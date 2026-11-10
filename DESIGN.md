@@ -199,6 +199,15 @@ pub trait Provider: Send + Sync {
 ## 5. Storage
 
 **SQLite from day one** (`rusqlite`, `bundled`), WAL mode, `busy_timeout`.
+
+**Two stores, by disposability** (decided 2026-11-10):
+- `cache.sqlite` in the platform **cache** dir (`SqliteCache`, built):
+  records, "not found" answers, search pages — all refetchable. No
+  migrations: a schema-version mismatch drops and rebuilds it. Batch-first
+  API (many IDs per read; many answers per write transaction).
+- `aspero.sqlite` in the platform **data** dir (when first needed): history
+  and derived data (embeddings, extracted text) — costly to recompute, so
+  forward-only numbered migrations recorded in `user_version`.
 Chosen over many JSON files because of multi-process agent concurrency and the
 need for transactions across cache, identifier graph, history and rate-limit
 state.

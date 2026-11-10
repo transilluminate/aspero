@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.3.3
 
 - Publisher URLs with a DOI in the path give that DOI, without landing-page
   suffixes (`/full`, `/abstract`, `/pdf`, `.pdf`, …): in `scan`, and as

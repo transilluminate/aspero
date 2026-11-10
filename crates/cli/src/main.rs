@@ -14,7 +14,8 @@ use std::process::ExitCode;
 use std::sync::Arc;
 
 use aspero_engine::{
-    CrossrefConfig, Engine, OpenAlexConfig, SecretString, SqliteCache, StandardConfig, standard,
+    CrossrefConfig, DoiConfig, Engine, OpenAlexConfig, SecretString, SqliteCache, StandardConfig,
+    standard,
 };
 use clap::Parser;
 use serde_json::json;
@@ -100,6 +101,7 @@ fn engine(cache: Option<Arc<SqliteCache>>) -> Result<Engine, Failure> {
     openalex.api_key = env("OPENALEX_API_KEY").map(SecretString::from);
     config.openalex = Some(openalex);
     config.crossref = Some(CrossrefConfig::default());
+    config.doi = Some(DoiConfig::default());
     standard(config).map_err(|e| Failure {
         exit: Exit::Internal,
         message: format!("could not set up HTTP client: {e}"),

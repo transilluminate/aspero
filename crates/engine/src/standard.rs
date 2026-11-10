@@ -9,6 +9,8 @@ use crate::{Cache, Engine, EngineBuilder};
 
 #[cfg(feature = "crossref")]
 pub use aspero_crossref::CrossrefConfig;
+#[cfg(feature = "doi")]
+pub use aspero_doi::DoiConfig;
 #[cfg(feature = "openalex")]
 pub use aspero_openalex::OpenAlexConfig;
 
@@ -24,13 +26,17 @@ pub struct StandardConfig {
     pub openalex: Option<OpenAlexConfig>,
     #[cfg(feature = "crossref")]
     pub crossref: Option<CrossrefConfig>,
+    #[cfg(feature = "doi")]
+    pub doi: Option<DoiConfig>,
 }
 
 /// Builds an engine with each enabled provider behind its own paced
 /// `reqwest` client.
 ///
 /// Priority for lookups: OpenAlex first (free per-ID lookups, many identifier
-/// kinds, indexes DataCite DOIs such as arXiv's), then Crossref.
+/// kinds, indexes DataCite DOIs such as arXiv's), then Crossref, then
+/// doi.org (any registration agency, one DOI per request; its "not found"
+/// is authoritative).
 pub fn standard(config: StandardConfig) -> Result<Engine, Error> {
     let user_agent = match &config.mailto {
         Some(mailto) => format!("aspero/{} (mailto:{mailto})", env!("CARGO_PKG_VERSION")),
@@ -65,6 +71,14 @@ pub fn standard(config: StandardConfig) -> Result<Engine, Error> {
         let policy = Crossref::default_policy();
         let provider = Crossref::new(cr, client(&policy)?);
         builder = builder.provider(Arc::new(provider), policy, 20);
+    }
+
+    #[cfg(feature = "doi")]
+    if let Some(doi) = config.doi {
+        use aspero_doi::DoiOrg;
+        let policy = DoiOrg::default_policy();
+        let provider = DoiOrg::new(doi, client(&policy)?);
+        builder = builder.provider(Arc::new(provider), policy, 30);
     }
 
     Ok(builder.build())

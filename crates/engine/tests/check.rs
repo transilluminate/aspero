@@ -177,3 +177,40 @@ async fn retractions_are_errors_with_the_detailed_notice() {
     );
     assert_eq!(c.severity(), Some(Severity::Error));
 }
+
+#[tokio::test]
+async fn a_bare_retraction_flag_is_detailed_from_another_provider() {
+    // The entry has the DOI, so OpenAlex verifies it at once - with only
+    // its bare flag. The notice's details come from Crossref by DOI.
+    let doi = "10.1016/s0140-6736(97)11096-0";
+    let base = work(
+        "openalex",
+        &[doi],
+        "RETRACTED: Ileal-lymphoid hyperplasia",
+        &["A J Wakefield"],
+        1998,
+    );
+    let openalex =
+        Arc::new(Scripted::new("openalex").with(vec![retracted(base.clone(), None, "openalex")]));
+    let crossref = Arc::new(Scripted::new("crossref").with(vec![retracted(
+        base,
+        Some("10.1016/s0140-6736(10)60175-4"),
+        "retraction-watch",
+    )]));
+    let engine = engine(vec![openalex, crossref]);
+
+    let claims = [claim(
+        "Ileal-lymphoid hyperplasia",
+        &["Wakefield, A. J."],
+        1998,
+        &[doi],
+    )];
+    let c = &engine.check(&claims, 5, |_| {}).await[0];
+    assert!(
+        c.verification
+            .reason
+            .contains("notice doi:10.1016/s0140-6736(10)60175-4, via retraction-watch"),
+        "{}",
+        c.verification.reason
+    );
+}

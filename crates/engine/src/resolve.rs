@@ -169,8 +169,49 @@ impl Engine {
     /// Decides whether `claim` refers to a real work, stopping early once it
     /// does.
     pub async fn verify(&self, claim: &Claim, limit: u32) -> Verification {
-        let report = self.gather(claim, limit, true).await;
+        let mut report = self.gather(claim, limit, true).await;
+        self.detail_notices(&mut report).await;
         judge(claim, report)
+    }
+
+    /// For candidates known to be retracted only by a bare flag (OpenAlex's
+    /// `is_retracted`), asks the other providers by identifier for the
+    /// notice itself: date, notice DOI, source. Free, cached, and only for
+    /// flagged works.
+    async fn detail_notices(&self, report: &mut ResolveReport) {
+        let bare = |c: &Candidate| {
+            c.updates
+                .iter()
+                .any(|u| u.kind.is_retraction() && u.notice.is_none())
+        };
+        for entry in &self.entries {
+            let provider = entry.provider.id();
+            let kinds = &entry.provider.capabilities().lookup_kinds;
+            let wanted: Vec<(usize, WorkId)> = report
+                .candidates
+                .iter()
+                .enumerate()
+                .filter(|(_, c)| bare(c) && !c.sightings.iter().any(|s| s.provider == provider))
+                .filter_map(|(i, c)| {
+                    Some((
+                        i,
+                        c.ids.iter().find(|id| kinds.contains(&id.kind()))?.clone(),
+                    ))
+                })
+                .collect();
+            if wanted.is_empty() {
+                continue;
+            }
+            let ids: Vec<WorkId> = wanted.iter().map(|(_, id)| id.clone()).collect();
+            let answers = self
+                .lookup_at(entry, &ids, FieldSet::ALL, &mut report.usage)
+                .await;
+            for ((i, _), (_, record)) in wanted.into_iter().zip(answers) {
+                if let Some(record) = record {
+                    merge_updates(&mut report.candidates[i].updates, &record.work.updates);
+                }
+            }
+        }
     }
 
     /// Looks up every identifier the claims assert, in one batched call per

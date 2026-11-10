@@ -244,6 +244,16 @@ optional extensions behind generic seams, never dependencies.
   work supports a claim (the step after `verify`). Sources: OpenAlex
   (inverted index; not always present), Crossref (JATS, sometimes), S2.
   Cached whenever a provider returns them, with provenance.
+  *Built:* `--abstract` on lookup/verify/search/resolve, via
+  `Engine::abstracts` (fills gaps from other providers, keeps provenance,
+  `null` when none exists — e.g. Nature's "Deep learning" has no abstract
+  at OpenAlex or Crossref). Next source for coverage: S2, and arXiv's API
+  for preprints.
+- **Re-normalising cached records**: the cache stores mapped records *and*
+  raw bodies. When a provider's mapping changes (e.g. stripping an
+  "Abstract" heading), cached records stay old until their TTL. Fix when
+  it matters: providers declare a mapping version; the engine re-maps
+  cached raw bodies whose version is older.
 - **Full text** (Phase 4): fetching legal OA PDFs is easy (Unpaywall, arXiv,
   Europe PMC); extraction is the hard part. A text-extractor seam lets any
   external library or tool fill `derived` with text — e.g. a layout-aware

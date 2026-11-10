@@ -205,9 +205,16 @@ pub fn assess(claim: &Claim, record: &SourceRecord) -> Assessment {
     };
 
     let ids = id_agreement(&claim.ids, &record.ids);
+    // A claim of identifiers alone is fully confirmed by a matching ID.
+    let id_only = [title, authors, year].iter().all(|c| c.score.is_none());
+    let confidence = if id_only && ids == Agreement::Match {
+        1.0
+    } else {
+        combine(title, authors, year)
+    };
 
     Assessment {
-        confidence: combine(title, authors, year),
+        confidence,
         title,
         authors,
         year,
@@ -383,15 +390,13 @@ impl Normalised {
             return 0.0;
         };
         let rest = &rest[..rest.len().min(AUTHORS_COMPARED - 1)];
-        let rest_share = if rest.is_empty() {
-            1.0
-        } else {
-            rest.iter().filter(|f| present(f)).count() as f64 / rest.len() as f64
-        };
-        if present(first) {
-            0.9 + 0.1 * rest_share
-        } else {
-            0.5 * rest_share
+        let rest_present = rest.iter().filter(|f| present(f)).count();
+        match (present(first), rest.len()) {
+            (true, 0) => 1.0,
+            (true, n) => 0.9 + 0.1 * rest_present as f64 / n as f64,
+            // A sole author who isn't mentioned is no match at all.
+            (false, 0) => 0.0,
+            (false, n) => 0.5 * rest_present as f64 / n as f64,
         }
     }
 
@@ -404,6 +409,37 @@ impl Normalised {
             .filter(|y| (1600..=2100).contains(y))
             .collect()
     }
+}
+
+/// The longest run of words a candidate's title shares with a reference,
+/// as a search query for the title the reference actually cites. Uses the
+/// candidate as a guide to find the title inside the reference without
+/// parsing citation styles: for a re-deposit it is the whole title; for
+/// "Faculty Opinions recommendation of *Highly accurate … AlphaFold*" it is
+/// just the cited title. `None` if the run is too short to be a title (under
+/// three words, unless it is the candidate's whole title).
+pub fn shared_title(candidate_title: &str, reference: &str) -> Option<String> {
+    let (title, text) = (words(candidate_title), words(reference));
+    // Longest common substring over words; references are short.
+    let mut best = (0, 0); // (length, end index in title)
+    let mut prev = vec![0usize; text.len() + 1];
+    for (i, tw) in title.iter().enumerate() {
+        let mut cur = vec![0usize; text.len() + 1];
+        for (j, rw) in text.iter().enumerate() {
+            if tw == rw {
+                cur[j + 1] = prev[j] + 1;
+                if cur[j + 1] > best.0 {
+                    best = (cur[j + 1], i + 1);
+                }
+            }
+        }
+        prev = cur;
+    }
+    let (len, end) = best;
+    if len == 0 || (len < 3 && len < title.len()) {
+        return None;
+    }
+    Some(title[end - len..end].join(" "))
 }
 
 /// Keywords for a plain search engine from a messy reference: years,
@@ -553,6 +589,12 @@ mod tests {
             FieldCheck::scored(others.author_coverage(&families)).agreement,
             Agreement::Partial
         );
+        let sole = ["anfinsen".to_owned()];
+        assert_eq!(
+            etal.author_coverage(&sole),
+            0.0,
+            "an unmentioned sole author"
+        );
     }
 
     #[test]
@@ -618,6 +660,28 @@ mod tests {
         assert!(id_only.text.is_none() && id_only.ids.len() == 1);
         let reference = Claim::from_input("Deep learning. Nature 2015. doi:10.1038/nature14539");
         assert!(reference.text.is_some() && reference.ids.len() == 1);
+    }
+
+    #[test]
+    fn shared_title_finds_the_cited_title_inside_a_derivative_one() {
+        let reference = "Jumper J, et al. Highly accurate protein structure prediction with AlphaFold. Nature. 2021.";
+        assert_eq!(
+            shared_title(
+                "Faculty Opinions recommendation of Highly accurate protein structure prediction with AlphaFold.",
+                reference
+            )
+            .as_deref(),
+            Some("highly accurate protein structure prediction with alphafold")
+        );
+        assert_eq!(
+            shared_title("Deep learning", "LeCun Y. Deep learning. Nature 2015").as_deref(),
+            Some("deep learning"),
+            "a short title counts when whole"
+        );
+        assert_eq!(
+            shared_title("Deep learning for AI", "Smith J. On learning. 2020"),
+            None
+        );
     }
 
     #[test]

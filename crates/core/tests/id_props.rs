@@ -21,10 +21,11 @@ fn recase(s: &str, mask: &[bool]) -> String {
 prop_compose! {
     /// A canonical (lowercase) DOI. The suffix alphabet covers the punctuation
     /// real DOIs use, but not `?` or `#`, which would need URL-encoding, and
-    /// never ends in the sentence punctuation that parsing strips.
+    /// never ends in what parsing strips from pasted text (sentence
+    /// punctuation, `>`, an unbalanced `)`).
     fn canonical_doi()(
         registrant in "[0-9]{4,9}(\\.[0-9]{1,3})?",
-        suffix in "[a-z0-9._;()/:<>-]{0,29}[a-z0-9()/<>-]",
+        suffix in "[a-z0-9._;()/:<>-]{0,29}[a-z0-9/<-]",
     ) -> String {
         format!("10.{registrant}/{suffix}")
     }

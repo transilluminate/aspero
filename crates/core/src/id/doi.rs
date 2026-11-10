@@ -2,7 +2,7 @@ use std::borrow::Cow;
 use std::fmt;
 
 use super::IdKind;
-use super::syntax::{IdSyntax, impl_id_traits, strip_kind_prefix, strip_prefix_ci};
+use super::syntax::{IdSyntax, clean_pasted, impl_id_traits, strip_kind_prefix, strip_prefix_ci};
 use super::url::Url;
 
 const INFO_PREFIX: &str = "info:doi/";
@@ -70,7 +70,9 @@ impl IdSyntax for Doi {
     const KIND: IdKind = IdKind::Doi;
 
     fn parse_bare(s: &str) -> Result<Self, &'static str> {
-        let doi = s
+        // Also after URL decoding: canonical DOIs never end in what pasting
+        // adds, so display → parse is the identity.
+        let doi = clean_pasted(s)
             .trim_end_matches(TRAILING_PUNCTUATION)
             .to_ascii_lowercase();
         let (prefix, suffix) = doi
@@ -157,6 +159,20 @@ mod tests {
             "10.1002/(sici)1097-4636"
         );
         assert_eq!(doi("10.1002/a%20b").unwrap().as_str(), "10.1002/a%20b");
+    }
+
+    #[test]
+    fn decoded_url_dois_are_cleaned_too() {
+        assert_eq!(
+            doi("https://doi.org/10.1234/x%29").unwrap().as_str(),
+            "10.1234/x"
+        );
+        assert_eq!(
+            doi("https://doi.org/10.1016/S0140-6736%2810%2960835-5")
+                .unwrap()
+                .as_str(),
+            "10.1016/s0140-6736(10)60835-5"
+        );
     }
 
     #[test]

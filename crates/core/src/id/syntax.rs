@@ -25,7 +25,7 @@ pub(crate) trait IdSyntax: Sized {
 
 /// The full `FromStr` pipeline: trim, strip prefix, unwrap URL, parse bare.
 pub(crate) fn parse<T: IdSyntax>(input: &str) -> Result<T, IdError> {
-    let s = input.trim();
+    let s = clean_pasted(input);
     if s.is_empty() {
         return Err(IdError::Empty);
     }
@@ -50,6 +50,38 @@ pub(crate) fn finish<T: IdSyntax>(
             input: input.to_owned(),
             reason,
         })
+}
+
+/// Removes what clings to identifiers pasted from Markdown or prose:
+/// surrounding brackets, emphasis (`*`, `_`), quotes and backticks, and
+/// trailing sentence punctuation. A closing bracket goes only when it is
+/// unbalanced, so DOIs like `10.1016/S0140-6736(10)60835-5` stay whole.
+pub(crate) fn clean_pasted(input: &str) -> &str {
+    const LEADING: &[char] = &[
+        '(', '[', '{', '<', '*', '_', '"', '\'', '`', '\u{201c}', '\u{2018}',
+    ];
+    const TRAILING: &[char] = &[
+        '*', '_', '"', '\'', '`', '>', '\u{201d}', '\u{2019}', '.', ',', ';', ':',
+    ];
+    let unbalanced = |s: &str, open: char, close: char| {
+        s.ends_with(close) && s.matches(open).count() < s.matches(close).count()
+    };
+    let mut s = input.trim();
+    loop {
+        let before = s.len();
+        s = s
+            .trim_start_matches(LEADING)
+            .trim_end_matches(TRAILING)
+            .trim();
+        for (open, close) in [('(', ')'), ('[', ']'), ('{', '}')] {
+            if unbalanced(s, open, close) {
+                s = &s[..s.len() - close.len_utf8()];
+            }
+        }
+        if s.len() == before {
+            return s;
+        }
+    }
 }
 
 /// Strips `prefix:` (ASCII case-insensitive) and any following whitespace.
@@ -113,3 +145,34 @@ macro_rules! impl_string_serde {
 }
 
 pub(crate) use {impl_id_traits, impl_string_serde};
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn pasted_wrappers_come_off_but_balanced_brackets_stay() {
+        for (input, want) in [
+            ("10.1056/NEJMoa072006)", "10.1056/NEJMoa072006"),
+            ("10.1056/NEJMoa072006))", "10.1056/NEJMoa072006"),
+            ("10.1056/NEJMoa072006):", "10.1056/NEJMoa072006"),
+            ("**10.1056/NEJMoa072006**.", "10.1056/NEJMoa072006"),
+            ("(doi:10.1056/NEJMoa072006)", "doi:10.1056/NEJMoa072006"),
+            ("`arXiv:1706.03762`", "arXiv:1706.03762"),
+            (
+                "10.1016/S0140-6736(10)60835-5",
+                "10.1016/S0140-6736(10)60835-5",
+            ),
+            (
+                "10.1016/S0140-6736(10)60835-5).",
+                "10.1016/S0140-6736(10)60835-5",
+            ),
+            (
+                "[10.1002/(SICI)1097-4636(199601)]",
+                "10.1002/(SICI)1097-4636(199601)",
+            ),
+        ] {
+            assert_eq!(clean_pasted(input), want, "{input:?}");
+        }
+    }
+}

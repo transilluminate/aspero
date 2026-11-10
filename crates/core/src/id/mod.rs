@@ -236,7 +236,7 @@ impl FromStr for WorkId {
     /// the shape of a bare value. Bare all-digit input is ambiguous (PMID or
     /// S2 CorpusId) and is rejected rather than guessed.
     fn from_str(input: &str) -> Result<Self, IdError> {
-        let s = input.trim();
+        let s = syntax::clean_pasted(input);
         if s.is_empty() {
             return Err(IdError::Empty);
         }

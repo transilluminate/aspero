@@ -85,6 +85,11 @@ The CLI is a thin adapter over `aspero-engine`; providers are separate
 crates behind features. See [DESIGN.md](DESIGN.md) for the architecture,
 scoring rules, provider gotchas and plans.
 
+## Development
+
+`just check` runs what CI runs (fmt, clippy, tests); `just` lists the rest:
+the live benchmark, fixture recording, a release dry run.
+
 ## Licence
 
 MIT OR Apache-2.0, at your option.

@@ -15,6 +15,9 @@ pub enum Exit {
     Auth = 6,
     Unsupported = 7,
     Protocol = 8,
+    /// A citation doesn't check out: mismatched identifier, or only a
+    /// partial match.
+    Unverified = 9,
 }
 
 impl Exit {
@@ -38,11 +41,12 @@ impl Exit {
         let rank = |e: Exit| match e {
             Exit::Ok => 0,
             Exit::NotFound => 1,
-            Exit::Unsupported => 2,
-            Exit::Unavailable | Exit::Protocol | Exit::Internal => 3,
-            Exit::Throttled => 4,
-            Exit::Auth => 5,
-            Exit::Usage => 6,
+            Exit::Unverified => 2,
+            Exit::Unsupported => 3,
+            Exit::Unavailable | Exit::Protocol | Exit::Internal => 4,
+            Exit::Throttled => 5,
+            Exit::Auth => 6,
+            Exit::Usage => 7,
         };
         if rank(other) > rank(self) {
             other

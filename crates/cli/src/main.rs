@@ -74,6 +74,7 @@ async fn run(engine: &Engine, command: Command, out: Out) -> Result<Exit, Failur
     match command {
         Command::Lookup { ids } => cmd::lookup::run(engine, ids, out).await,
         Command::Search { query, options } => cmd::search::run(engine, query, options, out).await,
-        Command::Resolve { text, limit } => cmd::resolve::run(engine, text, limit, out).await,
+        Command::Resolve { claim } => cmd::resolve::run(engine, claim, out).await,
+        Command::Verify { claim } => cmd::verify::run(engine, claim, out).await,
     }
 }

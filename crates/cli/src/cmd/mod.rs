@@ -4,9 +4,11 @@
 //! found: those outcomes are in its output) and `Err(Failure)` when it could
 //! not run at all.
 
+pub mod claim;
 pub mod lookup;
 pub mod resolve;
 pub mod search;
+pub mod verify;
 
 use std::io::Read;
 

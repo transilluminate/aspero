@@ -14,6 +14,7 @@ Exit codes:
   6  credentials rejected
   7  unsupported by the enabled providers
   8  unexpected provider response
+  9  a citation does not check out (verify: mismatch or only plausible)
 
 Environment:
   OPENALEX_API_KEY  OpenAlex key ($1/day free budget; $0.10/day without)
@@ -94,27 +95,74 @@ Examples:
         options: SearchOptions,
     },
 
-    /// Match a messy citation (or identifier) to candidate works.
+    /// Rank candidate works for a citation, with per-field checks.
     #[command(after_help = "\
-If the input parses as an identifier it is looked up. Otherwise it goes to
-every provider that can search: citation matchers (Crossref) get the whole
-reference, others a keyword search. Candidates are listed per provider with
-that provider's score; scores are not comparable across providers.
+The citation can be free text in any style, an identifier, structured
+fields, or a mix. Candidates come from identifier lookups, Crossref's
+citation matcher and OpenAlex title searches; records sharing an
+identifier are merged. Each is scored on title, authors and year.
 
-Confidence scoring across providers is not implemented yet. Lookalikes exist
-(re-deposits with the same title and authors), so check year and venue.
+Use `verify` for a yes/no answer; `resolve` shows every candidate.
 
 Examples:
   aspero resolve \"LeCun Y, Bengio Y, Hinton G. Deep learning. Nature. 2015\"
-  aspero resolve \"Vaswani 2017 Attention is all you need\" --limit 3
-  echo 'arXiv:1706.03762' | aspero resolve -")]
+  aspero resolve --title \"Attention is all you need\" --author Vaswani --year 2017")]
     Resolve {
-        /// The citation; `-` reads all of stdin.
-        text: String,
-        /// Candidates per provider.
-        #[arg(long, default_value_t = 3)]
-        limit: u32,
+        #[command(flatten)]
+        claim: ClaimArgs,
     },
+
+    /// Check that a citation refers to a real work, and that its details agree.
+    #[command(after_help = "\
+Verdicts:
+  verified      a matching work exists (and so do its claimed identifiers)
+  plausible     a work partly matches; check the details          (exit 9)
+  mismatch      the claimed DOI/arXiv ID doesn't exist or is another
+                work's; `reason` names the work the citation matches (exit 9)
+  not_found     no matching work                                   (exit 3)
+  unverifiable  providers failed                                   (exit 4)
+
+A wrong year is treated as a strong mismatch: re-deposits of famous papers
+exist with the same title and authors but a different year.
+
+Stops as soon as a free source verifies the claim; OpenAlex title searches
+($0.001 each, at most two per claim) run only when needed.
+
+Batch input on stdin, one claim per line, as text or JSON:
+  {\"title\": \"...\", \"authors\": [\"...\"], \"year\": 2017, \"doi\": \"...\"}
+  JSON keys: text, title, authors, year, doi, arxiv, id, ids
+
+Examples:
+  aspero verify \"Vaswani et al. 2017. Attention is all you need. arXiv:1706.03762\"
+  aspero verify --title \"Deep learning\" --author LeCun --year 2015 --id 10.1038/nature14539
+  aspero verify - < citations.jsonl")]
+    Verify {
+        #[command(flatten)]
+        claim: ClaimArgs,
+    },
+}
+
+/// A citation claim: free text and/or fields.
+#[derive(Debug, Args)]
+pub struct ClaimArgs {
+    /// The citation as free text or an identifier; `-` reads one claim per
+    /// stdin line.
+    pub text: Option<String>,
+    /// Claimed title.
+    #[arg(long)]
+    pub title: Option<String>,
+    /// Claimed author (repeatable), e.g. "Vaswani, A." or "Ashish Vaswani".
+    #[arg(long = "author")]
+    pub authors: Vec<String>,
+    /// Claimed publication year.
+    #[arg(long)]
+    pub year: Option<i16>,
+    /// Claimed identifier (repeatable): DOI, arXiv ID, PMID, URL...
+    #[arg(long = "id")]
+    pub ids: Vec<String>,
+    /// Results per provider search.
+    #[arg(long, default_value_t = 5)]
+    pub limit: u32,
 }
 
 #[derive(Debug, Args)]

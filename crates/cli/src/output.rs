@@ -3,7 +3,8 @@
 //! JSON shapes are the agent contract: fields are omitted when unknown rather
 //! than `null`, and the lean default set is enough to identify and cite.
 
-use aspero_core::{Hit, ProviderId, SourceRecord, Usage};
+use aspero_core::{Agreement, Hit, ProviderId, SourceRecord, Usage};
+use aspero_engine::Candidate;
 use serde_json::{Map, Value, json};
 
 /// Authors shown in a table before "et al.".
@@ -101,6 +102,76 @@ pub fn work_text(record: &SourceRecord, indent: &str) -> String {
 pub fn hit_text(rank: usize, hit: &Hit) -> String {
     let score = hit.score.map(|s| format!(" [{s:.1}]")).unwrap_or_default();
     format!("{rank:>2}.{score}\n{}\n", work_text(&hit.record, "    "))
+}
+
+/// A scored candidate: confidence, per-field checks, who found it, and the
+/// work (with every identifier merged records asserted).
+pub fn candidate(c: &Candidate, full: bool) -> Value {
+    let a = &c.assessment;
+    let checks = if full {
+        json!({"title": a.title, "authors": a.authors, "year": a.year, "ids": a.ids})
+    } else {
+        json!({
+            "title": a.title.agreement,
+            "authors": a.authors.agreement,
+            "year": a.year.agreement,
+            "ids": a.ids,
+        })
+    };
+    let found_by: Vec<Value> = c
+        .sightings
+        .iter()
+        .map(|s| json!({"provider": s.provider, "via": s.via.as_str(), "rank": s.rank, "score": s.score}))
+        .collect();
+    let mut work = work(&c.record, full);
+    work["ids"] = json!(c.ids);
+    json!({
+        "confidence": (a.confidence * 100.0).round() / 100.0,
+        "checks": checks,
+        "found_by": found_by,
+        "work": work,
+    })
+}
+
+/// A candidate as terminal text: confidence and checks, then the work.
+pub fn candidate_text(c: &Candidate, indent: &str) -> String {
+    let a = &c.assessment;
+    let check = |name: &str, g: Agreement| match g {
+        Agreement::Unknown => None,
+        g => Some(format!("{name} {}", agreement_word(g))),
+    };
+    let checks: Vec<String> = [
+        check("title", a.title.agreement),
+        check("authors", a.authors.agreement),
+        check("year", a.year.agreement),
+        check("id", a.ids),
+    ]
+    .into_iter()
+    .flatten()
+    .collect();
+    let via: Vec<String> = c
+        .sightings
+        .iter()
+        .map(|s| format!("{} {}", s.provider, s.via.as_str().replace('_', " ")))
+        .collect();
+    let mut record = c.record.clone();
+    record.ids = c.ids.clone();
+    format!(
+        "{indent}{:.2}  {}  (via {})\n{}",
+        a.confidence,
+        checks.join(" · "),
+        via.join(", "),
+        work_text(&record, indent)
+    )
+}
+
+fn agreement_word(g: Agreement) -> &'static str {
+    match g {
+        Agreement::Match => "match",
+        Agreement::Partial => "partial",
+        Agreement::Mismatch => "MISMATCH",
+        _ => "unknown",
+    }
 }
 
 /// One line per provider, for stderr: "openalex: $0.0010 spent, $0.9960 left".

@@ -3,7 +3,7 @@
 use std::io::IsTerminal;
 
 use aspero_bib::BibEntry;
-use aspero_engine::{Checked, Engine, Finding, Severity, Verdict};
+use aspero_engine::{Checked, Engine, Finding, Severity, Verdict, describe_update};
 use serde_json::{Value, json};
 
 use super::{Failure, Out, print, print_line, read_stdin};
@@ -222,6 +222,7 @@ fn line(finding: &Finding, keys: &[&str]) -> Line {
             let key = keys.get(*of).copied().unwrap_or("?");
             (format!("duplicate of {key}"), json!({"of": key}))
         }
+        Finding::Updated { update } => (describe_update(update), json!({"update": update})),
         _ => (format!("{finding:?}"), Value::Null),
     };
     Line {

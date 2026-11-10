@@ -3,8 +3,8 @@
 //! JSON shapes are the agent contract: fields are omitted when unknown rather
 //! than `null`, and the lean default set is enough to identify and cite.
 
-use aspero_core::{Agreement, Hit, ProviderId, SourceRecord, Usage};
-use aspero_engine::{Abstract, Candidate};
+use aspero_core::{Agreement, Hit, ProviderId, SourceRecord, UpdateKind, Usage};
+use aspero_engine::{Abstract, Candidate, describe_update};
 
 /// Abstract characters shown in tables; JSON has the full text.
 const TABLE_ABSTRACT: usize = 600;
@@ -33,6 +33,8 @@ pub fn work(record: &SourceRecord, full: bool) -> Value {
     put("type", w.work_type.as_ref().map(|t| json!(t.as_csl())));
     put("container", w.container_title.as_ref().map(|c| json!(c)));
     put("url", w.url.as_ref().map(|u| json!(u)));
+    // Never lean enough to leave out: a retracted work is not citable.
+    put("updates", (!w.updates.is_empty()).then(|| json!(w.updates)));
     if full {
         // Everything else, in the core `Work` shape (structured authors).
         if let Ok(Value::Object(all)) = serde_json::to_value(w) {
@@ -98,6 +100,11 @@ pub fn work_text(record: &SourceRecord, indent: &str) -> String {
     }
     let ids: Vec<String> = record.ids.iter().map(ToString::to_string).collect();
     lines.push(format!("{indent}{}", ids.join("  ")));
+    for update in &w.updates {
+        if !matches!(update.kind, UpdateKind::Correction) {
+            lines.push(format!("{indent}⚠ {}", describe_update(update)));
+        }
+    }
     lines.join("\n")
 }
 
@@ -152,6 +159,9 @@ pub fn candidate(c: &Candidate, full: bool) -> Value {
         .collect();
     let mut work = work(&c.record, full);
     work["ids"] = json!(c.ids);
+    if !c.updates.is_empty() {
+        work["updates"] = json!(c.updates);
+    }
     json!({
         "confidence": (a.confidence * 100.0).round() / 100.0,
         "checks": checks,
@@ -183,6 +193,7 @@ pub fn candidate_text(c: &Candidate, indent: &str) -> String {
         .collect();
     let mut record = c.record.clone();
     record.ids = c.ids.clone();
+    record.work.updates = c.updates.clone();
     format!(
         "{indent}{:.2}  {}  (via {})\n{}",
         a.confidence,

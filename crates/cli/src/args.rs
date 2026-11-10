@@ -160,11 +160,12 @@ Examples:
     #[command(after_help = "\
 Each entry's title, authors, year and identifiers (doi, arXiv eprint, DOI
 or arXiv URLs) are verified, then reported with fixes:
-  error    not found; identifier wrong or nonexistent (with the right one);
-           year off by more than one
-  warning  only a plausible match; duplicate entries; providers failed
+  error    retracted or withdrawn; not found; identifier wrong or
+           nonexistent (with the right one); year off by more than one
+  warning  expression of concern; only a plausible match; duplicate
+           entries; providers failed
   info     add a DOI the entry lacks; year off by one (often preprint vs
-           published, or online vs print)
+           published, or online vs print); a published correction
 
 Exits 9 if any entry reaches --fail-on (default: error), so it can gate a
 pre-commit hook or CI job. JSON output has a summary and every finding.

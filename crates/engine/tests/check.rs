@@ -75,8 +75,8 @@ async fn a_bibliography_gets_verdicts_and_fixes() {
         claimed: 2018,
         actual: 2017
     }));
-    // A year off by one verifies but is still worth a warning.
-    assert_eq!(checked[2].severity(), Some(Severity::Warning));
+    // A year off by one verifies and is only worth knowing.
+    assert_eq!(checked[2].severity(), Some(Severity::Info));
 
     assert_eq!(checked[3].verification.verdict, Verdict::NotFound);
     assert_eq!(checked[3].severity(), Some(Severity::Error));

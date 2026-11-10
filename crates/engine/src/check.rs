@@ -44,7 +44,8 @@ pub enum Finding {
         claimed: WorkId,
         with: Option<WorkId>,
     },
-    /// The entry's year differs from the matched work's.
+    /// The entry's year differs from the matched work's: an error beyond
+    /// one year, otherwise info.
     YearDiffers { claimed: i16, actual: i16 },
     /// Another entry (by index) cites the same work.
     Duplicate { of: usize },
@@ -58,11 +59,13 @@ impl Finding {
                 _ => Severity::Warning,
             },
             Finding::ReplaceId { .. } => Severity::Error,
+            // Off by one is usually legitimate (preprint vs published,
+            // online vs print), so it is only worth knowing.
             Finding::YearDiffers { claimed, actual } if (claimed - actual).abs() > 1 => {
                 Severity::Error
             }
-            Finding::YearDiffers { .. } | Finding::Duplicate { .. } => Severity::Warning,
-            Finding::AddDoi { .. } => Severity::Info,
+            Finding::YearDiffers { .. } | Finding::AddDoi { .. } => Severity::Info,
+            Finding::Duplicate { .. } => Severity::Warning,
         }
     }
 

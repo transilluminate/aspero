@@ -515,8 +515,25 @@ Still to do: venue as a signal; merging records that share no ID
 (preprint ↔ published, as *suggestions* per §4); down-weighting
 derivative records (commentaries, peer reviews) by type.
 
-To verify at implementation time: doi.org content-negotiation limits,
-arXiv (~1 req / 3 s).
+### doi.org and DataCite (recorded 2026-11-10)
+
+- **doi.org** content negotiation (`Accept: application/vnd.citationstyles.
+  csl+json`) redirects to the DOI's registration agency, so any registered
+  DOI resolves — a Zenodo DOI minted minutes earlier resolved while OpenAlex
+  and Crossref didn't know it. Its 404 is the authoritative "DOI does not
+  exist". Crossref's "CSL" uses Crossref type names; DataCite's carries
+  abstracts. One DOI per request; lookup priority last (30).
+- **DataCite** REST (JSON:API): batched lookup via `query=doi:("a" OR "b")`.
+  **Relevance only with page-number paging** (`sort=relevance&
+  page[number]=N`) — cursor paging sorts by creation date, the same trap as
+  Crossref's cursor. Year ranges via query syntax `publicationYear:[A TO B]`
+  (`published=` takes year lists only). Errors are JSON:API `errors`, as an
+  object (400) or array (404). Priority 25.
+
+Lookup order is now OpenAlex (10) → Crossref (20) → DataCite (25) →
+doi.org (30).
+
+To verify at implementation time: arXiv (~1 req / 3 s).
 
 ---
 

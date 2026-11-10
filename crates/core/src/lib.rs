@@ -27,7 +27,7 @@ pub mod testing;
 pub use error::{Error, ErrorCategory, Result};
 pub use http::{HttpClient, HttpRequest, HttpResponse};
 pub use id::{
-    ArxivId, CorpusId, Doi, IdError, IdKind, Isbn, OpenAlexId, Pmcid, Pmid, S2PaperId, WorkId,
+    ArxivId, CorpusId, Doi, IdError, IdKind, Isbn, Nbk, OpenAlexId, Pmcid, Pmid, S2PaperId, WorkId,
 };
 pub use matching::{Agreement, Assessment, Claim, FieldCheck};
 pub use provider::{

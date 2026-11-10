@@ -58,6 +58,11 @@ numeric_id!(
     /// Semantic Scholar CorpusId, e.g. `13756489`.
     CorpusId, letter = ""
 );
+numeric_id!(
+    /// NCBI Bookshelf ID, canonically `NBK526056`: a book or chapter, such
+    /// as a StatPearls article. The `NBK` letters are optional on input.
+    Nbk, letter = "NBK"
+);
 
 /// The segment after `marker` in the URL path, if present.
 fn segment_after<'a>(url: &Url<'a>, marker: &str) -> Option<&'a str> {
@@ -142,6 +147,22 @@ impl IdSyntax for CorpusId {
     }
 }
 
+impl IdSyntax for Nbk {
+    const KIND: IdKind = IdKind::Nbk;
+
+    fn parse_bare(s: &str) -> Result<Self, &'static str> {
+        Self::parse_number(s)
+    }
+
+    /// `ncbi.nlm.nih.gov/books/NBK526056/`.
+    fn from_url<'a>(url: &Url<'a>) -> Option<Result<Cow<'a, str>, &'static str>> {
+        if !url.is_host(&["ncbi.nlm.nih.gov"]) {
+            return None;
+        }
+        segment_after(url, "books").map(|s| Ok(Cow::Borrowed(s)))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -197,6 +218,14 @@ mod tests {
             "CorpusID:13756489".parse::<CorpusId>().unwrap().get(),
             13756489
         );
+        assert_eq!(
+            "https://www.ncbi.nlm.nih.gov/books/NBK526056/"
+                .parse::<Nbk>()
+                .unwrap()
+                .to_string(),
+            "NBK526056"
+        );
+        assert_eq!("nbk526056".parse::<Nbk>().unwrap().get(), 526056);
     }
 
     #[test]

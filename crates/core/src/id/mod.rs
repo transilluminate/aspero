@@ -10,9 +10,8 @@
 //!   parsing that output yields an equal value, so normalisation is idempotent.
 //! - Equality is equality of canonical forms.
 //! - Parsing is strict about structure, with one concession to pasted prose:
-//!   DOIs drop trailing sentence punctuation (see [`Doi`]). Pulling
-//!   identifiers out of running text (line-wrapped DOIs, surrounding words)
-//!   belongs to `resolve`, not here.
+//!   wrappers and trailing sentence punctuation come off (see [`Doi`]).
+//!   Finding identifiers in running text is [`scan`]'s job.
 //!
 //! [`WorkId`] is the kind-tagged union. Its canonical form is `kind:value`
 //! (`doi:10.1145/3368089`), which is also how it serialises.
@@ -22,6 +21,7 @@ mod doi;
 mod isbn;
 mod numeric;
 mod s2;
+mod scan;
 mod syntax;
 mod url;
 
@@ -31,8 +31,9 @@ use std::str::FromStr;
 pub use arxiv::ArxivId;
 pub use doi::Doi;
 pub use isbn::Isbn;
-pub use numeric::{CorpusId, OpenAlexId, Pmcid, Pmid};
+pub use numeric::{CorpusId, Nbk, OpenAlexId, Pmcid, Pmid};
 pub use s2::S2PaperId;
+pub use scan::{Mention, scan};
 
 use syntax::IdSyntax;
 use url::Url;
@@ -49,10 +50,12 @@ pub enum IdKind {
     S2Paper,
     CorpusId,
     Isbn,
+    /// NCBI Bookshelf.
+    Nbk,
 }
 
 impl IdKind {
-    pub const ALL: [IdKind; 8] = [
+    pub const ALL: [IdKind; 9] = [
         IdKind::Doi,
         IdKind::Arxiv,
         IdKind::Pmid,
@@ -61,6 +64,7 @@ impl IdKind {
         IdKind::S2Paper,
         IdKind::CorpusId,
         IdKind::Isbn,
+        IdKind::Nbk,
     ];
 
     /// The lowercase prefix used in `kind:value` form.
@@ -74,6 +78,7 @@ impl IdKind {
             IdKind::S2Paper => "s2",
             IdKind::CorpusId => "corpusid",
             IdKind::Isbn => "isbn",
+            IdKind::Nbk => "nbk",
         }
     }
 
@@ -134,6 +139,7 @@ pub enum WorkId {
     S2Paper(S2PaperId),
     CorpusId(CorpusId),
     Isbn(Isbn),
+    Nbk(Nbk),
 }
 
 impl WorkId {
@@ -147,6 +153,7 @@ impl WorkId {
             WorkId::S2Paper(_) => IdKind::S2Paper,
             WorkId::CorpusId(_) => IdKind::CorpusId,
             WorkId::Isbn(_) => IdKind::Isbn,
+            WorkId::Nbk(_) => IdKind::Nbk,
         }
     }
 
@@ -162,6 +169,7 @@ impl WorkId {
             IdKind::S2Paper => WorkId::S2Paper(input.parse()?),
             IdKind::CorpusId => WorkId::CorpusId(input.parse()?),
             IdKind::Isbn => WorkId::Isbn(input.parse()?),
+            IdKind::Nbk => WorkId::Nbk(input.parse()?),
         })
     }
 
@@ -182,6 +190,7 @@ impl WorkId {
             .or_else(|| try_kind(url, input, WorkId::S2Paper))
             .or_else(|| try_kind(url, input, WorkId::CorpusId))
             .or_else(|| try_kind(url, input, WorkId::Isbn))
+            .or_else(|| try_kind(url, input, WorkId::Nbk))
             .unwrap_or_else(|| Err(IdError::Unrecognised(input.to_owned())))
     }
 
@@ -198,6 +207,9 @@ impl WorkId {
         }
         if s.get(..3).is_some_and(|p| p.eq_ignore_ascii_case("pmc")) && all_digits(&s[3..]) {
             return WorkId::parse_as(IdKind::Pmcid, input);
+        }
+        if s.get(..3).is_some_and(|p| p.eq_ignore_ascii_case("nbk")) && all_digits(&s[3..]) {
+            return WorkId::parse_as(IdKind::Nbk, input);
         }
         if s.starts_with(['W', 'w']) && all_digits(&s[1..]) {
             return WorkId::parse_as(IdKind::OpenAlex, input);
@@ -264,6 +276,7 @@ impl fmt::Display for WorkId {
             WorkId::S2Paper(id) => id.fmt(f),
             WorkId::CorpusId(id) => id.fmt(f),
             WorkId::Isbn(id) => id.fmt(f),
+            WorkId::Nbk(id) => id.fmt(f),
         }
     }
 }
@@ -289,6 +302,7 @@ impl_from_for_work_id!(
     S2Paper(S2PaperId),
     CorpusId(CorpusId),
     Isbn(Isbn),
+    Nbk(Nbk),
 );
 
 #[cfg(test)]
@@ -311,6 +325,11 @@ mod tests {
             ("PMID: 31452104", "pmid:31452104"),
             ("https://pubmed.ncbi.nlm.nih.gov/31452104/", "pmid:31452104"),
             ("PMC6716493", "pmcid:PMC6716493"),
+            ("NBK526056", "nbk:NBK526056"),
+            (
+                "https://www.ncbi.nlm.nih.gov/books/NBK526056/",
+                "nbk:NBK526056",
+            ),
             ("W2741809807", "openalex:W2741809807"),
             ("https://openalex.org/W2741809807", "openalex:W2741809807"),
             ("CorpusId:13756489", "corpusid:13756489"),

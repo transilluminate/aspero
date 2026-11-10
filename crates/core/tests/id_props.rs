@@ -157,6 +157,7 @@ proptest! {
             IdKind::Doi => doi,
             IdKind::Arxiv => arxiv,
             IdKind::Pmcid => format!("PMC{n}"),
+            IdKind::Nbk => format!("NBK{n}"),
             IdKind::OpenAlex => format!("W{n}"),
             IdKind::S2Paper => format!("{n:040x}"),
             IdKind::Isbn => isbn13("978", n % 1_000_000_000),

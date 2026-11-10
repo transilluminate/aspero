@@ -22,6 +22,8 @@ aspero-openalex = { path = "crates/providers/openalex" }
 aspero-crossref = { path = "crates/providers/crossref" }
 aspero-doi = { path = "crates/providers/doi" }
 
+async-trait = "0.1.92"
+jiff = { version = "0.2.42", features = ["serde"] }
 percent-encoding = "2.3.2"
 proptest = "1.12.0"
 serde = { version = "1.0.229", features = ["derive"] }

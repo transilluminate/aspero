@@ -1,5 +1,21 @@
 # Changelog
 
+## Unreleased
+
+- **Breaking (JSON):** `authors` is a list of objects in every mode, each
+  with a `name` (and `orcid` when known); `--full` adds `given` and
+  `family`. Lean output used to give plain strings.
+- `update_to` on notices: what an erratum corrects or a retraction notice
+  retracts (Crossref `update-to`). `lookup --full` asks Crossref for
+  notices in both directions when another provider answered.
+- Verification: generic titles with only a year stay plausible; replies,
+  errata and comments no longer pass for the original; online and print
+  years both match; ties go to the earliest published; `verify` stops
+  early only on a match its identifiers or two providers vouch for.
+- Identifiers pasted from prose lose wrapping brackets, quotes, asterisks
+  and trailing punctuation; balanced brackets inside DOIs stay.
+- Batch exit codes documented.
+
 ## 0.1.0
 
 First release.

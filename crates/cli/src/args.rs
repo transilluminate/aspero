@@ -18,7 +18,11 @@ Exit codes:
 
 Environment:
   OPENALEX_API_KEY  OpenAlex key ($1/day free budget; $0.10/day without)
-  ASPERO_MAILTO     contact address for polite API pools (Crossref)";
+  ASPERO_MAILTO     contact address for polite API pools (Crossref)
+  ASPERO_CACHE_DIR  where to keep the answer cache (default: platform cache dir)
+
+Answers are cached (records 7 days, not-found 1 day, searches 1 day) and
+served stale if a provider fails; JSON marks them \"served\": \"cache\"/\"stale\".";
 
 #[derive(Debug, Parser)]
 #[command(
@@ -46,6 +50,10 @@ pub struct Global {
     /// Include every known field, not just the lean default set.
     #[arg(long, global = true)]
     pub full: bool,
+
+    /// Don't read or write the answer cache.
+    #[arg(long, global = true)]
+    pub no_cache: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
@@ -140,6 +148,22 @@ Examples:
         #[command(flatten)]
         claim: ClaimArgs,
     },
+
+    /// Inspect or empty the answer cache.
+    Cache {
+        #[command(subcommand)]
+        action: CacheAction,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+pub enum CacheAction {
+    /// Show what the cache holds.
+    Stats,
+    /// Empty the cache.
+    Clear,
+    /// Print the cache file's path.
+    Path,
 }
 
 /// A citation claim: free text and/or fields.

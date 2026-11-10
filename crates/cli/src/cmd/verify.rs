@@ -22,6 +22,18 @@ pub async fn run(engine: &Engine, args: ClaimArgs, out: Out) -> Result<Exit, Fai
     let mut exit = Exit::Ok;
     let mut usage: Vec<(ProviderId, Usage)> = Vec::new();
     let mut items = Vec::new();
+
+    // One batched lookup of every claimed identifier first; with the cache
+    // warm, claims are then verified (and streamed) one by one cheaply.
+    if claims.len() > 1 {
+        let valid: Vec<_> = claims
+            .iter()
+            .filter_map(|(_, c)| c.as_ref().ok().cloned())
+            .collect();
+        for (p, u) in engine.prefetch(&valid).await.usage {
+            merge_usage(&mut usage, &p, u);
+        }
+    }
     for (input, claim) in claims {
         let (item, item_exit, text) = match claim {
             Err(e) => (

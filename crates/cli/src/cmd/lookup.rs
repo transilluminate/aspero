@@ -3,7 +3,7 @@
 use std::io::IsTerminal;
 
 use aspero_core::{FieldSet, IdError, WorkId};
-use aspero_engine::{Engine, LookupResult, Outcome};
+use aspero_engine::{Engine, LookupResult, Outcome, Served};
 use serde_json::{Value, json};
 
 use super::{Failure, Out, print, print_line, read_stdin};
@@ -93,6 +93,15 @@ pub fn item(input: &str, result: &LookupResult, full: bool) -> (Value, Exit) {
     let mut item = json!({"input": input, "id": result.id});
     let exit = if let Some(record) = &result.record {
         item["status"] = json!("found");
+        // Say when the answer didn't come live from the provider.
+        let served = result
+            .attempts
+            .iter()
+            .rfind(|a| matches!(a.outcome, Outcome::Found))
+            .map(|a| a.served);
+        if let Some(s) = served.filter(|s| *s != Served::Live) {
+            item["served"] = json!(s.as_str());
+        }
         item["work"] = output::work(record, full);
         Exit::Ok
     } else if result.attempts.is_empty() {
@@ -144,8 +153,12 @@ pub fn text(item: &Value, result: Option<&LookupResult>) -> String {
         .or(item["input"].as_str())
         .unwrap_or("?");
     if let Some(record) = result.and_then(|r| r.record.as_ref()) {
+        let served = item["served"]
+            .as_str()
+            .map(|s| format!(" ({s})"))
+            .unwrap_or_default();
         return format!(
-            "{label}  found via {}\n{}\n",
+            "{label}  found via {}{served}\n{}\n",
             record.source,
             output::work_text(record, "  ")
         );

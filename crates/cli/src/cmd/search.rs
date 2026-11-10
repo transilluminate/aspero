@@ -34,7 +34,15 @@ pub async fn run(
                 println!("{}", output::hit_text(i + 1, hit));
             }
             let total = page.total.map(|t| format!(" of {t}")).unwrap_or_default();
-            eprintln!("{} results{total} via {}", page.hits.len(), report.provider);
+            let served = match report.served {
+                aspero_engine::Served::Live => String::new(),
+                s => format!(" ({})", s.as_str()),
+            };
+            eprintln!(
+                "{} results{total} via {}{served}",
+                page.hits.len(),
+                report.provider
+            );
             if !report.ignored_filters.is_empty() {
                 eprintln!(
                     "ignored filters (unsupported by {}): {:?}",
@@ -56,6 +64,7 @@ pub async fn run(
                 "total": page.total,
                 "next_cursor": page.next.as_ref().map(|c| &c.0),
                 "ignored_filters": report.ignored_filters,
+                "served": report.served.as_str(),
                 "hits": hits,
             });
             if let Some(u) = &report.usage {

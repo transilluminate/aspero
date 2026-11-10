@@ -426,16 +426,30 @@ Design consequences:
   Attention is all you need" the top two were other papers, though a plain
   title search ranks the real one first.
 
-### Resolve quality: next steps
+### Resolve / verify (implemented 2026-11-10)
 
-Phase 0 `resolve` lists per-provider candidates. Observed failure modes
-(lookalike re-deposits; Crossref lacking DataCite DOIs; OpenAlex keyword
-search diluted by author/year/venue tokens) suggest, for `verify`:
-- extract title / first author / year from the reference, and query
-  OpenAlex with `title.search` plus a year filter;
-- score candidates across providers on title similarity, author overlap,
-  year delta and venue, using each provider's score margin as a signal;
-- merge candidates that share identifiers before ranking.
+Pipeline (engine `resolve.rs`), cheapest first: lookups of claimed IDs
+(including DOIs/arXiv IDs found in the text) → Crossref citation matcher on
+the whole reference → OpenAlex **title** searches (the claim's title, or the
+matcher's top distinct titles — a lookalike still carries the right title).
+Candidates sharing an ID merge. `verify` stops once a free source verifies.
+
+Scoring (core `matching.rs`) looks for the record's fields *in* the text
+rather than parsing citation styles: title as a phrase, authors' family
+names (first author alone is a match — "et al." styles), years. Year score
+halves per year off; ≥2 off is a mismatch with a 0.5 penalty. One comparable
+field caps confidence below "verified".
+
+Verdicts: verified / plausible / mismatch (claimed ID missing or another
+work's; or title+authors match but the year differs) / not_found /
+unverifiable. Live batch (7 claims, $0.006): both Vaswani forms → real arXiv
+paper; LeCun Vancouver → Nature 2015 via Crossref alone; nature14540 →
+mismatch naming nature14539; invented paper → not_found; NeurIPS 2019 →
+mismatch "year (2017) differs".
+
+Still to do: venue as a signal; merging records that share no ID
+(preprint ↔ published, as *suggestions* per §4); a fixture-backed benchmark
+of bad citations.
 
 To verify at implementation time: doi.org content-negotiation limits,
 arXiv (~1 req / 3 s).

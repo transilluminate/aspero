@@ -305,6 +305,52 @@ impl Engine {
         LookupReport { results, usage }
     }
 
+    /// Adds editorial notices, in both directions, to records that another
+    /// provider supplied, from the providers that report them in detail
+    /// (Crossref): an original then lists its corrections and retractions,
+    /// a correction the work it corrects. Batched and cached, like lookups.
+    pub async fn add_notices(&self, report: &mut LookupReport) {
+        for entry in &self.entries {
+            let caps = entry.provider.capabilities();
+            if !caps.notices {
+                continue;
+            }
+            let provider = entry.provider.id();
+            let wanted: Vec<(usize, WorkId)> = report
+                .results
+                .iter()
+                .enumerate()
+                .filter_map(|(i, r)| {
+                    let record = r.record.as_ref().filter(|r| r.source != provider)?;
+                    let id = record
+                        .ids
+                        .iter()
+                        .find(|id| caps.lookup_kinds.contains(&id.kind()))?;
+                    Some((i, id.clone()))
+                })
+                .collect();
+            if wanted.is_empty() {
+                continue;
+            }
+            let ids: Vec<WorkId> = wanted.iter().map(|(_, id)| id.clone()).collect();
+            let answers = self
+                .lookup_at(entry, &ids, FieldSet::ALL, &mut report.usage)
+                .await;
+            for ((i, _), (_, found)) in wanted.into_iter().zip(answers) {
+                let (Some(found), Some(record)) = (found, report.results[i].record.as_mut()) else {
+                    continue;
+                };
+                let work = &mut record.work;
+                resolve::merge_updates(&mut work.updates, &found.work.updates);
+                for target in found.work.update_to {
+                    if !work.update_to.contains(&target) {
+                        work.update_to.push(target);
+                    }
+                }
+            }
+        }
+    }
+
     /// Asks one provider about `ids` (all of kinds it accepts): fresh cached
     /// answers first, the rest in batches with retries, and stale cached
     /// records for any that fail. One answer per ID, in order.

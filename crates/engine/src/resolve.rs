@@ -93,7 +93,7 @@ impl Candidate {
 /// Adds notices not already known. A detailed notice (with the notice's
 /// identifier) replaces a bare one of the same kind, such as OpenAlex's
 /// `is_retracted` flag.
-fn merge_updates(known: &mut Vec<Update>, new: &[Update]) {
+pub(crate) fn merge_updates(known: &mut Vec<Update>, new: &[Update]) {
     for update in new {
         let same_kind = |k: &Update| k.kind == update.kind;
         if known

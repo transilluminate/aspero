@@ -11,3 +11,8 @@ workspace = true
 
 [dependencies]
 aspero-core.workspace = true
+async-trait.workspace = true
+serde_json.workspace = true
+
+[dev-dependencies]
+aspero-core = { workspace = true, features = ["testing"] }

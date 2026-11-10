@@ -1,0 +1,4 @@
+HTTP/2 200 
+content-type: application/vnd.citationstyles.csl+json
+x-rate-limit-limit: 10
+x-rate-limit-interval: 1s

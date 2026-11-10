@@ -97,6 +97,8 @@ name = "aspero-doi"
 version = "0.0.0"
 dependencies = [
  "aspero-core",
+ "async-trait",
+ "serde_json",
 ]
 
 [[package]]

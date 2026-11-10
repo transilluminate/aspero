@@ -170,6 +170,10 @@ pub trait Provider: Send + Sync {
 
 - Identifier kinds: DOI, PMID, PMCID, arXiv, S2 paperId, S2 CorpusId, OpenAlex
   `W…`, MAG, DBLP, ACL, URL.
+- **DOI trailing punctuation**: `.,;:` are stripped on parse (DOIs pasted
+  from prose). The spec allows a DOI ending in one, so if a stripped DOI is
+  not found and the input had trailing punctuation, the engine retries once
+  with it kept — no config switch needed.
 - **Normalisation** is core logic and heavily tested (DOI: lowercase, strip
   `https://doi.org/`, `doi:` prefixes, URL-decoding; arXiv: old/new styles,
   version suffix handling; etc.).

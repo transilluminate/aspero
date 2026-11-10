@@ -10,7 +10,6 @@ authors.workspace = true
 readme = "../../README.md"
 keywords = ["citations", "doi", "bibliography", "scholarly", "cli"]
 categories = ["command-line-utilities", "science"]
-publish.workspace = true
 
 [lints]
 workspace = true
@@ -29,6 +28,6 @@ serde_json.workspace = true
 tokio = { workspace = true, features = ["macros", "rt"] }
 tracing-subscriber = { workspace = true, features = ["registry"] }
 
-# Not on crates.io yet, but released as binaries by dist.
+# Released as binaries by dist (and published to crates.io).
 [package.metadata.dist]
 dist = true

@@ -132,6 +132,20 @@ impl Engine {
         judge(claim, report)
     }
 
+    /// Looks up every identifier the claims assert, in one batched call per
+    /// provider. With a cache attached, this warms it so verifying the
+    /// claims one by one (and streaming results) doesn't look them up one
+    /// by one.
+    pub async fn prefetch(&self, claims: &[Claim]) -> crate::LookupReport {
+        let mut ids: Vec<WorkId> = Vec::new();
+        for id in claims.iter().flat_map(|c| &c.ids) {
+            if !ids.contains(id) {
+                ids.push(id.clone());
+            }
+        }
+        self.lookup(&ids, FieldSet::DEFAULT).await
+    }
+
     async fn gather(&self, claim: &Claim, limit: u32, stop_when_verified: bool) -> ResolveReport {
         let mut acc = Accumulator {
             claim,

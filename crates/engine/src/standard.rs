@@ -5,7 +5,7 @@ use std::sync::Arc;
 use aspero_core::{Error, HttpClient, ResiliencePolicy};
 
 use crate::transport::{Paced, ReqwestClient};
-use crate::{Engine, EngineBuilder};
+use crate::{Cache, Engine, EngineBuilder};
 
 #[cfg(feature = "crossref")]
 pub use aspero_crossref::CrossrefConfig;
@@ -13,11 +13,13 @@ pub use aspero_crossref::CrossrefConfig;
 pub use aspero_openalex::OpenAlexConfig;
 
 /// Settings for the compiled-in providers. `None` disables a provider.
-#[derive(Debug, Clone, Default)]
+#[derive(Clone, Default)]
 #[non_exhaustive]
 pub struct StandardConfig {
     /// Contact address sent in the user agent (and as Crossref's `mailto`).
     pub mailto: Option<String>,
+    /// Where provider answers are cached; `None` for no cache.
+    pub cache: Option<Arc<dyn Cache>>,
     #[cfg(feature = "openalex")]
     pub openalex: Option<OpenAlexConfig>,
     #[cfg(feature = "crossref")]
@@ -41,8 +43,10 @@ pub fn standard(config: StandardConfig) -> Result<Engine, Error> {
         Ok(Arc::new(Paced::new(inner, policy.min_interval)))
     };
 
-    #[allow(unused_mut)]
     let mut builder: EngineBuilder = Engine::builder();
+    if let Some(cache) = config.cache {
+        builder = builder.cache(cache);
+    }
 
     #[cfg(feature = "openalex")]
     if let Some(oa) = config.openalex {

@@ -23,6 +23,7 @@ bench:
 record provider name="":
     ONLY={{name}} scripts/record-{{provider}}.sh
 
-# Checks plus a crates.io dry run: everything a release needs short of publishing.
+# Checks plus a crates.io dry run, after bumping the version: everything a
+# release needs short of publishing.
 release-check: check
     cargo publish --workspace --dry-run --allow-dirty

@@ -54,7 +54,7 @@ dependencies = [
 
 [[package]]
 name = "aspero"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "aspero-bib",
  "aspero-core",
@@ -72,7 +72,7 @@ dependencies = [
 
 [[package]]
 name = "aspero-bib"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "aspero-core",
  "biblatex",
@@ -81,7 +81,7 @@ dependencies = [
 
 [[package]]
 name = "aspero-core"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "async-trait",
  "jiff",
@@ -95,7 +95,7 @@ dependencies = [
 
 [[package]]
 name = "aspero-crossref"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "aspero-core",
  "async-trait",
@@ -107,7 +107,7 @@ dependencies = [
 
 [[package]]
 name = "aspero-datacite"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "aspero-core",
  "async-trait",
@@ -120,7 +120,7 @@ dependencies = [
 
 [[package]]
 name = "aspero-doi"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "aspero-core",
  "async-trait",
@@ -129,7 +129,7 @@ dependencies = [
 
 [[package]]
 name = "aspero-engine"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "aspero-core",
  "aspero-crossref",
@@ -154,7 +154,7 @@ dependencies = [
 
 [[package]]
 name = "aspero-europepmc"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "aspero-core",
  "async-trait",
@@ -166,7 +166,7 @@ dependencies = [
 
 [[package]]
 name = "aspero-openalex"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "aspero-core",
  "async-trait",
@@ -179,7 +179,7 @@ dependencies = [
 
 [[package]]
 name = "aspero-openlibrary"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "aspero-core",
  "async-trait",
@@ -191,7 +191,7 @@ dependencies = [
 
 [[package]]
 name = "aspero-store"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "aspero-core",
  "jiff",

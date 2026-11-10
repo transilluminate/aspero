@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.3.2
 
 - Newer versions: Crossref `new_version` notices (Cochrane reviews,
   `.pub6` → `.pub7`) and `is-replaced-by`/`is-preprint-of` relations

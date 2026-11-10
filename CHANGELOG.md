@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.3.1
 
 - `verify` and `resolve` check the journal (abbreviations and initials
   included: N Engl J Med, NEJM), volume and first page, from claim fields

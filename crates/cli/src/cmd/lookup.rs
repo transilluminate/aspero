@@ -22,6 +22,9 @@ pub async fn run(engine: &Engine, ids: Vec<String>, out: Out) -> Result<Exit, Fa
         .collect();
     let mut report = engine.lookup(&valid, FieldSet::DEFAULT).await;
     let retried = retry_with_punctuation(engine, &inputs, &parsed, &mut report).await;
+    if out.full {
+        engine.add_notices(&mut report).await;
+    }
 
     // Abstracts for the works found, one batched call; None per result
     // when not asked for or not found.

@@ -4,7 +4,7 @@
 //! than `null`, and the lean default set is enough to identify and cite.
 
 use aspero_core::{
-    Agreement, Hit, IdKind, ProviderId, SourceRecord, UpdateKind, Usage, Work, WorkId,
+    Agreement, Hit, IdKind, Person, ProviderId, SourceRecord, UpdateKind, Usage, Work, WorkId,
 };
 use aspero_engine::{Abstract, Candidate, describe_update};
 
@@ -27,9 +27,9 @@ pub fn work(record: &SourceRecord, full: bool) -> Value {
         }
     };
     put("title", w.title.as_ref().map(|t| json!(t)));
-    if !w.authors.is_empty() && !full {
-        let names: Vec<String> = w.authors.iter().filter_map(|a| a.display_name()).collect();
-        put("authors", Some(json!(names)));
+    if !w.authors.is_empty() {
+        let authors: Vec<Value> = w.authors.iter().filter_map(|a| author(a, full)).collect();
+        put("authors", Some(json!(authors)));
     }
     put("issued", w.issued.map(|d| json!(d.to_string())));
     put("type", w.work_type.as_ref().map(|t| json!(t.as_csl())));
@@ -37,6 +37,10 @@ pub fn work(record: &SourceRecord, full: bool) -> Value {
     put("url", w.url.as_ref().map(|u| json!(u)));
     // Never lean enough to leave out: a retracted work is not citable.
     put("updates", (!w.updates.is_empty()).then(|| json!(w.updates)));
+    put(
+        "update_to",
+        (!w.update_to.is_empty()).then(|| json!(w.update_to)),
+    );
     if full {
         // Everything else, in the core `Work` shape (structured authors).
         if let Ok(Value::Object(all)) = serde_json::to_value(w) {
@@ -47,6 +51,19 @@ pub fn work(record: &SourceRecord, full: bool) -> Value {
         out.insert("fetched_at".into(), json!(record.fetched_at.to_string()));
     }
     Value::Object(out)
+}
+
+/// One author, the same shape lean or full: always a `name`, then the ORCID
+/// iD, and with `full` the name's parts.
+fn author(person: &Person, full: bool) -> Option<Value> {
+    let mut out = Map::new();
+    out.insert("name".into(), json!(person.display_name()?));
+    if full && let Ok(Value::Object(parts)) = serde_json::to_value(person) {
+        out.extend(parts);
+    } else if let Some(orcid) = &person.orcid {
+        out.insert("orcid".into(), json!(orcid));
+    }
+    Some(Value::Object(out))
 }
 
 pub fn usage(usage: &[(ProviderId, Usage)]) -> Value {
@@ -353,7 +370,7 @@ pub enum Level {
 
 #[cfg(test)]
 mod tests {
-    use aspero_core::{FieldSet, PartialDate, Person, Raw, Work, WorkType};
+    use aspero_core::{FieldSet, PartialDate, Raw, Work, WorkType};
     use jiff::Timestamp;
 
     use super::*;
@@ -395,7 +412,12 @@ mod tests {
                 "source": "crossref",
                 "ids": ["doi:10.1038/nature14539"],
                 "title": "Deep learning",
-                "authors": ["Yann LeCun", "Yoshua Bengio", "Geoffrey Hinton", "A. N. Other"],
+                "authors": [
+                    {"name": "Yann LeCun"},
+                    {"name": "Yoshua Bengio"},
+                    {"name": "Geoffrey Hinton"},
+                    {"name": "A. N. Other"},
+                ],
                 "issued": "2015-05-27",
                 "type": "article-journal",
                 "container": "Nature",
@@ -409,6 +431,27 @@ mod tests {
         assert_eq!(full["abstract"], "Deep learning allows…");
         assert_eq!(full["authors"][0]["literal"], "Yann LeCun");
         assert!(full.get("fetched_at").is_some());
+    }
+
+    #[test]
+    fn authors_have_one_shape_lean_or_full() {
+        let mut r = record();
+        let mut lecun = Person::new("Yann", "LeCun");
+        lecun.orcid = Some("0000-0000-0000-0001".into());
+        r.work.authors = vec![lecun];
+        assert_eq!(
+            work(&r, false)["authors"],
+            json!([{"name": "Yann LeCun", "orcid": "0000-0000-0000-0001"}])
+        );
+        assert_eq!(
+            work(&r, true)["authors"],
+            json!([{
+                "name": "Yann LeCun",
+                "given": "Yann",
+                "family": "LeCun",
+                "orcid": "0000-0000-0000-0001",
+            }])
+        );
     }
 
     #[test]

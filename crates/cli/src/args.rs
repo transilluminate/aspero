@@ -51,7 +51,8 @@ pub struct Global {
     #[arg(long, global = true, value_enum, default_value_t = Format::Auto)]
     pub format: Format,
 
-    /// Include every known field, not just the lean default set.
+    /// Include every known field, not just the lean default set. The
+    /// JSON shape of works is in `aspero lookup --help`.
     #[arg(long, global = true)]
     pub full: bool,
 
@@ -101,6 +102,16 @@ Accepts DOIs, arXiv IDs, PMIDs, OpenAlex IDs and their URLs, bare or prefixed:
   pmid:26017442         W2919115771
 
 Bare digits are ambiguous; prefix them (pmid:, corpusid:).
+
+JSON works:
+  authors    [{\"name\": \"Yann LeCun\", \"orcid\": \"...\"}, ...], the same shape
+             with or without --full (which adds given and family)
+  updates    notices about the work: [{\"kind\": \"retraction\", \"notice\":
+             \"doi:...\", \"date\": \"...\", \"source\": \"...\"}]; kinds: retraction,
+             withdrawal, expression_of_concern, correction, or another name
+  update_to  for a notice itself, the works it updates: [{\"kind\", \"work\",
+             \"date\", \"source\"}]
+  `lookup --full` also asks Crossref for notices in both directions.
 
 Examples:
   aspero lookup 10.1038/nature14539 arXiv:1706.03762

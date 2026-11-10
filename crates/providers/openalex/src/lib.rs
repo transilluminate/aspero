@@ -192,9 +192,7 @@ impl Key {
 fn type_filter(t: &WorkType) -> Result<String> {
     let openalex = match t {
         WorkType::JournalArticle => "article",
-        WorkType::ConferencePaper => {
-            return Ok("type:article,primary_location.source.type:conference".into());
-        }
+        WorkType::ConferencePaper => "conference-paper",
         WorkType::Preprint => "preprint",
         WorkType::Book => "book",
         WorkType::Chapter => "book-chapter",

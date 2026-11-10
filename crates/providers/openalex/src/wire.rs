@@ -230,12 +230,13 @@ pub(crate) fn arxiv_from_doi(doi: &Doi) -> Option<ArxivId> {
     doi.suffix().strip_prefix("arxiv.")?.parse().ok()
 }
 
-/// OpenAlex types to CSL. OpenAlex folds conference papers into `article`, so
-/// the source type disambiguates. Its `review` means a review *article*,
-/// unlike CSL's `review` (a review of another work).
+/// OpenAlex types to CSL. Conference papers have their own type
+/// (`conference-paper`, seen 2026-11), but older records may still be an
+/// `article` in a conference source. OpenAlex's `review` means a review
+/// *article*, unlike CSL's `review` (a review of another work).
 fn work_type(openalex: &str, source_type: Option<&str>) -> WorkType {
     match (openalex, source_type) {
-        ("article", Some("conference")) => WorkType::ConferencePaper,
+        ("conference-paper", _) | ("article", Some("conference")) => WorkType::ConferencePaper,
         ("article" | "review" | "letter" | "editorial", _) => WorkType::JournalArticle,
         ("preprint", _) => WorkType::Preprint,
         ("book", _) => WorkType::Book,
@@ -281,6 +282,10 @@ mod tests {
     fn maps_types_with_source_context() {
         assert_eq!(
             work_type("article", Some("conference")),
+            WorkType::ConferencePaper
+        );
+        assert_eq!(
+            work_type("conference-paper", Some("conference")),
             WorkType::ConferencePaper
         );
         assert_eq!(

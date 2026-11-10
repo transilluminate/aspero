@@ -33,6 +33,9 @@ use crate::{Engine, EngineError, LookupResult, SearchReport, add_usage};
 /// distinct titles.
 const MAX_TITLE_SEARCHES: usize = 2;
 
+/// Confidence at which `verify` stops gathering candidates early.
+const DECISIVE: f64 = 0.95;
+
 /// Claims verified at once in batches. Providers pace themselves, so this
 /// overlaps different providers' waits rather than adding load to any one.
 const CLAIM_CONCURRENCY: usize = 4;
@@ -368,7 +371,7 @@ struct Accumulator<'a> {
 impl Accumulator<'_> {
     /// Adds a record, merging it into an existing candidate that shares an
     /// identifier.
-    fn add(&mut self, record: SourceRecord, sighting: Sighting) {
+    fn add(&mut self, mut record: SourceRecord, sighting: Sighting) {
         let assessment = matching::assess(self.claim, &record);
         let candidates = &mut self.report.candidates;
         let existing = candidates.iter_mut().find(|c| {
@@ -385,6 +388,13 @@ impl Accumulator<'_> {
                 }
                 c.sightings.push(sighting);
                 merge_updates(&mut c.updates, &record.work.updates);
+                // Pool the years every source reports (online-first vs
+                // print, editions), then keep the better-matching record.
+                let pooled: Vec<i16> = years(&c.record).chain(years(&record)).collect();
+                add_years(&mut c.record, &pooled);
+                add_years(&mut record, &pooled);
+                c.assessment = matching::assess(self.claim, &c.record);
+                let assessment = matching::assess(self.claim, &record);
                 if assessment.confidence > c.assessment.confidence {
                     c.record = record;
                     c.assessment = assessment;
@@ -449,24 +459,64 @@ impl Accumulator<'_> {
         }
     }
 
-    /// A candidate already verifies the claim (including its identifiers,
-    /// if it asserted any).
+    /// A candidate so clearly right that searching further can't improve
+    /// on it: decisive, and either the identifiers the claim asserted or two
+    /// providers vouch for it. A digest or reprint of a paper can match the
+    /// claim exactly while only a later search finds the original.
     fn verified(&self) -> bool {
         self.report.candidates.iter().any(|c| {
-            c.assessment.confidence >= VERIFIED
-                && (self.claim.ids.is_empty() || c.assessment.ids == Agreement::Match)
+            let corroborated = match self.claim.ids.is_empty() {
+                true => c
+                    .sightings
+                    .iter()
+                    .any(|s| s.provider != c.sightings[0].provider),
+                false => c.assessment.ids == Agreement::Match,
+            };
+            c.assessment.confidence >= DECISIVE && corroborated
         })
     }
 
     fn finish(mut self) -> ResolveReport {
+        // Most confident first; on a tie the earliest-published (an original
+        // precedes its reprints, abstracts and corrections), then the one
+        // more providers agree on.
+        let issued = |c: &Candidate| {
+            c.record.work.issued.map_or(i64::MAX, |d| {
+                i64::from(d.year()) * 10_000
+                    + i64::from(d.month().unwrap_or(12)) * 100
+                    + i64::from(d.day().unwrap_or(31))
+            })
+        };
         self.report.candidates.sort_by(|a, b| {
             b.assessment
                 .confidence
                 .total_cmp(&a.assessment.confidence)
+                .then(issued(a).cmp(&issued(b)))
                 .then(b.sightings.len().cmp(&a.sightings.len()))
         });
         self.report
     }
+}
+
+/// Every year a record reports: issued, then other editions or versions.
+fn years(record: &SourceRecord) -> impl Iterator<Item = i16> + '_ {
+    let w = &record.work;
+    w.issued
+        .map(|d| d.year())
+        .into_iter()
+        .chain(w.other_years.iter().copied())
+}
+
+/// Adds `pooled` years the record doesn't already report to its
+/// `other_years`.
+fn add_years(record: &mut SourceRecord, pooled: &[i16]) {
+    let issued = record.work.issued.map(|d| d.year());
+    for &y in pooled {
+        if Some(y) != issued && !record.work.other_years.contains(&y) {
+            record.work.other_years.push(y);
+        }
+    }
+    record.work.other_years.sort_unstable();
 }
 
 /// Titles with duplicates (by normalised form) removed, order kept.

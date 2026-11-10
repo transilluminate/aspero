@@ -43,16 +43,21 @@ async fn a_lookalike_from_the_matcher_leads_to_the_real_paper() {
 }
 
 #[tokio::test]
-async fn verify_skips_paid_searches_once_a_free_source_verifies() {
+async fn verify_skips_paid_searches_once_the_claimed_doi_verifies() {
     let openalex = Arc::new(
         Scripted::new("openalex")
             .keyword()
             .with(vec![deep_learning()]),
     );
-    let crossref = Arc::new(Scripted::new("crossref").matcher(vec![deep_learning()]));
+    let crossref = Arc::new(
+        Scripted::new("crossref")
+            .matcher(vec![deep_learning()])
+            .with(vec![deep_learning()]),
+    );
     let engine = engine(vec![openalex.clone(), crossref]);
-    let claim =
-        Claim::from_text("LeCun Y, Bengio Y, Hinton G. Deep learning. Nature. 2015;521:436-444.");
+    let claim = Claim::from_text(
+        "LeCun Y, Bengio Y, Hinton G. Deep learning. Nature. 2015;521:436-444. doi:10.1038/nature14539",
+    );
 
     let v = engine.verify(&claim, 5).await;
     assert_eq!(v.verdict, Verdict::Verified, "{}", v.reason);
@@ -61,6 +66,39 @@ async fn verify_skips_paid_searches_once_a_free_source_verifies() {
     // resolve, by contrast, gathers everything.
     engine.resolve(&claim, 5).await;
     assert_eq!(openalex.queries().len(), 1);
+}
+
+#[tokio::test]
+async fn one_matchers_exact_hit_does_not_stop_the_search_for_the_original() {
+    // A journal's digest of the paper: same title and lead authors, later.
+    let dated = |mut r: aspero_core::SourceRecord, month| {
+        r.work.issued = aspero_core::PartialDate::new(2015, Some(month), None);
+        r
+    };
+    let digest = dated(
+        work(
+            "crossref",
+            &["10.9999/digest"],
+            "Deep learning",
+            &LECUN,
+            2015,
+        ),
+        9,
+    );
+    let openalex = Arc::new(
+        Scripted::new("openalex")
+            .keyword()
+            .with(vec![dated(deep_learning(), 5)]),
+    );
+    let crossref = Arc::new(Scripted::new("crossref").matcher(vec![digest]));
+    let engine = engine(vec![openalex.clone(), crossref]);
+    let claim = Claim::from_text("LeCun Y, Bengio Y, Hinton G. Deep learning. 2015.");
+
+    let v = engine.verify(&claim, 5).await;
+    assert_eq!(v.verdict, Verdict::Verified, "{}", v.reason);
+    assert_eq!(openalex.queries().len(), 1);
+    let best = &v.report.candidates[v.best.unwrap()];
+    assert!(best.ids.contains(&"10.1038/nature14539".parse().unwrap()));
 }
 
 #[tokio::test]

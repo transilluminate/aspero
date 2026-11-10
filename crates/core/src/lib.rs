@@ -34,4 +34,4 @@ pub use provider::{
 };
 pub use record::{Field, FieldSet, Raw, SourceRecord};
 pub use resilience::ResiliencePolicy;
-pub use work::{PartialDate, Person, Work, WorkType, tidy_abstract};
+pub use work::{PartialDate, Person, Update, UpdateKind, Work, WorkType, tidy_abstract};

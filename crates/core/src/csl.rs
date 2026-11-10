@@ -9,7 +9,8 @@
 
 use serde::Deserialize;
 
-use crate::work::{PartialDate, Person, Work, WorkType, tidy_abstract};
+use crate::id::{Doi, WorkId};
+use crate::work::{PartialDate, Person, Update, UpdateKind, Work, WorkType, tidy_abstract};
 
 /// One CSL-JSON item.
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -34,6 +35,38 @@ pub struct CslItem {
     #[serde(rename = "abstract")]
     pub abstract_text: Option<String>,
     pub is_referenced_by_count: Option<u64>,
+    /// Crossref-registered DOIs carry their notices here (see
+    /// [`CrossrefUpdate`]).
+    pub updated_by: Vec<CrossrefUpdate>,
+}
+
+/// One entry of Crossref's `updated-by`: a notice about the work, e.g.
+/// `{"DOI": "10.1016/…", "type": "retraction", "source":
+/// "retraction-watch", "updated": {"date-parts": [[2010, 2, 6]]}}`. The
+/// same shape appears in Crossref's REST API and its CSL via doi.org.
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(default)]
+pub struct CrossrefUpdate {
+    #[serde(rename = "DOI")]
+    pub doi: Option<String>,
+    #[serde(rename = "type")]
+    pub update_type: Option<String>,
+    pub source: Option<String>,
+    pub updated: Option<CslDate>,
+}
+
+impl CrossrefUpdate {
+    pub fn to_update(&self) -> Option<Update> {
+        let mut update = Update::new(UpdateKind::parse(self.update_type.as_deref()?));
+        update.notice = self
+            .doi
+            .as_deref()
+            .and_then(|d| d.parse::<Doi>().ok())
+            .map(WorkId::Doi);
+        update.date = self.updated.as_ref().and_then(CslDate::to_partial);
+        update.source = self.source.clone();
+        Some(update)
+    }
 }
 
 /// A string, or an array of strings of which the first is used.
@@ -187,6 +220,11 @@ impl CslItem {
                 .filter(|a| !a.is_empty()),
             url: self.url.clone(),
             cited_by_count: self.is_referenced_by_count,
+            updates: self
+                .updated_by
+                .iter()
+                .filter_map(CrossrefUpdate::to_update)
+                .collect(),
         }
     }
 }
@@ -215,6 +253,29 @@ mod tests {
         assert_eq!(w.issued.unwrap().to_string(), "2015-05-27");
         assert_eq!(w.authors[0].display_name().as_deref(), Some("Yann LeCun"));
         assert_eq!(w.cited_by_count, Some(79265));
+    }
+
+    #[test]
+    fn reads_retraction_watch_notices() {
+        let w = item(serde_json::json!({
+            "title": "RETRACTED: Ileal-lymphoid-nodular hyperplasia",
+            "updated-by": [
+                {"DOI": "10.1016/s0140-6736(04)15715-2", "type": "correction", "source": "retraction-watch",
+                 "updated": {"date-parts": [[2004, 3, 6]]}},
+                {"DOI": "10.1016/s0140-6736(10)60175-4", "type": "retraction", "source": "retraction-watch",
+                 "updated": {"date-parts": [[2010, 2, 6]]}}
+            ]
+        }))
+        .to_work();
+        assert_eq!(w.updates.len(), 2);
+        let r = w.retraction().unwrap();
+        assert_eq!(r.kind, UpdateKind::Retraction);
+        assert_eq!(r.date.unwrap().to_string(), "2010-02-06");
+        assert_eq!(
+            r.notice.as_ref().unwrap().to_string(),
+            "doi:10.1016/s0140-6736(10)60175-4"
+        );
+        assert_eq!(r.source.as_deref(), Some("retraction-watch"));
     }
 
     #[test]

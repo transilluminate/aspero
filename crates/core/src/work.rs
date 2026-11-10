@@ -44,6 +44,94 @@ pub struct Work {
     /// As counted by the providing source; counts differ between sources.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cited_by_count: Option<u64>,
+    /// Retractions, corrections and other editorial notices about the work.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub updates: Vec<Update>,
+}
+
+/// An editorial notice about a work: retraction, correction, expression of
+/// concern, withdrawal.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[non_exhaustive]
+pub struct Update {
+    pub kind: UpdateKind,
+    /// The notice's own identifier (usually a DOI), if known.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub notice: Option<crate::id::WorkId>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub date: Option<PartialDate>,
+    /// Who reported it: "retraction-watch", "publisher", "openalex", ….
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source: Option<String>,
+}
+
+impl Update {
+    pub fn new(kind: UpdateKind) -> Self {
+        Update {
+            kind,
+            notice: None,
+            date: None,
+            source: None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[non_exhaustive]
+pub enum UpdateKind {
+    Retraction,
+    Withdrawal,
+    ExpressionOfConcern,
+    Correction,
+    Other(String),
+}
+
+impl UpdateKind {
+    pub fn as_str(&self) -> &str {
+        match self {
+            UpdateKind::Retraction => "retraction",
+            UpdateKind::Withdrawal => "withdrawal",
+            UpdateKind::ExpressionOfConcern => "expression_of_concern",
+            UpdateKind::Correction => "correction",
+            UpdateKind::Other(s) => s,
+        }
+    }
+
+    /// From Crossref/Retraction Watch type names (`retraction`,
+    /// `expression_of_concern`, `erratum`, …); never fails.
+    pub fn parse(s: &str) -> Self {
+        match s.to_ascii_lowercase().replace('-', "_").as_str() {
+            "retraction" | "partial_retraction" => UpdateKind::Retraction,
+            "withdrawal" | "removal" => UpdateKind::Withdrawal,
+            "expression_of_concern" => UpdateKind::ExpressionOfConcern,
+            "correction" | "erratum" | "corrigendum" | "addendum" => UpdateKind::Correction,
+            _ => UpdateKind::Other(s.to_owned()),
+        }
+    }
+
+    /// Whether citing the work is unsafe: retracted or withdrawn.
+    pub fn is_retraction(&self) -> bool {
+        matches!(self, UpdateKind::Retraction | UpdateKind::Withdrawal)
+    }
+}
+
+impl Serialize for UpdateKind {
+    fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+        s.serialize_str(self.as_str())
+    }
+}
+
+impl<'de> Deserialize<'de> for UpdateKind {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        Ok(UpdateKind::parse(&String::deserialize(d)?))
+    }
+}
+
+impl Work {
+    /// The first retraction or withdrawal notice, if any.
+    pub fn retraction(&self) -> Option<&Update> {
+        self.updates.iter().find(|u| u.kind.is_retraction())
+    }
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]

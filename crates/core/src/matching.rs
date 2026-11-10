@@ -294,10 +294,29 @@ fn words(s: &str) -> Vec<String> {
         .collect()
 }
 
+/// A title without a leading status marker publishers add to retracted or
+/// withdrawn works ("RETRACTED: Ileal-lymphoid…", "RETRACTED ARTICLE: …"),
+/// so a citation of the original title still matches. Notices themselves
+/// ("Retraction: …") are left alone.
+pub fn unmarked(title: &str) -> &str {
+    let trimmed = title.trim_start();
+    for marker in ["retracted article", "retracted", "withdrawn"] {
+        if let Some(head) = trimmed.get(..marker.len())
+            && head.eq_ignore_ascii_case(marker)
+        {
+            let rest = &trimmed[marker.len()..];
+            if let Some(rest) = rest.trim_start().strip_prefix([':', '.', '-', '—']) {
+                return rest.trim_start();
+            }
+        }
+    }
+    title
+}
+
 /// Dice coefficient over the two titles' word sets: 1.0 for the same
 /// words, lower as either title gains words the other lacks.
 pub fn title_similarity(a: &str, b: &str) -> f64 {
-    let (a, b) = (dedup(words(a)), dedup(words(b)));
+    let (a, b) = (dedup(words(unmarked(a))), dedup(words(unmarked(b))));
     if a.is_empty() || b.is_empty() {
         return 0.0;
     }
@@ -365,6 +384,7 @@ impl Normalised {
     /// 1.0 if the title appears as a phrase; otherwise the share of its
     /// words present.
     fn title_coverage(&self, title: &str) -> f64 {
+        let title = unmarked(title);
         let norm = normalise(title);
         if norm.is_empty() {
             return 0.0;
@@ -419,7 +439,7 @@ impl Normalised {
 /// just the cited title. `None` if the run is too short to be a title (under
 /// three words, unless it is the candidate's whole title).
 pub fn shared_title(candidate_title: &str, reference: &str) -> Option<String> {
-    let (title, text) = (words(candidate_title), words(reference));
+    let (title, text) = (words(unmarked(candidate_title)), words(reference));
     // Longest common substring over words; references are short.
     let mut best = (0, 0); // (length, end index in title)
     let mut prev = vec![0usize; text.len() + 1];
@@ -681,6 +701,27 @@ mod tests {
         assert_eq!(
             shared_title("Deep learning for AI", "Smith J. On learning. 2020"),
             None
+        );
+    }
+
+    #[test]
+    fn retraction_markers_do_not_hide_a_title_match() {
+        assert_eq!(
+            unmarked("RETRACTED: Ileal-lymphoid hyperplasia"),
+            "Ileal-lymphoid hyperplasia"
+        );
+        assert_eq!(unmarked("Retracted Article - Something"), "Something");
+        assert_eq!(unmarked("Retraction: Something"), "Retraction: Something");
+        assert_eq!(
+            unmarked("Retracted proteins in yeast"),
+            "Retracted proteins in yeast"
+        );
+        assert_eq!(
+            title_similarity(
+                "RETRACTED: Ileal-lymphoid hyperplasia",
+                "Ileal-lymphoid hyperplasia"
+            ),
+            1.0
         );
     }
 

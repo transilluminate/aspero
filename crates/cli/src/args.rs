@@ -17,6 +17,9 @@ Exit codes:
   9  a citation does not check out (verify: mismatch or only plausible;
      check: an entry reached --fail-on)
 
+With several inputs (a batch on stdin), the exit code is the most serious
+problem among them; results for every input are still written.
+
 Environment:
   OPENALEX_API_KEY  OpenAlex key ($1/day free budget; $0.10/day without)
   ASPERO_MAILTO     contact address for polite API pools (Crossref)

@@ -110,8 +110,10 @@ Candidates are gathered cheapest first: lookups of claimed identifiers
 Crossref's citation matcher; then **title** searches on keyword providers.
 Bare titles rank far better than whole references there, and the title is
 located *inside* the reference via each matcher hit's title (or container
-title, for untitled book chapters): `shared_title`. `verify` stops once a
-free source verifies, so paid searches only run when needed.
+title, for untitled book chapters): `shared_title`. `verify` stops early only
+on a decisive match that the claimed identifiers or two providers vouch
+for: a digest or reprint can match a claim exactly while only a later
+title search finds the original. Ties go to the earliest published.
 
 Scoring looks for the record's fields *in* the claim rather than parsing
 citation styles. The rules, each from a real failure:
@@ -122,6 +124,15 @@ citation styles. The rules, each from a real failure:
 - **Different authors halve confidence.** Similarly titled surveys and
   books by others otherwise pass.
 - **One field can't verify.** "Deep learning" matches many works.
+- **Title and year alone stay plausible** (at most 0.8): short generic
+  titles ("Health technology assessment") match by coincidence. Authors or
+  a shared identifier must corroborate.
+- **Titles compare on content words**, and a dropped subtitle still
+  matches; a few shared topic words in free text are not a title match.
+- **Replies, errata and comments are not the original.** Their titles
+  repeat the original's; confidence halves unless the claim cites one.
+- **Online and print years both count**, so either year of an
+  online-first paper matches, as do years across merged records.
 - **First author alone is an author match** ("Vaswani et al."); an
   unmentioned sole author is no match.
 - **"RETRACTED:" title markers are ignored** when comparing titles.
@@ -140,7 +151,7 @@ warning, correction info). `--fail-on` sets the exit-9 threshold.
 **Benchmark**: `bench/citations.jsonl` (known-answer citations, optionally
 requiring a specific match or retraction flag), run live by
 `cargo run -p aspero-engine --example verify_bench` through
-`target/bench-cache`: the first run costs ~$0.015, re-runs are free. Add a
+`target/bench-cache`: the first run costs ~$0.035, re-runs are free. Add a
 case for every new failure mode found in the wild.
 
 ## Storage

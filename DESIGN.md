@@ -102,7 +102,10 @@ scripts/       fixture recorders, one per provider
 - **Work** is CSL-shaped and all-optional: title, authors, issued, type,
   container, publication details, abstract, URL, cited-by count, plus:
   - `updates`: retractions, withdrawals, expressions of concern,
-    corrections, each with the notice's DOI, date and source;
+    corrections, and newer versions (Crossref `new_version` notices, which
+    Cochrane deposits per `.pubN`, and `is-replaced-by`/`is-preprint-of`
+    relations), each with the notice's DOI, date and source. Guideline
+    editions aren't linked in any source we use, so they aren't followed;
   - `update_to`: for a notice, the works it updates (Crossref `update-to`);
   - `other_years`: years of other editions or versions (book editions);
   - `open_access`: whether a free, legal copy exists, its PDF/page, licence

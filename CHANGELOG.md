@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- Newer versions: Crossref `new_version` notices (Cochrane reviews,
+  `.pub6` → `.pub7`) and `is-replaced-by`/`is-preprint-of` relations
+  become `new_version` updates. `lookup --full` follows the chain and adds
+  `latest`; `verify` notes "superseded by …"; `check` warns.
+
 ## 0.3.1
 
 - `verify` and `resolve` check the journal (abbreviations and initials

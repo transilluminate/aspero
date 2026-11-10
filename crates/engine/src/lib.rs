@@ -276,124 +276,126 @@ impl Engine {
         let mut usage: Vec<(ProviderId, Usage)> = Vec::new();
 
         for entry in &self.entries {
-            let provider = entry.provider.id();
             let caps = entry.provider.capabilities();
-            let attempt = |outcome, served| Attempt {
-                provider: provider.clone(),
-                outcome,
-                served,
-            };
-
             let eligible: Vec<usize> = (0..results.len())
                 .filter(|&i| results[i].record.is_none())
                 .filter(|&i| caps.lookup_kinds.contains(&results[i].id.kind()))
                 .collect();
-
-            // Fresh cached answers first (one cache read for the whole set);
-            // only the rest go to the provider.
             let ids: Vec<WorkId> = eligible.iter().map(|&i| results[i].id.clone()).collect();
-            let mut pending = Vec::new();
-            for (&i, cached) in eligible
-                .iter()
-                .zip(self.cached_lookups(&provider, &ids, fields))
-            {
-                match cached {
-                    Some(Some(record)) => {
-                        results[i].record = Some(record);
-                        results[i]
-                            .attempts
-                            .push(attempt(Outcome::Found, Served::Cache));
-                    }
-                    Some(None) => results[i]
-                        .attempts
-                        .push(attempt(Outcome::NotFound, Served::Cache)),
-                    None => pending.push(i),
-                }
+            let answers = self.lookup_at(entry, &ids, fields, &mut usage).await;
+            for (&i, (attempt, record)) in eligible.iter().zip(answers) {
+                results[i].record = record;
+                results[i].attempts.push(attempt);
             }
+        }
+        LookupReport { results, usage }
+    }
 
-            let mut chunks = pending.chunks(caps.max_batch.max(1));
-            while let Some(chunk) = chunks.next() {
-                let batch: Vec<WorkId> = chunk.iter().map(|&i| results[i].id.clone()).collect();
-                let answer = with_retries(&entry.policy, self.jitter, || {
-                    entry.provider.lookup(&batch, fields)
-                })
-                .await;
+    /// Asks one provider about `ids` (all of kinds it accepts): fresh cached
+    /// answers first, the rest in batches with retries, and stale cached
+    /// records for any that fail. One answer per ID, in order.
+    async fn lookup_at(
+        &self,
+        entry: &Entry,
+        ids: &[WorkId],
+        fields: FieldSet,
+        usage: &mut Vec<(ProviderId, Usage)>,
+    ) -> Vec<(Attempt, Option<SourceRecord>)> {
+        let provider = entry.provider.id();
+        let caps = entry.provider.capabilities();
+        let attempt = |outcome, served| Attempt {
+            provider: provider.clone(),
+            outcome,
+            served,
+        };
+        let mut answers: Vec<Option<(Attempt, Option<SourceRecord>)>> = vec![None; ids.len()];
 
-                match answer {
-                    Ok(resp) => {
-                        if let Some(u) = resp.usage {
-                            add_usage(&mut usage, &provider, u);
-                        }
-                        // The contract is one answer per ID, in order;
-                        // anything else is a provider bug, not a miss.
-                        let in_order = resp.value.len() == chunk.len()
-                            && resp
-                                .value
-                                .iter()
-                                .zip(chunk)
-                                .all(|(l, &i)| l.id == results[i].id);
-                        if !in_order {
-                            for &i in chunk {
-                                let failed = Outcome::Failed(Error::decode(ContractViolation));
-                                results[i].attempts.push(attempt(failed, Served::Live));
-                            }
-                            continue;
-                        }
-                        let answers: Vec<_> = resp
+        // Fresh cached answers first (one cache read for the whole set).
+        let mut pending = Vec::new();
+        for (i, cached) in self
+            .cached_lookups(&provider, ids, fields)
+            .into_iter()
+            .enumerate()
+        {
+            answers[i] = match cached {
+                Some(Some(record)) => Some((attempt(Outcome::Found, Served::Cache), Some(record))),
+                Some(None) => Some((attempt(Outcome::NotFound, Served::Cache), None)),
+                None => {
+                    pending.push(i);
+                    None
+                }
+            };
+        }
+
+        let mut chunks = pending.chunks(caps.max_batch.max(1));
+        while let Some(chunk) = chunks.next() {
+            let batch: Vec<WorkId> = chunk.iter().map(|&i| ids[i].clone()).collect();
+            let answer = with_retries(&entry.policy, self.jitter, || {
+                entry.provider.lookup(&batch, fields)
+            })
+            .await;
+
+            let error = match answer {
+                Ok(resp) => {
+                    if let Some(u) = resp.usage {
+                        add_usage(usage, &provider, u);
+                    }
+                    // The contract is one answer per ID, in order; anything
+                    // else is a provider bug, not a miss.
+                    let in_order = resp.value.len() == batch.len()
+                        && resp.value.iter().zip(&batch).all(|(l, id)| &l.id == id);
+                    if in_order {
+                        let stored: Vec<_> = resp
                             .value
                             .iter()
                             .map(|l| (&l.id, l.record.as_ref()))
                             .collect();
-                        self.remember_lookups(&provider, &answers);
+                        self.remember_lookups(&provider, &stored);
                         for (&i, lookup) in chunk.iter().zip(resp.value) {
                             let outcome = match lookup.record {
-                                Some(record) => {
-                                    results[i].record = Some(record);
-                                    Outcome::Found
-                                }
+                                Some(_) => Outcome::Found,
                                 None => Outcome::NotFound,
                             };
-                            results[i].attempts.push(attempt(outcome, Served::Live));
+                            answers[i] = Some((attempt(outcome, Served::Live), lookup.record));
                         }
+                        continue;
                     }
-                    Err(error) => {
-                        // Out of budget or credentials: don't spend more
-                        // calls on this provider in this lookup.
-                        let give_up = matches!(
-                            error.category(),
-                            ErrorCategory::Throttled | ErrorCategory::Auth
-                        );
-                        let affected: Vec<usize> = if give_up {
-                            chunk
-                                .iter()
-                                .chain(chunks.by_ref().flatten())
-                                .copied()
-                                .collect()
-                        } else {
-                            chunk.to_vec()
-                        };
-                        // Stale-on-error: an old answer beats none.
-                        let ids: Vec<WorkId> =
-                            affected.iter().map(|&i| results[i].id.clone()).collect();
-                        for (&i, stale) in affected.iter().zip(self.stale_lookups(&provider, &ids))
-                        {
-                            match stale {
-                                Some(record) => {
-                                    results[i].record = Some(record);
-                                    results[i]
-                                        .attempts
-                                        .push(attempt(Outcome::Found, Served::Stale));
-                                }
-                                None => results[i]
-                                    .attempts
-                                    .push(attempt(Outcome::Failed(error.clone()), Served::Live)),
-                            }
-                        }
-                    }
+                    Error::decode(ContractViolation)
                 }
+                Err(error) => error,
+            };
+
+            // Out of budget or credentials: don't spend more calls on this
+            // provider in this lookup.
+            let give_up = matches!(
+                error.category(),
+                ErrorCategory::Throttled | ErrorCategory::Auth
+            );
+            let affected: Vec<usize> = if give_up {
+                chunk
+                    .iter()
+                    .chain(chunks.by_ref().flatten())
+                    .copied()
+                    .collect()
+            } else {
+                chunk.to_vec()
+            };
+            // Stale-on-error: an old answer beats none.
+            let affected_ids: Vec<WorkId> = affected.iter().map(|&i| ids[i].clone()).collect();
+            for (&i, stale) in affected
+                .iter()
+                .zip(self.stale_lookups(&provider, &affected_ids))
+            {
+                answers[i] = Some(match stale {
+                    Some(record) => (attempt(Outcome::Found, Served::Stale), Some(record)),
+                    None => (attempt(Outcome::Failed(error.clone()), Served::Live), None),
+                });
             }
         }
-        LookupReport { results, usage }
+        answers
+            .into_iter()
+            .map(|a| a.expect("every ID answered from cache, provider or failure"))
+            .collect()
     }
 
     /// Searches one provider: `source` if given, otherwise the first that

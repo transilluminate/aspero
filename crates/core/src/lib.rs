@@ -1,6 +1,7 @@
 //! Core types, identifier parsing/normalisation, the `Provider` trait and errors. No I/O.
 //!
 //! - [`id`]: identifiers and their normalisation.
+//! - [`csl`]: lenient CSL-JSON reading.
 //! - [`work`]: the provider-neutral [`Work`] model.
 //! - [`record`]: [`SourceRecord`], one provider's view of one work.
 //! - [`provider`]: the [`Provider`] trait and its request/response types.
@@ -10,6 +11,7 @@
 //! - [`http`]: the [`HttpClient`] transport seam.
 //! - `testing` (feature): fixture replay for provider tests.
 
+pub mod csl;
 pub mod error;
 pub mod http;
 pub mod id;

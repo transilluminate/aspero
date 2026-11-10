@@ -20,3 +20,6 @@
 {"why": "invented DOI on its own", "claim": "10.9999/aspero.invented.2024", "expect": ["not_found"]}
 {"why": "retracted: exists, but must be flagged (title now prefixed RETRACTED:)", "claim": "Wakefield AJ, Murch SH, Anthony A, et al. Ileal-lymphoid-nodular hyperplasia, non-specific colitis, and pervasive developmental disorder in children. Lancet. 1998;351:637-641.", "expect": ["verified"], "ids": ["doi:10.1016/s0140-6736(97)11096-0"], "retracted": true}
 {"why": "retracted, cited by DOI (OpenAlex's bare flag gets detailed)", "claim": "10.1016/S0140-6736(97)11096-0", "expect": ["verified"], "retracted": true}
+{"why": "book with ISBN (Open Library)", "claim": "Goodfellow I, Bengio Y, Courville A. Deep Learning. MIT Press; 2016. ISBN 978-0-262-03561-3.", "expect": ["verified"], "ids": ["isbn:9780262035613"]}
+{"why": "book without identifiers (Springer registers it chapter by chapter)", "claim": "Bishop CM. Pattern Recognition and Machine Learning. Springer; 2006.", "expect": ["verified"]}
+{"why": "book cited by its second edition's year", "claim": {"title": "Reinforcement Learning: An Introduction", "authors": ["Sutton, Richard S.", "Barto, Andrew G."], "year": 2018}, "expect": ["verified"]}

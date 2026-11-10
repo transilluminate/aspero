@@ -8,8 +8,11 @@
 //!    picking the title out of a messy string, even when the work they
 //!    return is a lookalike.
 //! 3. **Title searches** on keyword providers (OpenAlex, $0.001 each): the
-//!    claim's title, or the distinct titles of the matchers' top hits. Bare
-//!    titles rank far better there than whole references (DESIGN §9).
+//!    claim's title, or the title the reference cites as located via the
+//!    matchers' hits ([`matching::shared_title`]). Bare titles rank far
+//!    better there than whole references (DESIGN §9), and locating the
+//!    title in the reference keeps derivative hits ("Faculty Opinions
+//!    recommendation of …") from steering the search.
 //!
 //! Candidates sharing an identifier are merged; each is scored against the
 //! claim with [`assess`]. `verify` stops as soon as a candidate verifies, so
@@ -183,7 +186,12 @@ impl Engine {
                     .search(self, &provider, &query, Via::CitationMatch)
                     .await;
                 if claim.title.is_none() {
-                    titles.extend(hits.into_iter().take(MAX_TITLE_SEARCHES));
+                    // Query the title the reference cites, as found via each
+                    // hit: a commentary titled "Recommendation of X" yields X.
+                    titles.extend(
+                        hits.iter()
+                            .filter_map(|t| matching::shared_title(t, &reference)),
+                    );
                 }
             }
         }
@@ -352,11 +360,12 @@ fn distinct(titles: Vec<String>) -> Vec<String> {
 }
 
 /// Same title and authors, but something else (usually the year) is wrong:
-/// a real work cited with an error, not a missing one.
+/// a real work cited with an error, not a missing one. Authors must match
+/// (first author present): short titles like "Protein Folding" occur inside
+/// many longer ones, so the title alone proves little.
 fn near_miss(c: &Candidate) -> bool {
     let a = &c.assessment;
-    a.title.agreement == Agreement::Match
-        && matches!(a.authors.agreement, Agreement::Match | Agreement::Partial)
+    a.title.agreement == Agreement::Match && a.authors.agreement == Agreement::Match
 }
 
 /// The fields that don't fully agree, as a clause: "its year (2017)

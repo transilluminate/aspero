@@ -229,10 +229,11 @@ async fn a_lookalike_from_the_matcher_leads_to_the_real_paper() {
     assert_eq!(v.verdict, Verdict::Verified, "{}", v.reason);
     let best = &v.report.candidates[v.best.unwrap()];
     assert!(best.ids.contains(&"arXiv:1706.03762".parse().unwrap()));
-    // The matcher's (lookalike) title became the OpenAlex query.
+    // The title the reference cites, located via the matcher's (lookalike)
+    // hit, became the OpenAlex query.
     assert_eq!(
         openalex.queries(),
-        [(SearchMode::Keywords, "Attention Is All You Need".to_owned())]
+        [(SearchMode::Keywords, "attention is all you need".to_owned())]
     );
     let lookalike = v
         .report

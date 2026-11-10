@@ -18,7 +18,7 @@
 use serde::{Deserialize, Serialize};
 use unicode_normalization::UnicodeNormalization;
 
-use crate::id::{ArxivId, WorkId};
+use crate::id::WorkId;
 use crate::record::SourceRecord;
 use crate::work::Person;
 
@@ -590,47 +590,12 @@ pub fn search_terms(text: &str) -> String {
         .join(" ")
 }
 
-/// DOIs and arXiv IDs mentioned in free text: `doi:…`, `https://doi.org/…`,
-/// bare `10.…/…`, `arXiv:…` and arxiv.org URLs. Surrounding brackets,
-/// quotes and sentence punctuation are ignored.
+/// The distinct identifiers mentioned in free text (see [`crate::id::scan`]).
 pub fn find_ids(text: &str) -> Vec<WorkId> {
     let mut found: Vec<WorkId> = Vec::new();
-    // An ISBN only counts when labelled ("ISBN 978-…"): in prose, a bare
-    // run of digits could be anything.
-    let mut isbn_label = false;
-    for token in text.split(|c: char| c.is_whitespace() || matches!(c, '<' | '>' | '"' | '\'')) {
-        let token = token
-            .trim_start_matches(['(', '[', '{'])
-            .trim_end_matches(['.', ',', ';', ')', ']', '}']);
-        let lower = token.to_ascii_lowercase();
-        let labelled = std::mem::replace(
-            &mut isbn_label,
-            matches!(
-                lower.trim_end_matches(':'),
-                "isbn" | "isbn-13" | "isbn-10" | "isbn13" | "isbn10"
-            ),
-        );
-        let token = token.trim_end_matches(':');
-        let candidate = if labelled || lower.starts_with("isbn") {
-            WorkId::parse_as(crate::id::IdKind::Isbn, token).ok()
-        } else if let Some(at) = lower.find("10.") {
-            // A DOI, possibly inside a URL or after "doi:".
-            WorkId::parse_as(crate::id::IdKind::Doi, &token[at..]).ok()
-        } else if lower.starts_with("arxiv:") || lower.contains("arxiv.org/") {
-            token
-                .split_once(':')
-                .filter(|_| lower.starts_with("arxiv:"))
-                .map_or(token, |(_, rest)| rest)
-                .parse::<ArxivId>()
-                .ok()
-                .map(WorkId::Arxiv)
-        } else {
-            None
-        };
-        if let Some(id) = candidate
-            && !found.iter().any(|f| same_work_id(f, &id))
-        {
-            found.push(id);
+    for mention in crate::id::scan(text) {
+        if !found.iter().any(|f| same_work_id(f, &mention.id)) {
+            found.push(mention.id);
         }
     }
     found

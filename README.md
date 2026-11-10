@@ -18,7 +18,9 @@ MISMATCH  LeCun Y, Bengio Y, Hinton G. Deep learning. Nature. 2015. doi:10.1038/
 ## Install
 
 ```sh
-cargo install --path crates/cli
+brew install transilluminate/tap/aspero          # macOS / Linux
+curl --proto '=https' --tlsv1.2 -LsSf https://github.com/transilluminate/aspero/releases/latest/download/aspero-installer.sh | sh
+cargo install --git https://github.com/transilluminate/aspero aspero   # from source
 ```
 
 Optional environment:

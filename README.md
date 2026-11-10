@@ -43,8 +43,12 @@ aspero verify - < citations.txt        # one claim per line, text or JSON
 aspero check refs.bib
 aspero check --fail-on warning --format json thesis.bib
 
-# Look up identifiers: DOIs, arXiv IDs, PMIDs, PMCIDs, ISBNs, URLs
+# Look up identifiers: DOIs, arXiv IDs, PMIDs, PMCIDs, NBK IDs, ISBNs, URLs
 aspero lookup 10.1038/nature14539 arXiv:1706.03762 "ISBN 978-0-262-03561-3"
+
+# Find the identifiers in documents (offline), then look them up
+aspero scan notes/*.md
+aspero scan --format jsonl page.md | aspero lookup -   # each result echoes its mention
 
 # Search, resolve, and include abstracts
 aspero search "protein folding" --year 2020.. --source europepmc

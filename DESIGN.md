@@ -87,9 +87,15 @@ scripts/       fixture recorders, one per provider
 ## Identity and data model
 
 - **Identifiers**: DOI, arXiv, PMID, PMCID, OpenAlex, S2 paperId, S2
-  CorpusId, ISBN. Each parses bare, `kind:`-prefixed and URL forms into one
-  canonical value; display re-parses to itself (property-tested). Bare
-  digits are ambiguous and refused, except checksum-valid ISBN-13s.
+  CorpusId, ISBN, NCBI Bookshelf (NBK). Each parses bare, `kind:`-prefixed
+  and URL forms into one canonical value; display re-parses to itself
+  (property-tested). Bare digits are ambiguous and refused, except
+  checksum-valid ISBN-13s.
+- **Scanning** (`id::scan`, `aspero scan`) finds every identifier
+  mentioned in a document, with its position and text as written; which
+  mentions matter is the caller's call. Shapes that prose imitates (bare
+  digits, `W1`, `1706.03762`) count only when labelled, prefixed or URLs.
+  Claims and BibTeX URLs use the same scanner.
 - **DOIs** drop trailing `.,;:` (prose punctuation). The spec allows such a
   DOI, so `lookup` retries not-found ones with the punctuation kept.
 - **ISBNs** canonicalise to ISBN-13 (ISBN-10s converted, checksums checked).
@@ -218,7 +224,8 @@ fixture recorded with different parameters once hid a ranking bug.
 - **doi.org.** Content negotiation resolves any registered DOI through its
   agency (it found a Zenodo DOI minutes old); its 404 is authoritative.
   One DOI per request.
-- **Europe PMC.** PMIDs, PMCIDs (the only provider for them), biomedical
+- **Europe PMC.** PMIDs, PMCIDs and NBK IDs (`BOOK_ID:`; StatPearls
+  chapters have PMIDs too) — the only provider for them — biomedical
   abstracts, "Retracted Publication" flags. Cursor paging keeps relevance.
 - **Open Library.** Books: batched ISBN lookup, work search with every
   edition's year. Subtitles are separate fields (join them). Data quality

@@ -7,6 +7,13 @@
   bronze, green, closed), from OpenAlex and Europe PMC. Lookup tables gain
   a "Free" column; text reports a "Free copy" line. `lookup --full` fills
   it from other providers when the first didn't say.
+- `aspero scan`: every identifier mentioned in text or Markdown files, with
+  line, column, the text as written and context, as JSON(L) or a table.
+  Offline. `lookup -` reads its JSON lines and echoes each as `from`.
+- NCBI Bookshelf IDs (`NBK526056`, Bookshelf URLs), looked up via Europe
+  PMC: StatPearls chapters with title, series and date.
+- Identifiers in claims and BibTeX URLs are found by the same scanner:
+  PMCIDs, NBK IDs and labelled PMIDs now count; brackets inside DOIs stay.
 
 ## 0.2.0
 

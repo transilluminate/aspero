@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased
+
+- `canonical` on every work in JSON: one key per work whichever identifier
+  found it (DOI, PMID or PMCID lookups of one work agree), for deduping.
+- `lookup --full`: notices are dated by when they appeared (earliest of
+  online and print), with the source's date kept as `deposited` when later;
+  notices themselves are typed `erratum` or `retraction`; and a record
+  that contradicts the DOI's registry (Crossref) gains `disagreements`, as
+  when an aggregator merged two notices into one record. Contradicting
+  records aren't used to date notices.
+
 ## 0.3.3
 
 - Publisher URLs with a DOI in the path give that DOI, without landing-page

@@ -111,6 +111,10 @@ scripts/       fixture recorders, one per provider
   - `open_access`: whether a free, legal copy exists, its PDF/page, licence
     and Unpaywall class (OpenAlex carries Unpaywall's data; Europe PMC
     adds PMC copies and licences).
+- **Registry checks**: Crossref registered most DOIs, so its record is the
+  reference for them. With `--full`, a record from another provider that
+  contradicts it (year, volume, first page, title) is reported, not
+  silently replaced: OpenAlex has merged two corrections into one record.
 - **Merging**: candidates merge only on a shared identifier (arXiv
   versions count as one work). Fuzzy matches may *suggest*, never merge: a
   wrong merge corrupts; a duplicate merely annoys. Notices merge too, with

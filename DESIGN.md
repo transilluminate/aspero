@@ -237,6 +237,14 @@ Cache policy:
 ### More free providers (candidates, by gap filled)
 
 - **DBLP** (CS; no key): conference papers without DOIs (NeurIPS, ICML, ICLR).
+  *Probed 2026-11-10:* the REST search API, record pages and both mirrors
+  (uni-trier, dagstuhl) now sit behind an Anubis proof-of-work bot
+  challenge (HTTP 202 HTML) — even with a polite, identified user agent.
+  aspero must not solve it. The official **SPARQL endpoint**
+  (`sparql.dblp.org`, QLever) answers programs directly: record fetch
+  ~0.1s (title, `authoredBy` person IRIs, year, pagination, venue, NeurIPS
+  proceedings URL); unranked `CONTAINS` title search ~2s, so rank
+  client-side. Build DBLP on SPARQL.
 - **Open Library** (books; no key): ISBN lookup and search — needs an ISBN
   identifier kind.
 - **Europe PMC** (biomedical; no key): PMID/PMCID, abstracts, OA full text,

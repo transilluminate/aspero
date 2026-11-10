@@ -1,0 +1,13 @@
+[package]
+name = "aspero-crossref"
+description = "Crossref provider for aspero"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+aspero-core.workspace = true

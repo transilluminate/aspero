@@ -1,0 +1,13 @@
+[package]
+name = "aspero-core"
+description = "Core types, identifiers and Provider trait for aspero (no I/O)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+

@@ -1,0 +1,23 @@
+[package]
+name = "aspero-engine"
+description = "Routing, caching and resilience engine for aspero"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+aspero-core.workspace = true
+aspero-store.workspace = true
+aspero-openalex = { workspace = true, optional = true }
+aspero-crossref = { workspace = true, optional = true }
+aspero-doi = { workspace = true, optional = true }
+
+[features]
+default = ["openalex", "crossref", "doi"]
+openalex = ["dep:aspero-openalex"]
+crossref = ["dep:aspero-crossref"]
+doi = ["dep:aspero-doi"]

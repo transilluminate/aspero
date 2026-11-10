@@ -1,0 +1,29 @@
+[workspace]
+resolver = "3"
+members = [
+    "crates/core",
+    "crates/store",
+    "crates/engine",
+    "crates/cli",
+    "crates/providers/*",
+]
+
+[workspace.package]
+version = "0.0.0"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+publish = false
+
+[workspace.dependencies]
+aspero-core = { path = "crates/core" }
+aspero-store = { path = "crates/store" }
+aspero-engine = { path = "crates/engine" }
+aspero-openalex = { path = "crates/providers/openalex" }
+aspero-crossref = { path = "crates/providers/crossref" }
+aspero-doi = { path = "crates/providers/doi" }
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+
+[workspace.lints.clippy]
+all = { level = "warn", priority = -1 }

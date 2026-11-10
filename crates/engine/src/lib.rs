@@ -25,6 +25,7 @@
 
 mod abstracts;
 mod check;
+mod registry;
 mod resolve;
 pub mod retry;
 mod standard;
@@ -34,6 +35,7 @@ mod versions;
 
 pub use abstracts::{Abstract, AbstractsReport};
 pub use check::{Checked, Finding, Severity, duplicates, findings};
+pub use registry::{Disagreement, disagreements};
 pub use resolve::{Candidate, ResolveReport, Sighting, Via};
 /// Re-exported for credentials in provider configs.
 pub use secrecy::SecretString;
@@ -310,12 +312,10 @@ impl Engine {
     /// Adds editorial notices, in both directions, to records that another
     /// provider supplied, from the providers that report them in detail
     /// (Crossref): an original then lists its corrections and retractions,
-    /// a correction the work it corrects. Batched and cached, like lookups.
+    /// a correction the work it corrects. Notices are typed as such and
+    /// dated by when they appeared. Batched and cached, like lookups.
     pub async fn add_notices(&self, report: &mut LookupReport) {
-        for entry in &self.entries {
-            if !entry.provider.capabilities().notices {
-                continue;
-            }
+        if let Some(entry) = self.registry() {
             let works = found_records(&report.results, |_| true);
             for (i, found) in self.ask_about(entry, works, &mut report.usage).await {
                 let Some(record) = report.results[i].record.as_mut() else {
@@ -328,6 +328,7 @@ impl Engine {
                         work.update_to.push(target);
                     }
                 }
+                work.type_as_notice();
                 // OpenAlex flags a retraction or withdrawal notice itself as
                 // retracted, without details: name the record as its own
                 // notice, so every row about the one event shares `notice`.
@@ -342,6 +343,7 @@ impl Engine {
                 }
             }
         }
+        self.date_notices(report).await;
     }
 
     /// Fills in where works can be read free, for records whose provider

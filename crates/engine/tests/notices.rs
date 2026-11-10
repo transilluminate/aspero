@@ -5,7 +5,7 @@ mod common;
 
 use std::sync::Arc;
 
-use aspero_core::{FieldSet, Update, UpdateKind, UpdateTo, WorkId};
+use aspero_core::{FieldSet, PartialDate, Update, UpdateKind, UpdateTo, WorkId};
 use common::*;
 
 fn id(s: &str) -> WorkId {
@@ -58,7 +58,10 @@ async fn originals_and_their_corrections_point_at_each_other() {
 
     engine.add_notices(&mut report).await;
     let work = |i: usize| &report.results[i].record.as_ref().unwrap().work;
-    assert_eq!(work(0).updates, [correction]);
+    // Dated from the notice's own record, which the source didn't give.
+    let mut dated = correction.clone();
+    dated.date = Some(PartialDate::from_year(2026));
+    assert_eq!(work(0).updates, [dated]);
     assert_eq!(work(1).update_to[0].work, id("10.1161/cir.1415"));
 
     // Merging again adds nothing.

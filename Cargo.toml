@@ -23,6 +23,7 @@ aspero-crossref = { path = "crates/providers/crossref" }
 aspero-doi = { path = "crates/providers/doi" }
 
 async-trait = "0.1.92"
+clap = { version = "4.6.7", features = ["derive", "env"] }
 fastrand = "2.5.0"
 jiff = { version = "0.2.42", features = ["serde"] }
 percent-encoding = "2.3.2"

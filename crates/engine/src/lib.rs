@@ -17,7 +17,16 @@
 //! search, the circuit breaker and the cross-process limiter.
 
 pub mod retry;
+mod standard;
 pub mod transport;
+
+/// Re-exported for credentials in provider configs.
+pub use secrecy::SecretString;
+#[cfg(feature = "crossref")]
+pub use standard::CrossrefConfig;
+#[cfg(feature = "openalex")]
+pub use standard::OpenAlexConfig;
+pub use standard::{StandardConfig, standard};
 
 use std::sync::Arc;
 

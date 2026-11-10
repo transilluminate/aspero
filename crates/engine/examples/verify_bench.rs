@@ -59,7 +59,9 @@ fn judge(case: &Case, v: &Verification) -> Option<String> {
         return Some(format!("expected {}, got {verdict}", case.expect.join("/")));
     }
     if let Some(want) = case.retracted {
-        let got = v.best.is_some_and(|i| v.report.candidates[i].retraction().is_some());
+        let got = v
+            .best
+            .is_some_and(|i| v.report.candidates[i].retraction().is_some());
         if got != want {
             return Some(format!("expected retracted={want}, got {got}"));
         }

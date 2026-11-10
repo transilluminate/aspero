@@ -4,6 +4,9 @@ description = "Crossref provider for aspero"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+authors.workspace = true
 publish.workspace = true
 
 [lints]

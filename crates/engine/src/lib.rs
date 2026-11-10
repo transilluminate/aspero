@@ -57,8 +57,8 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use aspero_core::{
-    Error, ErrorCategory, Field, FieldSet, Filter, Page, Provider, ProviderId, ResiliencePolicy,
-    SearchMode, SearchQuery, SourceRecord, Usage, WorkId,
+    Error, ErrorCategory, Field, FieldSet, Filter, IdKind, Page, Provider, ProviderId,
+    ResiliencePolicy, SearchMode, SearchQuery, SourceRecord, Update, Usage, WorkId,
 };
 pub use aspero_store::{Cache, SqliteCache, Stats as CacheStats, StoreError};
 use jiff::Timestamp;
@@ -326,6 +326,18 @@ impl Engine {
                 for target in found.work.update_to {
                     if !work.update_to.contains(&target) {
                         work.update_to.push(target);
+                    }
+                }
+                // OpenAlex flags a retraction or withdrawal notice itself as
+                // retracted, without details: name the record as its own
+                // notice, so every row about the one event shares `notice`.
+                let own_doi = record.ids.iter().find(|id| id.kind() == IdKind::Doi);
+                if work.update_to.iter().any(|t| t.kind.is_retraction())
+                    && let Some(own) = own_doi
+                {
+                    let bare = |u: &&mut Update| u.kind.is_retraction() && u.notice.is_none();
+                    for update in work.updates.iter_mut().filter(bare) {
+                        update.notice = Some(own.clone());
                     }
                 }
             }

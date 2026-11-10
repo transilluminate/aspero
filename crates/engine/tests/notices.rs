@@ -66,3 +66,38 @@ async fn originals_and_their_corrections_point_at_each_other() {
     let work = |i: usize| &report.results[i].record.as_ref().unwrap().work;
     assert_eq!((work(0).updates.len(), work(1).update_to.len()), (1, 1));
 }
+
+#[tokio::test]
+async fn a_notice_flagged_as_retracted_names_itself_as_the_notice() {
+    // OpenAlex flags the withdrawal notice (Cochrane .pub3) as retracted.
+    let mut flagged = work(
+        "openalex",
+        &["10.1002/x.pub3"],
+        "Withdrawn review",
+        &[],
+        2015,
+    );
+    flagged.work.updates = vec![Update::new(UpdateKind::Retraction)];
+    let openalex = Arc::new(Scripted::new("openalex").with(vec![flagged]));
+    // Crossref knows it is the notice withdrawing .pub2.
+    let mut notice = work(
+        "crossref",
+        &["10.1002/x.pub3"],
+        "Withdrawn review",
+        &[],
+        2015,
+    );
+    notice.work.update_to = vec![UpdateTo::new(UpdateKind::Withdrawal, id("10.1002/x.pub2"))];
+    let mut crossref = Scripted::new("crossref").with(vec![notice]);
+    crossref.caps.notices = true;
+
+    let engine = engine(vec![openalex, Arc::new(crossref)]);
+    let mut report = engine
+        .lookup(&[id("10.1002/x.pub3")], FieldSet::DEFAULT)
+        .await;
+    engine.add_notices(&mut report).await;
+
+    let work = &report.results[0].record.as_ref().unwrap().work;
+    assert_eq!(work.updates.len(), 1, "flagged, still");
+    assert_eq!(work.updates[0].notice, Some(id("10.1002/x.pub3")));
+}

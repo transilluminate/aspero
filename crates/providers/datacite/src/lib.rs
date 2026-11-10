@@ -17,7 +17,7 @@ mod wire;
 use std::sync::Arc;
 use std::time::Duration;
 
-use aspero_core::http::path_segment;
+use aspero_core::http::{escape_lucene, path_segment};
 use aspero_core::{
     Capabilities, Cursor, Doi, Error, FieldSet, Filter, Hit, HttpClient, HttpRequest, HttpResponse,
     IdKind, Lookup, Page, Provider, ProviderId, ResiliencePolicy, Response, Result, SearchMode,
@@ -143,19 +143,6 @@ fn to_doi(id: &WorkId) -> Result<Doi> {
     }
 }
 
-/// Escapes Lucene query syntax in user text, so "BERT: Pre-training" is
-/// searched as words rather than parsed as a field query.
-fn escape_query(text: &str) -> String {
-    let mut out = String::with_capacity(text.len());
-    for c in text.chars() {
-        if "+-&|!(){}[]^\"~*?:\\/".contains(c) {
-            out.push('\\');
-        }
-        out.push(c);
-    }
-    out
-}
-
 fn check(resp: &HttpResponse) -> Result<()> {
     if resp.is_success() {
         return Ok(());
@@ -240,7 +227,7 @@ impl Provider for Datacite {
         }
         let mut clauses = Vec::new();
         if !query.text.trim().is_empty() {
-            clauses.push(format!("({})", escape_query(query.text.trim())));
+            clauses.push(format!("({})", escape_lucene(query.text.trim())));
         }
         if let Some(years) = query.years {
             let end = |y: Option<i16>| y.map_or("*".to_owned(), |y| y.to_string());

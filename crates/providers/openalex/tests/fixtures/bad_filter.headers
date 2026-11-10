@@ -1,0 +1,11 @@
+HTTP/2 400 
+content-type: application/json
+x-ratelimit-cost-usd: 0
+x-ratelimit-credits-used: 0
+x-ratelimit-limit: 10000
+x-ratelimit-limit-usd: 1
+x-ratelimit-onetime-remaining: 0
+x-ratelimit-prepaid-remaining-usd: 0
+x-ratelimit-remaining: 9966
+x-ratelimit-remaining-usd: 0.9966
+x-ratelimit-reset: 42197

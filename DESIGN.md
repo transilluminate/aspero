@@ -218,6 +218,38 @@ Cache policy:
 - **Stale-on-error**: if providers fail, serve stale data flagged
   `"stale": true` rather than erroring.
 - Location: platform cache/data dirs via `directories`.
+- **Negative cache**: "not found" answers are cached briefly (~1d), so
+  re-verifying a bibliography with invented DOIs doesn't re-ask every time.
+- **Derived data** (abstract-derived embeddings, extracted text, …) lives in
+  one generic table keyed by `(work id, kind, producer, version)` with a
+  media type and a blob, found via any of the work's identifiers. Nothing in
+  aspero depends on a particular producer.
+
+### Abstracts, text and embeddings (later; seams only)
+
+aspero stays a standalone, MIT/Apache, generally useful tool. These are
+optional extensions behind generic seams, never dependencies.
+
+- **Abstracts first**: they are the cheap, high-value step for agents. The
+  agent is the reasoner — given the abstract it can judge whether a cited
+  work supports a claim (the step after `verify`). Sources: OpenAlex
+  (inverted index; not always present), Crossref (JATS, sometimes), S2.
+  Cached whenever a provider returns them, with provenance.
+- **Full text** (Phase 4): fetching legal OA PDFs is easy (Unpaywall, arXiv,
+  Europe PMC); extraction is the hard part. A text-extractor seam lets any
+  external library or tool fill `derived` with text — e.g. a layout-aware
+  ML pipeline such as rs-cogniste, used as an optional library, not a
+  dependency.
+- **Embeddings** (Phase 3/4): **S2-first**. The S2 Graph API offers
+  precomputed SPECTER2 vectors as a paper field (to confirm when the S2
+  provider is built). Local inference (candle/ONNX, optional crate behind a
+  feature) only for works S2 lacks, and only with the **same base model and
+  adapter** S2 uses, so vectors share one space and compare directly.
+  SPECTER2 has task adapters (proximity, ad-hoc query, …): confirm which S2
+  serves before mixing. Uses: ranking snowballed sets against seeds without
+  LLM cost, `related`, watches, and preprint↔published *suggestions* (§4).
+  Vectors are BLOBs in `derived`; brute-force cosine is fine at personal-
+  library scale, `sqlite-vec` only if ever needed.
 
 ---
 

@@ -65,15 +65,24 @@ fn transport_error(e: reqwest::Error) -> Error {
 /// sharing it. Slots are handed out in arrival order, so waiting is fair.
 ///
 /// In-process only; the cross-process limiter (DESIGN §6) is deferred.
+///
+/// Logs each request (at `info`, target `aspero::http`) with the provider
+/// label, status, duration and time spent waiting for a slot.
 pub struct Paced {
+    label: String,
     inner: Arc<dyn HttpClient>,
     min_interval: Duration,
     next_slot: Mutex<Option<Instant>>,
 }
 
 impl Paced {
-    pub fn new(inner: Arc<dyn HttpClient>, min_interval: Duration) -> Self {
+    pub fn new(
+        label: impl Into<String>,
+        inner: Arc<dyn HttpClient>,
+        min_interval: Duration,
+    ) -> Self {
         Paced {
+            label: label.into(),
             inner,
             min_interval,
             next_slot: Mutex::new(None),
@@ -93,9 +102,51 @@ impl Paced {
 #[async_trait]
 impl HttpClient for Paced {
     async fn send(&self, request: HttpRequest) -> Result<HttpResponse, Error> {
+        let queued = Instant::now();
         let slot = self.claim().await;
         tokio::time::sleep_until(slot).await;
-        self.inner.send(request).await
+        let started = Instant::now();
+        let url = loggable_url(&request.url);
+        let result = self.inner.send(request).await;
+        let ms = |since: Instant, until: Instant| until.duration_since(since).as_millis() as u64;
+        let (waited_ms, took_ms) = (ms(queued, started), ms(started, Instant::now()));
+        match &result {
+            Ok(resp) => tracing::info!(
+                target: "aspero::http",
+                provider = %self.label, status = resp.status, took_ms, waited_ms, "{url}"
+            ),
+            Err(e) => tracing::warn!(
+                target: "aspero::http",
+                provider = %self.label, error = %e, took_ms, waited_ms, "{url}"
+            ),
+        }
+        result
+    }
+}
+
+/// A URL for logs: path and query only, contact and key parameters
+/// redacted (logs get pasted into issues), long queries shortened.
+fn loggable_url(url: &str) -> String {
+    let path = url
+        .split_once("://")
+        .map_or(url, |(_, rest)| rest.find('/').map_or("/", |i| &rest[i..]));
+    let redacted: String = match path.split_once('?') {
+        None => path.to_owned(),
+        Some((p, query)) => {
+            let params: Vec<String> = query
+                .split('&')
+                .map(|kv| match kv.split_once('=') {
+                    Some((k, _)) if matches!(k, "mailto" | "api_key" | "key") => format!("{k}=…"),
+                    _ => kv.to_owned(),
+                })
+                .collect();
+            format!("{p}?{}", params.join("&"))
+        }
+    };
+    const MAX: usize = 140;
+    match redacted.char_indices().nth(MAX) {
+        Some((cut, _)) => format!("{}…", &redacted[..cut]),
+        None => redacted,
     }
 }
 
@@ -119,7 +170,11 @@ mod tests {
 
     #[tokio::test(start_paused = true)]
     async fn paced_requests_start_min_interval_apart() {
-        let paced = Arc::new(Paced::new(Arc::new(Echo), Duration::from_millis(250)));
+        let paced = Arc::new(Paced::new(
+            "test",
+            Arc::new(Echo),
+            Duration::from_millis(250),
+        ));
         let start = Instant::now();
         let mut tasks = Vec::new();
         for _ in 0..4 {
@@ -137,9 +192,21 @@ mod tests {
         assert_eq!(starts, [0, 250, 500, 750]);
     }
 
+    #[test]
+    fn logged_urls_hide_contacts_and_keys() {
+        assert_eq!(
+            loggable_url("https://api.crossref.org/works?query=x&mailto=me%40example.org&rows=3"),
+            "/works?query=x&mailto=…&rows=3"
+        );
+        assert_eq!(
+            loggable_url("https://doi.org/10.1038/nature14539"),
+            "/10.1038/nature14539"
+        );
+    }
+
     #[tokio::test(start_paused = true)]
     async fn idle_time_is_not_banked() {
-        let paced = Paced::new(Arc::new(Echo), Duration::from_millis(100));
+        let paced = Paced::new("test", Arc::new(Echo), Duration::from_millis(100));
         paced.send(HttpRequest::get("http://x")).await.unwrap();
         tokio::time::sleep(Duration::from_secs(5)).await;
         let start = Instant::now();

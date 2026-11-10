@@ -47,6 +47,11 @@ where
         if Instant::now() + delay >= deadline {
             return Err(error);
         }
+        tracing::info!(
+            target: "aspero::retry",
+            retry = retry + 1, delay_ms = delay.as_millis() as u64, error = %error,
+            "backing off"
+        );
         tokio::time::sleep(delay).await;
         retry += 1;
     }

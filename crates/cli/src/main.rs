@@ -27,6 +27,7 @@ use crate::exit::Exit;
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> ExitCode {
     let cli = Cli::parse();
+    init_logging(cli.global.verbose);
     let format = match cli.global.format {
         Format::Auto if std::io::stdout().is_terminal() => Format::Table,
         Format::Auto => Format::Json,
@@ -52,6 +53,29 @@ async fn main() -> ExitCode {
             failure.exit.code()
         }
     }
+}
+
+/// `-v`: aspero's own events (requests, cache, retries) at info; `-vv`:
+/// everything at debug, including the HTTP stack. Always to stderr, so
+/// stdout stays clean for pipes.
+fn init_logging(verbosity: u8) {
+    use tracing_subscriber::filter::{LevelFilter, Targets};
+    use tracing_subscriber::prelude::*;
+
+    let targets = match verbosity {
+        0 => return,
+        1 => Targets::new().with_target("aspero", LevelFilter::INFO),
+        _ => Targets::new().with_default(LevelFilter::DEBUG),
+    };
+    let layer = tracing_subscriber::fmt::layer()
+        .with_writer(std::io::stderr)
+        .with_ansi(std::io::stderr().is_terminal())
+        .with_timer(tracing_subscriber::fmt::time::Uptime::default())
+        .with_target(verbosity > 1)
+        .compact();
+    tracing_subscriber::registry()
+        .with(layer.with_filter(targets))
+        .init();
 }
 
 fn env(name: &str) -> Option<String> {

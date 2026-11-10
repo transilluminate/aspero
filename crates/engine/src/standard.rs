@@ -49,9 +49,9 @@ pub fn standard(config: StandardConfig) -> Result<Engine, Error> {
     };
     // Unused only when every provider feature is off.
     #[allow(unused_variables)]
-    let client = |policy: &ResiliencePolicy| -> Result<Arc<dyn HttpClient>, Error> {
+    let client = |label: &str, policy: &ResiliencePolicy| -> Result<Arc<dyn HttpClient>, Error> {
         let inner = Arc::new(ReqwestClient::new(&user_agent, policy.attempt_timeout)?);
-        Ok(Arc::new(Paced::new(inner, policy.min_interval)))
+        Ok(Arc::new(Paced::new(label, inner, policy.min_interval)))
     };
 
     let mut builder: EngineBuilder = Engine::builder();
@@ -63,7 +63,7 @@ pub fn standard(config: StandardConfig) -> Result<Engine, Error> {
     if let Some(oa) = config.openalex {
         use aspero_openalex::OpenAlex;
         let policy = OpenAlex::default_policy();
-        let provider = OpenAlex::new(oa, client(&policy)?);
+        let provider = OpenAlex::new(oa, client("openalex", &policy)?);
         builder = builder.provider(Arc::new(provider), policy, 10);
     }
 
@@ -74,7 +74,7 @@ pub fn standard(config: StandardConfig) -> Result<Engine, Error> {
             cr.mailto = config.mailto.clone();
         }
         let policy = Crossref::default_policy();
-        let provider = Crossref::new(cr, client(&policy)?);
+        let provider = Crossref::new(cr, client("crossref", &policy)?);
         builder = builder.provider(Arc::new(provider), policy, 20);
     }
 
@@ -82,7 +82,7 @@ pub fn standard(config: StandardConfig) -> Result<Engine, Error> {
     if let Some(dc) = config.datacite {
         use aspero_datacite::Datacite;
         let policy = Datacite::default_policy();
-        let provider = Datacite::new(dc, client(&policy)?);
+        let provider = Datacite::new(dc, client("datacite", &policy)?);
         builder = builder.provider(Arc::new(provider), policy, 25);
     }
 
@@ -90,7 +90,7 @@ pub fn standard(config: StandardConfig) -> Result<Engine, Error> {
     if let Some(doi) = config.doi {
         use aspero_doi::DoiOrg;
         let policy = DoiOrg::default_policy();
-        let provider = DoiOrg::new(doi, client(&policy)?);
+        let provider = DoiOrg::new(doi, client("doi", &policy)?);
         builder = builder.provider(Arc::new(provider), policy, 30);
     }
 

@@ -322,14 +322,21 @@ impl Engine {
 
         // Fresh cached answers first (one cache read for the whole set).
         let mut pending = Vec::new();
+        let mut from_cache = 0;
         for (i, cached) in self
             .cached_lookups(&provider, ids, fields)
             .into_iter()
             .enumerate()
         {
             answers[i] = match cached {
-                Some(Some(record)) => Some((attempt(Outcome::Found, Served::Cache), Some(record))),
-                Some(None) => Some((attempt(Outcome::NotFound, Served::Cache), None)),
+                Some(Some(record)) => {
+                    from_cache += 1;
+                    Some((attempt(Outcome::Found, Served::Cache), Some(record)))
+                }
+                Some(None) => {
+                    from_cache += 1;
+                    Some((attempt(Outcome::NotFound, Served::Cache), None))
+                }
                 None => {
                     pending.push(i);
                     None
@@ -337,6 +344,9 @@ impl Engine {
             };
         }
 
+        if from_cache > 0 {
+            tracing::info!(target: "aspero::cache", provider = %provider, ids = from_cache, "lookups served from cache");
+        }
         let mut chunks = pending.chunks(caps.max_batch.max(1));
         while let Some(chunk) = chunks.next() {
             let batch: Vec<WorkId> = chunk.iter().map(|&i| ids[i].clone()).collect();
@@ -472,6 +482,7 @@ impl Engine {
         };
         let cached = self.cached_search(&provider, &sent);
         if let Some((page, true)) = cached {
+            tracing::info!(target: "aspero::cache", provider = %provider, text = %sent.text, "search served from cache");
             return Ok(report(page, None, Served::Cache));
         }
         match with_retries(&entry.policy, self.jitter, || entry.provider.search(&sent)).await {

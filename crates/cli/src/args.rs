@@ -52,6 +52,12 @@ pub struct Global {
     #[arg(long, global = true)]
     pub full: bool,
 
+    /// Log each provider request, cache hit and retry to stderr, timed from
+    /// start, so concurrency and pacing are visible. `-vv` adds the HTTP
+    /// stack's own debug output.
+    #[arg(short, long, global = true, action = clap::ArgAction::Count)]
+    pub verbose: u8,
+
     /// Don't read or write the answer cache.
     #[arg(long, global = true)]
     pub no_cache: bool,

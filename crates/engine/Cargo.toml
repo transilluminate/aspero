@@ -30,4 +30,6 @@ crossref = ["dep:aspero-crossref"]
 doi = ["dep:aspero-doi"]
 
 [dev-dependencies]
+serde.workspace = true
+serde_json.workspace = true
 tokio = { workspace = true, features = ["macros", "rt", "test-util"] }

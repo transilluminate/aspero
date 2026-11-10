@@ -113,6 +113,8 @@ dependencies = [
  "jiff",
  "reqwest",
  "secrecy",
+ "serde",
+ "serde_json",
  "thiserror",
  "tokio",
 ]

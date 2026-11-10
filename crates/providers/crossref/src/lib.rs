@@ -245,6 +245,14 @@ impl Provider for Crossref {
         if !filters.is_empty() {
             params.push(("filter", filters.join(",")));
         }
+        // Cursor paging silently drops relevance order (observed 2026-11-10:
+        // the right match at 92.1 vanished from the top 3), so ask for it
+        // explicitly whenever there is text to rank by.
+        let has_query = params.iter().any(|(k, _)| k.starts_with("query"));
+        if has_query && !params.iter().any(|(k, _)| *k == "sort") {
+            params.push(("sort", "score".into()));
+            params.push(("order", "desc".into()));
+        }
         params.push(("rows", query.page.limit.clamp(1, MAX_ROWS).to_string()));
         let cursor = query.page.cursor.as_ref().map_or("*", |c| c.0.as_str());
         params.push(("cursor", cursor.to_owned()));

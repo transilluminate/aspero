@@ -121,6 +121,8 @@ fn citation_mode_uses_the_bibliographic_matcher() {
     let params = query(&http, 0);
     assert!(params.iter().any(|(k, _)| k == "query.bibliographic"));
     assert!(params.contains(&pair("rows", "3")));
+    // Cursor paging drops relevance order unless asked for explicitly.
+    assert!(params.contains(&pair("sort", "score")) && params.contains(&pair("order", "desc")));
 
     let hits = resp.value.hits;
     assert_eq!(hits[0].record.ids, [id("10.1038/nature14539")]);
@@ -164,12 +166,15 @@ fn keyword_search_applies_filters_and_pages_by_cursor() {
         "from-pub-date:2017,until-pub-date:2018,type:journal-article"
     )));
     assert!(params.contains(&pair("cursor", "*")));
+    assert!(params.contains(&pair("sort", "score")));
     assert!(params.contains(&pair("mailto", "test@example.org")));
 
     let page = resp.value;
     assert_eq!(page.total, Some(1813));
     assert!(page.next.is_some());
     assert_eq!(page.hits.len(), 3);
+    let scores: Vec<f64> = page.hits.iter().map(|h| h.score.unwrap()).collect();
+    assert!(scores.is_sorted_by(|a, b| a >= b), "{scores:?}");
     assert!(page.hits.iter().all(|h| {
         let year = h.record.work.issued.unwrap().year();
         (2017..=2018).contains(&year)

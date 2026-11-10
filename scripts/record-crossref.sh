@@ -12,15 +12,16 @@ out="$(cd "$(dirname "$0")/.." && pwd)/crates/providers/crossref/tests/fixtures"
 mkdir -p "$out"
 base="https://api.crossref.org"
 
-# name  path-and-query (mailto is appended)
+# name  path-and-query (mailto is appended). Keep these identical to what
+# the provider sends; the tests assert the parameters.
 requests=(
   "work_by_doi             /works/10.1038/nature14539"
   "work_conference         /works/10.1145/3368089.3409741"
   "work_not_found          /works/10.5555/aspero-does-not-exist"
   "works_batch_doi         /works?filter=doi:10.1038/nature14539,doi:10.1145/3368089.3409741,doi:10.5555/aspero-does-not-exist&rows=20"
-  "works_bibliographic     /works?query.bibliographic=Vaswani%202017%20Attention%20is%20all%20you%20need&rows=5"
-  "works_bibliographic_ref /works?query.bibliographic=LeCun%20Y%2C%20Bengio%20Y%2C%20Hinton%20G.%20Deep%20learning.%20Nature.%202015%3B521%3A436-444.&rows=3"
-  "works_search_filtered   /works?query=transformer&filter=from-pub-date:2017,until-pub-date:2018,type:journal-article&rows=3&cursor=*"
+  "works_bibliographic     /works?query.bibliographic=Vaswani%202017%20Attention%20is%20all%20you%20need&sort=score&order=desc&rows=5&cursor=*"
+  "works_bibliographic_ref /works?query.bibliographic=LeCun%20Y%2C%20Bengio%20Y%2C%20Hinton%20G.%20Deep%20learning.%20Nature.%202015%3B521%3A436-444.&sort=score&order=desc&rows=3&cursor=*"
+  "works_search_filtered   /works?query=transformer&filter=from-pub-date:2017,until-pub-date:2018,type:journal-article&sort=score&order=desc&rows=3&cursor=*"
   "bad_filter              /works?filter=no-such-filter:1"
 )
 

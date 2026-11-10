@@ -43,6 +43,25 @@ impl Doi {
     }
 }
 
+impl Doi {
+    /// The DOI as written *with* the trailing punctuation that parsing
+    /// strips, if `input` had any (`"10.1145/x."` → `10.1145/x.`). DOIs may
+    /// legally end in `.`; callers retry with this when the stripped form
+    /// isn't found.
+    ///
+    /// The one exception to the parse/display round trip: parsing this
+    /// value's display strips the punctuation again. Use it for lookups only.
+    pub fn with_trailing_punctuation(input: &str) -> Option<Doi> {
+        let stripped: Doi = input.parse().ok()?;
+        let lower = input.trim().to_ascii_lowercase();
+        let at = lower.rfind(stripped.as_str())?;
+        let tail = &lower[at + stripped.as_str().len()..];
+        let only_punctuation =
+            !tail.is_empty() && tail.chars().all(|c| TRAILING_PUNCTUATION.contains(&c));
+        only_punctuation.then(|| Doi(format!("{}{tail}", stripped.as_str())))
+    }
+}
+
 pub(crate) fn has_info_prefix(s: &str) -> bool {
     strip_prefix_ci(s, INFO_PREFIX).is_some()
 }
@@ -166,6 +185,19 @@ mod tests {
             "(sici)1097-4636(199601)"
         );
         assert!(doi("10.1145/.").is_err());
+    }
+
+    #[test]
+    fn keeps_trailing_punctuation_on_request() {
+        let kept = Doi::with_trailing_punctuation("doi:10.1145/3368089.").unwrap();
+        assert_eq!(kept.as_str(), "10.1145/3368089.");
+        assert_eq!(
+            Doi::with_trailing_punctuation("https://doi.org/10.1145/3368089;")
+                .unwrap()
+                .as_str(),
+            "10.1145/3368089;"
+        );
+        assert_eq!(Doi::with_trailing_punctuation("10.1145/3368089"), None);
     }
 
     #[test]

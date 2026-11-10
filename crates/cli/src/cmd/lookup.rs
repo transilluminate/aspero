@@ -2,8 +2,8 @@
 
 use std::io::IsTerminal;
 
-use aspero_core::{FieldSet, IdError, SourceRecord, WorkId};
-use aspero_engine::{Abstract, Engine, LookupResult, Outcome, Served};
+use aspero_core::{Doi, FieldSet, IdError, SourceRecord, WorkId};
+use aspero_engine::{Abstract, Engine, LookupReport, LookupResult, Outcome, Served};
 use serde_json::{Value, json};
 
 use super::{Failure, Out, merge_usage, print, print_line, read_stdin};
@@ -19,6 +19,7 @@ pub async fn run(engine: &Engine, ids: Vec<String>, out: Out) -> Result<Exit, Fa
         .filter_map(|p| p.as_ref().ok().cloned())
         .collect();
     let mut report = engine.lookup(&valid, FieldSet::DEFAULT).await;
+    let retried = retry_with_punctuation(engine, &inputs, &parsed, &mut report).await;
 
     // Abstracts for the works found, one batched call; None per result
     // when not asked for or not found.
@@ -54,6 +55,9 @@ pub async fn run(engine: &Engine, ids: Vec<String>, out: Out) -> Result<Exit, Fa
             Ok(_) => {
                 let (result, found) = results.next().expect("one result per valid id");
                 let (mut item, exit) = item(input, result, out.full);
+                if retried.contains(&result.id) {
+                    item["note"] = json!("found with the trailing punctuation kept");
+                }
                 if let Some(found) = found {
                     output::set_abstract(&mut item["work"], found.as_ref());
                 }
@@ -87,6 +91,47 @@ pub async fn run(engine: &Engine, ids: Vec<String>, out: Out) -> Result<Exit, Fa
         }
     }
     Ok(exit)
+}
+
+/// DOIs may legally end in `.` (or `,;:`), which parsing strips as sentence
+/// punctuation. For DOIs not found that way, ask once more with the
+/// punctuation kept, in one batch; found ones replace their results.
+/// Returns the identifiers that were found only on retry.
+async fn retry_with_punctuation(
+    engine: &Engine,
+    inputs: &[String],
+    parsed: &[Result<WorkId, IdError>],
+    report: &mut LookupReport,
+) -> Vec<WorkId> {
+    let valid_inputs = inputs
+        .iter()
+        .zip(parsed)
+        .filter(|(_, p)| p.is_ok())
+        .map(|(i, _)| i);
+    let retries: Vec<(usize, WorkId)> = valid_inputs
+        .zip(&report.results)
+        .enumerate()
+        .filter(|(_, (_, r))| r.is_not_found())
+        .filter_map(|(i, (input, _))| {
+            Some((i, WorkId::Doi(Doi::with_trailing_punctuation(input)?)))
+        })
+        .collect();
+    if retries.is_empty() {
+        return Vec::new();
+    }
+    let ids: Vec<WorkId> = retries.iter().map(|(_, id)| id.clone()).collect();
+    let second = engine.lookup(&ids, FieldSet::DEFAULT).await;
+    for (p, u) in second.usage {
+        merge_usage(&mut report.usage, &p, u);
+    }
+    let mut found = Vec::new();
+    for ((i, _), result) in retries.into_iter().zip(second.results) {
+        if result.record.is_some() {
+            found.push(result.id.clone());
+            report.results[i] = result;
+        }
+    }
+    found
 }
 
 /// Arguments, or one identifier per stdin line when given none (or `-`).

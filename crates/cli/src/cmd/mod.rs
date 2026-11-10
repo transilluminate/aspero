@@ -13,6 +13,7 @@ pub mod verify;
 
 use std::io::Read;
 
+use aspero_core::{ProviderId, Usage};
 use aspero_engine::EngineError;
 use serde_json::Value;
 
@@ -49,6 +50,7 @@ impl From<EngineError> for Failure {
 pub struct Out {
     pub format: Format,
     pub full: bool,
+    pub abstracts: bool,
 }
 
 pub fn read_stdin() -> Result<String, Failure> {
@@ -70,4 +72,12 @@ pub fn print(value: &Value) {
 /// One JSON Lines record.
 pub fn print_line(value: &Value) {
     println!("{value}");
+}
+
+/// Adds `usage` to a per-provider total.
+pub fn merge_usage(totals: &mut Vec<(ProviderId, Usage)>, provider: &ProviderId, usage: Usage) {
+    match totals.iter_mut().find(|(p, _)| p == provider) {
+        Some((_, total)) => *total = total.then(usage),
+        None => totals.push((provider.clone(), usage)),
+    }
 }

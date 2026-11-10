@@ -1,11 +1,12 @@
 //! `aspero resolve`: every candidate work for a citation, scored.
 
+use aspero_core::SourceRecord;
 use aspero_engine::Engine;
 use serde_json::{Value, json};
 
 use super::claim::claims;
 use super::verify::split;
-use super::{Failure, Out, print, print_line};
+use super::{Failure, Out, merge_usage, print, print_line};
 use crate::args::{ClaimArgs, Format};
 use crate::exit::Exit;
 use crate::output;
@@ -25,22 +26,53 @@ pub async fn run(engine: &Engine, args: ClaimArgs, out: Out) -> Result<Exit, Fai
                 continue;
             }
         };
-        let report = engine.resolve(&claim, limit).await;
+        let mut report = engine.resolve(&claim, limit).await;
         if report.candidates.is_empty() {
             exit = exit.worst(Exit::NotFound);
         }
+        let abstracts = if out.abstracts {
+            // Search under every identifier merged into each candidate.
+            let records: Vec<SourceRecord> = report
+                .candidates
+                .iter()
+                .map(|c| {
+                    let mut r = c.record.clone();
+                    r.ids = c.ids.clone();
+                    r
+                })
+                .collect();
+            let fetched = engine.abstracts(&records.iter().collect::<Vec<_>>()).await;
+            for (p, u) in &fetched.usage {
+                merge_usage(&mut report.usage, p, *u);
+            }
+            Some(fetched.found)
+        } else {
+            None
+        };
+        let found = |i: usize| abstracts.as_ref().map(|a| a[i].as_ref());
         let candidates: Vec<Value> = report
             .candidates
             .iter()
-            .map(|c| output::candidate(c, out.full))
+            .enumerate()
+            .map(|(i, c)| {
+                let mut json = output::candidate(c, out.full);
+                if let Some(a) = found(i) {
+                    output::set_abstract(&mut json["work"], a);
+                }
+                json
+            })
             .collect();
         let errors: Vec<String> = report.errors.iter().map(ToString::to_string).collect();
 
         match out.format {
             Format::Table => {
                 println!("{input}\n");
-                for c in &report.candidates {
-                    println!("{}\n", output::candidate_text(c, "  "));
+                for (i, c) in report.candidates.iter().enumerate() {
+                    println!("{}", output::candidate_text(c, "  "));
+                    if let Some(a) = found(i) {
+                        println!("{}", output::abstract_text(a, "  "));
+                    }
+                    println!();
                 }
                 if report.candidates.is_empty() {
                     println!("  no candidates\n");

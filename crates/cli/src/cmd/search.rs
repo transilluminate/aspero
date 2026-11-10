@@ -1,6 +1,6 @@
 //! `aspero search`: keyword search against one provider.
 
-use aspero_core::{Cursor, SearchQuery, WorkType, YearRange};
+use aspero_core::{Cursor, SearchQuery, SourceRecord, WorkType, YearRange};
 use aspero_engine::Engine;
 use serde_json::{Value, json};
 
@@ -18,12 +18,23 @@ pub async fn run(
     let query = query(text, &options)?;
     let report = engine.search(options.source.as_deref(), &query).await?;
     let page = &report.page;
+    let abstracts = if out.abstracts {
+        let records: Vec<&SourceRecord> = page.hits.iter().map(|h| &h.record).collect();
+        Some(engine.abstracts(&records).await)
+    } else {
+        None
+    };
+    let found = |i: usize| abstracts.as_ref().map(|a| a.found[i].as_ref());
     let hits: Vec<Value> = page
         .hits
         .iter()
         .enumerate()
         .map(|(i, h)| {
-            json!({"rank": i + 1, "score": h.score, "work": output::work(&h.record, out.full)})
+            let mut work = output::work(&h.record, out.full);
+            if let Some(a) = found(i) {
+                output::set_abstract(&mut work, a);
+            }
+            json!({"rank": i + 1, "score": h.score, "work": work})
         })
         .collect();
 
@@ -31,7 +42,11 @@ pub async fn run(
         Format::Jsonl => hits.iter().for_each(print_line),
         Format::Table => {
             for (i, hit) in page.hits.iter().enumerate() {
-                println!("{}", output::hit_text(i + 1, hit));
+                print!("{}", output::hit_text(i + 1, hit));
+                if let Some(a) = found(i) {
+                    println!("{}", output::abstract_text(a, "    "));
+                }
+                println!();
             }
             let total = page.total.map(|t| format!(" of {t}")).unwrap_or_default();
             let served = match report.served {

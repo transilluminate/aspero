@@ -54,6 +54,12 @@ pub struct Global {
     /// Don't read or write the answer cache.
     #[arg(long, global = true)]
     pub no_cache: bool,
+
+    /// Include abstracts, looked up at other providers when the first one
+    /// lacks it. JSON gives `abstract` (null if none exists) and
+    /// `abstract_source`.
+    #[arg(long = "abstract", global = true)]
+    pub abstracts: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]

@@ -34,6 +34,7 @@ async fn main() -> ExitCode {
     let out = Out {
         format,
         full: cli.global.full,
+        abstracts: cli.global.abstracts,
     };
     match run(cli, out).await {
         Ok(exit) => exit.code(),

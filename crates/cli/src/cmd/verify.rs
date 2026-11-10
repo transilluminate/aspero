@@ -6,7 +6,7 @@ use aspero_engine::{Engine, Verdict, Verification};
 use serde_json::{Value, json};
 
 use super::claim::{ClaimInput, claims};
-use super::{Failure, Out, print, print_line};
+use super::{Failure, Out, merge_usage, print, print_line};
 use crate::args::{ClaimArgs, Format};
 use crate::exit::Exit;
 use crate::output;
@@ -46,11 +46,24 @@ pub async fn run(engine: &Engine, args: ClaimArgs, out: Out) -> Result<Exit, Fai
                 for (p, u) in &v.report.usage {
                     merge_usage(&mut usage, p, *u);
                 }
-                (
-                    item(&input, &v, out.full),
-                    exit_for(v.verdict),
-                    verdict_text(&input, &v),
-                )
+                let mut item = item(&input, &v, out.full);
+                let mut text = verdict_text(&input, &v);
+                if out.abstracts
+                    && let Some(best) = v.best.map(|i| &v.report.candidates[i])
+                {
+                    // Search under every identifier merged into the match.
+                    let mut record = best.record.clone();
+                    record.ids = best.ids.clone();
+                    let fetched = engine.abstracts(&[&record]).await;
+                    for (p, u) in &fetched.usage {
+                        merge_usage(&mut usage, p, *u);
+                    }
+                    let found = fetched.found.into_iter().next().flatten();
+                    output::set_abstract(&mut item["match"]["work"], found.as_ref());
+                    text.push_str(&output::abstract_text(found.as_ref(), "  "));
+                    text.push('\n');
+                }
+                (item, exit_for(v.verdict), text)
             }
         };
         exit = exit.worst(item_exit);
@@ -137,11 +150,4 @@ fn verdict_text(input: &str, v: &Verification) -> String {
         lines.push(format!("  warning: {e}"));
     }
     lines.join("\n") + "\n"
-}
-
-fn merge_usage(totals: &mut Vec<(ProviderId, Usage)>, provider: &ProviderId, usage: Usage) {
-    match totals.iter_mut().find(|(p, _)| p == provider) {
-        Some((_, total)) => *total = total.then(usage),
-        None => totals.push((provider.clone(), usage)),
-    }
 }

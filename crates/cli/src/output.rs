@@ -4,7 +4,10 @@
 //! than `null`, and the lean default set is enough to identify and cite.
 
 use aspero_core::{Agreement, Hit, ProviderId, SourceRecord, Usage};
-use aspero_engine::Candidate;
+use aspero_engine::{Abstract, Candidate};
+
+/// Abstract characters shown in tables; JSON has the full text.
+const TABLE_ABSTRACT: usize = 600;
 use serde_json::{Map, Value, json};
 
 /// Authors shown in a table before "et al.".
@@ -96,6 +99,30 @@ pub fn work_text(record: &SourceRecord, indent: &str) -> String {
     let ids: Vec<String> = record.ids.iter().map(ToString::to_string).collect();
     lines.push(format!("{indent}{}", ids.join("  ")));
     lines.join("\n")
+}
+
+/// Sets a work's `abstract` (null when none was found) and
+/// `abstract_source`.
+pub fn set_abstract(work: &mut Value, found: Option<&Abstract>) {
+    match found {
+        Some(a) => {
+            work["abstract"] = json!(a.text);
+            work["abstract_source"] = json!(a.source);
+        }
+        None => work["abstract"] = Value::Null,
+    }
+}
+
+/// An abstract for terminal display, indented and shortened.
+pub fn abstract_text(found: Option<&Abstract>, indent: &str) -> String {
+    let Some(a) = found else {
+        return format!("{indent}(no abstract available)");
+    };
+    let mut text: String = a.text.chars().take(TABLE_ABSTRACT).collect();
+    if a.text.chars().count() > TABLE_ABSTRACT {
+        text.push('…');
+    }
+    format!("{indent}abstract ({}): {text}", a.source)
 }
 
 /// A ranked search hit: `" 1. [91.9]"` then the work, indented.

@@ -2,11 +2,11 @@
 
 use std::io::IsTerminal;
 
-use aspero_core::{FieldSet, IdError, WorkId};
-use aspero_engine::{Engine, LookupResult, Outcome, Served};
+use aspero_core::{FieldSet, IdError, SourceRecord, WorkId};
+use aspero_engine::{Abstract, Engine, LookupResult, Outcome, Served};
 use serde_json::{Value, json};
 
-use super::{Failure, Out, print, print_line, read_stdin};
+use super::{Failure, Out, merge_usage, print, print_line, read_stdin};
 use crate::args::Format;
 use crate::exit::Exit;
 use crate::output;
@@ -18,8 +18,28 @@ pub async fn run(engine: &Engine, ids: Vec<String>, out: Out) -> Result<Exit, Fa
         .iter()
         .filter_map(|p| p.as_ref().ok().cloned())
         .collect();
-    let report = engine.lookup(&valid, FieldSet::DEFAULT).await;
-    let mut results = report.results.iter();
+    let mut report = engine.lookup(&valid, FieldSet::DEFAULT).await;
+
+    // Abstracts for the works found, one batched call; None per result
+    // when not asked for or not found.
+    let mut abstracts: Vec<Option<Option<Abstract>>> = vec![None; report.results.len()];
+    if out.abstracts {
+        let found: Vec<(usize, &SourceRecord)> = report
+            .results
+            .iter()
+            .enumerate()
+            .filter_map(|(i, r)| Some((i, r.record.as_ref()?)))
+            .collect();
+        let records: Vec<&SourceRecord> = found.iter().map(|(_, r)| *r).collect();
+        let fetched = engine.abstracts(&records).await;
+        for ((i, _), a) in found.iter().zip(fetched.found) {
+            abstracts[*i] = Some(a);
+        }
+        for (p, u) in fetched.usage {
+            merge_usage(&mut report.usage, &p, u);
+        }
+    }
+    let mut results = report.results.iter().zip(&abstracts);
 
     // Every input gets an item, in input order, including ones that didn't
     // parse: a request is never silently dropped.
@@ -32,8 +52,12 @@ pub async fn run(engine: &Engine, ids: Vec<String>, out: Out) -> Result<Exit, Fa
                 Exit::Usage,
             ),
             Ok(_) => {
-                let result = results.next().expect("one result per valid id");
-                item(input, result, out.full)
+                let (result, found) = results.next().expect("one result per valid id");
+                let (mut item, exit) = item(input, result, out.full);
+                if let Some(found) = found {
+                    output::set_abstract(&mut item["work"], found.as_ref());
+                }
+                (item, exit)
             }
         };
         exit = exit.worst(item_exit);
@@ -43,8 +67,16 @@ pub async fn run(engine: &Engine, ids: Vec<String>, out: Out) -> Result<Exit, Fa
     match out.format {
         Format::Jsonl => items.iter().for_each(print_line),
         Format::Table => {
+            let mut abstracts = abstracts.iter();
             for (item, result) in items.iter().zip(per_input(&parsed, &report.results)) {
-                println!("{}", text(item, result));
+                print!("{}", text(item, result));
+                let found = result
+                    .and_then(|_| abstracts.next())
+                    .and_then(Option::as_ref);
+                if let Some(found) = found {
+                    println!("{}", output::abstract_text(found.as_ref(), "  "));
+                }
+                println!();
             }
             if let Some(usage) = output::usage_text(&report.usage) {
                 eprintln!("{usage}");

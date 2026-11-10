@@ -7,8 +7,8 @@
 use std::collections::BTreeMap;
 
 use aspero_core::{
-    ArxivId, Doi, FieldSet, OpenAlexId, PartialDate, Person, Pmcid, Pmid, Raw, SourceRecord, Work,
-    WorkId, WorkType, tidy_abstract,
+    ArxivId, Doi, FieldSet, OpenAlexId, PartialDate, Person, Pmcid, Pmid, Raw, SourceRecord,
+    Update, UpdateKind, Work, WorkId, WorkType, tidy_abstract,
 };
 use jiff::Timestamp;
 use serde::Deserialize;
@@ -36,6 +36,8 @@ pub(crate) struct WireWork {
     biblio: WireBiblio,
     abstract_inverted_index: Option<BTreeMap<String, Vec<usize>>>,
     cited_by_count: Option<u64>,
+    /// From Retraction Watch; OpenAlex gives no notice details.
+    is_retracted: bool,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -205,6 +207,11 @@ impl WireWork {
             .as_ref()
             .and_then(|l| l.landing_page_url.clone());
         work.cited_by_count = self.cited_by_count;
+        if self.is_retracted {
+            let mut retraction = Update::new(UpdateKind::Retraction);
+            retraction.source = Some("openalex".into());
+            work.updates.push(retraction);
+        }
         work
     }
 }

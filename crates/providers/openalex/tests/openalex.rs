@@ -369,3 +369,30 @@ fn unsupported_id_kinds_are_refused() {
     assert!(matches!(err, Error::Unsupported(_)));
     assert!(http.requests().is_empty());
 }
+
+#[test]
+fn is_retracted_becomes_a_retraction_update() {
+    let (oa, _) = provider([recorded("work_retracted")]);
+    let resp =
+        block_on(oa.lookup(&[id("10.1016/S0140-6736(97)11096-0")], FieldSet::DEFAULT)).unwrap();
+    let w = &resp.value[0].record.as_ref().unwrap().work;
+    let r = w.retraction().expect("retracted");
+    assert_eq!(r.source.as_deref(), Some("openalex"));
+    assert_eq!(r.notice, None, "OpenAlex gives no notice details");
+    assert!(w.title.as_deref().unwrap().starts_with("RETRACTED"));
+}
+
+#[test]
+fn unretracted_works_have_no_updates() {
+    let (oa, _) = provider([recorded("work_by_doi")]);
+    let resp = block_on(oa.lookup(&[id("10.1038/nature14539")], FieldSet::DEFAULT)).unwrap();
+    assert!(
+        resp.value[0]
+            .record
+            .as_ref()
+            .unwrap()
+            .work
+            .updates
+            .is_empty()
+    );
+}

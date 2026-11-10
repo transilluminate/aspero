@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Records OpenAlex responses as test fixtures for aspero-openalex.
 #
-# Usage: OPENALEX_API_KEY=… scripts/record-openalex.sh
+# Usage: OPENALEX_API_KEY=… [ONLY=name] scripts/record-openalex.sh
 #
 # The key is sent as a Bearer header (never in the URL) and the script fails
 # if it appears in any recorded file. Lookups are free; each search costs
@@ -26,10 +26,12 @@ requests=(
   "works_search      /works?search=attention%20is%20all%20you%20need&per-page=5"
   "works_search_filtered /works?search=transformer&filter=from_publication_date:2017-01-01,to_publication_date:2018-12-31,is_oa:true,type:preprint&per-page=3&cursor=*"
   "bad_filter        /works?filter=no_such_field:1"
+  "work_retracted    /works/doi:10.1016/S0140-6736(97)11096-0"
 )
 
 for entry in "${requests[@]}"; do
   read -r name path <<<"$entry"
+  [[ -n "${ONLY:-}" && "$name" != "$ONLY" ]] && continue
   curl -sS --globoff -H "Authorization: Bearer $OPENALEX_API_KEY" \
     -H "User-Agent: aspero-fixture-recorder" \
     -D "$out/$name.headers" -o "$out/$name.body" "$base$path"

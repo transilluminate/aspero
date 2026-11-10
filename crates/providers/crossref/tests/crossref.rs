@@ -232,3 +232,23 @@ fn only_dois_are_supported() {
     assert!(matches!(err, Error::Unsupported(_)));
     assert!(http.requests().is_empty());
 }
+
+#[test]
+fn retraction_watch_notices_are_mapped() {
+    let (cr, _) = provider([recorded("work_retracted")]);
+    let resp =
+        block_on(cr.lookup(&[id("10.1016/S0140-6736(97)11096-0")], FieldSet::DEFAULT)).unwrap();
+    let w = &resp.value[0].record.as_ref().unwrap().work;
+    let r = w.retraction().expect("retracted");
+    assert_eq!(r.date.unwrap().to_string(), "2010-02-06");
+    assert_eq!(
+        r.notice.as_ref().unwrap().to_string(),
+        "doi:10.1016/s0140-6736(10)60175-4"
+    );
+    assert_eq!(r.source.as_deref(), Some("retraction-watch"));
+    assert!(
+        w.updates
+            .iter()
+            .any(|u| u.kind == aspero_core::UpdateKind::Correction)
+    );
+}

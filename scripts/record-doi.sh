@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Records doi.org content-negotiation responses as fixtures for aspero-doi.
 #
-# Usage: ASPERO_MAILTO=you@example.org scripts/record-doi.sh
+# Usage: ASPERO_MAILTO=you@example.org [ONLY=name] scripts/record-doi.sh
 #
 # doi.org redirects to the DOI's registration agency (Crossref, DataCite,
 # mEDRA, ...); like the provider's HTTP client, curl follows the redirects,
@@ -18,10 +18,12 @@ requests=(
   "csl_crossref   10.1038/nature14539"
   "csl_datacite   10.48550/arXiv.1706.03762"
   "csl_not_found  10.5555/aspero-does-not-exist"
+  "csl_retracted  10.1016/S0140-6736(97)11096-0"
 )
 
 for entry in "${requests[@]}"; do
   read -r name doi <<<"$entry"
+  [[ -n "${ONLY:-}" && "$name" != "$ONLY" ]] && continue
   curl -sS -L -H "Accept: application/vnd.citationstyles.csl+json" \
     -H "User-Agent: aspero-fixture-recorder (mailto:$ASPERO_MAILTO)" \
     -D "$out/$name.all-headers" -o "$out/$name.body" "https://doi.org/$doi"

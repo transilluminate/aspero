@@ -25,8 +25,10 @@ use aspero_core::{Page, ProviderId, SearchQuery, SourceRecord, WorkId};
 use jiff::Timestamp;
 use rusqlite::{Connection, OptionalExtension, params};
 
-/// Bump on any schema change; older caches are dropped and rebuilt.
-const SCHEMA_VERSION: i64 = 1;
+/// Bump on any schema change, *and* when cached records' shape or mapping
+/// changes (records are stored as mapped); older caches are dropped and
+/// rebuilt. 2: records gained `updates` (retractions).
+const SCHEMA_VERSION: i64 = 2;
 
 const SCHEMA: &str = "
 CREATE TABLE record (

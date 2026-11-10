@@ -3,6 +3,7 @@
 //! Wire types are lenient: every field defaults and unknown fields are
 //! ignored (the full item is kept in `Raw`).
 
+use aspero_core::csl::CrossrefUpdate;
 use aspero_core::{
     Doi, FieldSet, PartialDate, Person, Raw, SourceRecord, Work, WorkId, WorkType, tidy_abstract,
 };
@@ -47,6 +48,8 @@ struct WireWork {
     #[serde(rename = "abstract")]
     abstract_jats: Option<String>,
     is_referenced_by_count: Option<u64>,
+    /// Retraction Watch and publisher notices about this work.
+    updated_by: Vec<CrossrefUpdate>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -129,6 +132,11 @@ impl WireWork {
             .map(|jats| tidy_abstract(&strip_jats(jats)));
         work.url = self.url;
         work.cited_by_count = self.is_referenced_by_count;
+        work.updates = self
+            .updated_by
+            .iter()
+            .filter_map(CrossrefUpdate::to_update)
+            .collect();
         work
     }
 }

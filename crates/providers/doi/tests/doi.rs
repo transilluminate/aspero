@@ -123,3 +123,19 @@ fn other_identifier_kinds_are_refused() {
     ));
     assert!(http.requests().is_empty());
 }
+
+#[test]
+fn crossref_notices_arrive_through_csl() {
+    let (doi, _) = provider([fixture(FIXTURES, "csl_retracted")]);
+    let resp =
+        block_on(doi.lookup(&[id("10.1016/S0140-6736(97)11096-0")], FieldSet::DEFAULT)).unwrap();
+    let r = resp.value[0]
+        .record
+        .as_ref()
+        .unwrap()
+        .work
+        .retraction()
+        .cloned()
+        .expect("retracted");
+    assert_eq!(r.date.unwrap().year(), 2010);
+}

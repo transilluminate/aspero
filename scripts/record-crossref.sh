@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Records Crossref REST API responses as test fixtures for aspero-crossref.
 #
-# Usage: ASPERO_MAILTO=you@example.org scripts/record-crossref.sh
+# Usage: ASPERO_MAILTO=you@example.org [ONLY=name] scripts/record-crossref.sh
 #
 # The mailto puts requests in Crossref's polite pool. The script fails if the
 # address appears in any recorded file, so fixtures stay safe to publish.
@@ -23,10 +23,12 @@ requests=(
   "works_bibliographic_ref /works?query.bibliographic=LeCun%20Y%2C%20Bengio%20Y%2C%20Hinton%20G.%20Deep%20learning.%20Nature.%202015%3B521%3A436-444.&sort=score&order=desc&rows=3&cursor=*"
   "works_search_filtered   /works?query=transformer&filter=from-pub-date:2017,until-pub-date:2018,type:journal-article&sort=score&order=desc&rows=3&cursor=*"
   "bad_filter              /works?filter=no-such-filter:1"
+  "work_retracted          /works/10.1016/S0140-6736(97)11096-0"
 )
 
 for entry in "${requests[@]}"; do
   read -r name path <<<"$entry"
+  [[ -n "${ONLY:-}" && "$name" != "$ONLY" ]] && continue
   sep='?'; [[ "$path" == *\?* ]] && sep='&'
   curl -sS --globoff -H "User-Agent: aspero-fixture-recorder (mailto:$ASPERO_MAILTO)" \
     -D "$out/$name.headers" -o "$out/$name.body" "$base$path${sep}mailto=$ASPERO_MAILTO"

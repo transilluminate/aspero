@@ -35,6 +35,13 @@ const TITLE_MISMATCH_PENALTY: f64 = 0.5;
 const AUTHORS_MISMATCH_PENALTY: f64 = 0.5;
 /// Confidence ceiling when fewer than two fields could be compared.
 const SINGLE_FIELD_CAP: f64 = 0.7;
+/// Confidence ceiling without corroborating authors or identifiers.
+const UNCORROBORATED_CAP: f64 = 0.8;
+/// Author score that corroborates a match: the first author present
+/// (0.75 for structured claims, 0.9 in free text).
+const CORROBORATING_AUTHORS: f64 = 0.75;
+/// Multiplier for replies, corrections, errata and commentaries.
+const DERIVATIVE_PENALTY: f64 = 0.5;
 
 /// Verdict thresholds on confidence.
 pub const VERIFIED: f64 = 0.85;
@@ -215,11 +222,28 @@ pub fn assess(claim: &Claim, record: &SourceRecord) -> Assessment {
     let ids = id_agreement(&claim.ids, &record.ids);
     // A claim of identifiers alone is fully confirmed by a matching ID.
     let id_only = [title, authors, year].iter().all(|c| c.score.is_none());
-    let confidence = if id_only && ids == Agreement::Match {
+    let mut confidence = if id_only && ids == Agreement::Match {
         1.0
     } else {
         combine(title, authors, year)
     };
+    // Title and year alone can't verify: a short or generic title ("Health
+    // technology assessment") turns up inside many references, and letters
+    // and corrections often carry the original's title without authors.
+    // Corroboration means the first author matches, or a claimed ID does.
+    let corroborated =
+        authors.score.is_some_and(|s| s >= CORROBORATING_AUTHORS) || ids == Agreement::Match;
+    if !id_only && !corroborated {
+        confidence = confidence.min(UNCORROBORATED_CAP);
+    }
+    // A reply, correction or commentary is not the work it responds to,
+    // unless the citation says it is citing one.
+    if let Some(actual) = &work.title
+        && is_derivative(actual)
+        && !claim_mentions_derivative(claim)
+    {
+        confidence *= DERIVATIVE_PENALTY;
+    }
 
     Assessment {
         confidence,
@@ -256,6 +280,40 @@ fn combine(title: FieldCheck, authors: FieldCheck, year: FieldCheck) -> f64 {
         confidence = confidence.min(SINGLE_FIELD_CAP);
     }
     confidence
+}
+
+/// Words marking a record as *about* another work rather than the work
+/// itself: replies, corrections, errata, commentaries.
+const DERIVATIVE_MARKERS: &[&str] = &[
+    "reply",
+    "erratum",
+    "errata",
+    "corrigendum",
+    "correction",
+    "comment on",
+    "response to",
+    "in response",
+    "faculty opinions recommendation",
+    "retraction of",
+    "expression of concern",
+];
+
+/// Whether a title marks a derivative record: "…—Reply", "Correction to:
+/// …", "Comment on “…”", "Faculty Opinions recommendation of …".
+pub fn is_derivative(title: &str) -> bool {
+    let words = format!(" {} ", normalise(title));
+    DERIVATIVE_MARKERS
+        .iter()
+        .any(|m| words.contains(&format!(" {m} ")))
+}
+
+/// Whether the claim itself cites a derivative (its text or title uses a
+/// marker), in which case derivatives are fair matches.
+fn claim_mentions_derivative(claim: &Claim) -> bool {
+    [claim.text.as_deref(), claim.title.as_deref()]
+        .into_iter()
+        .flatten()
+        .any(is_derivative)
 }
 
 /// Whether claimed identifiers are among a work's identifiers (see
@@ -329,12 +387,44 @@ pub fn unmarked(title: &str) -> &str {
 /// Dice coefficient over the two titles' word sets: 1.0 for the same
 /// words, lower as either title gains words the other lacks.
 pub fn title_similarity(a: &str, b: &str) -> f64 {
-    let (a, b) = (dedup(words(unmarked(a))), dedup(words(unmarked(b))));
+    // Citations often drop a subtitle: compare main titles too.
+    let (a, b) = (unmarked(a), unmarked(b));
+    [(a, b), (main_title(a), b), (a, main_title(b))]
+        .into_iter()
+        .map(|(x, y)| dice(&content_words(x), &content_words(y)))
+        .fold(0.0, f64::max)
+}
+
+fn dice(a: &[String], b: &[String]) -> f64 {
     if a.is_empty() || b.is_empty() {
         return 0.0;
     }
     let shared = a.iter().filter(|w| b.contains(w)).count();
     2.0 * shared as f64 / (a.len() + b.len()) as f64
+}
+
+/// Words too common to count as evidence that two titles agree.
+const STOPWORDS: &[&str] = &[
+    "a", "an", "the", "of", "in", "on", "for", "and", "or", "to", "with", "by", "at", "from", "is",
+    "are", "as", "via", "into", "its",
+];
+
+/// A title's distinct words, without stopwords (unless that leaves none).
+fn content_words(title: &str) -> Vec<String> {
+    let all = dedup(words(title));
+    let content: Vec<String> = all
+        .iter()
+        .filter(|w| !STOPWORDS.contains(&w.as_str()))
+        .cloned()
+        .collect();
+    if content.is_empty() { all } else { content }
+}
+
+/// The title before a subtitle separator (":" or a dash), if there is one.
+fn main_title(title: &str) -> &str {
+    title
+        .find([':', '\u{2014}', '\u{2013}'])
+        .map_or(title, |i| title[..i].trim())
 }
 
 fn dedup(mut v: Vec<String>) -> Vec<String> {
@@ -396,21 +486,33 @@ impl Normalised {
 
     /// 1.0 if the title appears as a phrase; otherwise the share of its
     /// words present.
+    /// 1.0 if the title (or its main title, without subtitle) appears as a
+    /// phrase; otherwise the share of its content words present. Under two
+    /// thirds present is scored as a mismatch: a couple of topic words
+    /// ("septic shock") shared with a reference are not a title match.
     fn title_coverage(&self, title: &str) -> f64 {
         let title = unmarked(title);
-        let norm = normalise(title);
-        if norm.is_empty() {
-            return 0.0;
-        }
-        if self.padded.contains(&format!(" {norm} ")) {
+        let phrase = |t: &str| {
+            let norm = normalise(t);
+            !norm.is_empty() && self.padded.contains(&format!(" {norm} "))
+        };
+        if phrase(title) || (main_title(title) != title && phrase(main_title(title))) {
             return 1.0;
         }
-        let title_words = dedup(words(title));
+        let title_words = content_words(title);
+        if title_words.is_empty() {
+            return 0.0;
+        }
         let present = title_words
             .iter()
             .filter(|w| self.words.contains(w))
             .count();
-        present as f64 / title_words.len() as f64
+        let share = present as f64 / title_words.len() as f64;
+        if share < 2.0 / 3.0 {
+            share / 2.0
+        } else {
+            share
+        }
     }
 
     /// Citation styles routinely list only the first author or two ("Vaswani
@@ -785,6 +887,134 @@ mod tests {
             ),
             1.0
         );
+    }
+
+    #[test]
+    fn title_and_year_alone_cannot_verify() {
+        // Dogfood: a generic title contained in the reference, no authors.
+        let claim = Claim::from_text(
+            "3CPO (NEJM 2008; Health Technol Assess 2009). New England Journal of Medicine; Health Technology Assessment 2009 2008",
+        );
+        let a = assess(
+            &claim,
+            &record(&[], "Health technology assessment", &[], 2009),
+        );
+        assert_eq!(a.title.agreement, Agreement::Match);
+        assert!(a.confidence < VERIFIED, "{a:?}");
+
+        // An unauthored letter with the same title loses to the article.
+        let claim = Claim {
+            text: Some(
+                "Fibrinolysis for patients with intermediate-risk pulmonary embolism".into(),
+            ),
+            authors: vec!["Meyer".into()],
+            year: Some(2014),
+            ..Claim::default()
+        };
+        let letter = assess(
+            &claim,
+            &record(
+                &[],
+                "Fibrinolysis for Intermediate-Risk Pulmonary Embolism",
+                &[],
+                2014,
+            ),
+        );
+        let article = assess(
+            &claim,
+            &record(
+                &[],
+                "Fibrinolysis for Patients with Intermediate-Risk Pulmonary Embolism",
+                &["Guy Meyer"],
+                2014,
+            ),
+        );
+        assert!(letter.confidence < VERIFIED && article.confidence >= VERIFIED);
+    }
+
+    #[test]
+    fn replies_and_corrections_are_not_the_original() {
+        assert!(is_derivative(
+            "Age-Adjusted D-Dimer Cutoff Levels and Pulmonary Embolism—Reply"
+        ));
+        assert!(is_derivative("Correction to: Attention is all you need"));
+        assert!(is_derivative(
+            "Comment on “Fibrinolysis for patients with intermediate-risk PE”"
+        ));
+        assert!(!is_derivative(
+            "Age-Adjusted D-Dimer Cutoff Levels to Rule Out Pulmonary Embolism"
+        ));
+
+        let claim = Claim {
+            title: Some("Age-adjusted D-dimer cutoff levels to rule out pulmonary embolism".into()),
+            authors: vec!["Righini".into()],
+            year: Some(2014),
+            ..Claim::default()
+        };
+        let reply = assess(
+            &claim,
+            &record(
+                &[],
+                "Age-Adjusted D-Dimer Cutoff Levels and Pulmonary Embolism—Reply",
+                &["Marc Righini"],
+                2014,
+            ),
+        );
+        assert!(reply.confidence < PLAUSIBLE, "{reply:?}");
+        // Citing the reply itself is fine.
+        let citing_reply = Claim {
+            title: Some("Age-adjusted D-dimer cutoff levels and pulmonary embolism—reply".into()),
+            ..claim
+        };
+        let a = assess(
+            &citing_reply,
+            &record(
+                &[],
+                "Age-Adjusted D-Dimer Cutoff Levels and Pulmonary Embolism—Reply",
+                &["Marc Righini"],
+                2014,
+            ),
+        );
+        assert!(a.confidence >= VERIFIED, "{a:?}");
+    }
+
+    #[test]
+    fn a_few_shared_topic_words_are_not_a_title_match() {
+        // Dogfood control: a fabricated citation sharing "septic shock".
+        let claim = Claim::from_text("Smith 2019 Ketamine reduces mortality in septic shock");
+        let a = assess(
+            &claim,
+            &record(
+                &[],
+                "Leukotrienes in Endotoxic and Septic Shock",
+                &["J Smith"],
+                2019,
+            ),
+        );
+        assert_eq!(a.title.agreement, Agreement::Mismatch);
+        assert!(a.confidence < PLAUSIBLE, "{a:?}");
+    }
+
+    #[test]
+    fn dropped_subtitles_still_match() {
+        let structured = title_similarity(
+            "Age-adjusted D-dimer cutoff levels to rule out pulmonary embolism",
+            "Age-Adjusted D-Dimer Cutoff Levels to Rule Out Pulmonary Embolism: The ADJUST-PE Study",
+        );
+        assert_eq!(structured, 1.0);
+        let claim = Claim::from_text(
+            "Righini M et al. Age-adjusted D-dimer cutoff levels to rule out pulmonary embolism. JAMA 2014",
+        );
+        let a = assess(
+            &claim,
+            &record(
+                &[],
+                "Age-Adjusted D-Dimer Cutoff Levels to Rule Out Pulmonary Embolism: The ADJUST-PE Study",
+                &["Marc Righini"],
+                2014,
+            ),
+        );
+        assert_eq!(a.title.agreement, Agreement::Match);
     }
 
     #[test]

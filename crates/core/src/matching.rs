@@ -226,7 +226,9 @@ fn combine(title: FieldCheck, authors: FieldCheck, year: FieldCheck) -> f64 {
     confidence
 }
 
-fn id_agreement(claimed: &[WorkId], actual: &[WorkId]) -> Agreement {
+/// Whether claimed identifiers are among a work's identifiers (see
+/// [`Assessment::ids`]).
+pub fn id_agreement(claimed: &[WorkId], actual: &[WorkId]) -> Agreement {
     if claimed.is_empty() {
         return Agreement::Unknown;
     }
@@ -378,6 +380,19 @@ impl Normalised {
             .filter(|y| (1600..=2100).contains(y))
             .collect()
     }
+}
+
+/// Keywords for a plain search engine from a messy reference: years,
+/// numbers, initials and "et al." dropped, since they dilute keyword
+/// ranking (observed with OpenAlex).
+pub fn search_terms(text: &str) -> String {
+    words(text)
+        .into_iter()
+        .filter(|w| w.chars().count() > 1)
+        .filter(|w| !w.chars().all(|c| c.is_ascii_digit()))
+        .filter(|w| !matches!(w.as_str(), "et" | "al" | "doi" | "vol" | "pp" | "no"))
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 /// DOIs and arXiv IDs mentioned in free text: `doi:…`, `https://doi.org/…`,
@@ -542,6 +557,14 @@ mod tests {
         );
         assert_eq!(right.ids, Agreement::Match);
         assert_eq!(wrong.ids, Agreement::Mismatch);
+    }
+
+    #[test]
+    fn search_terms_drop_noise() {
+        assert_eq!(
+            search_terms("LeCun Y, Bengio Y, et al. Deep learning. Nature. 2015;521:436-444."),
+            "lecun bengio deep learning nature"
+        );
     }
 
     #[test]

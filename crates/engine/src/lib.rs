@@ -13,13 +13,18 @@
 //!   provider doesn't declare are stripped and reported as ignored, never
 //!   silently dropped.
 //!
-//! Not yet: caching (store), merging records across providers, fan-out
-//! search, the circuit breaker and the cross-process limiter.
+//! - **Resolve / verify** turn a citation claim into scored candidates and a
+//!   verdict (see [`resolve`](crate::Engine::resolve)).
+//!
+//! Not yet: caching (store), fan-out search, the circuit breaker and the
+//! cross-process limiter.
 
+mod resolve;
 pub mod retry;
 mod standard;
 pub mod transport;
 
+pub use resolve::{Candidate, ResolveReport, Sighting, Verdict, Verification, Via};
 /// Re-exported for credentials in provider configs.
 pub use secrecy::SecretString;
 #[cfg(feature = "crossref")]

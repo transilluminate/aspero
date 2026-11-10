@@ -62,6 +62,33 @@ impl Doi {
     }
 }
 
+/// What publishers append to a DOI in their page URLs. Checked longest
+/// first; only ever stripped from publisher URLs, never from a DOI as given.
+const LANDING_SUFFIXES: &[&str] = &[
+    "/full.pdf",
+    ".full.pdf",
+    "/fulltext",
+    "/abstract",
+    "/pdfdirect",
+    ".abstract",
+    "/epdf",
+    "/full",
+    "/html",
+    "/meta",
+    "/pdf",
+    ".full",
+    ".pdf",
+];
+
+/// `doi` without a trailing landing-page suffix (`/full`, `.pdf`, …).
+fn without_landing_suffix(doi: &str) -> &str {
+    let lower = doi.to_ascii_lowercase();
+    LANDING_SUFFIXES
+        .iter()
+        .find(|s| lower.ends_with(*s))
+        .map_or(doi, |s| &doi[..doi.len() - s.len()])
+}
+
 pub(crate) fn has_info_prefix(s: &str) -> bool {
     strip_prefix_ci(s, INFO_PREFIX).is_some()
 }
@@ -96,12 +123,27 @@ impl IdSyntax for Doi {
         Ok(Doi(doi))
     }
 
+    /// doi.org URLs, whose path is the DOI, and publishers' pages with the
+    /// DOI in the path (`frontiersin.org/articles/10.3389/…/full`), whose
+    /// landing-page suffix is dropped.
     fn from_url<'a>(url: &Url<'a>) -> Option<Result<Cow<'a, str>, &'static str>> {
-        url.is_host(&["doi.org", "dx.doi.org"]).then(|| {
-            percent_encoding::percent_decode_str(url.path)
+        let decode = |path: &'a str| {
+            percent_encoding::percent_decode_str(path)
                 .decode_utf8()
                 .map_err(|_| "not valid UTF-8 after percent-decoding")
-        })
+        };
+        if url.is_host(&["doi.org", "dx.doi.org"]) {
+            return Some(decode(url.path));
+        }
+        // A path segment starting "10.<digits>/" begins the DOI.
+        let at = url.path.match_indices("10.").map(|(i, _)| i).find(|&i| {
+            let registrant = url.path[i + 3..].split('/').next().unwrap_or("");
+            (i == 0 || url.path[..i].ends_with('/'))
+                && registrant.starts_with(|c: char| c.is_ascii_digit())
+                && registrant.bytes().all(|b| b.is_ascii_digit() || b == b'.')
+                && url.path[i + 3 + registrant.len()..].len() > 1
+        })?;
+        Some(decode(&url.path[at..]).map(|doi| Cow::Owned(without_landing_suffix(&doi).to_owned())))
     }
 
     fn strip_prefix(s: &str) -> &str {
@@ -204,6 +246,42 @@ mod tests {
     }
 
     #[test]
+    fn publisher_urls_give_their_doi_without_page_suffixes() {
+        for (url, want) in [
+            (
+                "https://www.frontiersin.org/articles/10.3389/fneur.2019.01343/full",
+                "10.3389/fneur.2019.01343",
+            ),
+            (
+                "https://storage.imrpress.com/IMR/hmed/application/10.12968/hmed.2007.68.sup2.22842.pdf",
+                "10.12968/hmed.2007.68.sup2.22842",
+            ),
+            (
+                "https://onlinelibrary.wiley.com/doi/epdf/10.1002/14651858.CD000567.pub7",
+                "10.1002/14651858.cd000567.pub7",
+            ),
+            (
+                "https://www.nejm.org/doi/full/10.1056/NEJMoa1302097?articleTools=true",
+                "10.1056/nejmoa1302097",
+            ),
+            (
+                "https://www.thelancet.com/journals/lancet/article/PIIS0140-6736(10)60835-5/fulltext",
+                "",
+            ),
+        ] {
+            match doi(url) {
+                Ok(d) => assert_eq!(d.as_str(), want, "{url}"),
+                Err(_) => assert_eq!(want, "", "{url}"),
+            }
+        }
+        // At doi.org the path is the DOI, suffix-like endings included.
+        assert_eq!(
+            doi("https://doi.org/10.1234/report.pdf").unwrap().as_str(),
+            "10.1234/report.pdf"
+        );
+    }
+
+    #[test]
     fn keeps_trailing_punctuation_on_request() {
         let kept = Doi::with_trailing_punctuation("doi:10.1145/3368089.").unwrap();
         assert_eq!(kept.as_str(), "10.1145/3368089.");
@@ -232,7 +310,7 @@ mod tests {
             "10.abcd/x",
             "10.1145/",
             "10.1145/a b",
-            "https://example.org/10.1145/x",
+            "https://example.org/papers/x",
         ] {
             assert!(
                 matches!(

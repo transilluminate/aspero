@@ -2,6 +2,7 @@
 resolver = "3"
 members = [
     "crates/core",
+    "crates/bib",
     "crates/store",
     "crates/engine",
     "crates/cli",
@@ -16,6 +17,7 @@ publish = false
 
 [workspace.dependencies]
 aspero-core = { path = "crates/core" }
+aspero-bib = { path = "crates/bib" }
 aspero-store = { path = "crates/store" }
 aspero-engine = { path = "crates/engine" }
 aspero-openalex = { path = "crates/providers/openalex" }
@@ -24,6 +26,7 @@ aspero-datacite = { path = "crates/providers/datacite" }
 aspero-doi = { path = "crates/providers/doi" }
 
 async-trait = "0.1.92"
+biblatex = "0.12.0"
 clap = { version = "4.6.7", features = ["derive", "env"] }
 directories = "6.0.0"
 fastrand = "2.5.0"

@@ -169,7 +169,9 @@ struct AuthorId {
 
 #[derive(Debug, Default, Deserialize)]
 #[serde(default)]
+#[serde(rename_all = "camelCase")]
 struct JournalInfo {
+    year_of_publication: Option<i16>,
     volume: Option<String>,
     issue: Option<String>,
     journal: Journal,
@@ -256,6 +258,18 @@ fn to_record(value: &serde_json::Value, at: Timestamp) -> serde_json::Result<Sou
     } else {
         None
     };
+    // First publication (often online) vs the journal issue's year.
+    let issued_year = work.issued.map(|d| d.year());
+    let mut other: Vec<i16> = r
+        .journal_info
+        .year_of_publication
+        .into_iter()
+        .chain(r.pub_year.as_deref().and_then(|y| y.parse().ok()))
+        .filter(|y| Some(*y) != issued_year)
+        .collect();
+    other.sort_unstable();
+    other.dedup();
+    work.other_years = other;
     work.container_title = r.journal_info.journal.title;
     work.volume = r.journal_info.volume;
     work.issue = r.journal_info.issue;

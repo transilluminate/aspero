@@ -44,6 +44,8 @@ struct WireWork {
     page: Option<String>,
     issued: WireDate,
     published: WireDate,
+    published_print: WireDate,
+    published_online: WireDate,
     author: Vec<WireAuthor>,
     #[serde(rename = "abstract")]
     abstract_jats: Option<String>,
@@ -132,6 +134,17 @@ impl WireWork {
             .map(|jats| tidy_abstract(&strip_jats(jats)));
         work.url = self.url;
         work.cited_by_count = self.is_referenced_by_count;
+        // Online-first and print years often differ by one; citations use
+        // either.
+        let issued_year = work.issued.map(|d| d.year());
+        let mut other: Vec<i16> = [&self.published_print, &self.published_online]
+            .into_iter()
+            .filter_map(|d| d.to_partial().map(|p| p.year()))
+            .filter(|y| Some(*y) != issued_year)
+            .collect();
+        other.sort_unstable();
+        other.dedup();
+        work.other_years = other;
         work.updates = self
             .updated_by
             .iter()

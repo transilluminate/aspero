@@ -189,21 +189,6 @@ impl Key {
     }
 }
 
-/// Sums cost; keeps the most recent remaining budget and reset time.
-fn add_usage(total: &mut Option<Usage>, next: Option<Usage>) {
-    let Some(next) = next else { return };
-    let Some(acc) = total else {
-        *total = Some(next);
-        return;
-    };
-    acc.cost = match (acc.cost, next.cost) {
-        (Some(a), Some(b)) => Some(a + b),
-        (a, b) => a.or(b),
-    };
-    acc.remaining = next.remaining.or(acc.remaining);
-    acc.resets_at = next.resets_at.or(acc.resets_at);
-}
-
 fn type_filter(t: &WorkType) -> Result<String> {
     let openalex = match t {
         WorkType::JournalArticle => "article",
@@ -280,13 +265,15 @@ impl Provider for OpenAlex {
                 ];
                 let (hits, _, u) = self.list(&params).await?;
                 found.extend(hits.into_iter().map(|h| h.record));
-                add_usage(&mut usage, Some(u));
+                usage = Some(usage.map_or(u, |acc: Usage| acc.then(u)));
             }
         }
         for key in singles {
             let (record, u) = self.lookup_one(key).await?;
             found.extend(record);
-            add_usage(&mut usage, u);
+            if let Some(u) = u {
+                usage = Some(usage.map_or(u, |acc: Usage| acc.then(u)));
+            }
         }
 
         let lookups = ids

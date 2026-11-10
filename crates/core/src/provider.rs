@@ -270,6 +270,21 @@ pub struct Usage {
     pub resets_at: Option<Timestamp>,
 }
 
+impl Usage {
+    /// Usage of this call followed by `later`: costs add up; the remaining
+    /// budget and reset time are the most recent known.
+    pub fn then(self, later: Usage) -> Usage {
+        Usage {
+            cost: match (self.cost, later.cost) {
+                (Some(a), Some(b)) => Some(a + b),
+                (a, b) => a.or(b),
+            },
+            remaining: later.remaining.or(self.remaining),
+            resets_at: later.resets_at.or(self.resets_at),
+        }
+    }
+}
+
 /// A provider result plus the usage it cost.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Response<T> {
@@ -363,6 +378,23 @@ mod tests {
         fn capabilities(&self) -> &Capabilities {
             &self.0
         }
+    }
+
+    #[test]
+    fn usage_adds_costs_and_keeps_latest_budget() {
+        let first = Usage {
+            cost: Some(0.001),
+            remaining: Some(0.9),
+            resets_at: None,
+        };
+        let second = Usage {
+            cost: Some(0.0001),
+            remaining: None,
+            resets_at: None,
+        };
+        let total = first.then(second);
+        assert!((total.cost.unwrap() - 0.0011).abs() < 1e-12);
+        assert_eq!(total.remaining, Some(0.9));
     }
 
     #[test]

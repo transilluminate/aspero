@@ -16,8 +16,12 @@
 //! - **Resolve / verify** turn a citation claim into scored candidates and a
 //!   verdict (see [`resolve`](crate::Engine::resolve)).
 //!
-//! Not yet: caching (store), fan-out search, the circuit breaker and the
-//! cross-process limiter.
+//! - **Caching**: provider answers (records, "not found", search pages) are
+//!   cached with per-kind TTLs ([`CachePolicy`]) and served stale if a
+//!   provider fails; every answer says how it was [`Served`].
+//!
+//! Not yet: fan-out search, the circuit breaker and the cross-process
+//! limiter.
 
 mod resolve;
 pub mod retry;
@@ -34,18 +38,70 @@ pub use standard::OpenAlexConfig;
 pub use standard::{StandardConfig, standard};
 
 use std::sync::Arc;
+use std::time::Duration;
 
 use aspero_core::{
     Error, ErrorCategory, FieldSet, Filter, Page, Provider, ProviderId, ResiliencePolicy,
     SearchMode, SearchQuery, SourceRecord, Usage, WorkId,
 };
+pub use aspero_store::{Cache, SqliteCache, Stats as CacheStats, StoreError};
+use jiff::Timestamp;
 
 use crate::retry::{Jitter, random_jitter, with_retries};
+
+/// A clock, injectable so cache expiry is testable.
+pub type Clock = fn() -> Timestamp;
+
+/// How long cached answers are trusted (DESIGN §5). Past these, a provider
+/// is asked again; if it then fails, the old answer is served as stale.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct CachePolicy {
+    pub records: Duration,
+    /// "Not found" answers: short, since works get registered.
+    pub misses: Duration,
+    pub searches: Duration,
+}
+
+impl Default for CachePolicy {
+    fn default() -> Self {
+        const DAY: u64 = 86_400;
+        CachePolicy {
+            records: Duration::from_secs(7 * DAY),
+            misses: Duration::from_secs(DAY),
+            searches: Duration::from_secs(DAY),
+        }
+    }
+}
+
+/// Where an answer came from.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum Served {
+    Live,
+    /// A cached answer within its TTL.
+    Cache,
+    /// An expired cached answer, served because the provider failed.
+    Stale,
+}
+
+impl Served {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Served::Live => "live",
+            Served::Cache => "cache",
+            Served::Stale => "stale",
+        }
+    }
+}
 
 pub struct Engine {
     /// In priority order.
     entries: Vec<Entry>,
     jitter: Jitter,
+    cache: Option<Arc<dyn Cache>>,
+    cache_policy: CachePolicy,
+    clock: Clock,
 }
 
 struct Entry {
@@ -56,6 +112,9 @@ struct Entry {
 pub struct EngineBuilder {
     entries: Vec<(i32, Entry)>,
     jitter: Jitter,
+    cache: Option<Arc<dyn Cache>>,
+    cache_policy: CachePolicy,
+    clock: Clock,
 }
 
 impl EngineBuilder {
@@ -77,11 +136,31 @@ impl EngineBuilder {
         self
     }
 
+    /// Caches provider answers (and serves them stale if a provider fails).
+    pub fn cache(mut self, cache: Arc<dyn Cache>) -> Self {
+        self.cache = Some(cache);
+        self
+    }
+
+    pub fn cache_policy(mut self, policy: CachePolicy) -> Self {
+        self.cache_policy = policy;
+        self
+    }
+
+    /// Replaces the clock (for deterministic cache-expiry tests).
+    pub fn clock(mut self, clock: Clock) -> Self {
+        self.clock = clock;
+        self
+    }
+
     pub fn build(mut self) -> Engine {
         self.entries.sort_by_key(|(priority, _)| *priority);
         Engine {
             entries: self.entries.into_iter().map(|(_, e)| e).collect(),
             jitter: self.jitter,
+            cache: self.cache,
+            cache_policy: self.cache_policy,
+            clock: self.clock,
         }
     }
 }
@@ -99,6 +178,7 @@ pub enum Outcome {
 pub struct Attempt {
     pub provider: ProviderId,
     pub outcome: Outcome,
+    pub served: Served,
 }
 
 #[derive(Debug, Clone)]
@@ -138,6 +218,7 @@ pub struct SearchReport {
     /// Query filters the provider can't apply; they were not sent.
     pub ignored_filters: Vec<Filter>,
     pub usage: Option<Usage>,
+    pub served: Served,
 }
 
 #[derive(Debug, Clone, thiserror::Error)]
@@ -170,6 +251,9 @@ impl Engine {
         EngineBuilder {
             entries: Vec::new(),
             jitter: random_jitter,
+            cache: None,
+            cache_policy: CachePolicy::default(),
+            clock: Timestamp::now,
         }
     }
 
@@ -194,10 +278,38 @@ impl Engine {
         for entry in &self.entries {
             let provider = entry.provider.id();
             let caps = entry.provider.capabilities();
-            let pending: Vec<usize> = (0..results.len())
+            let attempt = |outcome, served| Attempt {
+                provider: provider.clone(),
+                outcome,
+                served,
+            };
+
+            let eligible: Vec<usize> = (0..results.len())
                 .filter(|&i| results[i].record.is_none())
                 .filter(|&i| caps.lookup_kinds.contains(&results[i].id.kind()))
                 .collect();
+
+            // Fresh cached answers first (one cache read for the whole set);
+            // only the rest go to the provider.
+            let ids: Vec<WorkId> = eligible.iter().map(|&i| results[i].id.clone()).collect();
+            let mut pending = Vec::new();
+            for (&i, cached) in eligible
+                .iter()
+                .zip(self.cached_lookups(&provider, &ids, fields))
+            {
+                match cached {
+                    Some(Some(record)) => {
+                        results[i].record = Some(record);
+                        results[i]
+                            .attempts
+                            .push(attempt(Outcome::Found, Served::Cache));
+                    }
+                    Some(None) => results[i]
+                        .attempts
+                        .push(attempt(Outcome::NotFound, Served::Cache)),
+                    None => pending.push(i),
+                }
+            }
 
             let mut chunks = pending.chunks(caps.max_batch.max(1));
             while let Some(chunk) = chunks.next() {
@@ -207,30 +319,41 @@ impl Engine {
                 })
                 .await;
 
-                let attempt = |outcome| Attempt {
-                    provider: provider.clone(),
-                    outcome,
-                };
                 match answer {
                     Ok(resp) => {
                         if let Some(u) = resp.usage {
                             add_usage(&mut usage, &provider, u);
                         }
-                        let mut lookups = resp.value.into_iter();
-                        for &i in chunk {
-                            // The contract is one answer per ID, in order;
-                            // anything else is a provider bug, not a miss.
-                            let outcome = match lookups.next() {
-                                Some(l) if l.id == results[i].id => match l.record {
-                                    Some(record) => {
-                                        results[i].record = Some(record);
-                                        Outcome::Found
-                                    }
-                                    None => Outcome::NotFound,
-                                },
-                                _ => Outcome::Failed(Error::decode(ContractViolation)),
+                        // The contract is one answer per ID, in order;
+                        // anything else is a provider bug, not a miss.
+                        let in_order = resp.value.len() == chunk.len()
+                            && resp
+                                .value
+                                .iter()
+                                .zip(chunk)
+                                .all(|(l, &i)| l.id == results[i].id);
+                        if !in_order {
+                            for &i in chunk {
+                                let failed = Outcome::Failed(Error::decode(ContractViolation));
+                                results[i].attempts.push(attempt(failed, Served::Live));
+                            }
+                            continue;
+                        }
+                        let answers: Vec<_> = resp
+                            .value
+                            .iter()
+                            .map(|l| (&l.id, l.record.as_ref()))
+                            .collect();
+                        self.remember_lookups(&provider, &answers);
+                        for (&i, lookup) in chunk.iter().zip(resp.value) {
+                            let outcome = match lookup.record {
+                                Some(record) => {
+                                    results[i].record = Some(record);
+                                    Outcome::Found
+                                }
+                                None => Outcome::NotFound,
                             };
-                            results[i].attempts.push(attempt(outcome));
+                            results[i].attempts.push(attempt(outcome, Served::Live));
                         }
                     }
                     Err(error) => {
@@ -249,10 +372,22 @@ impl Engine {
                         } else {
                             chunk.to_vec()
                         };
-                        for i in affected {
-                            results[i]
-                                .attempts
-                                .push(attempt(Outcome::Failed(error.clone())));
+                        // Stale-on-error: an old answer beats none.
+                        let ids: Vec<WorkId> =
+                            affected.iter().map(|&i| results[i].id.clone()).collect();
+                        for (&i, stale) in affected.iter().zip(self.stale_lookups(&provider, &ids))
+                        {
+                            match stale {
+                                Some(record) => {
+                                    results[i].record = Some(record);
+                                    results[i]
+                                        .attempts
+                                        .push(attempt(Outcome::Found, Served::Stale));
+                                }
+                                None => results[i]
+                                    .attempts
+                                    .push(attempt(Outcome::Failed(error.clone()), Served::Live)),
+                            }
                         }
                     }
                 }
@@ -316,18 +451,104 @@ impl Engine {
             }
         }
 
-        let resp = with_retries(&entry.policy, self.jitter, || entry.provider.search(&sent))
-            .await
-            .map_err(|error| EngineError::Provider {
-                provider: provider.clone(),
-                error,
-            })?;
-        Ok(SearchReport {
-            provider,
-            page: resp.value,
-            ignored_filters,
-            usage: resp.usage,
-        })
+        let report = |page, usage, served| SearchReport {
+            provider: provider.clone(),
+            page,
+            ignored_filters: ignored_filters.clone(),
+            usage,
+            served,
+        };
+        let cached = self.cached_search(&provider, &sent);
+        if let Some((page, true)) = cached {
+            return Ok(report(page, None, Served::Cache));
+        }
+        match with_retries(&entry.policy, self.jitter, || entry.provider.search(&sent)).await {
+            Ok(resp) => {
+                self.remember_search(&provider, &sent, &resp.value);
+                Ok(report(resp.value, resp.usage, Served::Live))
+            }
+            Err(error) => match cached {
+                Some((page, _)) => Ok(report(page, None, Served::Stale)),
+                None => Err(EngineError::Provider {
+                    provider: provider.clone(),
+                    error,
+                }),
+            },
+        }
+    }
+
+    // Cache access. Cache failures are never fatal: a broken cache behaves
+    // like an empty one, and failed writes are skipped.
+
+    /// For each ID, a fresh cached answer covering `fields`:
+    /// `Some(Some(record))`, `Some(None)` for a fresh "not found", or `None`
+    /// to ask the provider.
+    fn cached_lookups(
+        &self,
+        provider: &ProviderId,
+        ids: &[WorkId],
+        fields: FieldSet,
+    ) -> Vec<Option<Option<SourceRecord>>> {
+        let now = (self.clock)();
+        let policy = self.cache_policy;
+        self.cache_entries(provider, ids)
+            .into_iter()
+            .map(|entry| {
+                let entry = entry?;
+                match entry.value {
+                    Some(ref record)
+                        if entry.is_fresh(now, policy.records)
+                            && fields.is_subset(record.fields) =>
+                    {
+                        Some(entry.value)
+                    }
+                    None if entry.is_fresh(now, policy.misses) => Some(None),
+                    _ => None,
+                }
+            })
+            .collect()
+    }
+
+    /// For each ID, any cached record, however old.
+    fn stale_lookups(&self, provider: &ProviderId, ids: &[WorkId]) -> Vec<Option<SourceRecord>> {
+        self.cache_entries(provider, ids)
+            .into_iter()
+            .map(|entry| entry.and_then(|e| e.value))
+            .collect()
+    }
+
+    fn cache_entries(
+        &self,
+        provider: &ProviderId,
+        ids: &[WorkId],
+    ) -> Vec<Option<aspero_store::CachedLookup>> {
+        self.cache
+            .as_ref()
+            .and_then(|c| c.get_lookups(provider, ids).ok())
+            .unwrap_or_else(|| vec![None; ids.len()])
+    }
+
+    fn remember_lookups(
+        &self,
+        provider: &ProviderId,
+        answers: &[(&WorkId, Option<&SourceRecord>)],
+    ) {
+        if let Some(cache) = &self.cache {
+            let _ = cache.put_lookups(provider, answers, (self.clock)());
+        }
+    }
+
+    /// A cached page and whether it is still fresh.
+    fn cached_search(&self, provider: &ProviderId, query: &SearchQuery) -> Option<(Page, bool)> {
+        let entry = self.cache.as_ref()?.get_search(provider, query).ok()??;
+        let fresh = entry.is_fresh((self.clock)(), self.cache_policy.searches);
+        Some((entry.value, fresh))
+    }
+
+    fn remember_search(&self, provider: &ProviderId, query: &SearchQuery, page: &Page) {
+        if let Some(cache) = &self.cache {
+            let _ = cache.put_search(provider, query, page, (self.clock)());
+        }
     }
 }
 

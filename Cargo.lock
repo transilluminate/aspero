@@ -93,6 +93,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "aspero-datacite"
+version = "0.0.0"
+dependencies = [
+ "aspero-core",
+ "async-trait",
+ "jiff",
+ "serde",
+ "serde_json",
+ "thiserror",
+ "url",
+]
+
+[[package]]
 name = "aspero-doi"
 version = "0.0.0"
 dependencies = [
@@ -107,6 +120,7 @@ version = "0.0.0"
 dependencies = [
  "aspero-core",
  "aspero-crossref",
+ "aspero-datacite",
  "aspero-doi",
  "aspero-openalex",
  "aspero-store",

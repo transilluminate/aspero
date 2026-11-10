@@ -20,6 +20,7 @@ aspero-store = { path = "crates/store" }
 aspero-engine = { path = "crates/engine" }
 aspero-openalex = { path = "crates/providers/openalex" }
 aspero-crossref = { path = "crates/providers/crossref" }
+aspero-datacite = { path = "crates/providers/datacite" }
 aspero-doi = { path = "crates/providers/doi" }
 
 async-trait = "0.1.92"

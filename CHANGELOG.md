@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased
+
+- Publisher URLs with a DOI in the path give that DOI, without landing-page
+  suffixes (`/full`, `/abstract`, `/pdf`, `.pdf`, …): in `scan`, and as
+  `lookup` input. doi.org URLs are taken as they are.
+- A retraction or withdrawal notice that OpenAlex flags as retracted names
+  itself as the `notice` (with `lookup --full`), so rows about one event
+  share a `notice` to dedupe on.
+- Help: `scan`'s `id` joins to `lookup`'s; `open_access` "closed" means no
+  free copy is known to the source.
+
 ## 0.3.2
 
 - Newer versions: Crossref `new_version` notices (Cochrane reviews,

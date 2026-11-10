@@ -97,7 +97,8 @@ pub enum Command {
     /// Look up works by identifier.
     #[command(after_help = "\
 Accepts DOIs, arXiv IDs, PMIDs, PMCIDs, NCBI Bookshelf IDs, ISBNs, OpenAlex
-IDs and their URLs, bare or prefixed:
+IDs and their URLs, bare or prefixed; also publisher URLs with a DOI in the
+path (…/10.3389/fneur.2019.01343/full, page suffixes dropped):
   10.1038/nature14539   doi:10.1038/nature14539   https://doi.org/10.1038/nature14539
   arXiv:1706.03762v5    https://arxiv.org/abs/1706.03762
   pmid:26017442         PMC6716493   NBK526056   W2919115771
@@ -111,11 +112,16 @@ JSON works:
                \"doi:...\", \"date\": \"...\", \"source\": \"...\"}]; kinds:
                retraction, withdrawal, expression_of_concern, correction,
                new_version (superseded; the notice is the newer work), …
+               Rows sharing a `notice` are one event reported by several
+               sources (or found via several identifiers): dedupe on it. A
+               notice that is itself flagged names itself as `notice`.
   update_to    for a notice itself, the works it updates: [{\"kind\",
                \"work\", \"date\", \"source\"}]
   open_access  whether a free, legal copy exists: {\"is_oa\": true,
                \"status\": gold|diamond|hybrid|bronze|green|closed, \"pdf_url\",
-               \"url\", \"license\", \"version\", \"source\"}; absent if unknown
+               \"url\", \"license\", \"version\", \"source\"}; absent if unknown.
+               \"closed\" means no free copy is known to the source (OpenAlex
+               carries Unpaywall's data), not that none exists
   `lookup --full` also asks Crossref for notices in both directions, and
   other providers for open access when the first didn't say. A superseded
   work's result gains `latest`: the newest version, following the chain
@@ -240,10 +246,13 @@ Finds DOIs, PMIDs, PMCIDs, NCBI Bookshelf IDs (NBK…), arXiv IDs and ISBNs
 in text or Markdown: one record per mention, with file, line, column, the
 identifier, the text as written and its line for context. Which mentions
 matter is yours to decide; scan only says what is a valid identifier.
+`id` is canonical (doi:10.1056/nejmoa1302097) and equals `lookup`'s `id`
+for the same identifier: join results on it.
 
 Cleaned like pasted input: wrapping brackets, quotes and emphasis and
 trailing punctuation are dropped, brackets inside a DOI kept
 (10.1016/S0140-6736(10)60835-5). Markdown links and tables are split.
+Publisher URLs give their DOI without page suffixes (/full, /pdf, .pdf).
 DOIs, PMC… and NBK… count anywhere; PMIDs, ISBNs and arXiv IDs only when
 labelled (PMID: 123, ISBN 978-…), prefixed (arXiv:…) or as URLs. A DOI
 broken across lines is not found. Nothing is fetched.

@@ -14,8 +14,8 @@ use std::process::ExitCode;
 use std::sync::Arc;
 
 use aspero_engine::{
-    CrossrefConfig, DoiConfig, Engine, OpenAlexConfig, SecretString, SqliteCache, StandardConfig,
-    standard,
+    CrossrefConfig, DataciteConfig, DoiConfig, Engine, OpenAlexConfig, SecretString, SqliteCache,
+    StandardConfig, standard,
 };
 use clap::Parser;
 use serde_json::json;
@@ -101,6 +101,7 @@ fn engine(cache: Option<Arc<SqliteCache>>) -> Result<Engine, Failure> {
     openalex.api_key = env("OPENALEX_API_KEY").map(SecretString::from);
     config.openalex = Some(openalex);
     config.crossref = Some(CrossrefConfig::default());
+    config.datacite = Some(DataciteConfig::default());
     config.doi = Some(DoiConfig::default());
     standard(config).map_err(|e| Failure {
         exit: Exit::Internal,

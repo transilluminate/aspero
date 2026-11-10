@@ -17,8 +17,8 @@ use std::sync::Arc;
 
 use aspero_core::{Claim, WorkId};
 use aspero_engine::{
-    CrossrefConfig, DoiConfig, OpenAlexConfig, SecretString, SqliteCache, StandardConfig,
-    Verification, standard,
+    CrossrefConfig, DataciteConfig, DoiConfig, OpenAlexConfig, SecretString, SqliteCache,
+    StandardConfig, Verification, standard,
 };
 use serde::Deserialize;
 
@@ -90,6 +90,7 @@ async fn main() -> std::process::ExitCode {
     openalex.api_key = env("OPENALEX_API_KEY").map(SecretString::from);
     config.openalex = Some(openalex);
     config.crossref = Some(CrossrefConfig::default());
+    config.datacite = Some(DataciteConfig::default());
     config.doi = Some(DoiConfig::default());
     let engine = standard(config).expect("engine");
 

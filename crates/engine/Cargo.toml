@@ -14,6 +14,7 @@ aspero-core.workspace = true
 aspero-store.workspace = true
 aspero-openalex = { workspace = true, optional = true }
 aspero-crossref = { workspace = true, optional = true }
+aspero-datacite = { workspace = true, optional = true }
 aspero-doi = { workspace = true, optional = true }
 async-trait.workspace = true
 fastrand.workspace = true
@@ -24,9 +25,10 @@ tokio = { workspace = true, features = ["time", "sync"] }
 secrecy.workspace = true
 
 [features]
-default = ["openalex", "crossref", "doi"]
+default = ["openalex", "crossref", "datacite", "doi"]
 openalex = ["dep:aspero-openalex"]
 crossref = ["dep:aspero-crossref"]
+datacite = ["dep:aspero-datacite"]
 doi = ["dep:aspero-doi"]
 
 [dev-dependencies]

@@ -35,6 +35,8 @@ pub use resolve::{Candidate, ResolveReport, Sighting, Verdict, Verification, Via
 pub use secrecy::SecretString;
 #[cfg(feature = "crossref")]
 pub use standard::CrossrefConfig;
+#[cfg(feature = "datacite")]
+pub use standard::DataciteConfig;
 #[cfg(feature = "doi")]
 pub use standard::DoiConfig;
 #[cfg(feature = "openalex")]

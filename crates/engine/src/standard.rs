@@ -9,6 +9,8 @@ use crate::{Cache, Engine, EngineBuilder};
 
 #[cfg(feature = "crossref")]
 pub use aspero_crossref::CrossrefConfig;
+#[cfg(feature = "datacite")]
+pub use aspero_datacite::DataciteConfig;
 #[cfg(feature = "doi")]
 pub use aspero_doi::DoiConfig;
 #[cfg(feature = "openalex")]
@@ -26,6 +28,8 @@ pub struct StandardConfig {
     pub openalex: Option<OpenAlexConfig>,
     #[cfg(feature = "crossref")]
     pub crossref: Option<CrossrefConfig>,
+    #[cfg(feature = "datacite")]
+    pub datacite: Option<DataciteConfig>,
     #[cfg(feature = "doi")]
     pub doi: Option<DoiConfig>,
 }
@@ -35,8 +39,9 @@ pub struct StandardConfig {
 ///
 /// Priority for lookups: OpenAlex first (free per-ID lookups, many identifier
 /// kinds, indexes DataCite DOIs such as arXiv's), then Crossref, then
-/// doi.org (any registration agency, one DOI per request; its "not found"
-/// is authoritative).
+/// DataCite (arXiv, Zenodo, data and software; batched), then doi.org (any
+/// registration agency, one DOI per request; its "not found" is
+/// authoritative).
 pub fn standard(config: StandardConfig) -> Result<Engine, Error> {
     let user_agent = match &config.mailto {
         Some(mailto) => format!("aspero/{} (mailto:{mailto})", env!("CARGO_PKG_VERSION")),
@@ -71,6 +76,14 @@ pub fn standard(config: StandardConfig) -> Result<Engine, Error> {
         let policy = Crossref::default_policy();
         let provider = Crossref::new(cr, client(&policy)?);
         builder = builder.provider(Arc::new(provider), policy, 20);
+    }
+
+    #[cfg(feature = "datacite")]
+    if let Some(dc) = config.datacite {
+        use aspero_datacite::Datacite;
+        let policy = Datacite::default_policy();
+        let provider = Datacite::new(dc, client(&policy)?);
+        builder = builder.provider(Arc::new(provider), policy, 25);
     }
 
     #[cfg(feature = "doi")]

@@ -172,7 +172,7 @@ pub enum SearchMode {
     Citation,
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[non_exhaustive]
 pub struct SearchQuery {
     pub text: String,
@@ -226,7 +226,7 @@ pub struct Lookup {
 }
 
 /// A page of works: search hits in rank order, or one side of the citation graph.
-#[derive(Debug, Clone, Default, PartialEq)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[non_exhaustive]
 pub struct Page {
     pub hits: Vec<Hit>,
@@ -243,7 +243,7 @@ impl Page {
 }
 
 /// One work in a [`Page`].
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Hit {
     pub record: SourceRecord,
     /// The provider's relevance score, if it gives one. Only comparable

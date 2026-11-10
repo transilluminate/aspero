@@ -19,9 +19,9 @@ use std::time::Duration;
 
 use aspero_core::http::{escape_lucene, path_segment};
 use aspero_core::{
-    Capabilities, Cursor, Doi, Error, FieldSet, Filter, Hit, HttpClient, HttpRequest, HttpResponse,
-    IdKind, Lookup, Page, Provider, ProviderId, ResiliencePolicy, Response, Result, SearchMode,
-    SearchQuery, SourceRecord, WorkId,
+    Capabilities, Cursor, Doi, Error, Field, FieldSet, Filter, Hit, HttpClient, HttpRequest,
+    HttpResponse, IdKind, Lookup, Page, Provider, ProviderId, ResiliencePolicy, Response, Result,
+    SearchMode, SearchQuery, SourceRecord, WorkId,
 };
 use async_trait::async_trait;
 
@@ -67,7 +67,8 @@ impl Datacite {
         let mut capabilities = Capabilities::default();
         capabilities.lookup_kinds = vec![IdKind::Doi, IdKind::Arxiv];
         capabilities.max_batch = MAX_BATCH;
-        capabilities.fields = FieldSet::ALL;
+        // Records say nothing about free copies.
+        capabilities.fields = FieldSet::ALL.difference(FieldSet::of(&[Field::OpenAccess]));
         capabilities.search = true;
         capabilities.search_filters = vec![Filter::Years, Filter::WorkType];
         Datacite {

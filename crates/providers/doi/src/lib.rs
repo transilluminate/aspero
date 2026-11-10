@@ -17,8 +17,8 @@ use std::time::Duration;
 use aspero_core::csl::CslItem;
 use aspero_core::http::path_segment;
 use aspero_core::{
-    Capabilities, Doi, Error, FieldSet, HttpClient, HttpRequest, HttpResponse, IdKind, Lookup,
-    ProviderId, Raw, ResiliencePolicy, Response, Result, SourceRecord, WorkId,
+    Capabilities, Doi, Error, Field, FieldSet, HttpClient, HttpRequest, HttpResponse, IdKind,
+    Lookup, ProviderId, Raw, ResiliencePolicy, Response, Result, SourceRecord, WorkId,
 };
 use async_trait::async_trait;
 
@@ -56,7 +56,8 @@ impl DoiOrg {
         let mut capabilities = Capabilities::default();
         capabilities.lookup_kinds = vec![IdKind::Doi, IdKind::Arxiv];
         capabilities.max_batch = 1;
-        capabilities.fields = FieldSet::ALL;
+        // Records say nothing about free copies.
+        capabilities.fields = FieldSet::ALL.difference(FieldSet::of(&[Field::OpenAccess]));
         DoiOrg {
             config,
             http,

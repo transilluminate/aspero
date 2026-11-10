@@ -245,6 +245,7 @@ impl CslItem {
                 .filter_map(CrossrefUpdate::to_update_to)
                 .collect(),
             other_years: Vec::new(),
+            open_access: None,
         }
     }
 }

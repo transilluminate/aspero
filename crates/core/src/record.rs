@@ -92,10 +92,12 @@ pub enum Field {
     CitedByCount,
     /// Retractions, corrections and other notices.
     Updates,
+    /// Where a free, legal copy is.
+    OpenAccess,
 }
 
 impl Field {
-    pub const ALL: [Field; 10] = [
+    pub const ALL: [Field; 11] = [
         Field::Title,
         Field::Authors,
         Field::Issued,
@@ -106,6 +108,7 @@ impl Field {
         Field::Url,
         Field::CitedByCount,
         Field::Updates,
+        Field::OpenAccess,
     ];
 
     const fn bit(self) -> u16 {

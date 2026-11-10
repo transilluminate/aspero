@@ -51,6 +51,9 @@ pub struct Work {
     /// erratum corrects or a retraction notice retracts.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub update_to: Vec<UpdateTo>,
+    /// Whether, and where, the work can be read free and legally.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub open_access: Option<OpenAccess>,
     /// Years of other editions or versions of the same work, when the
     /// provider knows them (a book's later editions). A citation of any of
     /// them is a citation of this work.
@@ -83,6 +86,35 @@ impl Update {
             source: None,
         }
     }
+}
+
+/// Whether, and where, a work can be read free and legally (as with
+/// Unpaywall, whose data OpenAlex carries).
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[non_exhaustive]
+pub struct OpenAccess {
+    /// Free to read somewhere.
+    pub is_oa: bool,
+    /// Unpaywall's classes: `gold`, `diamond`, `hybrid`, `bronze` (free on
+    /// the publisher's site without a licence), `green` (a repository
+    /// copy), `closed`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub status: Option<String>,
+    /// The best free copy as a PDF.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pdf_url: Option<String>,
+    /// The best free copy's page (HTML full text or a landing page).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub url: Option<String>,
+    /// That copy's licence, e.g. `cc-by`; none for bronze.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub license: Option<String>,
+    /// `publishedVersion`, `acceptedVersion` or `submittedVersion`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub version: Option<String>,
+    /// Who said so: "openalex", "europepmc", ….
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source: Option<String>,
 }
 
 /// A notice's link to the work it updates (Crossref's `update-to`): the

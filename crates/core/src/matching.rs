@@ -31,6 +31,8 @@ const W_YEAR: f64 = 0.25;
 const YEAR_MISMATCH_PENALTY: f64 = 0.5;
 /// Multiplier when the title clearly differs.
 const TITLE_MISMATCH_PENALTY: f64 = 0.5;
+/// Multiplier when the authors clearly differ.
+const AUTHORS_MISMATCH_PENALTY: f64 = 0.5;
 /// Confidence ceiling when fewer than two fields could be compared.
 const SINGLE_FIELD_CAP: f64 = 0.7;
 
@@ -183,17 +185,23 @@ pub fn assess(claim: &Claim, record: &SourceRecord) -> Assessment {
         FieldCheck::UNKNOWN
     };
 
-    let actual_year = work.issued.map(|d| d.year());
+    let actual_years: Vec<i16> = work
+        .issued
+        .map(|d| d.year())
+        .into_iter()
+        .chain(work.other_years.iter().copied())
+        .collect();
     let claimed_years: Vec<i16> = match (claim.year, &text) {
         (Some(y), _) => vec![y],
         (None, Some(text)) => text.years(),
         _ => Vec::new(),
     };
-    let year = match actual_year {
-        Some(actual) if !claimed_years.is_empty() => {
+    let year = match actual_years.is_empty() || claimed_years.is_empty() {
+        false => {
+            // Nearest pairing: any edition's year may be the one cited.
             let delta = claimed_years
                 .iter()
-                .map(|y| (y - actual).unsigned_abs())
+                .flat_map(|c| actual_years.iter().map(move |a| (c - a).unsigned_abs()))
                 .min()
                 .unwrap_or(u16::MAX);
             // Halves per year off: off by one is common (online-first vs
@@ -201,7 +209,7 @@ pub fn assess(claim: &Claim, record: &SourceRecord) -> Assessment {
             // more is a mismatch, but a nearer year still ranks higher.
             FieldCheck::scored(0.5f64.powi(i32::from(delta.min(30))))
         }
-        _ => FieldCheck::UNKNOWN,
+        true => FieldCheck::UNKNOWN,
     };
 
     let ids = id_agreement(&claim.ids, &record.ids);
@@ -238,6 +246,11 @@ fn combine(title: FieldCheck, authors: FieldCheck, year: FieldCheck) -> f64 {
     }
     if title.agreement == Agreement::Mismatch {
         confidence *= TITLE_MISMATCH_PENALTY;
+    }
+    // Different authors usually mean a different work (a similarly titled
+    // book or survey), even when title and year agree.
+    if authors.agreement == Agreement::Mismatch {
+        confidence *= AUTHORS_MISMATCH_PENALTY;
     }
     if known.len() < 2 {
         confidence = confidence.min(SINGLE_FIELD_CAP);
@@ -628,6 +641,42 @@ mod tests {
             0.0,
             "an unmentioned sole author"
         );
+    }
+
+    #[test]
+    fn any_edition_year_counts_for_books() {
+        let mut first_edition = record(
+            &[],
+            "Reinforcement Learning: An Introduction",
+            &["Richard S. Sutton", "Andrew G. Barto"],
+            1998,
+        );
+        let claim = Claim::from_text(
+            "Sutton RS, Barto AG. Reinforcement Learning: An Introduction. 2nd ed. MIT Press; 2018.",
+        );
+        assert_eq!(
+            assess(&claim, &first_edition).year.agreement,
+            Agreement::Mismatch
+        );
+        first_edition.work.other_years = vec![2018];
+        let a = assess(&claim, &first_edition);
+        assert_eq!(a.year.agreement, Agreement::Match);
+        assert!(a.confidence >= VERIFIED, "{a:?}");
+    }
+
+    #[test]
+    fn different_authors_are_penalised() {
+        let claim =
+            Claim::from_text("Sutton RS, Barto AG. Reinforcement Learning: An Introduction. 2018.");
+        let other = record(
+            &[],
+            "An Introduction to Deep Reinforcement Learning",
+            &["Vincent Francois-Lavet", "Peter Henderson"],
+            2018,
+        );
+        let a = assess(&claim, &other);
+        assert_eq!(a.authors.agreement, Agreement::Mismatch);
+        assert!(a.confidence < PLAUSIBLE, "{a:?}");
     }
 
     #[test]

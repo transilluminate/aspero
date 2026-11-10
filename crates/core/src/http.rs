@@ -150,6 +150,19 @@ pub fn path_segment(s: &str) -> String {
     percent_encoding::utf8_percent_encode(s, PATH_ESCAPES).to_string()
 }
 
+/// Escapes Lucene/Solr query syntax in user text (DataCite, Open Library),
+/// so "BERT: Pre-training" is searched as words, not parsed as a field query.
+pub fn escape_lucene(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    for c in text.chars() {
+        if "+-&|!(){}[]^\"~*?:\\/".contains(c) {
+            out.push('\\');
+        }
+        out.push(c);
+    }
+    out
+}
+
 #[async_trait]
 pub trait HttpClient: Send + Sync {
     /// Sends one request. `Ok` for every HTTP status; `Err` only for transport

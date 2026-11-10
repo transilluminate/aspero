@@ -47,6 +47,11 @@ pub struct Work {
     /// Retractions, corrections and other editorial notices about the work.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub updates: Vec<Update>,
+    /// Years of other editions or versions of the same work, when the
+    /// provider knows them (a book's later editions). A citation of any of
+    /// them is a citation of this work.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub other_years: Vec<i16>,
 }
 
 /// An editorial notice about a work: retraction, correction, expression of

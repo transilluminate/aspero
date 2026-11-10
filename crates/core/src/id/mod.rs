@@ -192,6 +192,10 @@ impl WorkId {
         if s.starts_with("10.") || doi::has_info_prefix(s) {
             return WorkId::parse_as(IdKind::Doi, input);
         }
+        // "ISBN 978-…" / "ISBN-13 …": a label followed by a space.
+        if s.get(..4).is_some_and(|p| p.eq_ignore_ascii_case("isbn")) {
+            return WorkId::parse_as(IdKind::Isbn, input);
+        }
         if s.get(..3).is_some_and(|p| p.eq_ignore_ascii_case("pmc")) && all_digits(&s[3..]) {
             return WorkId::parse_as(IdKind::Pmcid, input);
         }

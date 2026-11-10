@@ -119,6 +119,11 @@ async fn run(cli: Cli, out: Out) -> Result<Exit, Failure> {
         Command::Search { query, options } => cmd::search::run(&engine, query, options, out).await,
         Command::Resolve { claim } => cmd::resolve::run(&engine, claim, out).await,
         Command::Verify { claim } => cmd::verify::run(&engine, claim, out).await,
+        Command::Check {
+            path,
+            fail_on,
+            limit,
+        } => cmd::check::run(&engine, path, fail_on, limit, out).await,
         Command::Cache { .. } => unreachable!("handled above"),
     }
 }

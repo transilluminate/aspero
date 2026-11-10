@@ -5,6 +5,7 @@
 //! not run at all.
 
 pub mod cache;
+pub mod check;
 pub mod claim;
 pub mod lookup;
 pub mod resolve;

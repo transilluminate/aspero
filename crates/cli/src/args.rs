@@ -14,7 +14,8 @@ Exit codes:
   6  credentials rejected
   7  unsupported by the enabled providers
   8  unexpected provider response
-  9  a citation does not check out (verify: mismatch or only plausible)
+  9  a citation does not check out (verify: mismatch or only plausible;
+     check: an entry reached --fail-on)
 
 Environment:
   OPENALEX_API_KEY  OpenAlex key ($1/day free budget; $0.10/day without)
@@ -155,11 +156,47 @@ Examples:
         claim: ClaimArgs,
     },
 
+    /// Check every entry of a BibTeX/BibLaTeX file, CI-style.
+    #[command(after_help = "\
+Each entry's title, authors, year and identifiers (doi, arXiv eprint, DOI
+or arXiv URLs) are verified, then reported with fixes:
+  error    not found; identifier wrong or nonexistent (with the right one);
+           year off by more than one
+  warning  only a plausible match; duplicate entries; providers failed
+  info     add a DOI the entry lacks; year off by one (often preprint vs
+           published, or online vs print)
+
+Exits 9 if any entry reaches --fail-on (default: error), so it can gate a
+pre-commit hook or CI job. JSON output has a summary and every finding.
+
+Examples:
+  aspero check refs.bib
+  aspero check --fail-on warning --format json thesis.bib > report.json
+  cat refs.bib | aspero check -")]
+    Check {
+        /// The .bib file; `-` reads stdin.
+        path: String,
+        /// Lowest severity that makes the check fail (exit 9).
+        #[arg(long, value_enum, default_value_t = FailOn::Error)]
+        fail_on: FailOn,
+        /// Results per provider search.
+        #[arg(long, default_value_t = 5)]
+        limit: u32,
+    },
+
     /// Inspect or empty the answer cache.
     Cache {
         #[command(subcommand)]
         action: CacheAction,
     },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub enum FailOn {
+    Error,
+    Warning,
+    Info,
+    Never,
 }
 
 #[derive(Debug, Subcommand)]

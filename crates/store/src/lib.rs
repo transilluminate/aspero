@@ -1,11 +1,18 @@
-//! SQLite store: cached provider records, "not found" answers, search pages,
-//! and derived data (embeddings, extracted text, …) for later.
+//! SQLite storage.
 //!
-//! The store keeps entries and when they were stored; it applies no policy.
-//! Freshness (TTLs), field coverage and stale-on-error are the engine's
-//! decisions, made from [`Entry::stored_at`]. Records are kept whole,
-//! including the provider's raw response, so normalisation can be improved
-//! and rerun without refetching.
+//! [`SqliteCache`] is the **disposable** cache of provider answers: records,
+//! "not found" answers and search pages. Everything in it can be fetched
+//! again, so it lives in the platform cache directory (which the OS may
+//! wipe) and has no migrations: a schema mismatch simply rebuilds it.
+//!
+//! Durable data that is costly to recompute (history; derived data such as
+//! embeddings or extracted text) will live in a separate store in the data
+//! directory, with real migrations (DESIGN §5).
+//!
+//! The cache keeps entries and when they were stored; it applies no policy.
+//! Freshness, field coverage and stale-on-error are the engine's decisions.
+//! The API is batch-first: lookups of many IDs are one read, and storing
+//! many answers is one transaction (one disk sync, not one per ID).
 //!
 //! SQLite in WAL mode with a busy timeout, so several agent processes can
 //! share one cache file.
@@ -18,10 +25,10 @@ use aspero_core::{Page, ProviderId, SearchQuery, SourceRecord, WorkId};
 use jiff::Timestamp;
 use rusqlite::{Connection, OptionalExtension, params};
 
-/// Schema version written to `PRAGMA user_version`.
+/// Bump on any schema change; older caches are dropped and rebuilt.
 const SCHEMA_VERSION: i64 = 1;
 
-const SCHEMA_V1: &str = "
+const SCHEMA: &str = "
 CREATE TABLE record (
     provider   TEXT NOT NULL,
     native_id  TEXT NOT NULL,
@@ -49,17 +56,6 @@ CREATE TABLE search (
     stored_at  INTEGER NOT NULL,
     PRIMARY KEY (provider, query)
 );
--- Anything computed from a work: embeddings, extracted text, …
-CREATE TABLE derived (
-    work_id    TEXT NOT NULL,
-    kind       TEXT NOT NULL,      -- e.g. 'embedding', 'text'
-    producer   TEXT NOT NULL,      -- e.g. 'specter2-proximity'
-    version    TEXT NOT NULL,
-    media_type TEXT NOT NULL,
-    content    BLOB NOT NULL,
-    stored_at  INTEGER NOT NULL,
-    PRIMARY KEY (work_id, kind, producer, version)
-);
 ";
 
 #[derive(Debug, thiserror::Error)]
@@ -71,8 +67,6 @@ pub enum StoreError {
     Corrupt(#[from] serde_json::Error),
     #[error("could not create cache directory: {0}")]
     Io(#[from] std::io::Error),
-    #[error("cache schema version {found} is newer than this aspero supports ({supported})")]
-    TooNew { found: i64, supported: i64 },
 }
 
 pub type Result<T, E = StoreError> = std::result::Result<T, E>;
@@ -91,23 +85,26 @@ impl<T> Entry<T> {
     }
 }
 
-/// What a lookup cache needs; the engine depends on this, not on SQLite.
-pub trait Cache: Send + Sync {
-    /// The cached answer for `id` at `provider`: `Some(record)`, or `None`
-    /// for a cached "not found".
-    fn get_lookup(
-        &self,
-        provider: &ProviderId,
-        id: &WorkId,
-    ) -> Result<Option<Entry<Option<SourceRecord>>>>;
+/// A provider's cached answer for one ID: `Some(record)`, or `None` for a
+/// cached "not found".
+pub type CachedLookup = Entry<Option<SourceRecord>>;
 
-    /// Stores `provider`'s answer for `id`. A record is also reachable by
-    /// every identifier it asserts.
-    fn put_lookup(
+/// What the engine needs from a cache; it depends on this, not on SQLite.
+pub trait Cache: Send + Sync {
+    /// The cached answer for each of `ids` at `provider`, in order; `None`
+    /// where nothing is cached.
+    fn get_lookups(
         &self,
         provider: &ProviderId,
-        id: &WorkId,
-        record: Option<&SourceRecord>,
+        ids: &[WorkId],
+    ) -> Result<Vec<Option<CachedLookup>>>;
+
+    /// Stores `provider`'s answers in one transaction. A found record is
+    /// also reachable by every identifier it asserts.
+    fn put_lookups(
+        &self,
+        provider: &ProviderId,
+        answers: &[(&WorkId, Option<&SourceRecord>)],
         at: Timestamp,
     ) -> Result<()>;
 
@@ -123,16 +120,6 @@ pub trait Cache: Send + Sync {
     ) -> Result<()>;
 }
 
-/// Something computed from a work.
-#[derive(Debug, Clone, PartialEq)]
-pub struct Derived {
-    pub kind: String,
-    pub producer: String,
-    pub version: String,
-    pub media_type: String,
-    pub content: Vec<u8>,
-}
-
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct Stats {
@@ -140,14 +127,13 @@ pub struct Stats {
     pub identifiers: u64,
     pub misses: u64,
     pub searches: u64,
-    pub derived: u64,
 }
 
-pub struct SqliteStore {
+pub struct SqliteCache {
     conn: Mutex<Connection>,
 }
 
-impl SqliteStore {
+impl SqliteCache {
     /// Opens (creating if needed) the cache at `path`.
     pub fn open(path: &Path) -> Result<Self> {
         if let Some(dir) = path.parent() {
@@ -160,31 +146,32 @@ impl SqliteStore {
         Self::init(Connection::open_in_memory()?)
     }
 
-    fn init(conn: Connection) -> Result<Self> {
+    fn init(mut conn: Connection) -> Result<Self> {
         conn.busy_timeout(Duration::from_secs(5))?;
         conn.pragma_update(None, "journal_mode", "WAL")?;
         let version: i64 = conn.pragma_query_value(None, "user_version", |r| r.get(0))?;
-        match version {
-            0 => {
-                conn.execute_batch(SCHEMA_V1)?;
-                conn.pragma_update(None, "user_version", SCHEMA_VERSION)?;
+        if version != SCHEMA_VERSION {
+            // Disposable: drop whatever is there (older or newer) and rebuild.
+            let tx = conn.transaction()?;
+            let tables: Vec<String> = tx
+                .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'")?
+                .query_map([], |r| r.get(0))?
+                .collect::<rusqlite::Result<_>>()?;
+            for table in tables {
+                tx.execute_batch(&format!("DROP TABLE \"{}\";", table.replace('"', "\"\"")))?;
             }
-            SCHEMA_VERSION => {}
-            found => {
-                return Err(StoreError::TooNew {
-                    found,
-                    supported: SCHEMA_VERSION,
-                });
-            }
+            tx.execute_batch(SCHEMA)?;
+            tx.pragma_update(None, "user_version", SCHEMA_VERSION)?;
+            tx.commit()?;
         }
-        Ok(SqliteStore {
+        Ok(SqliteCache {
             conn: Mutex::new(conn),
         })
     }
 
     fn conn(&self) -> std::sync::MutexGuard<'_, Connection> {
-        // A panic while holding the lock leaves SQLite consistent (each
-        // write is one statement or transaction), so poisoning is ignorable.
+        // A panic while holding the lock leaves SQLite consistent (writes
+        // are transactional), so poisoning is ignorable.
         self.conn.lock().unwrap_or_else(|e| e.into_inner())
     }
 
@@ -200,72 +187,15 @@ impl SqliteStore {
             identifiers: count("record_id")?,
             misses: count("miss")?,
             searches: count("search")?,
-            derived: count("derived")?,
         })
     }
 
-    /// Empties every table, keeping the schema.
+    /// Empties the cache.
     pub fn clear(&self) -> Result<()> {
         self.conn().execute_batch(
-            "DELETE FROM record; DELETE FROM record_id; DELETE FROM miss;
-             DELETE FROM search; DELETE FROM derived; VACUUM;",
+            "DELETE FROM record; DELETE FROM record_id; DELETE FROM miss; DELETE FROM search; VACUUM;",
         )?;
         Ok(())
-    }
-
-    pub fn put_derived(&self, work: &WorkId, d: &Derived, at: Timestamp) -> Result<()> {
-        self.conn().execute(
-            "INSERT OR REPLACE INTO derived
-                 (work_id, kind, producer, version, media_type, content, stored_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-            params![
-                work.to_string(),
-                d.kind,
-                d.producer,
-                d.version,
-                d.media_type,
-                d.content,
-                at.as_second()
-            ],
-        )?;
-        Ok(())
-    }
-
-    /// Derived data of `kind` stored under any of `ids` (a work's
-    /// identifiers), optionally from one producer.
-    pub fn get_derived(
-        &self,
-        ids: &[WorkId],
-        kind: &str,
-        producer: Option<&str>,
-    ) -> Result<Vec<Entry<Derived>>> {
-        let conn = self.conn();
-        let mut stmt = conn.prepare(
-            "SELECT kind, producer, version, media_type, content, stored_at FROM derived
-             WHERE work_id = ?1 AND kind = ?2 AND (?3 IS NULL OR producer = ?3)",
-        )?;
-        let mut out = Vec::new();
-        for id in ids {
-            let rows = stmt.query_map(params![id.to_string(), kind, producer], |r| {
-                Ok(Entry {
-                    value: Derived {
-                        kind: r.get(0)?,
-                        producer: r.get(1)?,
-                        version: r.get(2)?,
-                        media_type: r.get(3)?,
-                        content: r.get(4)?,
-                    },
-                    stored_at: timestamp(r.get(5)?),
-                })
-            })?;
-            for row in rows {
-                let entry = row?;
-                if !out.contains(&entry) {
-                    out.push(entry);
-                }
-            }
-        }
-        Ok(out)
     }
 }
 
@@ -273,86 +203,99 @@ fn timestamp(seconds: i64) -> Timestamp {
     Timestamp::from_second(seconds).unwrap_or(Timestamp::UNIX_EPOCH)
 }
 
-impl Cache for SqliteStore {
-    fn get_lookup(
+impl Cache for SqliteCache {
+    fn get_lookups(
         &self,
         provider: &ProviderId,
-        id: &WorkId,
-    ) -> Result<Option<Entry<Option<SourceRecord>>>> {
-        let conn = self.conn();
-        let (provider, id) = (provider.as_str(), id.to_string());
-        let found: Option<(String, i64)> = conn
-            .query_row(
-                "SELECT r.record, r.stored_at FROM record_id i
-                 JOIN record r ON r.provider = i.provider AND r.native_id = i.native_id
-                 WHERE i.provider = ?1 AND i.work_id = ?2",
-                params![provider, id],
-                |r| Ok((r.get(0)?, r.get(1)?)),
-            )
-            .optional()?;
-        let missed: Option<i64> = conn
-            .query_row(
-                "SELECT stored_at FROM miss WHERE provider = ?1 AND work_id = ?2",
-                params![provider, id],
-                |r| r.get(0),
-            )
-            .optional()?;
-        let miss = |at: i64| Entry {
-            value: None,
-            stored_at: timestamp(at),
-        };
-        // The newer answer wins if both exist.
-        Ok(match (found, missed) {
-            (Some((_, found_at)), Some(missed_at)) if missed_at > found_at => Some(miss(missed_at)),
-            (Some((json, at)), _) => Some(Entry {
-                value: Some(serde_json::from_str(&json)?),
+        ids: &[WorkId],
+    ) -> Result<Vec<Option<CachedLookup>>> {
+        let mut conn = self.conn();
+        // One read transaction: a consistent snapshot, one lock.
+        let tx = conn.transaction()?;
+        let mut found = tx.prepare_cached(
+            "SELECT r.record, r.stored_at FROM record_id i
+             JOIN record r ON r.provider = i.provider AND r.native_id = i.native_id
+             WHERE i.provider = ?1 AND i.work_id = ?2",
+        )?;
+        let mut missed =
+            tx.prepare_cached("SELECT stored_at FROM miss WHERE provider = ?1 AND work_id = ?2")?;
+
+        let mut out = Vec::with_capacity(ids.len());
+        for id in ids {
+            let key = params![provider.as_str(), id.to_string()];
+            let record: Option<(String, i64)> = found
+                .query_row(key, |r| Ok((r.get(0)?, r.get(1)?)))
+                .optional()?;
+            let miss: Option<i64> = missed.query_row(key, |r| r.get(0)).optional()?;
+            let not_found = |at: i64| Entry {
+                value: None,
                 stored_at: timestamp(at),
-            }),
-            (None, Some(at)) => Some(miss(at)),
-            (None, None) => None,
-        })
+            };
+            // The newer answer wins if both exist.
+            out.push(match (record, miss) {
+                (Some((_, found_at)), Some(missed_at)) if missed_at > found_at => {
+                    Some(not_found(missed_at))
+                }
+                (Some((json, at)), _) => Some(Entry {
+                    value: Some(serde_json::from_str(&json)?),
+                    stored_at: timestamp(at),
+                }),
+                (None, Some(at)) => Some(not_found(at)),
+                (None, None) => None,
+            });
+        }
+        Ok(out)
     }
 
-    fn put_lookup(
+    fn put_lookups(
         &self,
         provider: &ProviderId,
-        id: &WorkId,
-        record: Option<&SourceRecord>,
+        answers: &[(&WorkId, Option<&SourceRecord>)],
         at: Timestamp,
     ) -> Result<()> {
         let mut conn = self.conn();
         let tx = conn.transaction()?;
-        let (p, requested, at) = (provider.as_str(), id.to_string(), at.as_second());
-        match record.and_then(|r| r.native_id().map(|n| (r, n.to_string()))) {
-            Some((record, native)) => {
-                tx.execute(
-                    "INSERT OR REPLACE INTO record (provider, native_id, record, stored_at)
-                     VALUES (?1, ?2, ?3, ?4)",
-                    params![p, native, serde_json::to_string(record)?, at],
-                )?;
-                let ids = record
-                    .ids
-                    .iter()
-                    .map(ToString::to_string)
-                    .chain([requested.clone()]);
-                for work_id in ids {
-                    tx.execute(
-                        "INSERT OR REPLACE INTO record_id (provider, work_id, native_id) VALUES (?1, ?2, ?3)",
-                        params![p, work_id, native],
-                    )?;
-                    tx.execute(
-                        "DELETE FROM miss WHERE provider = ?1 AND work_id = ?2",
-                        params![p, work_id],
-                    )?;
+        {
+            let (p, at) = (provider.as_str(), at.as_second());
+            let mut put_record = tx.prepare_cached(
+                "INSERT OR REPLACE INTO record (provider, native_id, record, stored_at) VALUES (?1, ?2, ?3, ?4)",
+            )?;
+            let mut put_id = tx.prepare_cached(
+                "INSERT OR REPLACE INTO record_id (provider, work_id, native_id) VALUES (?1, ?2, ?3)",
+            )?;
+            let mut clear_miss =
+                tx.prepare_cached("DELETE FROM miss WHERE provider = ?1 AND work_id = ?2")?;
+            let mut put_miss = tx.prepare_cached(
+                "INSERT OR REPLACE INTO miss (provider, work_id, stored_at) VALUES (?1, ?2, ?3)",
+            )?;
+
+            for (requested, record) in answers {
+                match record {
+                    Some(record) => {
+                        // A record without any identifier can't be found again.
+                        let Some(native) = record.native_id().map(ToString::to_string) else {
+                            continue;
+                        };
+                        put_record.execute(params![
+                            p,
+                            native,
+                            serde_json::to_string(record)?,
+                            at
+                        ])?;
+                        let ids = record
+                            .ids
+                            .iter()
+                            .map(ToString::to_string)
+                            .chain([requested.to_string()]);
+                        for work_id in ids {
+                            put_id.execute(params![p, work_id, native])?;
+                            clear_miss.execute(params![p, work_id])?;
+                        }
+                    }
+                    None => {
+                        put_miss.execute(params![p, requested.to_string(), at])?;
+                    }
                 }
-            }
-            // A record without any identifier can't be found again; skip it.
-            None if record.is_some() => {}
-            None => {
-                tx.execute(
-                    "INSERT OR REPLACE INTO miss (provider, work_id, stored_at) VALUES (?1, ?2, ?3)",
-                    params![p, requested, at],
-                )?;
             }
         }
         tx.commit()?;

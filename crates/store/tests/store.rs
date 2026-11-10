@@ -1,7 +1,7 @@
 use std::time::Duration;
 
 use aspero_core::{FieldSet, Hit, Page, ProviderId, Raw, SearchQuery, SourceRecord, Work, WorkId};
-use aspero_store::{Cache, Derived, SqliteStore, StoreError};
+use aspero_store::{Cache, SqliteCache};
 use jiff::Timestamp;
 
 const OA: ProviderId = ProviderId::from_static("openalex");
@@ -31,9 +31,21 @@ fn record(ids: &[&str], title: &str) -> SourceRecord {
     )
 }
 
+fn get(
+    cache: &SqliteCache,
+    provider: &ProviderId,
+    key: &str,
+) -> Option<aspero_store::CachedLookup> {
+    cache
+        .get_lookups(provider, &[id(key)])
+        .unwrap()
+        .pop()
+        .unwrap()
+}
+
 #[test]
 fn a_record_is_found_by_every_identifier_it_asserts() {
-    let store = SqliteStore::open_in_memory().unwrap();
+    let cache = SqliteCache::open_in_memory().unwrap();
     let r = record(
         &[
             "W2626778328",
@@ -42,8 +54,9 @@ fn a_record_is_found_by_every_identifier_it_asserts() {
         ],
         "Attention",
     );
-    store
-        .put_lookup(&OA, &id("arXiv:1706.03762v5"), Some(&r), at(10))
+    let requested = id("arXiv:1706.03762v5");
+    cache
+        .put_lookups(&OA, &[(&requested, Some(&r))], at(10))
         .unwrap();
 
     for key in [
@@ -52,53 +65,79 @@ fn a_record_is_found_by_every_identifier_it_asserts() {
         "10.48550/arxiv.1706.03762",
         "arXiv:1706.03762v5",
     ] {
-        let entry = store
-            .get_lookup(&OA, &id(key))
-            .unwrap()
-            .unwrap_or_else(|| panic!("{key}"));
+        let entry = get(&cache, &OA, key).unwrap_or_else(|| panic!("{key}"));
         assert_eq!(entry.value.as_ref(), Some(&r), "{key}");
         assert_eq!(entry.stored_at, at(10));
     }
-    assert!(
-        store.get_lookup(&CR, &id("W2626778328")).unwrap().is_none(),
-        "per provider"
+    assert!(get(&cache, &CR, "W2626778328").is_none(), "per provider");
+}
+
+#[test]
+fn batches_answer_every_id_in_order() {
+    let cache = SqliteCache::open_in_memory().unwrap();
+    let (a, b, missing, unknown) = (id("W1"), id("W2"), id("10.5555/nope"), id("W3"));
+    let (ra, rb) = (record(&["W1"], "A"), record(&["W2"], "B"));
+    cache
+        .put_lookups(
+            &OA,
+            &[(&a, Some(&ra)), (&missing, None), (&b, Some(&rb))],
+            at(0),
+        )
+        .unwrap();
+
+    let got = cache
+        .get_lookups(&OA, &[b.clone(), unknown, missing, a])
+        .unwrap();
+    let summary: Vec<Option<Option<String>>> = got
+        .iter()
+        .map(|e| {
+            e.as_ref()
+                .map(|e| e.value.as_ref().and_then(|r| r.work.title.clone()))
+        })
+        .collect();
+    assert_eq!(
+        summary,
+        [
+            Some(Some("B".into())),
+            None,
+            Some(None),
+            Some(Some("A".into()))
+        ]
     );
 }
 
 #[test]
-fn misses_are_cached_and_cleared_by_a_later_find() {
-    let store = SqliteStore::open_in_memory().unwrap();
+fn a_later_find_replaces_a_cached_miss() {
+    let cache = SqliteCache::open_in_memory().unwrap();
     let doi = id("10.5555/aspero-does-not-exist");
-    store.put_lookup(&CR, &doi, None, at(0)).unwrap();
-    let entry = store.get_lookup(&CR, &doi).unwrap().unwrap();
-    assert_eq!(entry.value, None);
+    cache.put_lookups(&CR, &[(&doi, None)], at(0)).unwrap();
+    assert_eq!(
+        get(&cache, &CR, "10.5555/aspero-does-not-exist")
+            .unwrap()
+            .value,
+        None
+    );
 
-    store
-        .put_lookup(
-            &CR,
-            &doi,
-            Some(&record(&["10.5555/aspero-does-not-exist"], "Now real")),
-            at(5),
-        )
+    let now_real = record(&["10.5555/aspero-does-not-exist"], "Now real");
+    cache
+        .put_lookups(&CR, &[(&doi, Some(&now_real))], at(5))
         .unwrap();
     assert!(
-        store
-            .get_lookup(&CR, &doi)
-            .unwrap()
+        get(&cache, &CR, "10.5555/aspero-does-not-exist")
             .unwrap()
             .value
             .is_some()
     );
-    assert_eq!(store.stats().unwrap().misses, 0);
+    assert_eq!(cache.stats().unwrap().misses, 0);
 }
 
 #[test]
 fn freshness_is_judged_from_stored_at() {
-    let store = SqliteStore::open_in_memory().unwrap();
-    store
-        .put_lookup(&OA, &id("W1"), Some(&record(&["W1"], "x")), at(0))
+    let cache = SqliteCache::open_in_memory().unwrap();
+    cache
+        .put_lookups(&OA, &[(&id("W1"), Some(&record(&["W1"], "x")))], at(0))
         .unwrap();
-    let entry = store.get_lookup(&OA, &id("W1")).unwrap().unwrap();
+    let entry = get(&cache, &OA, "W1").unwrap();
     let day = Duration::from_secs(86_400);
     assert!(entry.is_fresh(at(3600), day));
     assert!(!entry.is_fresh(at(2 * 86_400), day));
@@ -106,7 +145,7 @@ fn freshness_is_judged_from_stored_at() {
 
 #[test]
 fn search_pages_round_trip_by_exact_query() {
-    let store = SqliteStore::open_in_memory().unwrap();
+    let cache = SqliteCache::open_in_memory().unwrap();
     let mut query = SearchQuery::new("attention is all you need");
     query.page.limit = 5;
     let page = Page::new(
@@ -114,72 +153,51 @@ fn search_pages_round_trip_by_exact_query() {
         Some(3_384_260),
         None,
     );
-    store.put_search(&OA, &query, &page, at(0)).unwrap();
+    cache.put_search(&OA, &query, &page, at(0)).unwrap();
 
-    assert_eq!(store.get_search(&OA, &query).unwrap().unwrap().value, page);
+    assert_eq!(cache.get_search(&OA, &query).unwrap().unwrap().value, page);
     query.page.limit = 10;
     assert!(
-        store.get_search(&OA, &query).unwrap().is_none(),
+        cache.get_search(&OA, &query).unwrap().is_none(),
         "different query"
-    );
-}
-
-#[test]
-fn derived_data_is_found_via_any_identifier_of_the_work() {
-    let store = SqliteStore::open_in_memory().unwrap();
-    let embedding = Derived {
-        kind: "embedding".into(),
-        producer: "specter2-proximity".into(),
-        version: "1".into(),
-        media_type: "application/x-f32le".into(),
-        content: [0.25f32, -1.0]
-            .iter()
-            .flat_map(|f| f.to_le_bytes())
-            .collect(),
-    };
-    store
-        .put_derived(&id("arXiv:1706.03762"), &embedding, at(0))
-        .unwrap();
-
-    let work_ids = [id("W2626778328"), id("arXiv:1706.03762")];
-    let found = store.get_derived(&work_ids, "embedding", None).unwrap();
-    assert_eq!(found.len(), 1);
-    assert_eq!(found[0].value, embedding);
-    assert!(
-        store
-            .get_derived(&work_ids, "embedding", Some("other"))
-            .unwrap()
-            .is_empty()
     );
 }
 
 #[test]
 fn a_cache_file_persists_and_clears() {
     let dir = tempfile::tempdir().unwrap();
-    let path = dir.path().join("nested").join("aspero.sqlite");
+    let path = dir.path().join("nested").join("cache.sqlite");
     {
-        let store = SqliteStore::open(&path).unwrap();
-        store
-            .put_lookup(&OA, &id("W1"), Some(&record(&["W1"], "kept")), at(0))
+        let cache = SqliteCache::open(&path).unwrap();
+        cache
+            .put_lookups(&OA, &[(&id("W1"), Some(&record(&["W1"], "kept")))], at(0))
             .unwrap();
     }
-    let store = SqliteStore::open(&path).unwrap();
-    assert_eq!(store.stats().unwrap().records, 1);
-    store.clear().unwrap();
-    assert_eq!(store.stats().unwrap(), Default::default());
+    let cache = SqliteCache::open(&path).unwrap();
+    assert_eq!(cache.stats().unwrap().records, 1);
+    cache.clear().unwrap();
+    assert_eq!(cache.stats().unwrap(), Default::default());
 }
 
 #[test]
-fn refuses_a_cache_from_a_newer_aspero() {
+fn a_cache_from_another_schema_version_is_rebuilt() {
     let dir = tempfile::tempdir().unwrap();
-    let path = dir.path().join("aspero.sqlite");
-    drop(SqliteStore::open(&path).unwrap());
-    rusqlite::Connection::open(&path)
-        .unwrap()
-        .pragma_update(None, "user_version", 99)
+    let path = dir.path().join("cache.sqlite");
+    {
+        let cache = SqliteCache::open(&path).unwrap();
+        cache
+            .put_lookups(&OA, &[(&id("W1"), Some(&record(&["W1"], "old")))], at(0))
+            .unwrap();
+    }
+    {
+        let conn = rusqlite::Connection::open(&path).unwrap();
+        conn.execute_batch("CREATE TABLE from_the_future (x);")
+            .unwrap();
+        conn.pragma_update(None, "user_version", 99).unwrap();
+    }
+    let cache = SqliteCache::open(&path).unwrap();
+    assert_eq!(cache.stats().unwrap(), Default::default());
+    cache
+        .put_lookups(&OA, &[(&id("W1"), Some(&record(&["W1"], "new")))], at(0))
         .unwrap();
-    assert!(matches!(
-        SqliteStore::open(&path),
-        Err(StoreError::TooNew { found: 99, .. })
-    ));
 }

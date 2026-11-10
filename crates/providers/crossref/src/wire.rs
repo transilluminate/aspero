@@ -3,7 +3,9 @@
 //! Wire types are lenient: every field defaults and unknown fields are
 //! ignored (the full item is kept in `Raw`).
 
-use aspero_core::{Doi, FieldSet, PartialDate, Person, Raw, SourceRecord, Work, WorkId, WorkType};
+use aspero_core::{
+    Doi, FieldSet, PartialDate, Person, Raw, SourceRecord, Work, WorkId, WorkType, tidy_abstract,
+};
 use jiff::Timestamp;
 use serde::Deserialize;
 
@@ -121,7 +123,10 @@ impl WireWork {
         work.volume = self.volume;
         work.issue = self.issue;
         work.page = self.page;
-        work.abstract_text = self.abstract_jats.as_deref().map(strip_jats);
+        work.abstract_text = self
+            .abstract_jats
+            .as_deref()
+            .map(|jats| tidy_abstract(&strip_jats(jats)));
         work.url = self.url;
         work.cited_by_count = self.is_referenced_by_count;
         work

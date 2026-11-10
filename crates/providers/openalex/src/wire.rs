@@ -8,7 +8,7 @@ use std::collections::BTreeMap;
 
 use aspero_core::{
     ArxivId, Doi, FieldSet, OpenAlexId, PartialDate, Person, Pmcid, Pmid, Raw, SourceRecord, Work,
-    WorkId, WorkType,
+    WorkId, WorkType, tidy_abstract,
 };
 use jiff::Timestamp;
 use serde::Deserialize;
@@ -196,7 +196,10 @@ impl WireWork {
             (Some(first), _) => Some(first.clone()),
             (None, last) => last.clone(),
         };
-        work.abstract_text = self.abstract_inverted_index.as_ref().map(rebuild_abstract);
+        work.abstract_text = self
+            .abstract_inverted_index
+            .as_ref()
+            .map(|index| tidy_abstract(&rebuild_abstract(index)));
         work.url = self
             .primary_location
             .as_ref()

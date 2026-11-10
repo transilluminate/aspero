@@ -89,6 +89,25 @@ impl Person {
     }
 }
 
+/// Removes an "Abstract" heading that some sources leave at the start of
+/// abstract text (JATS `<title>Abstract</title>`, kept as a word by
+/// OpenAlex). Only a standalone heading: "Abstraction is…" is untouched.
+pub fn tidy_abstract(text: &str) -> String {
+    let text = text.trim();
+    for heading in ["Abstract", "ABSTRACT"] {
+        if let Some(rest) = text.strip_prefix(heading)
+            && rest.starts_with(|c: char| c.is_whitespace() || matches!(c, ':' | '.' | '-' | '—'))
+        {
+            return rest
+                .trim_start_matches(|c: char| {
+                    c.is_whitespace() || matches!(c, ':' | '.' | '-' | '—')
+                })
+                .to_owned();
+        }
+    }
+    text.to_owned()
+}
+
 /// A date known to year, month or day precision. Serialises as `2017`,
 /// `2017-06` or `2017-06-12`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -306,6 +325,20 @@ mod tests {
             })
         );
         assert_eq!(serde_json::from_value::<Work>(json).unwrap(), w);
+    }
+
+    #[test]
+    fn tidy_abstract_drops_only_a_standalone_heading() {
+        assert_eq!(
+            tidy_abstract("Abstract Proteins are essential"),
+            "Proteins are essential"
+        );
+        assert_eq!(tidy_abstract("ABSTRACT: We show"), "We show");
+        assert_eq!(
+            tidy_abstract("  Abstraction is useful"),
+            "Abstraction is useful"
+        );
+        assert_eq!(tidy_abstract("We show"), "We show");
     }
 
     #[test]

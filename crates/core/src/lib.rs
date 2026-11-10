@@ -5,6 +5,7 @@
 //! - [`record`]: [`SourceRecord`], one provider's view of one work.
 //! - [`provider`]: the [`Provider`] trait and its request/response types.
 //! - [`error`]: the shared [`Error`] contract.
+//! - [`matching`]: does a record match what a citation claims?
 //! - [`resilience`]: per-provider [`ResiliencePolicy`].
 //! - [`http`]: the [`HttpClient`] transport seam.
 //! - `testing` (feature): fixture replay for provider tests.
@@ -12,6 +13,7 @@
 pub mod error;
 pub mod http;
 pub mod id;
+pub mod matching;
 pub mod provider;
 pub mod record;
 pub mod resilience;
@@ -23,6 +25,7 @@ pub mod testing;
 pub use error::{Error, ErrorCategory, Result};
 pub use http::{HttpClient, HttpRequest, HttpResponse};
 pub use id::{ArxivId, CorpusId, Doi, IdError, IdKind, OpenAlexId, Pmcid, Pmid, S2PaperId, WorkId};
+pub use matching::{Agreement, Assessment, Claim, FieldCheck};
 pub use provider::{
     Capabilities, Cursor, Filter, Hit, Lookup, Page, PageReq, Provider, ProviderId, Response,
     SearchMode, SearchQuery, Usage, YearRange,

@@ -9,6 +9,7 @@ pub mod check;
 pub mod claim;
 pub mod lookup;
 pub mod resolve;
+pub mod scan;
 pub mod search;
 pub mod verify;
 

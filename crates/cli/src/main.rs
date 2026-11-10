@@ -136,8 +136,10 @@ fn engine(cache: Option<Arc<SqliteCache>>) -> Result<Engine, Failure> {
 }
 
 async fn run(cli: Cli, out: Out) -> Result<Exit, Failure> {
-    if let Command::Cache { action } = cli.command {
-        return cmd::cache::run(cache_path()?, action, out);
+    match cli.command {
+        Command::Cache { action } => return cmd::cache::run(cache_path()?, action, out),
+        Command::Scan { files } => return cmd::scan::run(files, out),
+        _ => {}
     }
     let engine = engine(open_cache(cli.global.no_cache))?;
     match cli.command {
@@ -150,6 +152,6 @@ async fn run(cli: Cli, out: Out) -> Result<Exit, Failure> {
             fail_on,
             limit,
         } => cmd::check::run(&engine, path, fail_on, limit, out).await,
-        Command::Cache { .. } => unreachable!("handled above"),
+        Command::Cache { .. } | Command::Scan { .. } => unreachable!("handled above"),
     }
 }

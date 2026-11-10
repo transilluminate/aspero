@@ -14,7 +14,7 @@ use crate::exit::Exit;
 use crate::output::{self, Level};
 
 pub async fn run(engine: &Engine, ids: Vec<String>, out: Out) -> Result<Exit, Failure> {
-    let inputs = inputs(ids)?;
+    let (inputs, from) = inputs(ids)?;
     let parsed: Vec<Result<WorkId, IdError>> = inputs.iter().map(|s| s.parse()).collect();
     let valid: Vec<WorkId> = parsed
         .iter()
@@ -52,8 +52,8 @@ pub async fn run(engine: &Engine, ids: Vec<String>, out: Out) -> Result<Exit, Fa
     // parse: a request is never silently dropped.
     let mut exit = Exit::Ok;
     let mut items = Vec::new();
-    for (input, parsed) in inputs.iter().zip(&parsed) {
-        let (item, item_exit) = match parsed {
+    for ((input, parsed), from) in inputs.iter().zip(&parsed).zip(from) {
+        let (mut item, item_exit) = match parsed {
             Err(e) => (
                 json!({"input": input, "status": "invalid", "error": e.to_string()}),
                 Exit::Usage,
@@ -70,6 +70,9 @@ pub async fn run(engine: &Engine, ids: Vec<String>, out: Out) -> Result<Exit, Fa
                 (item, exit)
             }
         };
+        if let Some(from) = from {
+            item["from"] = from;
+        }
         exit = exit.worst(item_exit);
         items.push(item);
     }
@@ -163,10 +166,13 @@ async fn retry_with_punctuation(
 }
 
 /// Arguments, or one identifier per stdin line when given none (or `-`).
-/// Blank lines and `#` comments are skipped.
-fn inputs(ids: Vec<String>) -> Result<Vec<String>, Failure> {
+/// Blank lines and `#` comments are skipped. A JSON object line (as from
+/// `aspero scan`) gives its `id`, and is echoed back as the result's
+/// `from`. Returns the inputs and, per input, that object.
+fn inputs(ids: Vec<String>) -> Result<(Vec<String>, Vec<Option<Value>>), Failure> {
     if !(ids.is_empty() || ids == ["-"]) {
-        return Ok(ids);
+        let from = vec![None; ids.len()];
+        return Ok((ids, from));
     }
     if std::io::stdin().is_terminal() {
         return Err(Failure::usage(
@@ -177,8 +183,14 @@ fn inputs(ids: Vec<String>) -> Result<Vec<String>, Failure> {
         .lines()
         .map(str::trim)
         .filter(|l| !l.is_empty() && !l.starts_with('#'))
-        .map(str::to_owned)
-        .collect())
+        .map(|line| match serde_json::from_str::<Value>(line) {
+            Ok(object @ Value::Object(_)) => {
+                let id = object["id"].as_str().unwrap_or(line).to_owned();
+                (id, Some(object))
+            }
+            _ => (line.to_owned(), None),
+        })
+        .unzip())
 }
 
 /// The engine result for each input, `None` for inputs that didn't parse.

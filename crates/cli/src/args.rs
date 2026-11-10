@@ -96,10 +96,11 @@ impl Format {
 pub enum Command {
     /// Look up works by identifier.
     #[command(after_help = "\
-Accepts DOIs, arXiv IDs, PMIDs, OpenAlex IDs and their URLs, bare or prefixed:
+Accepts DOIs, arXiv IDs, PMIDs, PMCIDs, NCBI Bookshelf IDs, ISBNs, OpenAlex
+IDs and their URLs, bare or prefixed:
   10.1038/nature14539   doi:10.1038/nature14539   https://doi.org/10.1038/nature14539
   arXiv:1706.03762v5    https://arxiv.org/abs/1706.03762
-  pmid:26017442         W2919115771
+  pmid:26017442         PMC6716493   NBK526056   W2919115771
 
 Bare digits are ambiguous; prefix them (pmid:, corpusid:).
 
@@ -120,6 +121,7 @@ JSON works:
 Examples:
   aspero lookup 10.1038/nature14539 arXiv:1706.03762
   cat dois.txt | aspero lookup -        # one identifier per line
+  aspero scan --format jsonl notes.md | aspero lookup -   # or JSON lines with an \"id\"
   aspero lookup --format jsonl W2919115771")]
     Lookup {
         /// Identifiers; `-` (or none, when piped) reads one per line from stdin.
@@ -217,6 +219,29 @@ Examples:
         /// Results per provider search.
         #[arg(long, default_value_t = 5)]
         limit: u32,
+    },
+
+    /// List the identifiers mentioned in documents, without looking them up.
+    #[command(after_help = "\
+Finds DOIs, PMIDs, PMCIDs, NCBI Bookshelf IDs (NBK…), arXiv IDs and ISBNs
+in text or Markdown: one record per mention, with file, line, column, the
+identifier, the text as written and its line for context. Which mentions
+matter is yours to decide; scan only says what is a valid identifier.
+
+Cleaned like pasted input: wrapping brackets, quotes and emphasis and
+trailing punctuation are dropped, brackets inside a DOI kept
+(10.1016/S0140-6736(10)60835-5). Markdown links and tables are split.
+DOIs, PMC… and NBK… count anywhere; PMIDs, ISBNs and arXiv IDs only when
+labelled (PMID: 123, ISBN 978-…), prefixed (arXiv:…) or as URLs. A DOI
+broken across lines is not found. Nothing is fetched.
+
+Examples:
+  aspero scan notes/*.md
+  aspero scan --format jsonl page.md | aspero lookup -    # results echo each mention as `from`
+  pdftotext paper.pdf - | aspero scan -")]
+    Scan {
+        /// Text or Markdown files; `-` (or none, when piped) reads stdin.
+        files: Vec<std::path::PathBuf>,
     },
 
     /// Inspect or empty the answer cache.

@@ -109,14 +109,17 @@ JSON works:
                shape with or without --full (which adds given and family)
   updates      notices about the work: [{\"kind\": \"retraction\", \"notice\":
                \"doi:...\", \"date\": \"...\", \"source\": \"...\"}]; kinds:
-               retraction, withdrawal, expression_of_concern, correction, …
+               retraction, withdrawal, expression_of_concern, correction,
+               new_version (superseded; the notice is the newer work), …
   update_to    for a notice itself, the works it updates: [{\"kind\",
                \"work\", \"date\", \"source\"}]
   open_access  whether a free, legal copy exists: {\"is_oa\": true,
                \"status\": gold|diamond|hybrid|bronze|green|closed, \"pdf_url\",
                \"url\", \"license\", \"version\", \"source\"}; absent if unknown
   `lookup --full` also asks Crossref for notices in both directions, and
-  other providers for open access when the first didn't say.
+  other providers for open access when the first didn't say. A superseded
+  work's result gains `latest`: the newest version, following the chain
+  (Cochrane .pub5 → .pub6 → .pub7).
 
 Examples:
   aspero lookup 10.1038/nature14539 arXiv:1706.03762

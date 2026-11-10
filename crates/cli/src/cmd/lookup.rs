@@ -46,7 +46,26 @@ pub async fn run(engine: &Engine, ids: Vec<String>, out: Out) -> Result<Exit, Fa
             merge_usage(&mut report.usage, &p, u);
         }
     }
-    let mut results = report.results.iter().zip(&abstracts);
+    // The latest version of each superseded work (Cochrane `.pubN`), one
+    // batched lookup per step along the chains.
+    let mut latest: Vec<Option<SourceRecord>> = vec![None; report.results.len()];
+    if out.full {
+        let found: Vec<(usize, &SourceRecord)> = report
+            .results
+            .iter()
+            .enumerate()
+            .filter_map(|(i, r)| Some((i, r.record.as_ref()?)))
+            .collect();
+        let records: Vec<&SourceRecord> = found.iter().map(|(_, r)| *r).collect();
+        let versions = engine.latest_versions(&records).await;
+        for ((i, _), record) in found.iter().zip(versions.latest) {
+            latest[*i] = record;
+        }
+        for (p, u) in versions.usage {
+            merge_usage(&mut report.usage, &p, u);
+        }
+    }
+    let mut results = report.results.iter().zip(&abstracts).zip(&latest);
 
     // Every input gets an item, in input order, including ones that didn't
     // parse: a request is never silently dropped.
@@ -59,13 +78,16 @@ pub async fn run(engine: &Engine, ids: Vec<String>, out: Out) -> Result<Exit, Fa
                 Exit::Usage,
             ),
             Ok(_) => {
-                let (result, found) = results.next().expect("one result per valid id");
+                let ((result, found), newest) = results.next().expect("one result per valid id");
                 let (mut item, exit) = item(input, result, out.full);
                 if retried.contains(&result.id) {
                     item["note"] = json!("found with the trailing punctuation kept");
                 }
                 if let Some(found) = found {
                     output::set_abstract(&mut item["work"], found.as_ref());
+                }
+                if let Some(newest) = newest {
+                    item["latest"] = output::work(newest, false);
                 }
                 (item, exit)
             }
@@ -278,14 +300,10 @@ fn row(item: &Value, result: Option<&LookupResult>) -> Vec<comfy_table::Cell> {
                 Some(served) => format!("{} ({served})", record.source),
                 None => record.source.to_string(),
             };
-            let mut status_text = status;
-            if let Some(r) = w.retraction() {
-                status_text = format!("found\n{}", describe_update(r));
-            }
-            let level = if w.retraction().is_some() {
-                Level::Error
-            } else {
-                Level::Good
+            let (status_text, level) = match (w.retraction(), w.newer_version()) {
+                (Some(r), _) => (format!("found\n{}", describe_update(r)), Level::Error),
+                (None, Some(newer)) => (format!("found\nsuperseded by {newer}"), Level::Warning),
+                (None, None) => (status, Level::Good),
             };
             vec![
                 Cell::new(label),
@@ -327,8 +345,17 @@ pub fn text(item: &Value, result: Option<&LookupResult>) -> String {
             .as_str()
             .map(|s| format!(" ({s})"))
             .unwrap_or_default();
+        let latest = match &item["latest"] {
+            Value::Null => String::new(),
+            l => format!(
+                "\n  latest version: {} \"{}\" ({})",
+                l["ids"][0].as_str().unwrap_or("?"),
+                l["title"].as_str().unwrap_or("(untitled)"),
+                l["issued"].as_str().unwrap_or("?"),
+            ),
+        };
         return format!(
-            "{label}  found via {}{served}\n{}\n",
+            "{label}  found via {}{served}\n{}{latest}\n",
             record.source,
             output::work_text(record, "  ")
         );

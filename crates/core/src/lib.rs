@@ -6,15 +6,22 @@
 //! - [`provider`]: the [`Provider`] trait and its request/response types.
 //! - [`error`]: the shared [`Error`] contract.
 //! - [`resilience`]: per-provider [`ResiliencePolicy`].
+//! - [`http`]: the [`HttpClient`] transport seam.
+//! - `testing` (feature): fixture replay for provider tests.
 
 pub mod error;
+pub mod http;
 pub mod id;
 pub mod provider;
 pub mod record;
 pub mod resilience;
 pub mod work;
 
+#[cfg(feature = "testing")]
+pub mod testing;
+
 pub use error::{Error, ErrorCategory, Result};
+pub use http::{HttpClient, HttpRequest, HttpResponse};
 pub use id::{ArxivId, CorpusId, Doi, IdError, IdKind, OpenAlexId, Pmcid, Pmid, S2PaperId, WorkId};
 pub use provider::{
     Capabilities, Cursor, Filter, Lookup, Page, PageReq, Provider, ProviderId, Response,

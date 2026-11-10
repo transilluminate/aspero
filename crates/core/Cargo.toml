@@ -9,6 +9,10 @@ publish.workspace = true
 [lints]
 workspace = true
 
+[features]
+# Fixture replay helpers for provider crates' tests.
+testing = []
+
 [dependencies]
 async-trait.workspace = true
 jiff.workspace = true

@@ -1,7 +1,10 @@
 # Changelog
 
-## Unreleased
+## 0.3.0
 
+- **Breaking (library):** `IdKind::ALL` and `Field::ALL` are slices, so
+  future kinds and fields aren't breaking changes. (They were arrays whose
+  length the new NBK kind and open-access field changed.)
 - `open_access` on works: whether a free, legal copy exists, its PDF and
   page, licence, version and Unpaywall class (gold, diamond, hybrid,
   bronze, green, closed), from OpenAlex and Europe PMC. Lookup tables gain

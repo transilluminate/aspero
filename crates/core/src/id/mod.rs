@@ -19,6 +19,7 @@
 
 mod arxiv;
 mod doi;
+mod isbn;
 mod numeric;
 mod s2;
 mod syntax;
@@ -29,6 +30,7 @@ use std::str::FromStr;
 
 pub use arxiv::ArxivId;
 pub use doi::Doi;
+pub use isbn::Isbn;
 pub use numeric::{CorpusId, OpenAlexId, Pmcid, Pmid};
 pub use s2::S2PaperId;
 
@@ -46,10 +48,11 @@ pub enum IdKind {
     OpenAlex,
     S2Paper,
     CorpusId,
+    Isbn,
 }
 
 impl IdKind {
-    pub const ALL: [IdKind; 7] = [
+    pub const ALL: [IdKind; 8] = [
         IdKind::Doi,
         IdKind::Arxiv,
         IdKind::Pmid,
@@ -57,6 +60,7 @@ impl IdKind {
         IdKind::OpenAlex,
         IdKind::S2Paper,
         IdKind::CorpusId,
+        IdKind::Isbn,
     ];
 
     /// The lowercase prefix used in `kind:value` form.
@@ -69,6 +73,7 @@ impl IdKind {
             IdKind::OpenAlex => "openalex",
             IdKind::S2Paper => "s2",
             IdKind::CorpusId => "corpusid",
+            IdKind::Isbn => "isbn",
         }
     }
 
@@ -128,6 +133,7 @@ pub enum WorkId {
     OpenAlex(OpenAlexId),
     S2Paper(S2PaperId),
     CorpusId(CorpusId),
+    Isbn(Isbn),
 }
 
 impl WorkId {
@@ -140,6 +146,7 @@ impl WorkId {
             WorkId::OpenAlex(_) => IdKind::OpenAlex,
             WorkId::S2Paper(_) => IdKind::S2Paper,
             WorkId::CorpusId(_) => IdKind::CorpusId,
+            WorkId::Isbn(_) => IdKind::Isbn,
         }
     }
 
@@ -154,6 +161,7 @@ impl WorkId {
             IdKind::OpenAlex => WorkId::OpenAlex(input.parse()?),
             IdKind::S2Paper => WorkId::S2Paper(input.parse()?),
             IdKind::CorpusId => WorkId::CorpusId(input.parse()?),
+            IdKind::Isbn => WorkId::Isbn(input.parse()?),
         })
     }
 
@@ -173,6 +181,7 @@ impl WorkId {
             .or_else(|| try_kind(url, input, WorkId::OpenAlex))
             .or_else(|| try_kind(url, input, WorkId::S2Paper))
             .or_else(|| try_kind(url, input, WorkId::CorpusId))
+            .or_else(|| try_kind(url, input, WorkId::Isbn))
             .unwrap_or_else(|| Err(IdError::Unrecognised(input.to_owned())))
     }
 
@@ -189,10 +198,21 @@ impl WorkId {
         if s.starts_with(['W', 'w']) && all_digits(&s[1..]) {
             return WorkId::parse_as(IdKind::OpenAlex, input);
         }
+        // 13 digits from the book prefixes with a valid checksum, or a
+        // hyphenated form, can only be an ISBN; plain 10 digits might be.
+        let compact: String = s.chars().filter(|c| !matches!(c, '-' | ' ')).collect();
+        let book_prefix = compact.starts_with("978") || compact.starts_with("979");
+        if isbn::looks_like_isbn(s) && ((compact.len() == 13 && book_prefix) || s.contains('-')) {
+            return WorkId::parse_as(IdKind::Isbn, input);
+        }
         if all_digits(s) {
+            let mut candidates = vec![IdKind::Pmid, IdKind::CorpusId];
+            if isbn::looks_like_isbn(s) {
+                candidates.push(IdKind::Isbn);
+            }
             return Err(IdError::Ambiguous {
                 input: input.to_owned(),
-                candidates: vec![IdKind::Pmid, IdKind::CorpusId],
+                candidates,
             });
         }
         if s.len() == 40 && s.bytes().all(|b| b.is_ascii_hexdigit()) {
@@ -239,6 +259,7 @@ impl fmt::Display for WorkId {
             WorkId::OpenAlex(id) => id.fmt(f),
             WorkId::S2Paper(id) => id.fmt(f),
             WorkId::CorpusId(id) => id.fmt(f),
+            WorkId::Isbn(id) => id.fmt(f),
         }
     }
 }
@@ -263,6 +284,7 @@ impl_from_for_work_id!(
     OpenAlex(OpenAlexId),
     S2Paper(S2PaperId),
     CorpusId(CorpusId),
+    Isbn(Isbn),
 );
 
 #[cfg(test)]

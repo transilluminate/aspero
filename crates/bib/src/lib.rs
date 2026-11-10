@@ -89,6 +89,19 @@ fn entry(e: &biblatex::Entry) -> BibEntry {
             Err(_) => {}
         }
     }
+    // `isbn` may list several, separated by commas or spaces.
+    if let Some(isbns) = field("isbn") {
+        for raw in isbns
+            .split([',', ';'])
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+        {
+            match raw.parse::<aspero_core::Isbn>() {
+                Ok(isbn) => push(&mut ids, WorkId::Isbn(isbn)),
+                Err(_) => notes.push(format!("isbn {raw:?} is not a valid ISBN")),
+            }
+        }
+    }
     if let Some(url) = field("url") {
         for id in find_ids(&url) {
             push(&mut ids, id);
@@ -148,6 +161,12 @@ mod tests {
   url   = {https://arxiv.org/abs/1412.6980v9},
 }
 
+@book{goodfellow2016,
+  author    = {Goodfellow, Ian and Bengio, Yoshua and Courville, Aaron},
+  title     = {Deep Learning}, publisher = {MIT Press}, year = {2016},
+  isbn      = {978-0-262-03561-3, 0262035619}
+}
+
 @misc{website,
   howpublished = {\url{https://example.org}},
 }
@@ -157,7 +176,23 @@ mod tests {
     fn entries_become_claims() {
         let entries = parse(BIB).unwrap();
         let keys: Vec<&str> = entries.iter().map(|e| e.key.as_str()).collect();
-        assert_eq!(keys, ["lecun2015", "vaswani2017", "broken", "website"]);
+        assert_eq!(
+            keys,
+            [
+                "lecun2015",
+                "vaswani2017",
+                "broken",
+                "goodfellow2016",
+                "website"
+            ]
+        );
+        let book = &entries[3];
+        assert_eq!(book.claim.ids[0].to_string(), "isbn:9780262035613");
+        assert_eq!(
+            book.notes,
+            ["isbn \"0262035619\" is not a valid ISBN"],
+            "bad checksum noted"
+        );
 
         let lecun = &entries[0].claim;
         assert_eq!(lecun.title.as_deref(), Some("Deep Learning"));
@@ -182,7 +217,7 @@ mod tests {
         let broken = &entries[2];
         assert_eq!(broken.notes, ["doi field \"not-a-doi\" is not a valid DOI"]);
         assert_eq!(broken.claim.ids[0].to_string(), "arxiv:1412.6980v9");
-        assert!(!entries[3].is_checkable());
+        assert!(!entries[4].is_checkable());
     }
 
     #[test]

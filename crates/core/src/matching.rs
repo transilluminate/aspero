@@ -480,12 +480,25 @@ pub fn search_terms(text: &str) -> String {
 /// quotes and sentence punctuation are ignored.
 pub fn find_ids(text: &str) -> Vec<WorkId> {
     let mut found: Vec<WorkId> = Vec::new();
+    // An ISBN only counts when labelled ("ISBN 978-…"): in prose, a bare
+    // run of digits could be anything.
+    let mut isbn_label = false;
     for token in text.split(|c: char| c.is_whitespace() || matches!(c, '<' | '>' | '"' | '\'')) {
         let token = token
             .trim_start_matches(['(', '[', '{'])
-            .trim_end_matches(['.', ',', ';', ':', ')', ']', '}']);
+            .trim_end_matches(['.', ',', ';', ')', ']', '}']);
         let lower = token.to_ascii_lowercase();
-        let candidate = if let Some(at) = lower.find("10.") {
+        let labelled = std::mem::replace(
+            &mut isbn_label,
+            matches!(
+                lower.trim_end_matches(':'),
+                "isbn" | "isbn-13" | "isbn-10" | "isbn13" | "isbn10"
+            ),
+        );
+        let token = token.trim_end_matches(':');
+        let candidate = if labelled || lower.starts_with("isbn") {
+            WorkId::parse_as(crate::id::IdKind::Isbn, token).ok()
+        } else if let Some(at) = lower.find("10.") {
             // A DOI, possibly inside a URL or after "doi:".
             WorkId::parse_as(crate::id::IdKind::Doi, &token[at..]).ok()
         } else if lower.starts_with("arxiv:") || lower.contains("arxiv.org/") {
@@ -745,6 +758,13 @@ mod tests {
                 "arxiv:1706.03762v5",
                 "arxiv:hep-th/9901001"
             ]
+        );
+        let book = "Goodfellow I, et al. Deep Learning. MIT Press; 2016. ISBN 978-0-262-03561-3. Also ISBN-10: 0262035618.";
+        let ids: Vec<String> = find_ids(book).iter().map(ToString::to_string).collect();
+        assert_eq!(ids, ["isbn:9780262035613"], "both forms are one book");
+        assert!(
+            find_ids("pages 9780262035613 and 2016").is_empty(),
+            "unlabelled digits ignored"
         );
         assert!(find_ids("Published in 2017, pages 10-20.").is_empty());
     }

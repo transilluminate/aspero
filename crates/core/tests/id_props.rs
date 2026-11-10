@@ -115,11 +115,24 @@ proptest! {
     }
 
     #[test]
-    fn bare_digits_never_guess_a_kind(n in 1u64..u64::MAX) {
-        prop_assert!(
-            matches!(n.to_string().parse::<WorkId>(), Err(IdError::Ambiguous { .. })),
-            "expected Ambiguous error"
-        );
+    fn bare_digits_never_guess_a_kind_unless_an_isbn_13(n in 1u64..u64::MAX) {
+        let digits = n.to_string();
+        match digits.parse::<WorkId>() {
+            Err(IdError::Ambiguous { .. }) => {}
+            Ok(WorkId::Isbn(isbn)) => {
+                prop_assert_eq!(isbn.as_str(), digits.as_str());
+                prop_assert!(digits.starts_with("978") || digits.starts_with("979"));
+            }
+            other => prop_assert!(false, "{digits}: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn isbn_13s_are_recognised_bare(body in 0u64..1_000_000_000, prefix in prop::sample::select(vec!["978", "979"])) {
+        let isbn = isbn13(prefix, body);
+        let parsed = isbn.parse::<WorkId>().unwrap();
+        prop_assert_eq!(parsed.kind(), IdKind::Isbn);
+        prop_assert_eq!(parsed.to_string(), format!("isbn:{isbn}"));
     }
 
     /// The core idempotence property, over arbitrary input: whatever parses
@@ -145,12 +158,24 @@ proptest! {
             IdKind::Pmcid => format!("PMC{n}"),
             IdKind::OpenAlex => format!("W{n}"),
             IdKind::S2Paper => format!("{n:040x}"),
+            IdKind::Isbn => isbn13("978", n % 1_000_000_000),
             _ => n.to_string(),
         };
         let id = WorkId::parse_as(kind, &input).unwrap();
         prop_assert_eq!(id.kind(), kind);
         assert_round_trips(&id)?;
     }
+}
+
+/// A checksum-valid ISBN-13 from a prefix and nine digits.
+fn isbn13(prefix: &str, body: u64) -> String {
+    let first12 = format!("{prefix}{body:09}");
+    let sum: u32 = first12
+        .bytes()
+        .enumerate()
+        .map(|(i, b)| u32::from(b - b'0') * if i % 2 == 0 { 1 } else { 3 })
+        .sum();
+    format!("{first12}{}", (10 - sum % 10) % 10)
 }
 
 fn assert_round_trips(id: &WorkId) -> Result<(), TestCaseError> {

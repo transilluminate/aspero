@@ -106,6 +106,8 @@ path (…/10.3389/fneur.2019.01343/full, page suffixes dropped):
 Bare digits are ambiguous; prefix them (pmid:, corpusid:).
 
 JSON works:
+  canonical    the work's key, the same whichever of its IDs found it (a
+               DOI, else arXiv, PMID, PMCID, …): dedupe works on it
   authors      [{\"name\": \"Yann LeCun\", \"orcid\": \"...\"}, ...], the same
                shape with or without --full (which adds given and family)
   updates      notices about the work: [{\"kind\": \"retraction\", \"notice\":
@@ -115,6 +117,10 @@ JSON works:
                Rows sharing a `notice` are one event reported by several
                sources (or found via several identifiers): dedupe on it. A
                notice that is itself flagged names itself as `notice`.
+               With --full, `date` is when the notice appeared (online or
+               print, whichever first); `deposited` is the date the source
+               gave, when later (often the issue's).
+  type         CSL types; notices themselves are \"erratum\" or \"retraction\"
   update_to    for a notice itself, the works it updates: [{\"kind\",
                \"work\", \"date\", \"source\"}]
   open_access  whether a free, legal copy exists: {\"is_oa\": true,
@@ -125,7 +131,10 @@ JSON works:
   `lookup --full` also asks Crossref for notices in both directions, and
   other providers for open access when the first didn't say. A superseded
   work's result gains `latest`: the newest version, following the chain
-  (Cochrane .pub5 → .pub6 → .pub7).
+  (Cochrane .pub5 → .pub6 → .pub7). A record that contradicts the DOI's
+  registry (Crossref) on year, volume, page or title gains `disagreements`:
+  [{\"field\": \"page\", \"value\": \"1541\", \"crossref\": \"1823\"}]; aggregators
+  occasionally merge two works into one record.
 
 Examples:
   aspero lookup 10.1038/nature14539 arXiv:1706.03762

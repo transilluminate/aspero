@@ -22,9 +22,11 @@ pub async fn run(engine: &Engine, ids: Vec<String>, out: Out) -> Result<Exit, Fa
         .collect();
     let mut report = engine.lookup(&valid, FieldSet::DEFAULT).await;
     let retried = retry_with_punctuation(engine, &inputs, &parsed, &mut report).await;
+    let mut conflicts = vec![Vec::new(); report.results.len()];
     if out.full {
         engine.add_notices(&mut report).await;
         engine.add_open_access(&mut report).await;
+        conflicts = engine.cross_check(&mut report).await;
     }
 
     // Abstracts for the works found, one batched call; None per result
@@ -65,7 +67,12 @@ pub async fn run(engine: &Engine, ids: Vec<String>, out: Out) -> Result<Exit, Fa
             merge_usage(&mut report.usage, &p, u);
         }
     }
-    let mut results = report.results.iter().zip(&abstracts).zip(&latest);
+    let mut results = report
+        .results
+        .iter()
+        .zip(&abstracts)
+        .zip(&latest)
+        .zip(&conflicts);
 
     // Every input gets an item, in input order, including ones that didn't
     // parse: a request is never silently dropped.
@@ -78,7 +85,8 @@ pub async fn run(engine: &Engine, ids: Vec<String>, out: Out) -> Result<Exit, Fa
                 Exit::Usage,
             ),
             Ok(_) => {
-                let ((result, found), newest) = results.next().expect("one result per valid id");
+                let (((result, found), newest), conflicts) =
+                    results.next().expect("one result per valid id");
                 let (mut item, exit) = item(input, result, out.full);
                 if retried.contains(&result.id) {
                     item["note"] = json!("found with the trailing punctuation kept");
@@ -88,6 +96,19 @@ pub async fn run(engine: &Engine, ids: Vec<String>, out: Out) -> Result<Exit, Fa
                 }
                 if let Some(newest) = newest {
                     item["latest"] = output::work(newest, false);
+                }
+                if !conflicts.is_empty() {
+                    let list: Vec<Value> = conflicts
+                        .iter()
+                        .map(|d| {
+                            json!({
+                                "field": d.field,
+                                "value": d.value,
+                                d.registry.as_str(): d.registry_value,
+                            })
+                        })
+                        .collect();
+                    item["disagreements"] = json!(list);
                 }
                 (item, exit)
             }
@@ -354,8 +375,33 @@ pub fn text(item: &Value, result: Option<&LookupResult>) -> String {
                 l["issued"].as_str().unwrap_or("?"),
             ),
         };
+        let conflicts: Vec<String> = item["disagreements"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .map(|d| {
+                let registry = d
+                    .as_object()
+                    .and_then(|o| o.keys().find(|k| !matches!(k.as_str(), "field" | "value")));
+                let theirs = registry
+                    .map(|k| d[k].as_str().unwrap_or("?"))
+                    .unwrap_or("?");
+                format!(
+                    "{} {} (vs {theirs})",
+                    d["field"].as_str().unwrap_or("?"),
+                    d["value"].as_str().unwrap_or("?")
+                )
+            })
+            .collect();
+        let conflicts = match conflicts.is_empty() {
+            true => String::new(),
+            false => format!(
+                "\n  ⚠ the DOI's registry disagrees: {}",
+                conflicts.join("; ")
+            ),
+        };
         return format!(
-            "{label}  found via {}{served}\n{}{latest}\n",
+            "{label}  found via {}{served}\n{}{latest}{conflicts}\n",
             record.source,
             output::work_text(record, "  ")
         );

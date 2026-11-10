@@ -21,6 +21,10 @@ pub fn work(record: &SourceRecord, full: bool) -> Value {
     let mut out = Map::new();
     out.insert("source".into(), json!(record.source));
     out.insert("ids".into(), json!(record.ids));
+    // One key per work, whichever identifier found it: for deduping.
+    if let Some(id) = aspero_core::canonical(&record.ids) {
+        out.insert("canonical".into(), json!(id));
+    }
     let mut put = |key: &str, value: Option<Value>| {
         if let Some(v) = value {
             out.insert(key.into(), v);
@@ -214,6 +218,7 @@ pub fn candidate(c: &Candidate, full: bool) -> Value {
         .collect();
     let mut work = work(&c.record, full);
     work["ids"] = json!(c.ids);
+    work["canonical"] = json!(aspero_core::canonical(&c.ids));
     if !c.updates.is_empty() {
         work["updates"] = json!(c.updates);
     }
@@ -450,6 +455,7 @@ mod tests {
             json!({
                 "source": "crossref",
                 "ids": ["doi:10.1038/nature14539"],
+                "canonical": "doi:10.1038/nature14539",
                 "title": "Deep learning",
                 "authors": [
                     {"name": "Yann LeCun"},

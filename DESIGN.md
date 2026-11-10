@@ -223,9 +223,8 @@ fixture recorded with different parameters once hid a ranking bug.
   serves). Uses: ranking snowballed sets, `related`, watches,
   preprint↔published suggestions. Vectors as BLOBs; brute-force cosine is
   fine at personal scale.
-- **Full text** via a text-extractor seam filling derived data (any tool;
-  rs-cogniste fits), after fetching legal OA PDFs (Unpaywall, arXiv, Europe
-  PMC).
+- **Full text** via a text-extractor seam filling derived data (any tool),
+  after fetching legal OA PDFs (Unpaywall, arXiv, Europe PMC).
 - **`check --fix`**: write suggested DOIs and corrections back to the .bib.
 - **Preprint since published**: suggest the journal version of arXiv
   entries (OpenAlex locations, Crossref relations).

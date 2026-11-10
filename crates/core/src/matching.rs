@@ -182,12 +182,10 @@ pub fn assess(claim: &Claim, record: &SourceRecord) -> Assessment {
                 .map(|y| (y - actual).unsigned_abs())
                 .min()
                 .unwrap_or(u16::MAX);
-            // Off by one is common: online-first vs print, or preprint vs published.
-            FieldCheck::scored(match delta {
-                0 => 1.0,
-                1 => 0.5,
-                _ => 0.0,
-            })
+            // Halves per year off: off by one is common (online-first vs
+            // print, preprint vs published) and counts as partial; two or
+            // more is a mismatch, but a nearer year still ranks higher.
+            FieldCheck::scored(0.5f64.powi(i32::from(delta.min(30))))
         }
         _ => FieldCheck::UNKNOWN,
     };
@@ -361,14 +359,26 @@ impl Normalised {
         present as f64 / title_words.len() as f64
     }
 
-    /// 0.6 for the first author's family name appearing, 0.4 for the share
-    /// of the first few that appear.
+    /// Citation styles routinely list only the first author or two ("Vaswani
+    /// et al."), so the first author's family name appearing is a match on
+    /// its own (0.9), with the next authors a small bonus. Without the first
+    /// author, later names count for at most half.
     fn author_coverage(&self, families: &[String]) -> f64 {
-        let first = &families[..families.len().min(AUTHORS_COMPARED)];
-        let present = |f: &str| self.padded.contains(&format!(" {f} "));
-        let first_present = first.first().is_some_and(|f| present(f));
-        let share = first.iter().filter(|f| present(f)).count() as f64 / first.len() as f64;
-        0.6 * f64::from(u8::from(first_present)) + 0.4 * share
+        let present = |f: &String| self.padded.contains(&format!(" {f} "));
+        let Some((first, rest)) = families.split_first() else {
+            return 0.0;
+        };
+        let rest = &rest[..rest.len().min(AUTHORS_COMPARED - 1)];
+        let rest_share = if rest.is_empty() {
+            1.0
+        } else {
+            rest.iter().filter(|f| present(f)).count() as f64 / rest.len() as f64
+        };
+        if present(first) {
+            0.9 + 0.1 * rest_share
+        } else {
+            0.5 * rest_share
+        }
     }
 
     /// Four-digit numbers that look like publication years.
@@ -510,6 +520,35 @@ mod tests {
         let off_by_one = assess(&claim, &attention(&[], 2017));
         assert_eq!(off_by_one.year.agreement, Agreement::Partial);
         assert!(off_by_one.confidence >= PLAUSIBLE);
+    }
+
+    #[test]
+    fn first_author_alone_matches_but_a_missing_first_author_does_not() {
+        let families = [
+            "vaswani".to_owned(),
+            "shazeer".to_owned(),
+            "parmar".to_owned(),
+        ];
+        let etal = Normalised::new("Vaswani et al. Attention is all you need");
+        let others = Normalised::new("Shazeer N, Parmar N. Attention is all you need");
+        assert_eq!(
+            FieldCheck::scored(etal.author_coverage(&families)).agreement,
+            Agreement::Match
+        );
+        assert_eq!(
+            FieldCheck::scored(others.author_coverage(&families)).agreement,
+            Agreement::Partial
+        );
+    }
+
+    #[test]
+    fn nearer_years_score_higher_even_when_both_are_wrong() {
+        let claim =
+            Claim::from_text("Vaswani A, Shazeer N. Attention is all you need. NeurIPS 2019.");
+        let real = assess(&claim, &attention(&[], 2017));
+        let lookalike = assess(&claim, &attention(&[], 2025));
+        assert_eq!(real.year.agreement, Agreement::Mismatch);
+        assert!(real.confidence > lookalike.confidence);
     }
 
     #[test]

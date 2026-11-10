@@ -13,13 +13,13 @@ mod wire;
 use std::sync::Arc;
 use std::time::Duration;
 
+use aspero_core::http::path_segment;
 use aspero_core::{
     Capabilities, Cursor, Doi, Error, FieldSet, Filter, Hit, HttpClient, HttpRequest, HttpResponse,
     IdKind, Lookup, Page, PageReq, Provider, ProviderId, Raw, ResiliencePolicy, Response, Result,
     SearchMode, SearchQuery, SourceRecord, Usage, WorkId, WorkType,
 };
 use async_trait::async_trait;
-use percent_encoding::{AsciiSet, CONTROLS, utf8_percent_encode};
 use secrecy::{ExposeSecret, SecretString};
 
 use crate::wire::{ARXIV_DOI_PREFIX, WireList};
@@ -30,25 +30,6 @@ pub const DEFAULT_BASE_URL: &str = "https://api.openalex.org";
 
 /// OpenAlex's cap on `per-page` and on values OR-ed in one filter.
 const MAX_PAGE: u32 = 100;
-
-/// Characters escaped in a `/works/<key>` path segment. `/` and `:` stay
-/// literal: OpenAlex expects `doi:10.1038/nature14539` as written.
-const PATH_SEGMENT: &AsciiSet = &CONTROLS
-    .add(b' ')
-    .add(b'"')
-    .add(b'#')
-    .add(b'%')
-    .add(b'<')
-    .add(b'>')
-    .add(b'?')
-    .add(b'[')
-    .add(b'\\')
-    .add(b']')
-    .add(b'^')
-    .add(b'`')
-    .add(b'{')
-    .add(b'|')
-    .add(b'}');
 
 #[derive(Debug, Clone)]
 #[non_exhaustive]
@@ -117,7 +98,7 @@ impl OpenAlex {
     }
 
     async fn lookup_one(&self, key: &Key) -> Result<(Option<SourceRecord>, Option<Usage>)> {
-        let segment = utf8_percent_encode(&key.path_segment(), PATH_SEGMENT).to_string();
+        let segment = path_segment(&key.path_segment());
         let (resp, usage) = match self.send(self.works_url(&format!("/{segment}"))).await {
             Ok(ok) => ok,
             Err(Error::NotFound) => return Ok((None, None)),

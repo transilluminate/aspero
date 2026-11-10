@@ -125,6 +125,31 @@ impl HttpResponse {
     }
 }
 
+/// Characters escaped by [`path_segment`].
+const PATH_ESCAPES: &percent_encoding::AsciiSet = &percent_encoding::CONTROLS
+    .add(b' ')
+    .add(b'"')
+    .add(b'#')
+    .add(b'%')
+    .add(b'<')
+    .add(b'>')
+    .add(b'?')
+    .add(b'[')
+    .add(b'\\')
+    .add(b']')
+    .add(b'^')
+    .add(b'`')
+    .add(b'{')
+    .add(b'|')
+    .add(b'}');
+
+/// Escapes an identifier for use in a URL path, leaving `/` and `:` literal:
+/// APIs expect `/works/doi:10.1038/nature14539` as written, but DOIs may
+/// contain `#`, `?` or `<>`, which must not be taken as URL syntax.
+pub fn path_segment(s: &str) -> String {
+    percent_encoding::utf8_percent_encode(s, PATH_ESCAPES).to_string()
+}
+
 #[async_trait]
 pub trait HttpClient: Send + Sync {
     /// Sends one request. `Ok` for every HTTP status; `Err` only for transport
@@ -144,6 +169,18 @@ mod tests {
         let shown = format!("{req:?}");
         assert!(!shown.contains("s3cret"), "{shown}");
         assert!(shown.contains("application/json"));
+    }
+
+    #[test]
+    fn path_segment_keeps_doi_slashes_but_escapes_url_syntax() {
+        assert_eq!(
+            path_segment("doi:10.1038/nature14539"),
+            "doi:10.1038/nature14539"
+        );
+        assert_eq!(
+            path_segment("10.1002/(sici)1097<34::aid>3.0.co;2-#"),
+            "10.1002/(sici)1097%3C34::aid%3E3.0.co;2-%23"
+        );
     }
 
     #[test]

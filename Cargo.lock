@@ -54,7 +54,6 @@ dependencies = [
  "aspero-core",
  "async-trait",
  "jiff",
- "percent-encoding",
  "secrecy",
  "serde",
  "serde_json",

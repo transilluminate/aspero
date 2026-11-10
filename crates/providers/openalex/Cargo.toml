@@ -13,7 +13,6 @@ workspace = true
 aspero-core.workspace = true
 async-trait.workspace = true
 jiff.workspace = true
-percent-encoding.workspace = true
 secrecy.workspace = true
 serde.workspace = true
 serde_json.workspace = true

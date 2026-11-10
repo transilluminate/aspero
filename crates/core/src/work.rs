@@ -75,6 +75,11 @@ pub struct Update {
     /// Who reported it: "retraction-watch", "publisher", "openalex", ….
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub source: Option<String>,
+    /// The date the source gives for the update (Crossref's `updated`,
+    /// often the issue's), when the notice appeared earlier: `date` is then
+    /// the earliest known.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub deposited: Option<PartialDate>,
 }
 
 impl Update {
@@ -84,6 +89,7 @@ impl Update {
             notice: None,
             date: None,
             source: None,
+            deposited: None,
         }
     }
 }
@@ -203,6 +209,22 @@ impl Work {
     /// The first retraction or withdrawal notice, if any.
     pub fn retraction(&self) -> Option<&Update> {
         self.updates.iter().find(|u| u.kind.is_retraction())
+    }
+
+    /// Types a work that is itself a notice (it has `update_to`) as one:
+    /// `retraction` for retractions and withdrawals, `erratum` for other
+    /// notices, as OpenAlex names them. Registries type notices as plain
+    /// articles. New versions are works in their own right and keep theirs.
+    pub fn type_as_notice(&mut self) {
+        let kinds = || self.update_to.iter().map(|t| &t.kind);
+        let name = if kinds().any(UpdateKind::is_retraction) {
+            "retraction"
+        } else if kinds().any(|k| *k != UpdateKind::NewVersion) {
+            "erratum"
+        } else {
+            return;
+        };
+        self.work_type = Some(WorkType::Other(name.into()));
     }
 
     /// The newer version superseding this work, if one is known.

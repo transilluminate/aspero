@@ -161,6 +161,7 @@ impl WireWork {
             .iter()
             .filter_map(CrossrefUpdate::to_update_to)
             .collect();
+        work.type_as_notice();
         work
     }
 }

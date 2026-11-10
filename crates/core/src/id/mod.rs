@@ -243,6 +243,29 @@ impl WorkId {
     }
 }
 
+/// The identifier a work is best known by, the same whichever of its
+/// identifiers it was found through: a DOI (other than arXiv's DataCite
+/// one), then arXiv, PMID, PMCID, ISBN, NBK, any DOI, any other.
+pub fn canonical(ids: &[WorkId]) -> Option<&WorkId> {
+    let arxiv_doi = |id: &&WorkId| matches!(id, WorkId::Doi(d) if d.prefix() == "10.48550");
+    let of = |kind: IdKind| ids.iter().find(move |id| id.kind() == kind);
+    ids.iter()
+        .find(|id| id.kind() == IdKind::Doi && !arxiv_doi(id))
+        .or_else(|| {
+            [
+                IdKind::Arxiv,
+                IdKind::Pmid,
+                IdKind::Pmcid,
+                IdKind::Isbn,
+                IdKind::Nbk,
+                IdKind::Doi,
+            ]
+            .into_iter()
+            .find_map(of)
+        })
+        .or_else(|| ids.first())
+}
+
 impl FromStr for WorkId {
     type Err = IdError;
 
@@ -382,6 +405,32 @@ mod tests {
                 ..
             })
         ));
+    }
+
+    #[test]
+    fn canonical_ids_prefer_the_publisher_doi() {
+        let ids =
+            |list: &[&str]| -> Vec<WorkId> { list.iter().map(|s| parse(s).unwrap()).collect() };
+        let pick = |list: &[&str]| canonical(&ids(list)).map(ToString::to_string);
+        // Found by DOI (OpenAlex) or by PMCID (Europe PMC): the same key.
+        assert_eq!(
+            pick(&[
+                "openalex:W4211043869",
+                "doi:10.1016/s0140-6736(19)32233-0",
+                "pmid:31623894"
+            ]),
+            pick(&[
+                "pmid:31623894",
+                "pmcid:PMC6853170",
+                "doi:10.1016/s0140-6736(19)32233-0"
+            ]),
+        );
+        assert_eq!(
+            pick(&["doi:10.48550/arxiv.1706.03762", "arxiv:1706.03762"]).as_deref(),
+            Some("arxiv:1706.03762")
+        );
+        assert_eq!(pick(&["pmcid:PMC1", "pmid:2"]).as_deref(), Some("pmid:2"));
+        assert_eq!(pick(&[]), None);
     }
 
     #[test]

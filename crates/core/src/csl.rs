@@ -244,7 +244,7 @@ pub fn strip_markup(text: &str) -> String {
 impl CslItem {
     pub fn to_work(&self) -> Work {
         let first = |t: &Option<OneOrMany>| t.as_ref().and_then(|t| t.first()).map(str::to_owned);
-        Work {
+        let mut work = Work {
             title: first(&self.title),
             authors: self.author.iter().filter_map(CslName::person).collect(),
             issued: self
@@ -278,7 +278,9 @@ impl CslItem {
                 .collect(),
             other_years: Vec::new(),
             open_access: None,
-        }
+        };
+        work.type_as_notice();
+        work
     }
 }
 
@@ -368,6 +370,11 @@ mod tests {
         }))
         .to_work();
         assert!(w.updates.is_empty());
+        assert_eq!(
+            w.work_type.unwrap().as_csl(),
+            "erratum",
+            "a notice, not an article"
+        );
         let [target] = &w.update_to[..] else { panic!() };
         assert_eq!(target.kind, UpdateKind::Correction);
         assert_eq!(target.work.to_string(), "doi:10.1161/cir.0000000000001415");

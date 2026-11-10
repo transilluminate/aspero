@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+- `open_access` on works: whether a free, legal copy exists, its PDF and
+  page, licence, version and Unpaywall class (gold, diamond, hybrid,
+  bronze, green, closed), from OpenAlex and Europe PMC. Lookup tables gain
+  a "Free" column; text reports a "Free copy" line. `lookup --full` fills
+  it from other providers when the first didn't say.
+
 ## 0.2.0
 
 - **Breaking (JSON):** `authors` is a list of objects in every mode, each

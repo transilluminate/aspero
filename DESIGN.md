@@ -97,11 +97,17 @@ scripts/       fixture recorders, one per provider
   container, publication details, abstract, URL, cited-by count, plus:
   - `updates`: retractions, withdrawals, expressions of concern,
     corrections, each with the notice's DOI, date and source;
-  - `other_years`: years of other editions or versions (book editions).
+  - `update_to`: for a notice, the works it updates (Crossref `update-to`);
+  - `other_years`: years of other editions or versions (book editions);
+  - `open_access`: whether a free, legal copy exists, its PDF/page, licence
+    and Unpaywall class (OpenAlex carries Unpaywall's data; Europe PMC
+    adds PMC copies and licences).
 - **Merging**: candidates merge only on a shared identifier (arXiv
   versions count as one work). Fuzzy matches may *suggest*, never merge: a
   wrong merge corrupts; a duplicate merely annoys. Notices merge too, with
-  detailed ones replacing bare flags.
+  detailed ones replacing bare flags, and a free copy's location is kept
+  whichever record wins. `lookup --full` fills notices (Crossref) and open
+  access from other providers, keeping each value's `source`.
 
 ## Resolve, verify and check
 

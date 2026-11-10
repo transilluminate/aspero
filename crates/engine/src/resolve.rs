@@ -19,6 +19,7 @@
 //! paid searches only run when the free sources weren't conclusive.
 
 use aspero_core::matching::{self, PLAUSIBLE, VERIFIED, id_agreement, same_work_id};
+use aspero_core::publication::first_page;
 use aspero_core::{
     Agreement, Assessment, Claim, FieldSet, ProviderId, SearchQuery, SourceRecord, Update,
     UpdateKind, Usage, WorkId,
@@ -549,28 +550,40 @@ fn near_miss(c: &Candidate) -> bool {
 }
 
 /// The fields that don't fully agree, as a clause: "its year (2017)
-/// differs", "its authors and year (2017) differ".
-fn differences(c: &Candidate) -> String {
+/// differs", "its authors and year (2017) differ". With `known_only`, only
+/// fields both sides gave and that disagree; otherwise also those the
+/// citation doesn't confirm.
+fn differences(c: &Candidate, known_only: bool) -> Option<String> {
     let a = &c.assessment;
-    let year = c
-        .record
-        .work
-        .issued
-        .map(|d| format!(" ({})", d.year()))
-        .unwrap_or_default();
+    let w = &c.record.work;
+    let off = |check: &matching::FieldCheck| match known_only {
+        true => matches!(check.agreement, Agreement::Mismatch | Agreement::Partial),
+        false => check.agreement != Agreement::Match,
+    };
+    let value = |v: Option<String>| v.map(|v| format!(" ({v})")).unwrap_or_default();
     let fields: Vec<String> = [
-        (a.title.agreement != Agreement::Match).then(|| "title".to_owned()),
-        (a.authors.agreement != Agreement::Match).then(|| "authors".to_owned()),
+        off(&a.title).then(|| "title".to_owned()),
+        off(&a.authors).then(|| "authors".to_owned()),
         matches!(a.year.agreement, Agreement::Mismatch | Agreement::Partial)
-            .then(|| format!("year{year}")),
+            .then(|| format!("year{}", value(w.issued.map(|d| d.year().to_string())))),
+        (a.container.agreement == Agreement::Mismatch).then(|| {
+            let journal = w.container_title.as_ref().map(|t| format!("\"{t}\""));
+            format!("journal{}", value(journal))
+        }),
+        (a.volume.agreement == Agreement::Mismatch)
+            .then(|| format!("volume{}", value(w.volume.clone()))),
+        (a.page.agreement == Agreement::Mismatch).then(|| {
+            let first = w.page.as_deref().map(|p| first_page(p).to_owned());
+            format!("first page{}", value(first))
+        }),
     ]
     .into_iter()
     .flatten()
     .collect();
     match fields.len() {
-        0 => "its details differ".into(),
-        1 => format!("its {} differs", fields[0]),
-        _ => format!("its {} differ", fields.join(" and ")),
+        0 => None,
+        1 => Some(format!("its {} differs", fields[0])),
+        _ => Some(format!("its {} differ", fields.join(" and "))),
     }
 }
 
@@ -604,12 +617,20 @@ fn judge(claim: &Claim, report: ResolveReport) -> Verification {
             ),
             Some(c) if best_conf >= PLAUSIBLE => (
                 Verdict::Plausible,
-                format!("partly matches {}; check the details", describe(c)),
+                format!(
+                    "partly matches {}; {}",
+                    describe(c),
+                    differences(c, true).unwrap_or_else(|| "check the details".into())
+                ),
                 Some(0),
             ),
             Some(c) if near_miss(c) => (
                 Verdict::Mismatch,
-                format!("closest work is {}, but {}", describe(c), differences(c)),
+                format!(
+                    "closest work is {}, but {}",
+                    describe(c),
+                    differences(c, false).unwrap_or_else(|| "its details differ".into())
+                ),
                 Some(0),
             ),
             _ if failed => (
@@ -651,8 +672,11 @@ fn judge(claim: &Claim, report: ResolveReport) -> Verification {
             Some((i, c)) if c.assessment.confidence >= PLAUSIBLE => (
                 Verdict::Plausible,
                 format!(
-                    "{claimed} exists and partly matches the citation: {}",
-                    describe(c)
+                    "{claimed} exists and partly matches the citation: {}{}",
+                    describe(c),
+                    differences(c, true)
+                        .map(|d| format!("; {d}"))
+                        .unwrap_or_default()
                 ),
                 Some(i),
             ),

@@ -309,6 +309,18 @@ async fn a_real_doi_attached_to_the_wrong_citation_is_a_mismatch() {
 }
 
 #[tokio::test]
+async fn the_right_paper_with_the_wrong_year_is_a_mismatch_not_a_miss() {
+    let (engine, _, _) = live_like();
+    let claim = Claim::from_text("Vaswani A, Shazeer N. Attention is all you need. NeurIPS 2019.");
+
+    let v = engine.verify(&claim, 5).await;
+    assert_eq!(v.verdict, Verdict::Mismatch, "{}", v.reason);
+    assert!(v.reason.contains("year (2017)"), "{}", v.reason);
+    let best = &v.report.candidates[v.best.unwrap()];
+    assert!(best.ids.contains(&"arXiv:1706.03762".parse().unwrap()));
+}
+
+#[tokio::test]
 async fn identifier_only_claims_check_existence_without_searching() {
     let (engine, openalex, crossref) = live_like();
     let mut claim = Claim::default();

@@ -337,6 +337,40 @@ fn distinct(titles: Vec<String>) -> Vec<String> {
         .collect()
 }
 
+/// Same title and authors, but something else (usually the year) is wrong:
+/// a real work cited with an error, not a missing one.
+fn near_miss(c: &Candidate) -> bool {
+    let a = &c.assessment;
+    a.title.agreement == Agreement::Match
+        && matches!(a.authors.agreement, Agreement::Match | Agreement::Partial)
+}
+
+/// The fields that don't fully agree, as a clause: "its year (2017)
+/// differs", "its authors and year (2017) differ".
+fn differences(c: &Candidate) -> String {
+    let a = &c.assessment;
+    let year = c
+        .record
+        .work
+        .issued
+        .map(|d| format!(" ({})", d.year()))
+        .unwrap_or_default();
+    let fields: Vec<String> = [
+        (a.title.agreement != Agreement::Match).then(|| "title".to_owned()),
+        (a.authors.agreement != Agreement::Match).then(|| "authors".to_owned()),
+        matches!(a.year.agreement, Agreement::Mismatch | Agreement::Partial)
+            .then(|| format!("year{year}")),
+    ]
+    .into_iter()
+    .flatten()
+    .collect();
+    match fields.len() {
+        0 => "its details differ".into(),
+        1 => format!("its {} differs", fields[0]),
+        _ => format!("its {} differ", fields.join(" and ")),
+    }
+}
+
 fn describe(c: &Candidate) -> String {
     let w = &c.record.work;
     let title = w.title.as_deref().unwrap_or("(untitled)");
@@ -368,6 +402,11 @@ fn judge(claim: &Claim, report: ResolveReport) -> Verification {
             Some(c) if best_conf >= PLAUSIBLE => (
                 Verdict::Plausible,
                 format!("partly matches {}; check the details", describe(c)),
+                Some(0),
+            ),
+            Some(c) if near_miss(c) => (
+                Verdict::Mismatch,
+                format!("closest work is {}, but {}", describe(c), differences(c)),
                 Some(0),
             ),
             _ if failed => (

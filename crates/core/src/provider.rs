@@ -100,6 +100,9 @@ pub struct Capabilities {
     /// Fields this provider can supply at all.
     pub fields: FieldSet,
     pub search: bool,
+    /// Supports [`SearchMode::Citation`]: a matcher built for reference
+    /// strings, not just keyword search.
+    pub citation_search: bool,
     pub search_filters: Vec<Filter>,
     pub citations: bool,
     pub references: bool,
@@ -155,10 +158,25 @@ impl Default for PageReq {
     }
 }
 
+/// How [`SearchQuery::text`] should be interpreted.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+#[non_exhaustive]
+pub enum SearchMode {
+    /// Free-text keywords.
+    #[default]
+    Keywords,
+    /// A whole, possibly messy reference string ("LeCun Y, Bengio Y. Deep
+    /// learning. Nature. 2015"), to be matched to the work it cites. Only
+    /// sent to providers declaring [`Capabilities::citation_search`].
+    Citation,
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct SearchQuery {
     pub text: String,
+    pub mode: SearchMode,
     pub years: Option<YearRange>,
     pub work_type: Option<WorkType>,
     pub open_access: Option<bool>,
@@ -174,6 +192,14 @@ impl SearchQuery {
             text: text.into(),
             fields: FieldSet::DEFAULT,
             ..SearchQuery::default()
+        }
+    }
+
+    /// A [`SearchMode::Citation`] query for a reference string.
+    pub fn citation(reference: impl Into<String>) -> Self {
+        SearchQuery {
+            mode: SearchMode::Citation,
+            ..SearchQuery::new(reference)
         }
     }
 
@@ -203,7 +229,7 @@ pub struct Lookup {
 #[derive(Debug, Clone, Default, PartialEq)]
 #[non_exhaustive]
 pub struct Page {
-    pub works: Vec<SourceRecord>,
+    pub hits: Vec<Hit>,
     /// Total matches, if the provider reports it.
     pub total: Option<u64>,
     /// `None` on the last page.
@@ -211,8 +237,23 @@ pub struct Page {
 }
 
 impl Page {
-    pub fn new(works: Vec<SourceRecord>, total: Option<u64>, next: Option<Cursor>) -> Self {
-        Page { works, total, next }
+    pub fn new(hits: Vec<Hit>, total: Option<u64>, next: Option<Cursor>) -> Self {
+        Page { hits, total, next }
+    }
+}
+
+/// One work in a [`Page`].
+#[derive(Debug, Clone, PartialEq)]
+pub struct Hit {
+    pub record: SourceRecord,
+    /// The provider's relevance score, if it gives one. Only comparable
+    /// within one provider's results for one query.
+    pub score: Option<f64>,
+}
+
+impl Hit {
+    pub fn new(record: SourceRecord, score: Option<f64>) -> Self {
+        Hit { record, score }
     }
 }
 

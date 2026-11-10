@@ -24,8 +24,8 @@ pub use error::{Error, ErrorCategory, Result};
 pub use http::{HttpClient, HttpRequest, HttpResponse};
 pub use id::{ArxivId, CorpusId, Doi, IdError, IdKind, OpenAlexId, Pmcid, Pmid, S2PaperId, WorkId};
 pub use provider::{
-    Capabilities, Cursor, Filter, Lookup, Page, PageReq, Provider, ProviderId, Response,
-    SearchQuery, Usage, YearRange,
+    Capabilities, Cursor, Filter, Hit, Lookup, Page, PageReq, Provider, ProviderId, Response,
+    SearchMode, SearchQuery, Usage, YearRange,
 };
 pub use record::{Field, FieldSet, Raw, SourceRecord};
 pub use resilience::ResiliencePolicy;

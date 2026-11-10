@@ -14,9 +14,9 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use aspero_core::{
-    Capabilities, Cursor, Doi, Error, FieldSet, Filter, HttpClient, HttpRequest, HttpResponse,
+    Capabilities, Cursor, Doi, Error, FieldSet, Filter, Hit, HttpClient, HttpRequest, HttpResponse,
     IdKind, Lookup, Page, PageReq, Provider, ProviderId, Raw, ResiliencePolicy, Response, Result,
-    SearchQuery, SourceRecord, Usage, WorkId, WorkType,
+    SearchMode, SearchQuery, SourceRecord, Usage, WorkId, WorkType,
 };
 use async_trait::async_trait;
 use percent_encoding::{AsciiSet, CONTROLS, utf8_percent_encode};
@@ -133,21 +133,21 @@ impl OpenAlex {
     }
 
     /// One list call; `params` are already-decoded query pairs.
-    async fn list(
-        &self,
-        params: &[(&str, String)],
-    ) -> Result<(Vec<SourceRecord>, WireList, Usage)> {
+    async fn list(&self, params: &[(&str, String)]) -> Result<(Vec<Hit>, WireList, Usage)> {
         let url = url::Url::parse_with_params(&self.works_url(""), params)
             .map_err(|e| Error::BadRequest(format!("invalid OpenAlex base URL: {e}")))?;
         let (resp, usage) = self.send(url.into()).await?;
         let list: WireList = serde_json::from_slice(&resp.body).map_err(Error::decode)?;
-        let records = list
+        let hits = list
             .results
             .iter()
-            .map(|v| wire::to_record(v, Raw::json(v), resp.received_at))
+            .map(|v| {
+                let score = v.get("relevance_score").and_then(serde_json::Value::as_f64);
+                wire::to_record(v, Raw::json(v), resp.received_at).map(|r| Hit::new(r, score))
+            })
             .collect::<serde_json::Result<_>>()
             .map_err(Error::decode)?;
-        Ok((records, list, usage))
+        Ok((hits, list, usage))
     }
 }
 
@@ -297,8 +297,8 @@ impl Provider for OpenAlex {
                     ("filter", format!("{filter}:{}", values.join("|"))),
                     ("per-page", MAX_PAGE.to_string()),
                 ];
-                let (records, _, u) = self.list(&params).await?;
-                found.extend(records);
+                let (hits, _, u) = self.list(&params).await?;
+                found.extend(hits.into_iter().map(|h| h.record));
                 add_usage(&mut usage, Some(u));
             }
         }
@@ -320,6 +320,9 @@ impl Provider for OpenAlex {
     }
 
     async fn search(&self, query: &SearchQuery) -> Result<Response<Page>> {
+        if query.mode != SearchMode::Keywords {
+            return Err(Error::Unsupported("OpenAlex has no citation matcher"));
+        }
         let mut filters = Vec::new();
         if let Some(years) = query.years {
             if let Some(from) = years.from {
@@ -356,8 +359,8 @@ impl Provider for OpenAlex {
         }
         params.extend(page_params(&query.page));
 
-        let (records, list, usage) = self.list(&params).await?;
-        let page = Page::new(records, list.meta.count, list.meta.next_cursor.map(Cursor));
+        let (hits, list, usage) = self.list(&params).await?;
+        let page = Page::new(hits, list.meta.count, list.meta.next_cursor.map(Cursor));
         Ok(Response::with_usage(page, usage))
     }
 }

@@ -227,12 +227,14 @@ fn search_keeps_rank_order_and_reports_cost() {
     assert!(params.contains(&("per-page".into(), "5".into())));
     assert!(params.contains(&("cursor".into(), "*".into())));
 
-    let Page { works, total, .. } = resp.value;
-    assert_eq!(works.len(), 5);
+    let Page { hits, total, .. } = resp.value;
+    assert_eq!(hits.len(), 5);
     assert_eq!(
-        works[0].work.title.as_deref(),
+        hits[0].record.work.title.as_deref(),
         Some("Attention Is All You Need")
     );
+    let scores: Vec<f64> = hits.iter().map(|h| h.score.unwrap()).collect();
+    assert!(scores.is_sorted_by(|a, b| a >= b), "{scores:?}");
     assert!(total.unwrap() > 1_000_000);
     assert_eq!(resp.usage.unwrap().cost, Some(0.001));
 }
@@ -259,9 +261,9 @@ fn search_applies_every_declared_filter_and_pages_by_cursor() {
     assert_eq!(page.total, Some(1090));
     assert!(page.next.is_some());
     assert!(
-        page.works
+        page.hits
             .iter()
-            .all(|r| r.work.work_type == Some(WorkType::Preprint))
+            .all(|h| h.record.work.work_type == Some(WorkType::Preprint))
     );
 }
 
@@ -350,6 +352,14 @@ fn no_key_sends_no_authorization_header() {
             .iter()
             .all(|(k, _)| k != "authorization")
     );
+}
+
+#[test]
+fn citation_mode_is_unsupported() {
+    let (oa, http) = provider([]);
+    let err = block_on(oa.search(&SearchQuery::citation("LeCun 2015 Deep learning"))).unwrap_err();
+    assert!(matches!(err, Error::Unsupported(_)));
+    assert!(http.requests().is_empty());
 }
 
 #[test]

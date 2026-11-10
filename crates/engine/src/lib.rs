@@ -30,6 +30,7 @@ pub mod retry;
 mod standard;
 pub mod transport;
 mod verdict;
+mod versions;
 
 pub use abstracts::{Abstract, AbstractsReport};
 pub use check::{Checked, Finding, Severity, duplicates, findings};
@@ -50,6 +51,7 @@ pub use standard::OpenAlexConfig;
 pub use standard::OpenLibraryConfig;
 pub use standard::{StandardConfig, standard};
 pub use verdict::{Verdict, Verification, describe_update};
+pub use versions::VersionsReport;
 
 use std::sync::Arc;
 use std::time::Duration;

@@ -71,7 +71,7 @@ impl Finding {
             Finding::Duplicate { .. } => Severity::Warning,
             Finding::Updated { update } => match update.kind {
                 UpdateKind::Retraction | UpdateKind::Withdrawal => Severity::Error,
-                UpdateKind::ExpressionOfConcern => Severity::Warning,
+                UpdateKind::ExpressionOfConcern | UpdateKind::NewVersion => Severity::Warning,
                 _ => Severity::Info,
             },
         }

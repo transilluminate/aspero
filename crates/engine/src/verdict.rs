@@ -228,10 +228,20 @@ pub(crate) fn judge(claim: &Claim, report: ResolveReport) -> Verification {
             },
         }
     };
-    // Existing is not the same as citable: say so whatever the verdict.
-    let reason = match best_index.and_then(|i| report.candidates[i].retraction()) {
-        Some(r) => format!("{reason}; note: {}", describe_update(r)),
-        None => reason,
+    // Existing is not the same as citable or current: say so whatever the
+    // verdict.
+    let best = best_index.map(|i| &report.candidates[i]);
+    let notes: Vec<String> = [
+        best.and_then(Candidate::retraction),
+        best.and_then(|c| c.updates.iter().find(|u| u.kind == UpdateKind::NewVersion)),
+    ]
+    .into_iter()
+    .flatten()
+    .map(describe_update)
+    .collect();
+    let reason = match notes.is_empty() {
+        true => reason,
+        false => format!("{reason}; note: {}", notes.join("; ")),
     };
     Verification {
         verdict,
@@ -243,6 +253,16 @@ pub(crate) fn judge(claim: &Claim, report: ResolveReport) -> Verification {
 
 /// "RETRACTED (2010-02-06, notice doi:…, via retraction-watch)".
 pub fn describe_update(u: &Update) -> String {
+    // The notice of a new version is the newer work itself.
+    if u.kind == UpdateKind::NewVersion {
+        let by = u
+            .notice
+            .as_ref()
+            .map(|n| format!(" by {n}"))
+            .unwrap_or_default();
+        let date = u.date.map(|d| format!(" ({d})")).unwrap_or_default();
+        return format!("superseded{by}{date}");
+    }
     let what = match &u.kind {
         UpdateKind::Retraction => "RETRACTED".to_owned(),
         UpdateKind::Withdrawal => "WITHDRAWN".to_owned(),

@@ -72,6 +72,20 @@ impl Claim {
         }
     }
 
+    /// A claim from whatever a user typed: if the whole input is an
+    /// identifier, a claim of just that identifier (an existence check);
+    /// otherwise a free-text reference (see [`Claim::from_text`]).
+    pub fn from_input(input: &str) -> Self {
+        let input = input.trim();
+        match input.parse::<WorkId>() {
+            Ok(id) => Claim {
+                ids: vec![id],
+                ..Claim::default()
+            },
+            Err(_) => Claim::from_text(input),
+        }
+    }
+
     pub fn is_empty(&self) -> bool {
         self.text.is_none()
             && self.ids.is_empty()
@@ -596,6 +610,14 @@ mod tests {
         );
         assert_eq!(right.ids, Agreement::Match);
         assert_eq!(wrong.ids, Agreement::Mismatch);
+    }
+
+    #[test]
+    fn input_is_an_identifier_or_a_reference() {
+        let id_only = Claim::from_input(" 10.1038/nature14539 ");
+        assert!(id_only.text.is_none() && id_only.ids.len() == 1);
+        let reference = Claim::from_input("Deep learning. Nature 2015. doi:10.1038/nature14539");
+        assert!(reference.text.is_some() && reference.ids.len() == 1);
     }
 
     #[test]

@@ -26,7 +26,7 @@ pub struct ClaimInput {
 impl ClaimInput {
     pub fn into_claim(self) -> Result<Claim, String> {
         let mut claim = match &self.text {
-            Some(text) => text_claim(text),
+            Some(text) => Claim::from_input(text),
             None => Claim::default(),
         };
         let prefixed = [
@@ -50,21 +50,6 @@ impl ClaimInput {
     }
 }
 
-/// A free-text claim. If the whole text is an identifier, the claim is just
-/// that identifier (an existence check); otherwise the text is the reference,
-/// with any DOIs or arXiv IDs in it taken as asserted.
-pub fn text_claim(text: &str) -> Claim {
-    let text = text.trim();
-    match text.parse::<WorkId>() {
-        Ok(id) => {
-            let mut claim = Claim::default();
-            claim.ids = vec![id];
-            claim
-        }
-        Err(_) => Claim::from_text(text),
-    }
-}
-
 /// One stdin line: a JSON object or a plain reference.
 pub fn line_claim(line: &str) -> Result<Claim, String> {
     if line.trim_start().starts_with('{') {
@@ -72,7 +57,7 @@ pub fn line_claim(line: &str) -> Result<Claim, String> {
             serde_json::from_str(line).map_err(|e| format!("invalid claim JSON: {e}"))?;
         input.into_claim()
     } else {
-        Ok(text_claim(line))
+        Ok(Claim::from_input(line))
     }
 }
 
@@ -113,20 +98,6 @@ fn describe_fields(f: &ClaimInput) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn whole_identifier_is_an_existence_check() {
-        let claim = text_claim("10.1038/nature14539");
-        assert_eq!(claim.ids.len(), 1);
-        assert!(claim.text.is_none());
-    }
-
-    #[test]
-    fn references_keep_text_and_embedded_ids() {
-        let claim = text_claim("LeCun et al. Deep learning. Nature 2015. doi:10.1038/nature14539.");
-        assert!(claim.text.is_some());
-        assert_eq!(claim.ids[0].to_string(), "doi:10.1038/nature14539");
-    }
 
     #[test]
     fn json_lines_become_structured_claims() {

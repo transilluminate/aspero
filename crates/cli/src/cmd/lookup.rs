@@ -24,6 +24,7 @@ pub async fn run(engine: &Engine, ids: Vec<String>, out: Out) -> Result<Exit, Fa
     let retried = retry_with_punctuation(engine, &inputs, &parsed, &mut report).await;
     if out.full {
         engine.add_notices(&mut report).await;
+        engine.add_open_access(&mut report).await;
     }
 
     // Abstracts for the works found, one batched call; None per result
@@ -76,7 +77,8 @@ pub async fn run(engine: &Engine, ids: Vec<String>, out: Out) -> Result<Exit, Fa
     match out.format {
         Format::Jsonl => items.iter().for_each(print_line),
         Format::Table => {
-            let mut table = output::table(&["ID", "Status", "Year", "Author", "Title", "Via"]);
+            let mut table =
+                output::table(&["ID", "Status", "Year", "Author", "Title", "Free", "Via"]);
             let mut listed = Vec::new();
             let mut abstracts = abstracts.iter();
             for (item, result) in items.iter().zip(per_input(&parsed, &report.results)) {
@@ -279,6 +281,7 @@ fn row(item: &Value, result: Option<&LookupResult>) -> Vec<comfy_table::Cell> {
                 Cell::new(output::year(w)),
                 Cell::new(output::first_author(w)),
                 Cell::new(w.title.as_deref().unwrap_or("")),
+                Cell::new(output::free_copy(w)),
                 Cell::new(via),
             ]
         }
@@ -294,6 +297,7 @@ fn row(item: &Value, result: Option<&LookupResult>) -> Vec<comfy_table::Cell> {
                 Cell::new(""),
                 Cell::new(""),
                 Cell::new(why),
+                Cell::new(""),
                 Cell::new(""),
             ]
         }

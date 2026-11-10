@@ -104,14 +104,18 @@ Accepts DOIs, arXiv IDs, PMIDs, OpenAlex IDs and their URLs, bare or prefixed:
 Bare digits are ambiguous; prefix them (pmid:, corpusid:).
 
 JSON works:
-  authors    [{\"name\": \"Yann LeCun\", \"orcid\": \"...\"}, ...], the same shape
-             with or without --full (which adds given and family)
-  updates    notices about the work: [{\"kind\": \"retraction\", \"notice\":
-             \"doi:...\", \"date\": \"...\", \"source\": \"...\"}]; kinds: retraction,
-             withdrawal, expression_of_concern, correction, or another name
-  update_to  for a notice itself, the works it updates: [{\"kind\", \"work\",
-             \"date\", \"source\"}]
-  `lookup --full` also asks Crossref for notices in both directions.
+  authors      [{\"name\": \"Yann LeCun\", \"orcid\": \"...\"}, ...], the same
+               shape with or without --full (which adds given and family)
+  updates      notices about the work: [{\"kind\": \"retraction\", \"notice\":
+               \"doi:...\", \"date\": \"...\", \"source\": \"...\"}]; kinds:
+               retraction, withdrawal, expression_of_concern, correction, …
+  update_to    for a notice itself, the works it updates: [{\"kind\",
+               \"work\", \"date\", \"source\"}]
+  open_access  whether a free, legal copy exists: {\"is_oa\": true,
+               \"status\": gold|diamond|hybrid|bronze|green|closed, \"pdf_url\",
+               \"url\", \"license\", \"version\", \"source\"}; absent if unknown
+  `lookup --full` also asks Crossref for notices in both directions, and
+  other providers for open access when the first didn't say.
 
 Examples:
   aspero lookup 10.1038/nature14539 arXiv:1706.03762

@@ -41,6 +41,8 @@ pub fn work(record: &SourceRecord, full: bool) -> Value {
         "update_to",
         (!w.update_to.is_empty()).then(|| json!(w.update_to)),
     );
+    // Whether a free copy can be fetched instead of asking a human.
+    put("open_access", w.open_access.as_ref().map(|oa| json!(oa)));
     if full {
         // Everything else, in the core `Work` shape (structured authors).
         if let Ok(Value::Object(all)) = serde_json::to_value(w) {
@@ -124,7 +126,30 @@ pub fn work_text(record: &SourceRecord, indent: &str) -> String {
             lines.push(format!("{indent}⚠ {}", describe_update(update)));
         }
     }
+    if let Some(oa) = w.open_access.as_ref().filter(|oa| oa.is_oa) {
+        let terms: Vec<&str> = [oa.status.as_deref(), oa.license.as_deref()]
+            .into_iter()
+            .flatten()
+            .collect();
+        let link = oa.pdf_url.as_deref().or(oa.url.as_deref()).unwrap_or("");
+        let terms = match terms.is_empty() {
+            true => String::new(),
+            false => format!(" ({})", terms.join(", ")),
+        };
+        lines.push(format!("{indent}Free copy{terms}: {link}"));
+    }
     lines.join("\n")
+}
+
+/// "pdf" when a free PDF is known, "yes" for a free copy without one, "no"
+/// when known to be closed, "" when unknown.
+pub fn free_copy(w: &Work) -> &'static str {
+    match &w.open_access {
+        Some(oa) if oa.pdf_url.is_some() => "pdf",
+        Some(oa) if oa.is_oa => "yes",
+        Some(_) => "no",
+        None => "",
+    }
 }
 
 /// Sets a work's `abstract` (null when none was found) and

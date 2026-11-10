@@ -488,9 +488,22 @@ paper; LeCun Vancouver → Nature 2015 via Crossref alone; nature14540 →
 mismatch naming nature14539; invented paper → not_found; NeurIPS 2019 →
 mismatch "year (2017) differs".
 
+**Benchmark** (`bench/citations.jsonl`, `cargo run -p aspero-engine
+--example verify_bench`): 20 citations with known verdicts, run live
+through `target/bench-cache` (first run ≈ $0.015, re-runs free). It caught
+two bugs on day one:
+- Crossref's top matches for an AlphaFold reference were *Faculty Opinions*
+  commentaries ("… recommendation of <title>"); their titles steered the
+  OpenAlex search away from the real paper. Fix: query the part of a hit's
+  title the reference shares (`shared_title`).
+- An unmentioned sole author scored as a partial author match, making a
+  1992 "Protein Folding" a near miss for an invented paper.
+
+Add a case for every new failure mode found in the wild.
+
 Still to do: venue as a signal; merging records that share no ID
-(preprint ↔ published, as *suggestions* per §4); a fixture-backed benchmark
-of bad citations.
+(preprint ↔ published, as *suggestions* per §4); down-weighting
+derivative records (commentaries, peer reviews) by type.
 
 To verify at implementation time: doi.org content-negotiation limits,
 arXiv (~1 req / 3 s).

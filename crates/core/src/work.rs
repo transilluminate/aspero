@@ -47,6 +47,10 @@ pub struct Work {
     /// Retractions, corrections and other editorial notices about the work.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub updates: Vec<Update>,
+    /// When the work is itself a notice, the works it updates: what an
+    /// erratum corrects or a retraction notice retracts.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub update_to: Vec<UpdateTo>,
     /// Years of other editions or versions of the same work, when the
     /// provider knows them (a book's later editions). A citation of any of
     /// them is a citation of this work.
@@ -75,6 +79,31 @@ impl Update {
         Update {
             kind,
             notice: None,
+            date: None,
+            source: None,
+        }
+    }
+}
+
+/// A notice's link to the work it updates (Crossref's `update-to`): the
+/// other direction of an [`Update`].
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[non_exhaustive]
+pub struct UpdateTo {
+    pub kind: UpdateKind,
+    /// The updated work.
+    pub work: crate::id::WorkId,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub date: Option<PartialDate>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source: Option<String>,
+}
+
+impl UpdateTo {
+    pub fn new(kind: UpdateKind, work: crate::id::WorkId) -> Self {
+        UpdateTo {
+            kind,
+            work,
             date: None,
             source: None,
         }

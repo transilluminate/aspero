@@ -103,6 +103,10 @@ pub struct Capabilities {
     /// Supports [`SearchMode::Citation`]: a matcher built for reference
     /// strings, not just keyword search.
     pub citation_search: bool,
+    /// Reports editorial notices in detail and in both directions (a work's
+    /// corrections, a correction's work), so the engine asks it about
+    /// records other providers supplied.
+    pub notices: bool,
     pub search_filters: Vec<Filter>,
     pub citations: bool,
     pub references: bool,

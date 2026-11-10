@@ -10,7 +10,9 @@
 use serde::Deserialize;
 
 use crate::id::{Doi, WorkId};
-use crate::work::{PartialDate, Person, Update, UpdateKind, Work, WorkType, tidy_abstract};
+use crate::work::{
+    PartialDate, Person, Update, UpdateKind, UpdateTo, Work, WorkType, tidy_abstract,
+};
 
 /// One CSL-JSON item.
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -38,9 +40,12 @@ pub struct CslItem {
     /// Crossref-registered DOIs carry their notices here (see
     /// [`CrossrefUpdate`]).
     pub updated_by: Vec<CrossrefUpdate>,
+    /// And notices carry the works they update here.
+    pub update_to: Vec<CrossrefUpdate>,
 }
 
-/// One entry of Crossref's `updated-by`: a notice about the work, e.g.
+/// One entry of Crossref's `updated-by` (or `update-to`, where the DOI is
+/// the updated work's): a notice about the work, e.g.
 /// `{"DOI": "10.1016/…", "type": "retraction", "source":
 /// "retraction-watch", "updated": {"date-parts": [[2010, 2, 6]]}}`. The
 /// same shape appears in Crossref's REST API and its CSL via doi.org.
@@ -63,6 +68,15 @@ impl CrossrefUpdate {
             .as_deref()
             .and_then(|d| d.parse::<Doi>().ok())
             .map(WorkId::Doi);
+        update.date = self.updated.as_ref().and_then(CslDate::to_partial);
+        update.source = self.source.clone();
+        Some(update)
+    }
+
+    pub fn to_update_to(&self) -> Option<UpdateTo> {
+        let kind = UpdateKind::parse(self.update_type.as_deref()?);
+        let work = WorkId::Doi(self.doi.as_deref()?.parse::<Doi>().ok()?);
+        let mut update = UpdateTo::new(kind, work);
         update.date = self.updated.as_ref().and_then(CslDate::to_partial);
         update.source = self.source.clone();
         Some(update)
@@ -225,6 +239,11 @@ impl CslItem {
                 .iter()
                 .filter_map(CrossrefUpdate::to_update)
                 .collect(),
+            update_to: self
+                .update_to
+                .iter()
+                .filter_map(CrossrefUpdate::to_update_to)
+                .collect(),
             other_years: Vec::new(),
         }
     }
@@ -277,6 +296,22 @@ mod tests {
             "doi:10.1016/s0140-6736(10)60175-4"
         );
         assert_eq!(r.source.as_deref(), Some("retraction-watch"));
+    }
+
+    #[test]
+    fn a_notice_names_the_work_it_updates() {
+        let w = item(serde_json::json!({
+            "title": "Correction to: 2026 AHA/ACC/... Guideline for ... Acute Pulmonary Embolism",
+            "update-to": [{"DOI": "10.1161/cir.0000000000001415", "type": "correction",
+                           "source": "publisher", "updated": {"date-parts": [[2026, 7, 13]]}}]
+        }))
+        .to_work();
+        assert!(w.updates.is_empty());
+        let [target] = &w.update_to[..] else { panic!() };
+        assert_eq!(target.kind, UpdateKind::Correction);
+        assert_eq!(target.work.to_string(), "doi:10.1161/cir.0000000000001415");
+        assert_eq!(target.date.unwrap().to_string(), "2026-07-13");
+        assert_eq!(target.source.as_deref(), Some("publisher"));
     }
 
     #[test]

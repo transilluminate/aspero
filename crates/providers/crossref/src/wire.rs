@@ -52,6 +52,8 @@ struct WireWork {
     is_referenced_by_count: Option<u64>,
     /// Retraction Watch and publisher notices about this work.
     updated_by: Vec<CrossrefUpdate>,
+    /// For a notice, the works it updates.
+    update_to: Vec<CrossrefUpdate>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -149,6 +151,11 @@ impl WireWork {
             .updated_by
             .iter()
             .filter_map(CrossrefUpdate::to_update)
+            .collect();
+        work.update_to = self
+            .update_to
+            .iter()
+            .filter_map(CrossrefUpdate::to_update_to)
             .collect();
         work
     }

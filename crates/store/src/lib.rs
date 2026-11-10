@@ -29,7 +29,8 @@ use rusqlite::{Connection, OptionalExtension, params};
 /// changes (records are stored as mapped); older caches are dropped and
 /// rebuilt. 2: records gained `updates` (retractions). 3: `other_years`.
 /// 4: Crossref and Europe PMC map print/online years into `other_years`.
-const SCHEMA_VERSION: i64 = 4;
+/// 5: `update_to` (what a notice updates).
+const SCHEMA_VERSION: i64 = 5;
 
 const SCHEMA: &str = "
 CREATE TABLE record (

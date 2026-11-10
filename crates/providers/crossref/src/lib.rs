@@ -70,6 +70,7 @@ impl Crossref {
         capabilities.fields = FieldSet::ALL;
         capabilities.search = true;
         capabilities.citation_search = true;
+        capabilities.notices = true;
         capabilities.search_filters = vec![Filter::Years, Filter::WorkType];
         Crossref {
             config,

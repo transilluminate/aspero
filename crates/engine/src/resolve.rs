@@ -20,7 +20,8 @@
 
 use aspero_core::matching::{self, PLAUSIBLE, VERIFIED, id_agreement, same_work_id};
 use aspero_core::{
-    Agreement, Assessment, Claim, FieldSet, ProviderId, SearchQuery, SourceRecord, Usage, WorkId,
+    Agreement, Assessment, Claim, FieldSet, ProviderId, SearchQuery, SourceRecord, Update,
+    UpdateKind, Usage, WorkId,
 };
 
 use crate::{Engine, EngineError, LookupResult, add_usage};
@@ -68,6 +69,43 @@ pub struct Candidate {
     pub ids: Vec<WorkId>,
     pub sightings: Vec<Sighting>,
     pub assessment: Assessment,
+    /// Editorial notices from every merged record, most detailed kept.
+    pub updates: Vec<Update>,
+}
+
+impl Candidate {
+    /// The first retraction or withdrawal notice, if any.
+    pub fn retraction(&self) -> Option<&Update> {
+        self.updates.iter().find(|u| u.kind.is_retraction())
+    }
+}
+
+/// Adds notices not already known. A detailed notice (with the notice's
+/// identifier) replaces a bare one of the same kind, such as OpenAlex's
+/// `is_retracted` flag.
+fn merge_updates(known: &mut Vec<Update>, new: &[Update]) {
+    for update in new {
+        let same_kind = |k: &Update| k.kind == update.kind;
+        if known
+            .iter()
+            .any(|k| same_kind(k) && k.notice == update.notice)
+        {
+            continue; // already known
+        }
+        if update.notice.is_none() {
+            if !known.iter().any(same_kind) {
+                known.push(update.clone());
+            }
+            continue; // a bare flag adds nothing to a known notice
+        }
+        match known
+            .iter_mut()
+            .find(|k| same_kind(k) && k.notice.is_none())
+        {
+            Some(bare) => *bare = update.clone(),
+            None => known.push(update.clone()),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Default)]
@@ -266,6 +304,7 @@ impl Accumulator<'_> {
                     }
                 }
                 c.sightings.push(sighting);
+                merge_updates(&mut c.updates, &record.work.updates);
                 if assessment.confidence > c.assessment.confidence {
                     c.record = record;
                     c.assessment = assessment;
@@ -273,8 +312,11 @@ impl Accumulator<'_> {
                 c
             }
             None => {
+                let mut updates = Vec::new();
+                merge_updates(&mut updates, &record.work.updates);
                 candidates.push(Candidate {
                     ids: record.ids.clone(),
+                    updates,
                     record,
                     sightings: vec![sighting],
                     assessment,
@@ -517,10 +559,80 @@ fn judge(claim: &Claim, report: ResolveReport) -> Verification {
             },
         }
     };
+    // Existing is not the same as citable: say so whatever the verdict.
+    let reason = match best_index.and_then(|i| report.candidates[i].retraction()) {
+        Some(r) => format!("{reason}; note: {}", describe_update(r)),
+        None => reason,
+    };
     Verification {
         verdict,
         reason,
         best: best_index,
         report,
+    }
+}
+
+/// "RETRACTED (2010-02-06, notice doi:…, via retraction-watch)".
+pub fn describe_update(u: &Update) -> String {
+    let what = match &u.kind {
+        UpdateKind::Retraction => "RETRACTED".to_owned(),
+        UpdateKind::Withdrawal => "WITHDRAWN".to_owned(),
+        UpdateKind::ExpressionOfConcern => "expression of concern".to_owned(),
+        UpdateKind::Correction => "corrected".to_owned(),
+        other => other.as_str().replace('_', " "),
+    };
+    let details: Vec<String> = [
+        u.date.map(|d| d.to_string()),
+        u.notice.as_ref().map(|n| format!("notice {n}")),
+        u.source.as_ref().map(|s| format!("via {s}")),
+    ]
+    .into_iter()
+    .flatten()
+    .collect();
+    if details.is_empty() {
+        what
+    } else {
+        format!("{what} ({})", details.join(", "))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn update(kind: UpdateKind, notice: Option<&str>) -> Update {
+        let mut u = Update::new(kind);
+        u.notice = notice.map(|n| n.parse().unwrap());
+        u
+    }
+
+    #[test]
+    fn detailed_notices_replace_bare_flags_without_duplicates() {
+        let mut known = vec![update(UpdateKind::Retraction, None)];
+        let crossref = [
+            update(UpdateKind::Correction, Some("10.1000/c1")),
+            update(UpdateKind::Retraction, Some("10.1000/r")),
+            update(UpdateKind::Correction, Some("10.1000/c2")),
+        ];
+        merge_updates(&mut known, &crossref);
+        merge_updates(&mut known, &crossref); // again: nothing new
+        merge_updates(&mut known, &[update(UpdateKind::Retraction, None)]);
+        let summary: Vec<(String, Option<String>)> = known
+            .iter()
+            .map(|u| {
+                (
+                    u.kind.as_str().to_owned(),
+                    u.notice.as_ref().map(ToString::to_string),
+                )
+            })
+            .collect();
+        assert_eq!(
+            summary,
+            [
+                ("retraction".into(), Some("doi:10.1000/r".into())),
+                ("correction".into(), Some("doi:10.1000/c1".into())),
+                ("correction".into(), Some("doi:10.1000/c2".into())),
+            ]
+        );
     }
 }

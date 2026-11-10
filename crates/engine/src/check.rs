@@ -6,7 +6,7 @@
 //! cite the same work twice.
 
 use aspero_core::matching::same_work_id;
-use aspero_core::{Claim, IdKind, WorkId};
+use aspero_core::{Claim, IdKind, Update, UpdateKind, WorkId};
 
 use crate::{Candidate, Engine, Verdict, Verification};
 
@@ -49,6 +49,8 @@ pub enum Finding {
     YearDiffers { claimed: i16, actual: i16 },
     /// Another entry (by index) cites the same work.
     Duplicate { of: usize },
+    /// The work has an editorial notice: retraction, correction, ….
+    Updated { update: Update },
 }
 
 impl Finding {
@@ -66,6 +68,11 @@ impl Finding {
             }
             Finding::YearDiffers { .. } | Finding::AddDoi { .. } => Severity::Info,
             Finding::Duplicate { .. } => Severity::Warning,
+            Finding::Updated { update } => match update.kind {
+                UpdateKind::Retraction | UpdateKind::Withdrawal => Severity::Error,
+                UpdateKind::ExpressionOfConcern => Severity::Warning,
+                _ => Severity::Info,
+            },
         }
     }
 
@@ -77,6 +84,7 @@ impl Finding {
             Finding::ReplaceId { .. } => "replace_id",
             Finding::YearDiffers { .. } => "year_differs",
             Finding::Duplicate { .. } => "duplicate",
+            Finding::Updated { .. } => "updated",
         }
     }
 }
@@ -146,6 +154,11 @@ pub fn findings(claim: &Claim, v: &Verification) -> Vec<Finding> {
         return out;
     };
     let suggested = preferred_doi(&best.ids);
+    out.extend(
+        best.updates
+            .iter()
+            .map(|u| Finding::Updated { update: u.clone() }),
+    );
 
     // Each claimed identifier that isn't the matched work's: flagged when
     // the work has a different one of the same kind, or the verdict says the

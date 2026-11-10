@@ -109,3 +109,71 @@ async fn entries_citing_the_same_work_are_duplicates() {
         "clean entry, nothing to report"
     );
 }
+
+fn retracted(
+    mut record: aspero_core::SourceRecord,
+    notice: Option<&str>,
+    source: &str,
+) -> aspero_core::SourceRecord {
+    let mut u = aspero_core::Update::new(aspero_core::UpdateKind::Retraction);
+    u.notice = notice.map(|n| n.parse().unwrap());
+    u.source = Some(source.into());
+    record.work.updates.push(u);
+    record
+}
+
+#[tokio::test]
+async fn retractions_are_errors_with_the_detailed_notice() {
+    // OpenAlex (first) has only the bare flag, under the "RETRACTED:" title;
+    // Crossref has the Retraction Watch notice.
+    let mut flagged = work(
+        "openalex",
+        &["10.1016/s0140-6736(97)11096-0"],
+        "RETRACTED: Ileal-lymphoid-nodular hyperplasia, non-specific colitis",
+        &["Andrew J Wakefield"],
+        1998,
+    );
+    flagged = retracted(flagged, None, "openalex");
+    let detailed = retracted(
+        flagged.clone(),
+        Some("10.1016/s0140-6736(10)60175-4"),
+        "retraction-watch",
+    );
+    let openalex = Arc::new(Scripted::new("openalex").keyword().with(vec![flagged]));
+    let crossref = Arc::new(Scripted::new("crossref").matcher(vec![detailed]));
+    let engine = engine(vec![openalex, crossref]);
+
+    let claims = [claim(
+        "Ileal-lymphoid-nodular hyperplasia, non-specific colitis",
+        &["Wakefield, A. J."],
+        1998,
+        &[],
+    )];
+    let checked = engine.check(&claims, 5, |_| {}).await;
+    let c = &checked[0];
+
+    assert_eq!(
+        c.verification.verdict,
+        Verdict::Verified,
+        "the marker doesn't hide the title"
+    );
+    assert!(
+        c.verification.reason.contains("note: RETRACTED"),
+        "{}",
+        c.verification.reason
+    );
+    let notices: Vec<_> = c
+        .findings
+        .iter()
+        .filter_map(|f| match f {
+            Finding::Updated { update } => Some(update.notice.as_ref().map(ToString::to_string)),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        notices,
+        [Some("doi:10.1016/s0140-6736(10)60175-4".to_owned())],
+        "one, detailed"
+    );
+    assert_eq!(c.severity(), Some(Severity::Error));
+}

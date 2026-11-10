@@ -32,7 +32,9 @@ pub mod transport;
 
 pub use abstracts::{Abstract, AbstractsReport};
 pub use check::{Checked, Finding, Severity, duplicates, findings};
-pub use resolve::{Candidate, ResolveReport, Sighting, Verdict, Verification, Via};
+pub use resolve::{
+    Candidate, ResolveReport, Sighting, Verdict, Verification, Via, describe_update,
+};
 /// Re-exported for credentials in provider configs.
 pub use secrecy::SecretString;
 #[cfg(feature = "crossref")]

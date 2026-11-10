@@ -7,8 +7,8 @@
 use std::collections::BTreeMap;
 
 use aspero_core::{
-    ArxivId, Doi, FieldSet, OpenAlexId, PartialDate, Person, Pmcid, Pmid, Raw, SourceRecord,
-    Update, UpdateKind, Work, WorkId, WorkType, tidy_abstract,
+    ArxivId, Doi, FieldSet, OpenAccess, OpenAlexId, PartialDate, Person, Pmcid, Pmid, Raw,
+    SourceRecord, Update, UpdateKind, Work, WorkId, WorkType, tidy_abstract,
 };
 use jiff::Timestamp;
 use serde::Deserialize;
@@ -38,6 +38,17 @@ pub(crate) struct WireWork {
     cited_by_count: Option<u64>,
     /// From Retraction Watch; OpenAlex gives no notice details.
     is_retracted: bool,
+    /// Unpaywall's data.
+    open_access: Option<WireOpenAccess>,
+    best_oa_location: Option<WireLocation>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(default)]
+struct WireOpenAccess {
+    is_oa: bool,
+    oa_status: Option<String>,
+    oa_url: Option<String>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -67,6 +78,9 @@ struct WireAuthor {
 #[serde(default)]
 struct WireLocation {
     landing_page_url: Option<String>,
+    pdf_url: Option<String>,
+    license: Option<String>,
+    version: Option<String>,
     source: Option<WireSource>,
 }
 
@@ -207,6 +221,20 @@ impl WireWork {
             .as_ref()
             .and_then(|l| l.landing_page_url.clone());
         work.cited_by_count = self.cited_by_count;
+        work.open_access = self.open_access.as_ref().map(|oa| {
+            let best = self.best_oa_location.as_ref().filter(|_| oa.is_oa);
+            let mut out = OpenAccess::default();
+            out.is_oa = oa.is_oa;
+            out.status = oa.oa_status.clone();
+            out.pdf_url = best.and_then(|l| l.pdf_url.clone());
+            out.url = best
+                .and_then(|l| l.landing_page_url.clone())
+                .or_else(|| oa.oa_url.clone().filter(|_| oa.is_oa));
+            out.license = best.and_then(|l| l.license.clone());
+            out.version = best.and_then(|l| l.version.clone());
+            out.source = Some("openalex".into());
+            out
+        });
         if self.is_retracted {
             let mut retraction = Update::new(UpdateKind::Retraction);
             retraction.source = Some("openalex".into());

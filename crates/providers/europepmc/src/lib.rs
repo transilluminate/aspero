@@ -17,7 +17,7 @@ use aspero_core::csl::strip_markup;
 use aspero_core::http::escape_lucene;
 use aspero_core::{
     Capabilities, Cursor, Doi, Error, FieldSet, Filter, Hit, HttpClient, HttpRequest, HttpResponse,
-    IdKind, Lookup, Page, PartialDate, Person, Pmcid, Pmid, Provider, ProviderId, Raw,
+    IdKind, Lookup, OpenAccess, Page, PartialDate, Person, Pmcid, Pmid, Provider, ProviderId, Raw,
     ResiliencePolicy, Response, Result, SearchMode, SearchQuery, SourceRecord, Update, UpdateKind,
     Work, WorkId, WorkType, tidy_abstract,
 };
@@ -141,6 +141,58 @@ struct WireRecord {
     abstract_text: Option<String>,
     pub_type_list: PubTypes,
     cited_by_count: Option<u64>,
+    is_open_access: Option<String>,
+    license: Option<String>,
+    full_text_url_list: FullTextUrls,
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(default)]
+struct FullTextUrls {
+    #[serde(rename = "fullTextUrl")]
+    full_text_url: Vec<FullTextUrl>,
+}
+
+/// A full-text link, e.g. `{"availabilityCode": "OA", "documentStyle":
+/// "pdf", "site": "Europe_PMC", "url": "…"}`. Codes: OA (open access), F
+/// (free to read), S (subscription).
+#[derive(Debug, Default, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+struct FullTextUrl {
+    availability_code: Option<String>,
+    document_style: Option<String>,
+    site: Option<String>,
+    url: Option<String>,
+}
+
+impl WireRecord {
+    fn open_access(&self) -> Option<OpenAccess> {
+        let links = &self.full_text_url_list.full_text_url;
+        if self.is_open_access.is_none() && links.is_empty() {
+            return None;
+        }
+        let free = |style: &str| {
+            let mut free: Vec<&FullTextUrl> = links
+                .iter()
+                .filter(|l| matches!(l.availability_code.as_deref(), Some("OA" | "F")))
+                .filter(|l| l.document_style.as_deref() == Some(style))
+                .collect();
+            // Europe PMC's own copies first: stable, and the PDF renders.
+            free.sort_by_key(|l| l.site.as_deref() != Some("Europe_PMC"));
+            free.first().and_then(|l| l.url.clone())
+        };
+        let mut oa = OpenAccess::default();
+        oa.pdf_url = free("pdf");
+        oa.url = free("html");
+        oa.is_oa =
+            self.is_open_access.as_deref() == Some("Y") || oa.pdf_url.is_some() || oa.url.is_some();
+        oa.license = self
+            .license
+            .as_deref()
+            .map(|l| l.trim().to_lowercase().replace(' ', "-"));
+        oa.source = Some("europepmc".into());
+        Some(oa)
+    }
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -210,6 +262,7 @@ impl Author {
 
 fn to_record(value: &serde_json::Value, at: Timestamp) -> serde_json::Result<SourceRecord> {
     let r = WireRecord::deserialize(value)?;
+    let open_access = r.open_access();
     let mut ids: Vec<WorkId> = Vec::new();
     ids.extend(
         r.pmid
@@ -284,6 +337,7 @@ fn to_record(value: &serde_json::Value, at: Timestamp) -> serde_json::Result<Sou
         _ => None,
     };
     work.cited_by_count = r.cited_by_count;
+    work.open_access = open_access;
     if has("Retracted Publication") {
         let mut retraction = Update::new(UpdateKind::Retraction);
         retraction.source = Some("europepmc".into());

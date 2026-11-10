@@ -79,6 +79,14 @@ fn batch_lookup_of_pmids_pmcids_and_dois() {
         Some("0000-0001-5410-9085")
     );
     assert_eq!(r.work.work_type, Some(WorkType::JournalArticle));
+    let oa = r.work.open_access.as_ref().unwrap();
+    assert!(oa.is_oa);
+    assert_eq!(
+        oa.pdf_url.as_deref(),
+        Some("https://europepmc.org/articles/PMC6716493?pdf=render"),
+        "Europe PMC's own copy first"
+    );
+    assert_eq!(oa.license.as_deref(), Some("cc-by"));
 
     let r = wakefield.record.as_ref().unwrap();
     let retraction = r.work.retraction().expect("Retracted Publication flag");

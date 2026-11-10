@@ -396,3 +396,41 @@ fn unretracted_works_have_no_updates() {
             .is_empty()
     );
 }
+
+#[test]
+fn open_access_comes_from_the_best_free_copy() {
+    let (oa, _) = provider([
+        recorded("work_by_arxiv_doi"),
+        recorded("work_by_doi"),
+        recorded("work_retracted"),
+    ]);
+    let get = |i: &str| {
+        let resp = block_on(oa.lookup(&[id(i)], FieldSet::DEFAULT)).unwrap();
+        resp.value[0]
+            .record
+            .clone()
+            .unwrap()
+            .work
+            .open_access
+            .unwrap()
+    };
+
+    let arxiv = get("arXiv:1706.03762");
+    assert!(arxiv.is_oa);
+    assert_eq!(arxiv.status.as_deref(), Some("green"));
+    assert_eq!(
+        arxiv.pdf_url.as_deref(),
+        Some("https://arxiv.org/pdf/1706.03762")
+    );
+    assert_eq!(arxiv.source.as_deref(), Some("openalex"));
+
+    // A free repository copy without a PDF link.
+    let nature = get("10.1038/nature14539");
+    assert!(nature.is_oa && nature.pdf_url.is_none() && nature.url.is_some());
+    assert_eq!(nature.license.as_deref(), Some("other-oa"));
+
+    let closed = get("10.1016/S0140-6736(97)11096-0");
+    assert!(!closed.is_oa);
+    assert_eq!(closed.status.as_deref(), Some("closed"));
+    assert_eq!((closed.pdf_url, closed.url), (None, None));
+}

@@ -29,12 +29,11 @@ mod resolve;
 pub mod retry;
 mod standard;
 pub mod transport;
+mod verdict;
 
 pub use abstracts::{Abstract, AbstractsReport};
 pub use check::{Checked, Finding, Severity, duplicates, findings};
-pub use resolve::{
-    Candidate, ResolveReport, Sighting, Verdict, Verification, Via, describe_update,
-};
+pub use resolve::{Candidate, ResolveReport, Sighting, Via};
 /// Re-exported for credentials in provider configs.
 pub use secrecy::SecretString;
 #[cfg(feature = "crossref")]
@@ -50,6 +49,7 @@ pub use standard::OpenAlexConfig;
 #[cfg(feature = "openlibrary")]
 pub use standard::OpenLibraryConfig;
 pub use standard::{StandardConfig, standard};
+pub use verdict::{Verdict, Verification, describe_update};
 
 use std::sync::Arc;
 use std::time::Duration;

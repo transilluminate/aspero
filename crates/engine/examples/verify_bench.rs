@@ -3,9 +3,10 @@
 //!     cargo run -p aspero-engine --example verify_bench [-- bench/citations.jsonl]
 //!
 //! Each line of the benchmark file is
-//! `{"why": …, "claim": <reference text or Claim object>, "expect": [verdicts…], "ids": [ids…]}`:
-//! the verdict must be one of `expect`, and if `ids` is given the matched work
-//! must carry one of them.
+//! `{"why": …, "claim": <reference text or Claim object>, "expect": [verdicts…], "ids": [ids…],
+//! "retracted": bool}`: the verdict must be one of `expect`; if `ids` is given
+//! the matched work must carry one of them; if `retracted` is given, the
+//! matched work must (not) be flagged as retracted.
 //!
 //! Runs live (OPENALEX_API_KEY, ASPERO_MAILTO from the environment) through a
 //! dedicated cache in `target/bench-cache`, so the first run costs a few cents
@@ -30,6 +31,9 @@ struct Case {
     expect: Vec<String>,
     #[serde(default)]
     ids: Vec<WorkId>,
+    /// If given, whether the matched work must be flagged as retracted.
+    #[serde(default)]
+    retracted: Option<bool>,
 }
 
 #[derive(Deserialize)]
@@ -53,6 +57,12 @@ fn judge(case: &Case, v: &Verification) -> Option<String> {
     let verdict = v.verdict.as_str();
     if !case.expect.iter().any(|e| e == verdict) {
         return Some(format!("expected {}, got {verdict}", case.expect.join("/")));
+    }
+    if let Some(want) = case.retracted {
+        let got = v.best.is_some_and(|i| v.report.candidates[i].retraction().is_some());
+        if got != want {
+            return Some(format!("expected retracted={want}, got {got}"));
+        }
     }
     if case.ids.is_empty() {
         return None;

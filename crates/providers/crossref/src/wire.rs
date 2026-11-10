@@ -3,7 +3,9 @@
 //! Wire types are lenient: every field defaults and unknown fields are
 //! ignored (the full item is kept in `Raw`).
 
-use aspero_core::csl::CrossrefUpdate;
+use std::collections::BTreeMap;
+
+use aspero_core::csl::{CrossrefRelation, CrossrefUpdate, relation_updates};
 use aspero_core::{
     Doi, FieldSet, PartialDate, Person, Raw, SourceRecord, Work, WorkId, WorkType, tidy_abstract,
 };
@@ -54,6 +56,7 @@ struct WireWork {
     updated_by: Vec<CrossrefUpdate>,
     /// For a notice, the works it updates.
     update_to: Vec<CrossrefUpdate>,
+    relation: BTreeMap<String, Vec<CrossrefRelation>>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -151,6 +154,7 @@ impl WireWork {
             .updated_by
             .iter()
             .filter_map(CrossrefUpdate::to_update)
+            .chain(relation_updates(&self.relation))
             .collect();
         work.update_to = self
             .update_to

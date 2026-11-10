@@ -7,6 +7,8 @@
 //! (`article-journal`); abstracts may be JATS XML. Unknown fields are
 //! ignored (the raw response is kept elsewhere).
 
+use std::collections::BTreeMap;
+
 use serde::Deserialize;
 
 use crate::id::{Doi, WorkId};
@@ -42,6 +44,35 @@ pub struct CslItem {
     pub updated_by: Vec<CrossrefUpdate>,
     /// And notices carry the works they update here.
     pub update_to: Vec<CrossrefUpdate>,
+    /// Typed links to other works, e.g. `{"is-replaced-by": [{"id-type":
+    /// "doi", "id": "10.…"}]}`; see [`relation_updates`].
+    pub relation: BTreeMap<String, Vec<CrossrefRelation>>,
+}
+
+/// One target of a Crossref `relation`.
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(default, rename_all = "kebab-case")]
+pub struct CrossrefRelation {
+    pub id_type: Option<String>,
+    pub id: Option<String>,
+}
+
+/// Newer versions from Crossref relations: a replacement
+/// (`is-replaced-by`) or a preprint's published article (`is-preprint-of`).
+pub fn relation_updates(relation: &BTreeMap<String, Vec<CrossrefRelation>>) -> Vec<Update> {
+    ["is-replaced-by", "is-preprint-of"]
+        .iter()
+        .filter_map(|kind| relation.get(*kind))
+        .flatten()
+        .filter(|r| r.id_type.as_deref() == Some("doi"))
+        .filter_map(|r| r.id.as_deref()?.parse::<Doi>().ok())
+        .map(|doi| {
+            let mut update = Update::new(UpdateKind::NewVersion);
+            update.notice = Some(WorkId::Doi(doi));
+            update.source = Some("publisher".into());
+            update
+        })
+        .collect()
 }
 
 /// One entry of Crossref's `updated-by` (or `update-to`, where the DOI is
@@ -238,6 +269,7 @@ impl CslItem {
                 .updated_by
                 .iter()
                 .filter_map(CrossrefUpdate::to_update)
+                .chain(relation_updates(&self.relation))
                 .collect(),
             update_to: self
                 .update_to
@@ -297,6 +329,34 @@ mod tests {
             "doi:10.1016/s0140-6736(10)60175-4"
         );
         assert_eq!(r.source.as_deref(), Some("retraction-watch"));
+    }
+
+    #[test]
+    fn newer_versions_from_notices_and_relations() {
+        // Cochrane deposits a new version as a notice on the old one.
+        let w = item(serde_json::json!({
+            "updated-by": [{"DOI": "10.1002/14651858.cd000567.pub7", "type": "new_version",
+                            "source": "publisher", "updated": {"date-parts": [[2018, 8, 3]]}}]
+        }))
+        .to_work();
+        assert_eq!(w.updates[0].kind, UpdateKind::NewVersion);
+        assert_eq!(
+            w.newer_version().unwrap().to_string(),
+            "doi:10.1002/14651858.cd000567.pub7"
+        );
+        // Preprint servers link the published article as a relation.
+        let w = item(serde_json::json!({
+            "relation": {
+                "is-preprint-of": [{"id-type": "doi", "id": "10.1038/s41586-021-03819-2", "asserted-by": "subject"}],
+                "has-review": [{"id-type": "doi", "id": "10.3410/f.1"}]
+            }
+        }))
+        .to_work();
+        assert_eq!(w.updates.len(), 1);
+        assert_eq!(
+            w.newer_version().unwrap().to_string(),
+            "doi:10.1038/s41586-021-03819-2"
+        );
     }
 
     #[test]

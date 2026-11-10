@@ -149,6 +149,10 @@ pub enum UpdateKind {
     Withdrawal,
     ExpressionOfConcern,
     Correction,
+    /// A newer version or edition supersedes the work (Cochrane's
+    /// `.pub7` after `.pub6`), or a preprint's published version; the
+    /// update's `notice` is the newer work.
+    NewVersion,
     Other(String),
 }
 
@@ -159,6 +163,7 @@ impl UpdateKind {
             UpdateKind::Withdrawal => "withdrawal",
             UpdateKind::ExpressionOfConcern => "expression_of_concern",
             UpdateKind::Correction => "correction",
+            UpdateKind::NewVersion => "new_version",
             UpdateKind::Other(s) => s,
         }
     }
@@ -171,6 +176,7 @@ impl UpdateKind {
             "withdrawal" | "removal" => UpdateKind::Withdrawal,
             "expression_of_concern" => UpdateKind::ExpressionOfConcern,
             "correction" | "erratum" | "corrigendum" | "addendum" => UpdateKind::Correction,
+            "new_version" | "new_edition" => UpdateKind::NewVersion,
             _ => UpdateKind::Other(s.to_owned()),
         }
     }
@@ -197,6 +203,14 @@ impl Work {
     /// The first retraction or withdrawal notice, if any.
     pub fn retraction(&self) -> Option<&Update> {
         self.updates.iter().find(|u| u.kind.is_retraction())
+    }
+
+    /// The newer version superseding this work, if one is known.
+    pub fn newer_version(&self) -> Option<&crate::id::WorkId> {
+        self.updates
+            .iter()
+            .filter(|u| u.kind == UpdateKind::NewVersion)
+            .find_map(|u| u.notice.as_ref())
     }
 }
 

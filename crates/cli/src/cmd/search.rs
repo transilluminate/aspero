@@ -41,6 +41,32 @@ pub async fn run(
     match out.format {
         Format::Jsonl => hits.iter().for_each(print_line),
         Format::Table => {
+            let mut table = output::table(&["#", "Score", "Year", "Author", "Title", "ID"]);
+            for (i, hit) in page.hits.iter().enumerate() {
+                let w = &hit.record.work;
+                table.add_row(vec![
+                    (i + 1).to_string(),
+                    hit.score.map(|s| format!("{s:.1}")).unwrap_or_default(),
+                    output::year(w),
+                    output::first_author(w),
+                    w.title.clone().unwrap_or_default(),
+                    output::main_id(&hit.record.ids),
+                ]);
+            }
+            println!("{table}");
+            for (i, hit) in page.hits.iter().enumerate() {
+                if let Some(a) = found(i) {
+                    println!(
+                        "\n{}. {}\n{}",
+                        i + 1,
+                        output::main_id(&hit.record.ids),
+                        output::abstract_text(a, "  ")
+                    );
+                }
+            }
+            footer(&report);
+        }
+        Format::Text => {
             for (i, hit) in page.hits.iter().enumerate() {
                 print!("{}", output::hit_text(i + 1, hit));
                 if let Some(a) = found(i) {
@@ -48,30 +74,7 @@ pub async fn run(
                 }
                 println!();
             }
-            let total = page.total.map(|t| format!(" of {t}")).unwrap_or_default();
-            let served = match report.served {
-                aspero_engine::Served::Live => String::new(),
-                s => format!(" ({})", s.as_str()),
-            };
-            eprintln!(
-                "{} results{total} via {}{served}",
-                page.hits.len(),
-                report.provider
-            );
-            if !report.ignored_filters.is_empty() {
-                eprintln!(
-                    "ignored filters (unsupported by {}): {:?}",
-                    report.provider, report.ignored_filters
-                );
-            }
-            if let Some(next) = &page.next {
-                eprintln!("more: --cursor {}", next.0);
-            }
-            if let Some(u) = &report.usage
-                && let Some(text) = output::usage_text(&[(report.provider.clone(), *u)])
-            {
-                eprintln!("{text}");
-            }
+            footer(&report);
         }
         Format::Json | Format::Auto => {
             let mut doc = json!({
@@ -93,6 +96,35 @@ pub async fn run(
     } else {
         Exit::Ok
     })
+}
+
+/// Totals, ignored filters, paging and spend, on stderr.
+fn footer(report: &aspero_engine::SearchReport) {
+    let page = &report.page;
+    let total = page.total.map(|t| format!(" of {t}")).unwrap_or_default();
+    let served = match report.served {
+        aspero_engine::Served::Live => String::new(),
+        s => format!(" ({})", s.as_str()),
+    };
+    eprintln!(
+        "{} results{total} via {}{served}",
+        page.hits.len(),
+        report.provider
+    );
+    if !report.ignored_filters.is_empty() {
+        eprintln!(
+            "ignored filters (unsupported by {}): {:?}",
+            report.provider, report.ignored_filters
+        );
+    }
+    if let Some(next) = &page.next {
+        eprintln!("more: --cursor {}", next.0);
+    }
+    if let Some(u) = &report.usage
+        && let Some(text) = output::usage_text(&[(report.provider.clone(), *u)])
+    {
+        eprintln!("{text}");
+    }
 }
 
 fn query(text: String, o: &SearchOptions) -> Result<SearchQuery, Failure> {

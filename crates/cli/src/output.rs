@@ -3,7 +3,9 @@
 //! JSON shapes are the agent contract: fields are omitted when unknown rather
 //! than `null`, and the lean default set is enough to identify and cite.
 
-use aspero_core::{Agreement, Hit, ProviderId, SourceRecord, UpdateKind, Usage};
+use aspero_core::{
+    Agreement, Hit, IdKind, ProviderId, SourceRecord, UpdateKind, Usage, Work, WorkId,
+};
 use aspero_engine::{Abstract, Candidate, describe_update};
 
 /// Abstract characters shown in tables; JSON has the full text.
@@ -229,6 +231,124 @@ pub fn usage_text(usage: &[(ProviderId, Usage)]) -> Option<String> {
         })
         .collect();
     (!lines.is_empty()).then(|| lines.join("\n"))
+}
+
+// ------------------------------------------------------------ tables
+
+/// A table in aspero's style: rounded borders, bold headers, columns that
+/// wrap to the terminal's width. Colours apply only on a terminal.
+pub fn table(headers: &[&str]) -> comfy_table::Table {
+    use comfy_table::{Attribute, Cell, ContentArrangement, Table, presets};
+    let mut t = Table::new();
+    t.load_style(presets::UTF8_FULL_CONDENSED.with_rounded_corners())
+        .set_content_arrangement(ContentArrangement::Dynamic)
+        .set_header(
+            headers
+                .iter()
+                .map(|h| Cell::new(h).add_attribute(Attribute::Bold)),
+        );
+    t
+}
+
+/// "LeCun et al.", "Bishop", or "" when there are no authors.
+pub fn first_author(w: &Work) -> String {
+    let Some(first) = w.authors.first() else {
+        return String::new();
+    };
+    // Family names throughout; for unsplit names, the last word.
+    let name = first
+        .family
+        .clone()
+        .or_else(|| {
+            let literal = first.literal.as_deref()?;
+            literal.split_whitespace().last().map(str::to_owned)
+        })
+        .or_else(|| first.display_name())
+        .unwrap_or_default();
+    if w.authors.len() > 1 {
+        format!("{name} et al.")
+    } else {
+        name
+    }
+}
+
+pub fn year(w: &Work) -> String {
+    w.issued.map(|d| d.year().to_string()).unwrap_or_default()
+}
+
+/// The identifier most useful to cite: a DOI, else the first.
+pub fn main_id(ids: &[WorkId]) -> String {
+    ids.iter()
+        .find(|id| id.kind() == IdKind::Doi)
+        .or(ids.first())
+        .map(ToString::to_string)
+        .unwrap_or_default()
+}
+
+/// A cell coloured by how much attention it needs.
+pub fn status_cell(text: &str, level: Level) -> comfy_table::Cell {
+    use comfy_table::{Cell, Color};
+    let colour = match level {
+        Level::Good => Color::Green,
+        Level::Info => Color::Blue,
+        Level::Warning => Color::Yellow,
+        Level::Error => Color::Red,
+    };
+    Cell::new(text).fg(colour)
+}
+
+/// A scored candidate as a table row, coloured by confidence.
+pub fn candidate_row(rank: usize, c: &Candidate) -> Vec<comfy_table::Cell> {
+    use comfy_table::Cell;
+    let a = &c.assessment;
+    let mark = |g: Agreement| match g {
+        Agreement::Match => "✓",
+        Agreement::Partial => "~",
+        Agreement::Mismatch => "✗",
+        _ => "?",
+    };
+    let mut checks = format!(
+        "title {} authors {} year {}",
+        mark(a.title.agreement),
+        mark(a.authors.agreement),
+        mark(a.year.agreement)
+    );
+    if a.ids != Agreement::Unknown {
+        checks.push_str(&format!(" id {}", mark(a.ids)));
+    }
+    let level = match a.confidence {
+        c if c >= 0.85 => Level::Good,
+        c if c >= 0.6 => Level::Warning,
+        _ => Level::Error,
+    };
+    let w = &c.record.work;
+    let mut title = w.title.clone().unwrap_or_default();
+    if let Some(r) = c.retraction() {
+        title = format!("{title}\n⚠ {}", describe_update(r));
+    }
+    let found_by: Vec<String> = c
+        .sightings
+        .iter()
+        .map(|s| format!("{} {}", s.provider, s.via.as_str().replace('_', " ")))
+        .collect();
+    vec![
+        Cell::new(rank),
+        status_cell(&format!("{:.2}", a.confidence), level),
+        Cell::new(checks),
+        Cell::new(year(w)),
+        Cell::new(first_author(w)),
+        Cell::new(title),
+        Cell::new(main_id(&c.ids)),
+        Cell::new(found_by.join("\n")),
+    ]
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Level {
+    Good,
+    Info,
+    Warning,
+    Error,
 }
 
 #[cfg(test)]

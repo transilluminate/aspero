@@ -52,8 +52,10 @@ aspero resolve --abstract "Jumper J et al. Highly accurate protein structure pre
 aspero verify -v "Bishop CM. Pattern Recognition and Machine Learning. 2006"
 ```
 
-Output is a table on a terminal and JSON when piped (`--format
-json|jsonl|table`). Every command's `--help` has examples and the exit codes.
+On a terminal, results are tables (a single `verify` is a short report);
+piped, they're JSON. Pick explicitly with `--format table|text|json|jsonl`:
+`text` is a detailed report per result. Every command's `--help` has
+examples and the exit codes.
 
 What `verify` and `check` catch: invented papers, real DOIs attached to the
 wrong work, nonexistent DOIs (with the right one suggested), wrong years,

@@ -9,7 +9,7 @@ use serde_json::{Value, json};
 use super::{Failure, Out, print, print_line, read_stdin};
 use crate::args::{FailOn, Format};
 use crate::exit::Exit;
-use crate::output;
+use crate::output::{self, Level};
 
 pub async fn run(
     engine: &Engine,
@@ -31,7 +31,7 @@ pub async fn run(
 
     let checkable: Vec<&BibEntry> = entries.iter().filter(|e| e.is_checkable()).collect();
     let claims: Vec<_> = checkable.iter().map(|e| e.claim.clone()).collect();
-    let show_progress = out.format == Format::Table && std::io::stderr().is_terminal();
+    let show_progress = out.format.is_human() && std::io::stderr().is_terminal();
     let total = claims.len();
     let checked = engine
         .check(&claims, limit, |i| {
@@ -67,6 +67,16 @@ pub async fn run(
 
     match out.format {
         Format::Table => {
+            let mut table = output::table(&["Status", "Key", "Verdict", "Findings"]);
+            for report in &reports {
+                table.add_row(report.row());
+            }
+            println!("{table}\n{}", summary.text(&path));
+            if let Some(text) = output::usage_text(&usage) {
+                eprintln!("{text}");
+            }
+        }
+        Format::Text => {
             for report in &reports {
                 print!("{}", report.text());
             }
@@ -144,6 +154,23 @@ impl<'a> Report<'a> {
     fn verdict(&self) -> &'static str {
         self.checked
             .map_or("skipped", |c| c.verification.verdict.as_str())
+    }
+
+    /// Status, key, verdict, and one finding per line.
+    fn row(&self) -> Vec<comfy_table::Cell> {
+        let status = match self.severity {
+            None => output::status_cell("ok", Level::Good),
+            Some(Severity::Info) => output::status_cell("info", Level::Info),
+            Some(Severity::Warning) => output::status_cell("WARNING", Level::Warning),
+            Some(_) => output::status_cell("ERROR", Level::Error),
+        };
+        let findings: Vec<&str> = self.lines.iter().map(|l| l.message.as_str()).collect();
+        vec![
+            status,
+            comfy_table::Cell::new(&self.entry.key),
+            comfy_table::Cell::new(self.verdict().replace('_', " ")),
+            comfy_table::Cell::new(findings.join("\n")),
+        ]
     }
 
     fn text(&self) -> String {

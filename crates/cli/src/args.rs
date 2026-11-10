@@ -44,7 +44,7 @@ pub struct Cli {
 
 #[derive(Debug, Args)]
 pub struct Global {
-    /// Output format. `auto`: table on a terminal, JSON otherwise.
+    /// Output format. `auto`: tables on a terminal, JSON otherwise.
     #[arg(long, global = true, value_enum, default_value_t = Format::Auto)]
     pub format: Format,
 
@@ -75,7 +75,17 @@ pub enum Format {
     Json,
     /// One JSON object per line (per work or per candidate).
     Jsonl,
+    /// Aligned columns for list-shaped results; single results as text.
     Table,
+    /// A readable report: each result in detail.
+    Text,
+}
+
+impl Format {
+    /// Meant for people (table or text) rather than programs.
+    pub fn is_human(self) -> bool {
+        matches!(self, Format::Table | Format::Text)
+    }
 }
 
 #[derive(Debug, Subcommand)]

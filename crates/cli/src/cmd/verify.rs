@@ -6,12 +6,14 @@ use aspero_engine::{Engine, Verdict, Verification};
 use serde_json::{Value, json};
 
 use super::claim::{ClaimInput, claims};
+use std::io::IsTerminal;
+
 use futures::StreamExt;
 
 use super::{Failure, Out, merge_usage, print, print_line};
 use crate::args::{ClaimArgs, Format};
 use crate::exit::Exit;
-use crate::output;
+use crate::output::{self, Level};
 
 pub async fn run(engine: &Engine, args: ClaimArgs, out: Out) -> Result<Exit, Failure> {
     let limit = args.limit;
@@ -37,6 +39,9 @@ pub async fn run(engine: &Engine, args: ClaimArgs, out: Out) -> Result<Exit, Fai
         }
     }
     let mut verified = std::pin::pin!(engine.verify_many(&valid, limit));
+    let (mut rows, mut texts) = (Vec::new(), Vec::new());
+    let total = claims.len();
+    let show_progress = out.format == Format::Table && total > 1 && std::io::stderr().is_terminal();
     for (input, claim) in claims {
         let (item, item_exit, text) = match claim {
             Err(e) => (
@@ -76,13 +81,40 @@ pub async fn run(engine: &Engine, args: ClaimArgs, out: Out) -> Result<Exit, Fai
         // Stream line-oriented formats so long batches show progress.
         match out.format {
             Format::Jsonl => print_line(&item),
-            Format::Table => println!("{text}"),
+            Format::Text => println!("{text}"),
+            Format::Table => {
+                rows.push(row(&item));
+                texts.push(text);
+                if show_progress {
+                    eprint!("\rverified {}/{total}…", rows.len());
+                }
+            }
             _ => items.push(item),
         }
     }
+    if show_progress {
+        eprint!("\r\x1b[K");
+    }
 
     match out.format {
+        // One claim is detail, not rows: show it as text.
+        Format::Table if texts.len() == 1 => {
+            println!("{}", texts[0]);
+            if let Some(text) = output::usage_text(&usage) {
+                eprintln!("{text}");
+            }
+        }
         Format::Table => {
+            let mut table = output::table(&["Verdict", "Conf", "Citation", "Reason"]);
+            for row in rows {
+                table.add_row(row);
+            }
+            println!("{table}");
+            if let Some(text) = output::usage_text(&usage) {
+                eprintln!("{text}");
+            }
+        }
+        Format::Text => {
             if let Some(text) = output::usage_text(&usage) {
                 eprintln!("{text}");
             }
@@ -105,6 +137,27 @@ pub fn split(args: ClaimArgs) -> (Option<String>, ClaimInput) {
         ..ClaimInput::default()
     };
     (args.text, fields)
+}
+
+/// One verification as a table row: verdict, confidence, citation, reason.
+fn row(item: &Value) -> Vec<comfy_table::Cell> {
+    use comfy_table::Cell;
+    let verdict = item["verdict"].as_str().unwrap_or("?");
+    let level = match verdict {
+        "verified" => Level::Good,
+        "plausible" | "unverifiable" => Level::Warning,
+        _ => Level::Error,
+    };
+    let confidence = item["match"]["confidence"]
+        .as_f64()
+        .map(|c| format!("{c:.2}"))
+        .unwrap_or_default();
+    vec![
+        output::status_cell(&verdict.replace('_', " ").to_uppercase(), level),
+        Cell::new(confidence),
+        Cell::new(item["input"].as_str().unwrap_or("")),
+        Cell::new(item["reason"].as_str().unwrap_or("")),
+    ]
 }
 
 fn exit_for(verdict: Verdict) -> Exit {

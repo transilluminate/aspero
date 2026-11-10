@@ -3,13 +3,15 @@
 use std::io::IsTerminal;
 
 use aspero_core::{Doi, FieldSet, IdError, SourceRecord, WorkId};
-use aspero_engine::{Abstract, Engine, LookupReport, LookupResult, Outcome, Served};
+use aspero_engine::{
+    Abstract, Engine, LookupReport, LookupResult, Outcome, Served, describe_update,
+};
 use serde_json::{Value, json};
 
 use super::{Failure, Out, merge_usage, print, print_line, read_stdin};
 use crate::args::Format;
 use crate::exit::Exit;
-use crate::output;
+use crate::output::{self, Level};
 
 pub async fn run(engine: &Engine, ids: Vec<String>, out: Out) -> Result<Exit, Failure> {
     let inputs = inputs(ids)?;
@@ -71,6 +73,27 @@ pub async fn run(engine: &Engine, ids: Vec<String>, out: Out) -> Result<Exit, Fa
     match out.format {
         Format::Jsonl => items.iter().for_each(print_line),
         Format::Table => {
+            let mut table = output::table(&["ID", "Status", "Year", "Author", "Title", "Via"]);
+            let mut listed = Vec::new();
+            let mut abstracts = abstracts.iter();
+            for (item, result) in items.iter().zip(per_input(&parsed, &report.results)) {
+                table.add_row(row(item, result));
+                let found = result
+                    .and_then(|_| abstracts.next())
+                    .and_then(Option::as_ref);
+                if let (Some(found), Some(id)) = (found, item["id"].as_str()) {
+                    listed.push((id.to_owned(), found.clone()));
+                }
+            }
+            println!("{table}");
+            for (id, found) in listed {
+                println!("\n{id}\n{}", output::abstract_text(found.as_ref(), "  "));
+            }
+            if let Some(usage) = output::usage_text(&report.usage) {
+                eprintln!("{usage}");
+            }
+        }
+        Format::Text => {
             let mut abstracts = abstracts.iter();
             for (item, result) in items.iter().zip(per_input(&parsed, &report.results)) {
                 print!("{}", text(item, result));
@@ -221,6 +244,57 @@ pub fn item(input: &str, result: &LookupResult, full: bool) -> (Value, Exit) {
         item["attempts"] = json!(attempts);
     }
     (item, exit)
+}
+
+/// One result as a table row.
+fn row(item: &Value, result: Option<&LookupResult>) -> Vec<comfy_table::Cell> {
+    use comfy_table::Cell;
+    let label = item["id"]
+        .as_str()
+        .or(item["input"].as_str())
+        .unwrap_or("?");
+    let status = item["status"].as_str().unwrap_or("?").replace('_', " ");
+    match result.and_then(|r| r.record.as_ref()) {
+        Some(record) => {
+            let w = &record.work;
+            let via = match item["served"].as_str() {
+                Some(served) => format!("{} ({served})", record.source),
+                None => record.source.to_string(),
+            };
+            let mut status_text = status;
+            if let Some(r) = w.retraction() {
+                status_text = format!("found\n{}", describe_update(r));
+            }
+            let level = if w.retraction().is_some() {
+                Level::Error
+            } else {
+                Level::Good
+            };
+            vec![
+                Cell::new(label),
+                output::status_cell(&status_text, level),
+                Cell::new(output::year(w)),
+                Cell::new(output::first_author(w)),
+                Cell::new(w.title.as_deref().unwrap_or("")),
+                Cell::new(via),
+            ]
+        }
+        None => {
+            let level = match item["status"].as_str() {
+                Some("not_found") | Some("invalid") => Level::Error,
+                _ => Level::Warning,
+            };
+            let why = item["error"].as_str().unwrap_or("");
+            vec![
+                Cell::new(label),
+                output::status_cell(&status, level),
+                Cell::new(""),
+                Cell::new(""),
+                Cell::new(why),
+                Cell::new(""),
+            ]
+        }
+    }
 }
 
 /// One result as terminal text.

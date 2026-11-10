@@ -66,6 +66,32 @@ pub async fn run(engine: &Engine, args: ClaimArgs, out: Out) -> Result<Exit, Fai
 
         match out.format {
             Format::Table => {
+                println!("{input}");
+                if report.candidates.is_empty() {
+                    println!("  no candidates");
+                } else {
+                    let mut table = output::table(&[
+                        "#", "Conf", "Checks", "Year", "Author", "Title", "ID", "Found by",
+                    ]);
+                    for (i, c) in report.candidates.iter().enumerate() {
+                        table.add_row(output::candidate_row(i + 1, c));
+                    }
+                    println!("{table}");
+                }
+                for (i, c) in report.candidates.iter().enumerate() {
+                    if let Some(a) = found(i) {
+                        let id = output::main_id(&c.ids);
+                        println!("\n{}. {id}\n{}", i + 1, output::abstract_text(a, "  "));
+                    }
+                }
+                for e in &errors {
+                    eprintln!("warning: {e}");
+                }
+                if let Some(text) = output::usage_text(&report.usage) {
+                    eprintln!("{text}");
+                }
+            }
+            Format::Text => {
                 println!("{input}\n");
                 for (i, c) in report.candidates.iter().enumerate() {
                     println!("{}", output::candidate_text(c, "  "));

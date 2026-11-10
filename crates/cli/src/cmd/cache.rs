@@ -12,7 +12,7 @@ use crate::exit::Exit;
 pub fn run(path: PathBuf, action: CacheAction, out: Out) -> Result<Exit, Failure> {
     if let CacheAction::Path = action {
         match out.format {
-            Format::Table => println!("{}", path.display()),
+            Format::Text | Format::Table => println!("{}", path.display()),
             _ => print(&json!({"path": path})),
         }
         return Ok(Exit::Ok);
@@ -31,7 +31,7 @@ pub fn run(path: PathBuf, action: CacheAction, out: Out) -> Result<Exit, Failure
     let stats = cache.stats().map_err(failed)?;
     let bytes = std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
     match out.format {
-        Format::Table => println!(
+        Format::Text | Format::Table => println!(
             "{}\n  {} records ({} identifiers), {} not-found answers, {} searches, {:.1} MB",
             path.display(),
             stats.records,

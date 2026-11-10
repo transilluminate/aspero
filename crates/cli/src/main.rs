@@ -41,7 +41,7 @@ async fn main() -> ExitCode {
     match run(cli, out).await {
         Ok(exit) => exit.code(),
         Err(failure) => {
-            if format == Format::Table {
+            if format.is_human() {
                 eprintln!("error: {}", failure.message);
             } else {
                 let category = format!("{:?}", failure.exit).to_lowercase();

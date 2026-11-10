@@ -1,5 +1,18 @@
 # Changelog
 
+## Unreleased
+
+- `verify` and `resolve` check the journal (abbreviations and initials
+  included: N Engl J Med, NEJM), volume and first page, from claim fields
+  or Vancouver/APA-style text. A wrong volume or page makes a match
+  plausible, with the reason naming the right one; short references
+  without a title ("Daum RS et al. N Engl J Med 2017;376:2545") verify.
+  `checks` gains `container`, `volume` and `page`.
+- Structured claims: JSON lines take `journal` (or `container`), `volume`,
+  `page`, and a `key` echoed back untouched; results carry the `claim` as
+  understood. `--journal`, `--volume`, `--page` flags.
+- Plausible verdicts say which details differ.
+
 ## 0.3.0
 
 - **Breaking (library):** `IdKind::ALL` and `Field::ALL` are slices, so

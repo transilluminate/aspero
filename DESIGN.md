@@ -145,6 +145,15 @@ citation styles. The rules, each from a real failure:
   repeat the original's; confidence halves unless the claim cites one.
 - **Online and print years both count**, so either year of an
   online-first paper matches, as do years across merged records.
+- **Journal, volume and first page** come from claim fields or the text
+  (Vancouver `2017;376(26):2545`, APA `376(26), 2545`, `vol./pp.`).
+  Journals match by rule (each abbreviated word abbreviates the next
+  significant word, or initials: NEJM, JAMA), not a list, so a journal
+  mismatch only lowers the ranking. A different volume or page caps a match
+  at plausible: a citation error, and what separates an article from
+  replies printed in the same volume. Matching volume and page corroborate
+  like authors; with journal and volume agreeing, a title missing from a
+  short reference doesn't count against it.
 - **First author alone is an author match** ("Vaswani et al."); an
   unmentioned sole author is no match.
 - **"RETRACTED:" title markers are ignored** when comparing titles.

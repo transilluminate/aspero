@@ -31,3 +31,6 @@
 {"why": "dogfood: print year (2018) of an online-first paper (2017)", "claim": "Nazerian P, et al. Diagnostic accuracy of the aortic dissection detection risk score plus D-dimer for acute aortic syndromes. Circulation 2018", "expect": ["verified"], "ids": ["doi:10.1161/circulationaha.117.029457"]}
 {"why": "dogfood: DOI pasted from prose with a closing parenthesis", "claim": "Meyer G, et al. Fibrinolysis for patients with intermediate-risk pulmonary embolism. N Engl J Med 2014 (doi:10.1056/NEJMoa1302097).", "expect": ["verified"], "ids": ["doi:10.1056/nejmoa1302097"]}
 {"why": "control: invented paper", "claim": "Smith 2019 Ketamine reduces mortality in septic shock", "expect": ["not_found"]}
+{"why": "Vancouver without a title: journal, volume and first page place it", "claim": "Daum RS et al. N Engl J Med 2017;376:2545", "expect": ["verified"], "ids": ["doi:10.1056/nejmoa1607033"]}
+{"why": "Vancouver with a wrong first page: the paper, flagged", "claim": "Daum RS et al. N Engl J Med 2017;376:2440", "expect": ["plausible"]}
+{"why": "full Vancouver reference: title, journal abbreviation, volume, pages", "claim": "Meyer G, Vicaut E, Danays T, et al. Fibrinolysis for patients with intermediate-risk pulmonary embolism. N Engl J Med. 2014;370(15):1402-11.", "expect": ["verified"], "ids": ["doi:10.1056/nejmoa1302097"]}

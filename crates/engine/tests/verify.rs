@@ -384,3 +384,49 @@ async fn provider_failures_make_an_empty_result_unverifiable() {
     assert_eq!(v.verdict, Verdict::Unverifiable, "{}", v.reason);
     assert_eq!(v.report.errors.len(), 1);
 }
+
+fn with_abstract(mut record: SourceRecord, text: &str) -> SourceRecord {
+    record.work.abstract_text = Some(text.into());
+    record
+}
+
+#[tokio::test]
+async fn abstracts_are_filled_from_other_providers_with_provenance() {
+    // OpenAlex (first) knows the work without an abstract; Crossref has one.
+    let openalex =
+        Arc::new(Scripted::new("openalex").with(vec![deep_learning(), attention_real()]));
+    let crossref = Arc::new(Scripted::new("crossref").with(vec![
+        with_abstract(
+            deep_learning(),
+            "Deep learning allows computational models…",
+        ),
+        with_abstract(attention_lookalike(), "unrelated"),
+    ]));
+    let engine = engine(vec![openalex, crossref]);
+
+    let has_own = with_abstract(
+        attention_real(),
+        "The dominant sequence transduction models…",
+    );
+    let mut lacks = deep_learning();
+    lacks.source = ProviderId::from_static("openalex");
+    let nowhere = work("openalex", &["10.1000/no-abstract"], "Obscure", &[], 1999);
+
+    let report = engine.abstracts(&[&lacks, &has_own, &nowhere]).await;
+    let found: Vec<Option<(String, String)>> = report
+        .found
+        .iter()
+        .map(|a| {
+            a.as_ref()
+                .map(|a| (a.source.to_string(), a.text.chars().take(13).collect()))
+        })
+        .collect();
+    assert_eq!(
+        found,
+        [
+            Some(("crossref".into(), "Deep learning".into())),
+            Some(("openalex".into(), "The dominant ".into())),
+            None,
+        ]
+    );
+}

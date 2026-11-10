@@ -245,8 +245,17 @@ Cache policy:
   ~0.1s (title, `authoredBy` person IRIs, year, pagination, venue, NeurIPS
   proceedings URL); unranked `CONTAINS` title search ~2s, so rank
   client-side. Build DBLP on SPARQL.
-- **Open Library** (books; no key): ISBN lookup and search — needs an ISBN
-  identifier kind.
+  *Follow-up probe:* no QLever text index on DBLP's endpoint
+  (`ql:contains-word` returns nothing); title search is a scan over ~7M
+  titles (`CONTAINS` ~2s, `STRSTARTS` 8.6s). Firing that per verified claim
+  would be slow and impolite, so **DBLP is not a search provider**. OpenAlex
+  already covers NeurIPS/CVPR proceedings (benchmark cases pass). Worth
+  adding later: exact **DBLP-key lookups** via SPARQL (~0.1s; author order
+  via `hasSignature`/`signatureOrdinal`, DOIs via `dblp:doi`) for `.bib`
+  files exported from DBLP.
+- **Open Library** ✅ *built 2026-11-10*: ISBN lookup (batched) and book
+  search with edition years and joined subtitles.
+
 - **Europe PMC** (biomedical; no key): PMID/PMCID, abstracts, OA full text,
   citations.
 - **arXiv API**: all arXiv abstracts, versions, categories (~1 req/3 s).

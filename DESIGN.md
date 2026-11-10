@@ -566,8 +566,12 @@ shared circuit breaker (state machine + multi-process tests).
 
 **Phase 1** — S2 provider (once key arrives): search, batch, recommendations,
 snippets; `related`. Breaker + cross-process limiter if needed.
-**Phase 2** — `check` (bib lint over `verify`), retractions, format export
-(`hayagriva`).
+**Phase 2** — `check` (bib lint over `verify`) ✅ *built 2026-11-10*: BibTeX/
+BibLaTeX via the `biblatex` crate (`aspero-bib`), findings add_doi /
+replace_id / year_differs (off-by-one = info) / duplicate, `--fail-on` for
+CI. Still: retractions (Crossref `update-to`/Retraction Watch), "preprint
+since published", format export (`hayagriva`), writing fixes back to the
+.bib.
 **Phase 3** — snowballing; watches; MCP adapter if ever wanted.
 **Phase 4** — TUI; graph export + local web visualiser; OA PDF fetch.
 

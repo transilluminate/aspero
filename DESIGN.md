@@ -234,6 +234,19 @@ Cache policy:
   media type and a blob, found via any of the work's identifiers. Nothing in
   aspero depends on a particular producer.
 
+### More free providers (candidates, by gap filled)
+
+- **DBLP** (CS; no key): conference papers without DOIs (NeurIPS, ICML, ICLR).
+- **Open Library** (books; no key): ISBN lookup and search — needs an ISBN
+  identifier kind.
+- **Europe PMC** (biomedical; no key): PMID/PMCID, abstracts, OA full text,
+  citations.
+- **arXiv API**: all arXiv abstracts, versions, categories (~1 req/3 s).
+- **Unpaywall** (email): legal OA PDF locations (Phase 4).
+- **OpenCitations** (no key): citation graph by DOI, for snowballing.
+- Specialist: NASA ADS (key), INSPIRE-HEP, HAL, CORE (key).
+- Humanities stay thin (PhilPapers restricted; JSTOR/Google Scholar no API).
+
 ### Abstracts, text and embeddings (later; seams only)
 
 aspero stays a standalone, MIT/Apache, generally useful tool. These are
@@ -569,8 +582,12 @@ snippets; `related`. Breaker + cross-process limiter if needed.
 **Phase 2** — `check` (bib lint over `verify`) ✅ *built 2026-11-10*: BibTeX/
 BibLaTeX via the `biblatex` crate (`aspero-bib`), findings add_doi /
 replace_id / year_differs (off-by-one = info) / duplicate, `--fail-on` for
-CI. Still: retractions (Crossref `update-to`/Retraction Watch), "preprint
-since published", format export (`hayagriva`), writing fixes back to the
+CI. Retractions ✅: Crossref/doi.org `updated-by` (Retraction Watch notices
+with date and notice DOI) and OpenAlex `is_retracted` (bare flag, detailed
+on demand from Crossref) → `Work::updates`; verify notes them, check makes
+retraction/withdrawal an error, expression of concern a warning,
+correction info; titles' "RETRACTED:" marker is ignored when matching.
+Still: "preprint since published", format export (`hayagriva`), writing fixes back to the
 .bib.
 **Phase 3** — snowballing; watches; MCP adapter if ever wanted.
 **Phase 4** — TUI; graph export + local web visualiser; OA PDF fetch.

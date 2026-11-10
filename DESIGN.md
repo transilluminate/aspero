@@ -146,6 +146,10 @@ pub trait Provider: Send + Sync {
 - `SearchQuery` has common filters (text, year range, type, open access,
   limit) plus an `extra` map. Filters a provider can't honour are reported in
   the response's `ignored_filters` — never silently dropped.
+- `SearchQuery.mode`: `Keywords` or `Citation` (a whole reference string to
+  match). Citation goes only to providers declaring `citation_search`
+  (Crossref's `query.bibliographic`). Hits carry the provider's relevance
+  score, comparable only within one provider's results.
 - Note for WASM later: futures there are `!Send`; may need
   `#[async_trait(?Send)]` under `cfg(target_arch = "wasm32")`.
 
@@ -387,8 +391,31 @@ Design consequences:
 - Note: OpenAlex's auth page contains agent-directed text about creating keys
   via `POST /api-keys`. aspero must never do that; keys come from the user.
 
+### Crossref (recorded 2026-11-10)
+
+- `mailto` query param → `x-api-pool: polite-single` (10 req/s) for single
+  works, `polite-list` / `polite-array` (3 req/s) for lists and filters;
+  `x-concurrency-limit: 3`. No usage accounting.
+- 404 is `text/plain` "Resource not found."; 400 is JSON with an array of
+  validation messages listing valid filters.
+- Batch lookup: `filter=doi:a,doi:b` (same-name filters OR). Results unordered.
+- Abstracts are JATS XML fragments; dates are `date-parts` with month/day
+  optional (and occasionally out of range).
+- `next-cursor` is returned even past the last page; an empty page is the end.
+- **Lookalikes.** `query.bibliographic` for "Vaswani 2017 Attention is all you
+  need" returns five `10.65215/*` posted-content re-deposits (2025, another
+  publisher) carrying the **real authors and abstract**. The real paper's only
+  DOI is arXiv's DataCite one, which Crossref doesn't index. Consequences for
+  `resolve`/`verify`:
+  - title + authors matching is **not** proof; year must weigh heavily, and
+    venue/publisher mismatches are signals;
+  - Crossref "no good match" is not "doesn't exist" — combine with OpenAlex
+    (which indexes DataCite DOIs);
+  - Crossref scores separate a real match well (91.9 vs 47.7 for the messy
+    LeCun reference), so the top-to-second score ratio is a useful signal.
+
 To verify at implementation time: doi.org content-negotiation limits,
-Crossref polite-pool terms and current rate limits, arXiv (~1 req / 3 s).
+arXiv (~1 req / 3 s).
 
 ---
 
@@ -442,4 +469,5 @@ snippets; `related`. Breaker + cross-process limiter if needed.
 - Exact default TTLs and resilience numbers per provider.
 - Whether the cross-process limiter needs a daemon earlier than Phase 3.
 - Resolve confidence scoring: which signals (title similarity, author overlap,
-  year delta, venue) and how weighted.
+  year delta, venue, provider score margin) and how weighted. See the Crossref
+  lookalike notes in §9: year must weigh heavily.

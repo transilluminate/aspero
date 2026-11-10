@@ -137,6 +137,12 @@ pub trait Provider: Send + Sync {
   **never merge**; the engine does.
 - Each provider owns: its HTTP mapping, its error mapping into the shared error
   enum, its default `ResiliencePolicy`, and its credentials.
+- **Transport seam**: providers never own an HTTP client. They build
+  `HttpRequest`s and map `HttpResponse`s; the engine injects an `HttpClient`
+  (where per-request pacing, timeouts and user agent live). Responses carry
+  `received_at`, so providers stamp `fetched_at` without a clock. Tests inject
+  `ReplayClient` (core `testing` feature) with curl-recorded fixtures — no
+  network, no async runtime, no wiremock.
 - `SearchQuery` has common filters (text, year range, type, open access,
   limit) plus an `extra` map. Filters a provider can't honour are reported in
   the response's `ignored_filters` — never silently dropped.
@@ -336,7 +342,7 @@ Recorded 2026-11-10 from a keyless probe of S2 Graph API
   not S2 application JSON. **No `Retry-After` header.**
 - No `Access-Control-*` headers on 429s; CORS on 200s unverified (affects the
   in-browser WASM idea).
-- Keyless S2 is best-effort only. These responses become wiremock fixtures.
+- Keyless S2 is best-effort only. These responses become replay fixtures.
 
 ### OpenAlex (help.openalex.org, pages dated 2026-10-23 – 2026-11-03)
 
@@ -358,6 +364,16 @@ Recorded 2026-11-10 from a keyless probe of S2 Graph API
   (seconds to midnight UTC), and `meta.cost` in the body. Exhaustion → `429`
   (with `Retry-After`; `"not_enough_credits"` for over-budget queries). 301 =
   merged entity (follow and record the co-identifier).
+- **Observed 2026-11-10** (recorded fixtures): headers also include
+  `x-ratelimit-cost-usd` and `x-ratelimit-remaining-usd` (used directly);
+  singleton lookups cost $0, filter batches $0.0001, searches $0.001. A
+  missing work is a 404 with an **HTML** body; a bad filter is a 400 with JSON
+  `{error, message}` listing all valid filter names. Batch filter results come
+  back in "most cited" order with missing IDs simply absent, so results are
+  matched to requests by identifier. arXiv works are indexed under their
+  DataCite DOI `10.48550/arxiv.<id>`. Search for "attention is all you need"
+  returns two distinct works with that exact title — `resolve` must expect
+  duplicates.
 
 Design consequences:
 - Route **lookups and batched ID filters to OpenAlex freely**; treat **search
@@ -394,7 +410,8 @@ Crossref polite-pool terms and current rate limits, arXiv (~1 req / 3 s).
   author/year match), `history`, `auth status`.
 - **Tests on core logic**: identifier normalisation (property tests), cache
   field-subset logic, identifier-graph merging, backoff schedule & ceilings,
-  routing fallback, error mapping from recorded fixtures (wiremock).
+  routing fallback, error mapping from recorded fixtures (replayed through the
+  transport seam; `scripts/record-*.sh` re-records them).
 - Build a small **fixture set of bad citations** (invented DOIs, wrong years,
   title drift, preprint vs published) — no existing test data; this doubles as
   the `resolve`/`verify` benchmark.

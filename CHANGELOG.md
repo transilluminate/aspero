@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.3.4
 
 - `canonical` on every work in JSON: one key per work whichever identifier
   found it (DOI, PMID or PMCID lookups of one work agree), for deduping.

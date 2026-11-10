@@ -62,6 +62,16 @@ pub fn read_stdin() -> Result<String, Failure> {
     Ok(buf)
 }
 
+/// Quotes `s` for a POSIX shell, leaving plain words as they are.
+pub fn shell_quote(s: &str) -> String {
+    let plain = |c: char| c.is_ascii_alphanumeric() || "-_./:=+,@%".contains(c);
+    if !s.is_empty() && s.chars().all(plain) {
+        s.to_owned()
+    } else {
+        format!("'{}'", s.replace('\'', r"'\''"))
+    }
+}
+
 /// A whole JSON document, pretty-printed.
 pub fn print(value: &Value) {
     println!(

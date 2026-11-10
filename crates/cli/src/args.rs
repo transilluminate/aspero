@@ -266,7 +266,8 @@ pub struct SearchOptions {
     /// Results per page.
     #[arg(long, default_value_t = 10)]
     pub limit: u32,
-    /// Continue from a previous page's `next_cursor`.
+    /// Continue from a previous page's `next_cursor`, with the same
+    /// `--source` (the printed `next page` command does both).
     #[arg(long)]
     pub cursor: Option<String>,
 }

@@ -4,7 +4,7 @@ use aspero_core::{Cursor, SearchQuery, SourceRecord, WorkType, YearRange};
 use aspero_engine::Engine;
 use serde_json::{Value, json};
 
-use super::{Failure, Out, print, print_line};
+use super::{Failure, Out, print, print_line, shell_quote};
 use crate::args::{Format, SearchOptions};
 use crate::exit::Exit;
 use crate::output;
@@ -15,9 +15,18 @@ pub async fn run(
     options: SearchOptions,
     out: Out,
 ) -> Result<Exit, Failure> {
-    let query = query(text, &options)?;
+    let query = query(text.clone(), &options)?;
     let report = engine.search(options.source.as_deref(), &query).await?;
     let page = &report.page;
+    let next = page.next.as_ref().map(|c| {
+        next_command(
+            &text,
+            &options,
+            report.provider.as_str(),
+            &c.0,
+            out.abstracts,
+        )
+    });
     let abstracts = if out.abstracts {
         let records: Vec<&SourceRecord> = page.hits.iter().map(|h| &h.record).collect();
         Some(engine.abstracts(&records).await)
@@ -64,7 +73,7 @@ pub async fn run(
                     );
                 }
             }
-            footer(&report);
+            footer(&report, next.as_deref());
         }
         Format::Text => {
             for (i, hit) in page.hits.iter().enumerate() {
@@ -74,13 +83,14 @@ pub async fn run(
                 }
                 println!();
             }
-            footer(&report);
+            footer(&report, next.as_deref());
         }
         Format::Json | Format::Auto => {
             let mut doc = json!({
                 "provider": report.provider,
                 "total": page.total,
                 "next_cursor": page.next.as_ref().map(|c| &c.0),
+                "next_command": next,
                 "ignored_filters": report.ignored_filters,
                 "served": report.served.as_str(),
                 "hits": hits,
@@ -99,7 +109,7 @@ pub async fn run(
 }
 
 /// Totals, ignored filters, paging and spend, on stderr.
-fn footer(report: &aspero_engine::SearchReport) {
+fn footer(report: &aspero_engine::SearchReport, next: Option<&str>) {
     let page = &report.page;
     let total = page.total.map(|t| format!(" of {t}")).unwrap_or_default();
     let served = match report.served {
@@ -117,14 +127,48 @@ fn footer(report: &aspero_engine::SearchReport) {
             report.provider, report.ignored_filters
         );
     }
-    if let Some(next) = &page.next {
-        eprintln!("more: --cursor {}", next.0);
+    if let Some(next) = next {
+        eprintln!("next page: {next}");
     }
     if let Some(u) = &report.usage
         && let Some(text) = output::usage_text(&[(report.provider.clone(), *u)])
     {
         eprintln!("{text}");
     }
+}
+
+/// The command that fetches the next page: the same search, pinned to the
+/// provider that issued the cursor (cursors mean nothing elsewhere).
+fn next_command(
+    text: &str,
+    o: &SearchOptions,
+    provider: &str,
+    cursor: &str,
+    abstracts: bool,
+) -> String {
+    let mut args = vec!["aspero".to_owned(), "search".to_owned(), shell_quote(text)];
+    let mut flag = |name: &str, value: Option<String>| {
+        args.push(name.to_owned());
+        if let Some(v) = value {
+            args.push(shell_quote(&v));
+        }
+    };
+    flag("--source", Some(provider.to_owned()));
+    if let Some(year) = &o.year {
+        flag("--year", Some(year.clone()));
+    }
+    if let Some(t) = &o.work_type {
+        flag("--type", Some(t.clone()));
+    }
+    if o.oa {
+        flag("--oa", None);
+    }
+    if abstracts {
+        flag("--abstract", None);
+    }
+    flag("--limit", Some(o.limit.to_string()));
+    flag("--cursor", Some(cursor.to_owned()));
+    args.join(" ")
 }
 
 fn query(text: String, o: &SearchOptions) -> Result<SearchQuery, Failure> {
@@ -164,6 +208,34 @@ fn parse_years(s: &str) -> Result<YearRange, Failure> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn next_page_commands_reuse_the_search_and_pin_the_provider() {
+        let options = SearchOptions {
+            source: None,
+            year: Some("2020..".into()),
+            work_type: None,
+            oa: true,
+            limit: 5,
+            cursor: Some("old".into()),
+        };
+        assert_eq!(
+            next_command(
+                "protein folding",
+                &options,
+                "europepmc",
+                "AoII+Y5/T0Sg==",
+                false
+            ),
+            "aspero search 'protein folding' --source europepmc --year 2020.. --oa --limit 5 --cursor AoII+Y5/T0Sg=="
+        );
+        assert_eq!(
+            next_command("Bishop's book", &options, "openalex", "c", true)
+                .split(" --")
+                .next(),
+            Some(r#"aspero search 'Bishop'\''s book'"#)
+        );
+    }
 
     #[test]
     fn year_ranges() {

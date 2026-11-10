@@ -24,6 +24,7 @@ aspero-openalex = { path = "crates/providers/openalex" }
 aspero-crossref = { path = "crates/providers/crossref" }
 aspero-datacite = { path = "crates/providers/datacite" }
 aspero-doi = { path = "crates/providers/doi" }
+aspero-europepmc = { path = "crates/providers/europepmc" }
 aspero-openlibrary = { path = "crates/providers/openlibrary" }
 
 async-trait = "0.1.92"

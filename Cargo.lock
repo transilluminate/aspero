@@ -134,6 +134,7 @@ dependencies = [
  "aspero-crossref",
  "aspero-datacite",
  "aspero-doi",
+ "aspero-europepmc",
  "aspero-openalex",
  "aspero-openlibrary",
  "aspero-store",
@@ -148,6 +149,18 @@ dependencies = [
  "thiserror",
  "tokio",
  "tracing",
+]
+
+[[package]]
+name = "aspero-europepmc"
+version = "0.0.0"
+dependencies = [
+ "aspero-core",
+ "async-trait",
+ "jiff",
+ "serde",
+ "serde_json",
+ "url",
 ]
 
 [[package]]

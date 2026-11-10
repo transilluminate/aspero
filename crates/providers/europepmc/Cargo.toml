@@ -1,0 +1,21 @@
+[package]
+name = "aspero-europepmc"
+description = "Europe PMC (biomedical) provider for aspero"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+aspero-core.workspace = true
+async-trait.workspace = true
+jiff.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+url.workspace = true
+
+[dev-dependencies]
+aspero-core = { workspace = true, features = ["testing"] }

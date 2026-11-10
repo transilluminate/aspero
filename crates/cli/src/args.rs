@@ -119,7 +119,11 @@ JSON works:
                notice that is itself flagged names itself as `notice`.
                With --full, `date` is when the notice appeared (online or
                print, whichever first); `deposited` is the date the source
-               gave, when later (often the issue's).
+               gave, when later (often the issue's). Both come from the
+               notice deposit and the registry's record of the notice, so
+               they can differ from looking up the notice DOI itself when
+               another provider answers that wrongly; --full then shows
+               `disagreements` there.
   type         CSL types; notices themselves are \"erratum\" or \"retraction\"
   update_to    for a notice itself, the works it updates: [{\"kind\",
                \"work\", \"date\", \"source\"}]

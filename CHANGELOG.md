@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- Help: where notice dates come from, and why they can differ from a plain
+  lookup of the notice DOI.
+
 ## 0.3.4
 
 - `canonical` on every work in JSON: one key per work whichever identifier

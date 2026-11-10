@@ -19,6 +19,7 @@ use serde::{Deserialize, Serialize};
 use unicode_normalization::UnicodeNormalization;
 
 use crate::id::WorkId;
+use crate::publication::{self, first_page, journal_in, same_journal};
 use crate::record::SourceRecord;
 use crate::work::Person;
 
@@ -42,6 +43,10 @@ const UNCORROBORATED_CAP: f64 = 0.8;
 const CORROBORATING_AUTHORS: f64 = 0.75;
 /// Multiplier for replies, corrections, errata and commentaries.
 const DERIVATIVE_PENALTY: f64 = 0.5;
+/// Confidence ceiling when the claimed volume or first page differs.
+const LOCATION_MISMATCH_CAP: f64 = 0.8;
+/// Multiplier when a structured claim names a different journal.
+const JOURNAL_MISMATCH_PENALTY: f64 = 0.9;
 
 /// Verdict thresholds on confidence.
 pub const VERIFIED: f64 = 0.85;
@@ -67,6 +72,14 @@ pub struct Claim {
     pub authors: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub year: Option<i16>,
+    /// The journal (or other container), full or abbreviated.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub container: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub volume: Option<String>,
+    /// The first page (or a range, of which the first page counts).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub page: Option<String>,
 }
 
 impl Claim {
@@ -108,10 +121,22 @@ impl Claim {
         if let Some(text) = &self.text {
             return Some(text.clone());
         }
+        // Vancouver-like: "Authors. Title. Journal. 2017;376:2545".
+        let location = match (&self.volume, &self.page) {
+            (Some(v), Some(p)) => Some(format!("{v}:{p}")),
+            (Some(v), None) => Some(v.clone()),
+            (None, p) => p.clone(),
+        };
+        let when = [self.year.map(|y| y.to_string()), location]
+            .into_iter()
+            .flatten()
+            .collect::<Vec<_>>()
+            .join(";");
         let parts: Vec<String> = [
             (!self.authors.is_empty()).then(|| self.authors.join(", ")),
             self.title.clone(),
-            self.year.map(|y| y.to_string()),
+            self.container.clone(),
+            (!when.is_empty()).then_some(when),
         ]
         .into_iter()
         .flatten()
@@ -144,6 +169,10 @@ impl FieldCheck {
         score: None,
     };
 
+    fn exact(agrees: bool) -> Self {
+        FieldCheck::scored(if agrees { 1.0 } else { 0.0 })
+    }
+
     fn scored(score: f64) -> Self {
         let agreement = match score {
             s if s >= 0.9 => Agreement::Match,
@@ -164,6 +193,12 @@ pub struct Assessment {
     pub title: FieldCheck,
     pub authors: FieldCheck,
     pub year: FieldCheck,
+    /// The journal: `Match` when the claim names it (or an abbreviation),
+    /// `Mismatch` when a structured claim names another.
+    pub container: FieldCheck,
+    pub volume: FieldCheck,
+    /// The first page.
+    pub page: FieldCheck,
     /// Whether the claim's identifiers are the record's: `Match` if any
     /// claimed ID is the record's, `Mismatch` if the record has a different
     /// ID of the same kind, else `Unknown`.
@@ -219,6 +254,46 @@ pub fn assess(claim: &Claim, record: &SourceRecord) -> Assessment {
         true => FieldCheck::UNKNOWN,
     };
 
+    let container = match (&claim.container, &work.container_title, &text) {
+        (Some(claimed), Some(actual), _) => FieldCheck::exact(same_journal(claimed, actual)),
+        (None, Some(actual), Some(text)) if journal_in(&text.words, actual) => {
+            FieldCheck::exact(true)
+        }
+        _ => FieldCheck::UNKNOWN,
+    };
+    let located = match &claim.text {
+        Some(text) if claim.volume.is_none() && claim.page.is_none() => publication::locator(text),
+        _ => publication::Locator {
+            volume: claim.volume.clone(),
+            page: claim.page.as_deref().map(|p| first_page(p).to_owned()),
+        },
+    };
+    let same = |claimed: Option<&str>, actual: Option<&str>| match (claimed, actual) {
+        (Some(c), Some(a)) if !c.is_empty() && !a.is_empty() => {
+            FieldCheck::exact(c.trim().eq_ignore_ascii_case(a.trim()))
+        }
+        _ => FieldCheck::UNKNOWN,
+    };
+    let volume = same(located.volume.as_deref(), work.volume.as_deref());
+    let page = same(
+        located.page.as_deref(),
+        work.page.as_deref().map(first_page),
+    );
+
+    // Citing the exact place: volume and first page.
+    let located = volume.agreement == Agreement::Match && page.agreement == Agreement::Match;
+    // Short Vancouver references often leave the title out ("Daum RS et
+    // al. N Engl J Med 2017;376:2545"); with the journal and volume
+    // agreeing, a title missing from the text is not a different one (the
+    // page then decides between verified and a wrong page).
+    let placed = container.agreement == Agreement::Match && volume.agreement == Agreement::Match;
+    let title = match placed {
+        true if claim.title.is_none() && title.agreement == Agreement::Mismatch => {
+            FieldCheck::UNKNOWN
+        }
+        _ => title,
+    };
+
     let ids = id_agreement(&claim.ids, &record.ids);
     // A claim of identifiers alone is fully confirmed by a matching ID.
     let id_only = [title, authors, year].iter().all(|c| c.score.is_none());
@@ -231,10 +306,25 @@ pub fn assess(claim: &Claim, record: &SourceRecord) -> Assessment {
     // technology assessment") turns up inside many references, and letters
     // and corrections often carry the original's title without authors.
     // Corroboration means the first author matches, or a claimed ID does.
-    let corroborated =
-        authors.score.is_some_and(|s| s >= CORROBORATING_AUTHORS) || ids == Agreement::Match;
+    // So does citing the exact place.
+    let corroborated = authors.score.is_some_and(|s| s >= CORROBORATING_AUTHORS)
+        || ids == Agreement::Match
+        || located;
     if !id_only && !corroborated {
         confidence = confidence.min(UNCORROBORATED_CAP);
+    }
+    // A wrong volume or page is an error in the citation, and tells an
+    // original from the letters and corrections in the same journal.
+    if [volume, page]
+        .iter()
+        .any(|c| c.agreement == Agreement::Mismatch)
+    {
+        confidence = confidence.min(LOCATION_MISMATCH_CAP);
+    }
+    // Journal names compare by rule, which misses some pairs ("Br Med J" ↔
+    // "BMJ"), so a different journal only lowers the ranking.
+    if container.agreement == Agreement::Mismatch {
+        confidence *= JOURNAL_MISMATCH_PENALTY;
     }
     // A reply, correction or commentary is not the work it responds to,
     // unless the citation says it is citing one.
@@ -250,6 +340,9 @@ pub fn assess(claim: &Claim, record: &SourceRecord) -> Assessment {
         title,
         authors,
         year,
+        container,
+        volume,
+        page,
         ids,
     }
 }
@@ -484,8 +577,6 @@ impl Normalised {
         }
     }
 
-    /// 1.0 if the title appears as a phrase; otherwise the share of its
-    /// words present.
     /// 1.0 if the title (or its main title, without subtitle) appears as a
     /// phrase; otherwise the share of its content words present. Under two
     /// thirds present is scored as a mismatch: a couple of topic words
@@ -852,6 +943,98 @@ mod tests {
             ),
             1.0
         );
+    }
+
+    /// The PEITHO trial as published: NEJM 2014;370(15):1402-11.
+    fn peitho() -> SourceRecord {
+        let mut r = record(
+            &["10.1056/nejmoa1302097"],
+            "Fibrinolysis for Patients with Intermediate-Risk Pulmonary Embolism",
+            &["Guy Meyer", "Eric Vicaut"],
+            2014,
+        );
+        r.work.container_title = Some("New England Journal of Medicine".into());
+        r.work.volume = Some("370".into());
+        r.work.page = Some("1402-1411".into());
+        r
+    }
+
+    #[test]
+    fn journal_volume_and_page_are_checked_in_text_and_fields() {
+        let text = "Meyer G, et al. Fibrinolysis for patients with intermediate-risk pulmonary embolism. N Engl J Med. 2014;370(15):1402-11.";
+        let a = assess(&Claim::from_text(text), &peitho());
+        assert_eq!(
+            (a.container.agreement, a.volume.agreement, a.page.agreement),
+            (Agreement::Match, Agreement::Match, Agreement::Match)
+        );
+        assert!(a.confidence >= VERIFIED, "{a:?}");
+
+        // A wrong first page: a real error, and what tells the article from
+        // a reply printed later in the same volume.
+        let wrong_page = text.replace("1402-11", "2440");
+        let a = assess(&Claim::from_text(wrong_page), &peitho());
+        assert_eq!(a.page.agreement, Agreement::Mismatch);
+        assert!((PLAUSIBLE..VERIFIED).contains(&a.confidence), "{a:?}");
+
+        // Structured: the journal is compared by abbreviation rules; a
+        // different one lowers the ranking without settling the verdict.
+        let claim = Claim {
+            title: Some(
+                "Fibrinolysis for patients with intermediate-risk pulmonary embolism".into(),
+            ),
+            authors: vec!["Meyer G".into()],
+            year: Some(2014),
+            container: Some("Lancet".into()),
+            ..Claim::default()
+        };
+        let a = assess(&claim, &peitho());
+        assert_eq!(a.container.agreement, Agreement::Mismatch);
+        assert!(a.confidence >= VERIFIED && a.confidence < 1.0, "{a:?}");
+    }
+
+    #[test]
+    fn titleless_references_that_give_journal_volume_and_page_verify() {
+        let a = assess(
+            &Claim::from_text("Meyer G et al. N Engl J Med 2014;370:1402"),
+            &peitho(),
+        );
+        assert_eq!(a.title.agreement, Agreement::Unknown);
+        assert!(a.confidence >= VERIFIED, "{a:?}");
+        // The right paper with a wrong page: plausible, not missing.
+        let a = assess(
+            &Claim::from_text("Meyer G et al. N Engl J Med 2014;370:2440"),
+            &peitho(),
+        );
+        assert_eq!(a.page.agreement, Agreement::Mismatch);
+        assert!((PLAUSIBLE..VERIFIED).contains(&a.confidence), "{a:?}");
+        // Without the journal agreeing, the missing title still counts.
+        let a = assess(
+            &Claim::from_text("Meyer G et al. Lancet 2014;370:1402"),
+            &peitho(),
+        );
+        assert_eq!(a.title.agreement, Agreement::Mismatch);
+        assert!(a.confidence < PLAUSIBLE, "{a:?}");
+    }
+
+    #[test]
+    fn citing_the_exact_place_corroborates_like_authors() {
+        // No authors, but title, year, volume and first page all agree.
+        let claim = Claim {
+            title: Some(
+                "Fibrinolysis for patients with intermediate-risk pulmonary embolism".into(),
+            ),
+            year: Some(2014),
+            volume: Some("370".into()),
+            page: Some("1402".into()),
+            ..Claim::default()
+        };
+        assert!(assess(&claim, &peitho()).confidence >= VERIFIED);
+        let claim = Claim {
+            volume: None,
+            page: None,
+            ..claim
+        };
+        assert!(assess(&claim, &peitho()).confidence < VERIFIED);
     }
 
     #[test]

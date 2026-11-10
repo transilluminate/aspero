@@ -17,6 +17,7 @@ pub mod http;
 pub mod id;
 pub mod matching;
 pub mod provider;
+pub mod publication;
 pub mod record;
 pub mod resilience;
 pub mod work;

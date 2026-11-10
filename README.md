@@ -17,10 +17,22 @@ MISMATCH  LeCun Y, Bengio Y, Hinton G. Deep learning. Nature. 2015. doi:10.1038/
 
 ## Install
 
+Homebrew (macOS, Linux):
+
 ```sh
-brew install transilluminate/tap/aspero          # macOS / Linux
+brew install transilluminate/tap/aspero
+```
+
+Prebuilt binary, via the install script:
+
+```sh
 curl --proto '=https' --tlsv1.2 -LsSf https://github.com/transilluminate/aspero/releases/latest/download/aspero-installer.sh | sh
-cargo install --git https://github.com/transilluminate/aspero aspero   # from source
+```
+
+From source, with Cargo:
+
+```sh
+cargo install aspero
 ```
 
 Optional environment:

@@ -97,6 +97,32 @@ fn batch_lookup_of_pmids_pmcids_and_dois() {
 }
 
 #[test]
+fn bookshelf_chapters_are_looked_up_by_nbk_id() {
+    let (epmc, http) = provider([recorded("lookup_nbk")]);
+    let resp =
+        block_on(epmc.lookup(&[id("NBK526056"), id("NBK999999999")], FieldSet::DEFAULT)).unwrap();
+
+    assert!(query(&http, 0).contains(&pair("query", "BOOK_ID:NBK526056 OR BOOK_ID:NBK999999999")));
+    let [chapter, missing] = &resp.value[..] else {
+        panic!()
+    };
+    let r = chapter.record.as_ref().unwrap();
+    assert!(r.ids.contains(&id("pmid:30252312")));
+    // Not "Pacemaker syndrome": the check this lookup exists for.
+    assert_eq!(
+        r.work.title.as_deref(),
+        Some("Anatomy, Shoulder and Upper Limb, Nerves")
+    );
+    assert_eq!(r.work.work_type, Some(WorkType::Chapter));
+    assert_eq!(r.work.container_title.as_deref(), Some("StatPearls"));
+    assert_eq!(
+        r.work.url.as_deref(),
+        Some("https://www.ncbi.nlm.nih.gov/books/NBK526056/")
+    );
+    assert!(missing.record.is_none());
+}
+
+#[test]
 fn search_pages_by_cursor_mark() {
     let (epmc, http) = provider([recorded("search")]);
     let mut q = SearchQuery::new("protein structure prediction alphafold");

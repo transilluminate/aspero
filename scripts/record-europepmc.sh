@@ -27,6 +27,8 @@ record() {
 record lookup_batch \
   'query=(EXT_ID:26017442 AND SRC:MED) OR PMCID:PMC6716493 OR DOI:"10.1016/s0140-6736(97)11096-0" OR (EXT_ID:99999999 AND SRC:MED)' \
   'resultType=core' 'format=json' 'pageSize=4'
+record lookup_nbk 'query=BOOK_ID:NBK526056 OR BOOK_ID:NBK999999999' \
+  'resultType=core' 'format=json' 'pageSize=2'
 record search 'query=(protein structure prediction alphafold)' 'resultType=core' 'format=json' \
   'pageSize=3' 'cursorMark=*'
 record search_filtered 'query=(protein structure prediction) AND PUB_YEAR:[2021 TO 2021] AND OPEN_ACCESS:y' \

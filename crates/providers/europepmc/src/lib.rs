@@ -17,9 +17,9 @@ use aspero_core::csl::strip_markup;
 use aspero_core::http::escape_lucene;
 use aspero_core::{
     Capabilities, Cursor, Doi, Error, FieldSet, Filter, Hit, HttpClient, HttpRequest, HttpResponse,
-    IdKind, Lookup, OpenAccess, Page, PartialDate, Person, Pmcid, Pmid, Provider, ProviderId, Raw,
-    ResiliencePolicy, Response, Result, SearchMode, SearchQuery, SourceRecord, Update, UpdateKind,
-    Work, WorkId, WorkType, tidy_abstract,
+    IdKind, Lookup, Nbk, OpenAccess, Page, PartialDate, Person, Pmcid, Pmid, Provider, ProviderId,
+    Raw, ResiliencePolicy, Response, Result, SearchMode, SearchQuery, SourceRecord, Update,
+    UpdateKind, Work, WorkId, WorkType, tidy_abstract,
 };
 use async_trait::async_trait;
 use jiff::Timestamp;
@@ -58,7 +58,7 @@ pub struct EuropePmc {
 impl EuropePmc {
     pub fn new(config: EuropePmcConfig, http: Arc<dyn HttpClient>) -> Self {
         let mut capabilities = Capabilities::default();
-        capabilities.lookup_kinds = vec![IdKind::Pmid, IdKind::Pmcid, IdKind::Doi];
+        capabilities.lookup_kinds = vec![IdKind::Pmid, IdKind::Pmcid, IdKind::Doi, IdKind::Nbk];
         capabilities.max_batch = MAX_BATCH;
         capabilities.fields = FieldSet::ALL;
         capabilities.search = true;
@@ -144,6 +144,17 @@ struct WireRecord {
     is_open_access: Option<String>,
     license: Option<String>,
     full_text_url_list: FullTextUrls,
+    /// NCBI Bookshelf ID, for books and chapters (StatPearls).
+    bookid: Option<String>,
+    book_or_report_details: BookDetails,
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+struct BookDetails {
+    publisher: Option<String>,
+    /// The book a chapter is part of, e.g. "StatPearls".
+    comprising_title: Option<String>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -282,6 +293,9 @@ fn to_record(value: &serde_json::Value, at: Timestamp) -> serde_json::Result<Sou
             .and_then(|d| d.parse::<Doi>().ok())
             .map(WorkId::Doi),
     );
+    let nbk = r.bookid.as_deref().and_then(|b| b.parse::<Nbk>().ok());
+    ids.extend(nbk.map(WorkId::Nbk));
+    let book = &r.book_or_report_details;
 
     let types = &r.pub_type_list.pub_type;
     let has = |t: &str| types.iter().any(|p| p.eq_ignore_ascii_case(t));
@@ -304,7 +318,13 @@ fn to_record(value: &serde_json::Value, at: Timestamp) -> serde_json::Result<Sou
                 .ok()
                 .map(PartialDate::from_year)
         });
-    work.work_type = if r.source.as_deref() == Some("PPR") || has("Preprint") {
+    work.work_type = if nbk.is_some() {
+        // Bookshelf: a chapter of a book (a StatPearls article), or a book.
+        Some(match book.comprising_title {
+            Some(_) => WorkType::Chapter,
+            None => WorkType::Book,
+        })
+    } else if r.source.as_deref() == Some("PPR") || has("Preprint") {
         Some(WorkType::Preprint)
     } else if has("Journal Article") || has("research-article") || has("Review") {
         Some(WorkType::JournalArticle)
@@ -323,7 +343,12 @@ fn to_record(value: &serde_json::Value, at: Timestamp) -> serde_json::Result<Sou
     other.sort_unstable();
     other.dedup();
     work.other_years = other;
-    work.container_title = r.journal_info.journal.title;
+    work.container_title = r
+        .journal_info
+        .journal
+        .title
+        .or_else(|| book.comprising_title.clone());
+    work.publisher = book.publisher.clone();
     work.volume = r.journal_info.volume;
     work.issue = r.journal_info.issue;
     work.page = r.page_info;
@@ -333,6 +358,7 @@ fn to_record(value: &serde_json::Value, at: Timestamp) -> serde_json::Result<Sou
         .map(|a| tidy_abstract(&strip_markup(a)))
         .filter(|a| !a.is_empty());
     work.url = match (r.source.as_deref(), r.id.as_deref()) {
+        _ if nbk.is_some() => nbk.map(|n| format!("https://www.ncbi.nlm.nih.gov/books/{n}/")),
         (Some(source), Some(id)) => Some(format!("https://europepmc.org/article/{source}/{id}")),
         _ => None,
     };
@@ -358,6 +384,7 @@ fn clause(id: &WorkId) -> Result<String> {
     Ok(match id {
         WorkId::Pmid(p) => format!("(EXT_ID:{p} AND SRC:MED)"),
         WorkId::Pmcid(p) => format!("PMCID:{p}"),
+        WorkId::Nbk(n) => format!("BOOK_ID:{n}"),
         WorkId::Doi(d) => format!("DOI:\"{}\"", d.as_str().replace('"', "\\\"")),
         _ => {
             return Err(Error::Unsupported(

@@ -15,9 +15,18 @@ aspero-store.workspace = true
 aspero-openalex = { workspace = true, optional = true }
 aspero-crossref = { workspace = true, optional = true }
 aspero-doi = { workspace = true, optional = true }
+async-trait.workspace = true
+fastrand.workspace = true
+jiff.workspace = true
+reqwest.workspace = true
+thiserror.workspace = true
+tokio = { workspace = true, features = ["time", "sync"] }
 
 [features]
 default = ["openalex", "crossref", "doi"]
 openalex = ["dep:aspero-openalex"]
 crossref = ["dep:aspero-crossref"]
 doi = ["dep:aspero-doi"]
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt", "test-util"] }

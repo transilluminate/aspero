@@ -24,11 +24,18 @@ use aspero_core::{
     UpdateKind, Usage, WorkId,
 };
 
-use crate::{Engine, EngineError, LookupResult, add_usage};
+use futures::future::{join, join_all};
+use futures::stream::{self, Stream, StreamExt};
+
+use crate::{Engine, EngineError, LookupResult, SearchReport, add_usage};
 
 /// Title searches per claim: the claim's own title or the matchers' top
 /// distinct titles.
 const MAX_TITLE_SEARCHES: usize = 2;
+
+/// Claims verified at once in batches. Providers pace themselves, so this
+/// overlaps different providers' waits rather than adding load to any one.
+const CLAIM_CONCURRENCY: usize = 4;
 
 /// How a candidate was found.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -174,6 +181,18 @@ impl Engine {
         judge(claim, report)
     }
 
+    /// Verifies many claims, several at a time (each provider's pacing
+    /// still applies), yielding results in claim order as they complete.
+    pub fn verify_many<'a>(
+        &'a self,
+        claims: &'a [Claim],
+        limit: u32,
+    ) -> impl Stream<Item = Verification> + 'a {
+        stream::iter(claims)
+            .map(move |claim| self.verify(claim, limit))
+            .buffered(CLAIM_CONCURRENCY)
+    }
+
     /// For candidates known to be retracted only by a bare flag (OpenAlex's
     /// `is_retracted`), asks the other providers by identifier for the
     /// notice itself: date, notice DOI, source. Free, cached, and only for
@@ -234,69 +253,89 @@ impl Engine {
             report: ResolveReport::default(),
         };
         let done = |acc: &Accumulator| stop_when_verified && acc.verified();
+        let query = |text: &str, citation: bool| {
+            let mut q = if citation {
+                SearchQuery::citation(text)
+            } else {
+                SearchQuery::new(text)
+            };
+            q.page.limit = limit;
+            q
+        };
 
-        if !claim.ids.is_empty() {
-            let lookup = self.lookup(&claim.ids, FieldSet::DEFAULT).await;
-            for result in &lookup.results {
-                if let Some(record) = &result.record {
-                    let sighting = Sighting {
-                        provider: record.source.clone(),
-                        via: Via::Lookup,
-                        rank: 1,
-                        score: None,
-                    };
-                    acc.add(record.clone(), sighting);
-                }
+        // Stage 1, concurrently (both free): lookups of the claimed
+        // identifiers, and citation matchers on the whole reference.
+        let reference = claim.reference();
+        let matchers: Vec<ProviderId> = match &reference {
+            Some(_) => self.searchers(true),
+            None => Vec::new(),
+        };
+        let lookup = async {
+            match claim.ids.is_empty() {
+                true => None,
+                false => Some(self.lookup(&claim.ids, FieldSet::DEFAULT).await),
+            }
+        };
+        let matched = join_all(matchers.iter().map(|p| {
+            let q = query(reference.as_deref().unwrap_or_default(), true);
+            async move { self.search(Some(p.as_str()), &q).await }
+        }));
+        let (lookup, matched) = join(lookup, matched).await;
+
+        if let Some(lookup) = lookup {
+            for record in lookup.results.iter().filter_map(|r| r.record.as_ref()) {
+                let sighting = Sighting {
+                    provider: record.source.clone(),
+                    via: Via::Lookup,
+                    rank: 1,
+                    score: None,
+                };
+                acc.add(record.clone(), sighting);
             }
             acc.usage(lookup.usage);
             acc.report.lookups = lookup.results;
-            // An identifier-only claim has nothing else to compare.
-            if done(&acc) || !claim.is_descriptive() {
-                return acc.finish();
-            }
         }
-
         let mut titles: Vec<String> = claim.title.iter().cloned().collect();
-        if let Some(reference) = claim.reference() {
-            for provider in self.searchers(true) {
-                let mut query = SearchQuery::citation(&reference);
-                query.page.limit = limit;
-                let hits = acc
-                    .search(self, &provider, &query, Via::CitationMatch)
-                    .await;
-                if claim.title.is_none() {
-                    // Query the title the reference cites, as found via each
-                    // hit: a commentary titled "Recommendation of X" yields X.
-                    titles.extend(
-                        hits.iter()
-                            .filter_map(|t| matching::shared_title(t, &reference)),
-                    );
-                }
+        for (provider, result) in matchers.iter().zip(matched) {
+            let hits = acc.add_search(provider, Via::CitationMatch, result);
+            if let (None, Some(reference)) = (&claim.title, &reference) {
+                // Query the title the reference cites, as found via each
+                // hit: a commentary titled "Recommendation of X" yields X.
+                titles.extend(
+                    hits.iter()
+                        .filter_map(|t| matching::shared_title(t, reference)),
+                );
             }
         }
-        if done(&acc) {
+        // An identifier-only claim has nothing else to compare.
+        if done(&acc) || !claim.is_descriptive() {
             return acc.finish();
         }
 
+        // Stage 2, concurrently: title searches (or, with no title to go on,
+        // cleaned-up keywords) on every keyword provider. Results are added
+        // in provider-then-title order, so merging stays deterministic.
         titles = distinct(titles);
         titles.truncate(MAX_TITLE_SEARCHES);
+        let mut jobs: Vec<(ProviderId, SearchQuery, Via)> = Vec::new();
         for provider in self.searchers(false) {
-            if titles.is_empty() {
-                // No title to go on: fall back to cleaned-up keywords.
-                let Some(text) = &claim.text else { continue };
-                let mut query = SearchQuery::new(matching::search_terms(text));
-                query.page.limit = limit;
-                acc.search(self, &provider, &query, Via::KeywordSearch)
-                    .await;
+            if titles.is_empty()
+                && let Some(text) = &claim.text
+            {
+                let q = query(&matching::search_terms(text), false);
+                jobs.push((provider.clone(), q, Via::KeywordSearch));
             }
             for title in &titles {
-                if done(&acc) {
-                    break;
-                }
-                let mut query = SearchQuery::new(title);
-                query.page.limit = limit;
-                acc.search(self, &provider, &query, Via::TitleSearch).await;
+                jobs.push((provider.clone(), query(title, false), Via::TitleSearch));
             }
+        }
+        let results = join_all(
+            jobs.iter()
+                .map(|(p, q, _)| self.search(Some(p.as_str()), q)),
+        )
+        .await;
+        for ((provider, _, via), result) in jobs.iter().zip(results) {
+            acc.add_search(provider, *via, result);
         }
         acc.finish()
     }
@@ -369,15 +408,14 @@ impl Accumulator<'_> {
         candidate.assessment.ids = id_agreement(&self.claim.ids, &candidate.ids);
     }
 
-    /// Runs one search and adds its hits; returns the hits' titles.
-    async fn search(
+    /// Adds one search's hits; returns the hits' titles.
+    fn add_search(
         &mut self,
-        engine: &Engine,
         provider: &ProviderId,
-        query: &SearchQuery,
         via: Via,
+        result: Result<SearchReport, EngineError>,
     ) -> Vec<String> {
-        match engine.search(Some(provider.as_str()), query).await {
+        match result {
             Ok(report) => {
                 if let Some(u) = report.usage {
                     add_usage(&mut self.report.usage, provider, u);

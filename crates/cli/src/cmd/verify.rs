@@ -6,6 +6,8 @@ use aspero_engine::{Engine, Verdict, Verification};
 use serde_json::{Value, json};
 
 use super::claim::{ClaimInput, claims};
+use futures::StreamExt;
+
 use super::{Failure, Out, merge_usage, print, print_line};
 use crate::args::{ClaimArgs, Format};
 use crate::exit::Exit;
@@ -24,16 +26,17 @@ pub async fn run(engine: &Engine, args: ClaimArgs, out: Out) -> Result<Exit, Fai
     let mut items = Vec::new();
 
     // One batched lookup of every claimed identifier first; with the cache
-    // warm, claims are then verified (and streamed) one by one cheaply.
-    if claims.len() > 1 {
-        let valid: Vec<_> = claims
-            .iter()
-            .filter_map(|(_, c)| c.as_ref().ok().cloned())
-            .collect();
+    // warm, claims are then verified several at a time, streamed in order.
+    let valid: Vec<_> = claims
+        .iter()
+        .filter_map(|(_, c)| c.as_ref().ok().cloned())
+        .collect();
+    if valid.len() > 1 {
         for (p, u) in engine.prefetch(&valid).await.usage {
             merge_usage(&mut usage, &p, u);
         }
     }
+    let mut verified = std::pin::pin!(engine.verify_many(&valid, limit));
     for (input, claim) in claims {
         let (item, item_exit, text) = match claim {
             Err(e) => (
@@ -41,8 +44,11 @@ pub async fn run(engine: &Engine, args: ClaimArgs, out: Out) -> Result<Exit, Fai
                 Exit::Usage,
                 format!("INVALID  {input}\n  {e}\n"),
             ),
-            Ok(claim) => {
-                let v = engine.verify(&claim, limit).await;
+            Ok(_) => {
+                let v = verified
+                    .next()
+                    .await
+                    .expect("one verification per valid claim");
                 for (p, u) in &v.report.usage {
                     merge_usage(&mut usage, p, *u);
                 }

@@ -7,6 +7,7 @@
 
 use aspero_core::matching::same_work_id;
 use aspero_core::{Claim, IdKind, Update, UpdateKind, WorkId};
+use futures::StreamExt;
 
 use crate::{Candidate, Engine, Verdict, Verification};
 
@@ -120,9 +121,10 @@ impl Engine {
     ) -> Vec<Checked> {
         self.prefetch(claims).await;
         let mut checked = Vec::with_capacity(claims.len());
-        for (i, claim) in claims.iter().enumerate() {
-            let verification = self.verify(claim, limit).await;
-            let findings = findings(claim, &verification);
+        let mut verifications = std::pin::pin!(self.verify_many(claims, limit));
+        while let Some(verification) = verifications.next().await {
+            let i = checked.len();
+            let findings = findings(&claims[i], &verification);
             checked.push(Checked {
                 verification,
                 findings,

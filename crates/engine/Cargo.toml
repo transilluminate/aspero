@@ -23,6 +23,7 @@ reqwest.workspace = true
 thiserror.workspace = true
 tokio = { workspace = true, features = ["time", "sync"] }
 secrecy.workspace = true
+futures.workspace = true
 
 [features]
 default = ["openalex", "crossref", "datacite", "doi"]

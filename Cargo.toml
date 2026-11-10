@@ -30,6 +30,7 @@ biblatex = "0.12.0"
 clap = { version = "4.6.7", features = ["derive", "env"] }
 directories = "6.0.0"
 fastrand = "2.5.0"
+futures = { version = "0.3.34", default-features = false, features = ["std", "async-await"] }
 jiff = { version = "0.2.42", features = ["serde"] }
 percent-encoding = "2.3.2"
 proptest = "1.12.0"

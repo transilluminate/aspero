@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.2.0
 
 - **Breaking (JSON):** `authors` is a list of objects in every mode, each
   with a `name` (and `orcid` when known); `--full` adds `given` and

@@ -135,6 +135,7 @@ dependencies = [
  "aspero-datacite",
  "aspero-doi",
  "aspero-openalex",
+ "aspero-openlibrary",
  "aspero-store",
  "async-trait",
  "fastrand",
@@ -157,6 +158,18 @@ dependencies = [
  "async-trait",
  "jiff",
  "secrecy",
+ "serde",
+ "serde_json",
+ "url",
+]
+
+[[package]]
+name = "aspero-openlibrary"
+version = "0.0.0"
+dependencies = [
+ "aspero-core",
+ "async-trait",
+ "jiff",
  "serde",
  "serde_json",
  "url",

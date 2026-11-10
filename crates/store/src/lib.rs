@@ -27,8 +27,8 @@ use rusqlite::{Connection, OptionalExtension, params};
 
 /// Bump on any schema change, *and* when cached records' shape or mapping
 /// changes (records are stored as mapped); older caches are dropped and
-/// rebuilt. 2: records gained `updates` (retractions).
-const SCHEMA_VERSION: i64 = 2;
+/// rebuilt. 2: records gained `updates` (retractions). 3: `other_years`.
+const SCHEMA_VERSION: i64 = 3;
 
 const SCHEMA: &str = "
 CREATE TABLE record (

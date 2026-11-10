@@ -422,7 +422,10 @@ impl Accumulator<'_> {
                 }
                 let mut titles = Vec::new();
                 for (i, hit) in report.page.hits.into_iter().enumerate() {
-                    titles.extend(hit.record.work.title.clone());
+                    // An untitled hit (a book chapter registered under the
+                    // book) points to the cited title via its container.
+                    let w = &hit.record.work;
+                    titles.extend(w.title.clone().or_else(|| w.container_title.clone()));
                     let sighting = Sighting {
                         provider: provider.clone(),
                         via,
@@ -480,13 +483,14 @@ fn distinct(titles: Vec<String>) -> Vec<String> {
         .collect()
 }
 
-/// Same title and authors, but something else (usually the year) is wrong:
-/// a real work cited with an error, not a missing one. Authors must match
-/// (first author present): short titles like "Protein Folding" occur inside
-/// many longer ones, so the title alone proves little.
+/// The same title plus matching authors *or* year, with the other wrong: a
+/// real work cited with an error (wrong year, misattributed authors), not a
+/// missing one. The title alone proves little: short titles like "Protein
+/// Folding" occur inside many longer ones.
 fn near_miss(c: &Candidate) -> bool {
     let a = &c.assessment;
-    a.title.agreement == Agreement::Match && a.authors.agreement == Agreement::Match
+    a.title.agreement == Agreement::Match
+        && (a.authors.agreement == Agreement::Match || a.year.agreement == Agreement::Match)
 }
 
 /// The fields that don't fully agree, as a clause: "its year (2017)

@@ -187,8 +187,18 @@ pub fn findings(claim: &Claim, v: &Verification) -> Vec<Finding> {
     {
         out.push(Finding::AddDoi { doi: doi.clone() });
     }
-    if let (Some(claimed), Some(actual)) = (claim.year, best.record.work.issued.map(|d| d.year()))
-        && claimed != actual
+    // Any edition's year counts (as in scoring); otherwise report the
+    // nearest one.
+    let work = &best.record.work;
+    let years: Vec<i16> = work
+        .issued
+        .map(|d| d.year())
+        .into_iter()
+        .chain(work.other_years.iter().copied())
+        .collect();
+    if let Some(claimed) = claim.year
+        && let Some(&actual) = years.iter().min_by_key(|y| (*y - claimed).abs())
+        && actual != claimed
     {
         out.push(Finding::YearDiffers { claimed, actual });
     }

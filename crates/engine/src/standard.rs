@@ -15,6 +15,8 @@ pub use aspero_datacite::DataciteConfig;
 pub use aspero_doi::DoiConfig;
 #[cfg(feature = "openalex")]
 pub use aspero_openalex::OpenAlexConfig;
+#[cfg(feature = "openlibrary")]
+pub use aspero_openlibrary::OpenLibraryConfig;
 
 /// Settings for the compiled-in providers. `None` disables a provider.
 #[derive(Clone, Default)]
@@ -32,6 +34,8 @@ pub struct StandardConfig {
     pub datacite: Option<DataciteConfig>,
     #[cfg(feature = "doi")]
     pub doi: Option<DoiConfig>,
+    #[cfg(feature = "openlibrary")]
+    pub openlibrary: Option<OpenLibraryConfig>,
 }
 
 /// Builds an engine with each enabled provider behind its own paced
@@ -41,7 +45,7 @@ pub struct StandardConfig {
 /// kinds, indexes DataCite DOIs such as arXiv's), then Crossref, then
 /// DataCite (arXiv, Zenodo, data and software; batched), then doi.org (any
 /// registration agency, one DOI per request; its "not found" is
-/// authoritative).
+/// authoritative). Open Library answers ISBNs (books) and adds book search.
 pub fn standard(config: StandardConfig) -> Result<Engine, Error> {
     let user_agent = match &config.mailto {
         Some(mailto) => format!("aspero/{} (mailto:{mailto})", env!("CARGO_PKG_VERSION")),
@@ -92,6 +96,14 @@ pub fn standard(config: StandardConfig) -> Result<Engine, Error> {
         let policy = DoiOrg::default_policy();
         let provider = DoiOrg::new(doi, client("doi", &policy)?);
         builder = builder.provider(Arc::new(provider), policy, 30);
+    }
+
+    #[cfg(feature = "openlibrary")]
+    if let Some(ol) = config.openlibrary {
+        use aspero_openlibrary::OpenLibrary;
+        let policy = OpenLibrary::default_policy();
+        let provider = OpenLibrary::new(ol, client("openlibrary", &policy)?);
+        builder = builder.provider(Arc::new(provider), policy, 40);
     }
 
     Ok(builder.build())

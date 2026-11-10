@@ -14,8 +14,8 @@ use std::process::ExitCode;
 use std::sync::Arc;
 
 use aspero_engine::{
-    CrossrefConfig, DataciteConfig, DoiConfig, Engine, OpenAlexConfig, SecretString, SqliteCache,
-    StandardConfig, standard,
+    CrossrefConfig, DataciteConfig, DoiConfig, Engine, OpenAlexConfig, OpenLibraryConfig,
+    SecretString, SqliteCache, StandardConfig, standard,
 };
 use clap::Parser;
 use serde_json::json;
@@ -127,6 +127,7 @@ fn engine(cache: Option<Arc<SqliteCache>>) -> Result<Engine, Failure> {
     config.crossref = Some(CrossrefConfig::default());
     config.datacite = Some(DataciteConfig::default());
     config.doi = Some(DoiConfig::default());
+    config.openlibrary = Some(OpenLibraryConfig::default());
     standard(config).map_err(|e| Failure {
         exit: Exit::Internal,
         message: format!("could not set up HTTP client: {e}"),

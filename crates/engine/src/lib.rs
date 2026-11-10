@@ -45,6 +45,8 @@ pub use standard::DataciteConfig;
 pub use standard::DoiConfig;
 #[cfg(feature = "openalex")]
 pub use standard::OpenAlexConfig;
+#[cfg(feature = "openlibrary")]
+pub use standard::OpenLibraryConfig;
 pub use standard::{StandardConfig, standard};
 
 use std::sync::Arc;

@@ -55,7 +55,8 @@ pub enum IdKind {
 }
 
 impl IdKind {
-    pub const ALL: [IdKind; 9] = [
+    /// Every kind. A slice, so adding a kind is not a breaking change.
+    pub const ALL: &[IdKind] = &[
         IdKind::Doi,
         IdKind::Arxiv,
         IdKind::Pmid,
@@ -85,7 +86,8 @@ impl IdKind {
     /// Case-insensitive inverse of [`IdKind::prefix`].
     pub fn from_prefix(s: &str) -> Option<Self> {
         Self::ALL
-            .into_iter()
+            .iter()
+            .copied()
             .find(|k| k.prefix().eq_ignore_ascii_case(s))
     }
 }

@@ -97,7 +97,8 @@ pub enum Field {
 }
 
 impl Field {
-    pub const ALL: [Field; 11] = [
+    /// Every field. A slice, so adding a field is not a breaking change.
+    pub const ALL: &[Field] = &[
         Field::Title,
         Field::Authors,
         Field::Issued,
@@ -122,7 +123,7 @@ pub struct FieldSet(u16);
 
 impl FieldSet {
     pub const EMPTY: FieldSet = FieldSet(0);
-    pub const ALL: FieldSet = FieldSet::of(&Field::ALL);
+    pub const ALL: FieldSet = FieldSet::of(Field::ALL);
     /// The lean default: enough to identify and cite a work.
     pub const DEFAULT: FieldSet = FieldSet::of(&[
         Field::Title,
@@ -171,7 +172,10 @@ impl FieldSet {
     }
 
     pub fn iter(self) -> impl Iterator<Item = Field> {
-        Field::ALL.into_iter().filter(move |f| self.contains(*f))
+        Field::ALL
+            .iter()
+            .copied()
+            .filter(move |f| self.contains(*f))
     }
 }
 
@@ -213,7 +217,7 @@ mod tests {
             FieldSet::of(&[Field::Abstract])
         );
         assert!(FieldSet::EMPTY.is_subset(FieldSet::EMPTY));
-        assert!(FieldSet::ALL.iter().eq(Field::ALL));
+        assert!(FieldSet::ALL.iter().eq(Field::ALL.iter().copied()));
     }
 
     #[test]

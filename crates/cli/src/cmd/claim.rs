@@ -2,6 +2,7 @@
 
 use aspero_core::{Claim, WorkId};
 use serde::Deserialize;
+use serde_json::{Value, json};
 
 use super::{Failure, read_stdin};
 
@@ -15,12 +16,37 @@ pub struct ClaimInput {
     #[serde(default)]
     pub authors: Vec<String>,
     pub year: Option<i16>,
+    #[serde(alias = "journal")]
+    pub container: Option<String>,
+    #[serde(default, deserialize_with = "text_or_number")]
+    pub volume: Option<String>,
+    /// The first page, or a range.
+    #[serde(default, alias = "pages", deserialize_with = "text_or_number")]
+    pub page: Option<String>,
+    /// The caller's own reference for this claim, echoed back untouched;
+    /// allowed here, read from the raw line (see [`InputClaim::from_line`]).
+    #[serde(rename = "key")]
+    pub _key: Option<serde::de::IgnoredAny>,
     pub doi: Option<String>,
     pub arxiv: Option<String>,
     /// Any identifier form `lookup` accepts.
     pub id: Option<String>,
     #[serde(default)]
     pub ids: Vec<String>,
+}
+
+/// Volumes and pages are written as numbers or strings ("e1234").
+fn text_or_number<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Option<String>, D::Error> {
+    Ok(match Option::<serde_json::Value>::deserialize(d)? {
+        Some(serde_json::Value::String(s)) => Some(s),
+        Some(serde_json::Value::Number(n)) => Some(n.to_string()),
+        None | Some(serde_json::Value::Null) => None,
+        Some(other) => {
+            return Err(serde::de::Error::custom(format!(
+                "expected text or a number, got {other}"
+            )));
+        }
+    })
 }
 
 impl ClaimInput {
@@ -43,6 +69,9 @@ impl ClaimInput {
         claim.title = self.title;
         claim.authors = self.authors;
         claim.year = self.year;
+        claim.container = self.container;
+        claim.volume = self.volume;
+        claim.page = self.page;
         if claim.is_empty() {
             return Err("claim has no text, title, authors or identifiers".into());
         }
@@ -50,23 +79,53 @@ impl ClaimInput {
     }
 }
 
-/// One stdin line: a JSON object or a plain reference.
-pub fn line_claim(line: &str) -> Result<Claim, String> {
-    if line.trim_start().starts_with('{') {
-        let input: ClaimInput =
-            serde_json::from_str(line).map_err(|e| format!("invalid claim JSON: {e}"))?;
-        input.into_claim()
-    } else {
-        Ok(Claim::from_input(line))
+/// A claim with the input it came from and the caller's `key`, or why that
+/// input isn't one.
+pub struct InputClaim {
+    pub input: String,
+    pub key: Option<Value>,
+    pub claim: Result<Claim, String>,
+}
+
+impl InputClaim {
+    /// One stdin line: a JSON object or a plain reference. A JSON line's
+    /// `key` is kept even when the rest of it is invalid.
+    pub fn from_line(line: &str) -> Self {
+        let (key, claim) = match line.trim_start().starts_with('{') {
+            false => (None, Ok(Claim::from_input(line))),
+            true => match serde_json::from_str::<Value>(line) {
+                Err(e) => (None, Err(format!("invalid claim JSON: {e}"))),
+                Ok(value) => (
+                    value.get("key").cloned(),
+                    ClaimInput::deserialize(value)
+                        .map_err(|e| format!("invalid claim: {e}"))
+                        .and_then(ClaimInput::into_claim),
+                ),
+            },
+        };
+        InputClaim {
+            input: line.to_owned(),
+            key,
+            claim,
+        }
+    }
+
+    /// What every result for this claim starts with: the input, the
+    /// caller's key, and the claim as understood.
+    pub fn echo(&self) -> Value {
+        let mut echo = json!({ "input": self.input });
+        if let Some(key) = &self.key {
+            echo["key"] = key.clone();
+        }
+        if let Ok(claim) = &self.claim {
+            echo["claim"] = json!(claim);
+        }
+        echo
     }
 }
 
-/// A claim with the input it came from, or why that input isn't one.
-pub type InputClaim = (String, Result<Claim, String>);
-
 /// The claims to process: `text` plus flags as one claim, or one per stdin
-/// line when `text` is `-` (blank lines and `#` comments skipped). Each comes
-/// with the input it was built from, for reporting.
+/// line when `text` is `-` (blank lines and `#` comments skipped).
 pub fn claims(text: Option<String>, fields: ClaimInput) -> Result<Vec<InputClaim>, Failure> {
     if text.as_deref() == Some("-") {
         let input = read_stdin()?;
@@ -74,19 +133,26 @@ pub fn claims(text: Option<String>, fields: ClaimInput) -> Result<Vec<InputClaim
             .lines()
             .map(str::trim)
             .filter(|l| !l.is_empty() && !l.starts_with('#'))
-            .map(|l| (l.to_owned(), line_claim(l)))
+            .map(InputClaim::from_line)
             .collect());
     }
     let label = text.clone().unwrap_or_else(|| describe_fields(&fields));
     let input = ClaimInput { text, ..fields };
-    Ok(vec![(label, input.into_claim())])
+    Ok(vec![InputClaim {
+        input: label,
+        key: None,
+        claim: input.into_claim(),
+    }])
 }
 
 fn describe_fields(f: &ClaimInput) -> String {
     let parts: Vec<String> = [
         (!f.authors.is_empty()).then(|| f.authors.join(", ")),
         f.title.clone(),
+        f.container.clone(),
         f.year.map(|y| y.to_string()),
+        f.volume.clone(),
+        f.page.clone(),
         f.doi.clone().or(f.arxiv.clone()).or(f.id.clone()),
     ]
     .into_iter()
@@ -99,19 +165,46 @@ fn describe_fields(f: &ClaimInput) -> String {
 mod tests {
     use super::*;
 
+    fn claim(line: &str) -> Result<Claim, String> {
+        InputClaim::from_line(line).claim
+    }
+
     #[test]
     fn json_lines_become_structured_claims() {
-        let claim = line_claim(
+        let c = claim(
             r#"{"title": "Attention is all you need", "authors": ["Vaswani, A."], "year": 2017, "arxiv": "1706.03762"}"#,
         )
         .unwrap();
-        assert_eq!(claim.year, Some(2017));
-        assert_eq!(claim.ids[0].to_string(), "arxiv:1706.03762");
+        assert_eq!(c.year, Some(2017));
+        assert_eq!(c.ids[0].to_string(), "arxiv:1706.03762");
         assert!(
-            line_claim(r#"{"titel": "typo"}"#)
+            claim(r#"{"titel": "typo"}"#)
                 .unwrap_err()
                 .contains("unknown field")
         );
-        assert!(line_claim(r#"{"doi": "not a doi"}"#).is_err());
+        assert!(claim(r#"{"doi": "not a doi"}"#).is_err());
+    }
+
+    #[test]
+    fn journal_volume_and_page_as_text_or_numbers() {
+        let c = claim(
+            r#"{"title": "X", "journal": "N Engl J Med", "volume": 376, "pages": "2545-55"}"#,
+        )
+        .unwrap();
+        assert_eq!(c.container.as_deref(), Some("N Engl J Med"));
+        assert_eq!(c.volume.as_deref(), Some("376"));
+        assert_eq!(c.page.as_deref(), Some("2545-55"));
+        assert!(claim(r#"{"title": "X", "volume": [1]}"#).is_err());
+    }
+
+    #[test]
+    fn keys_are_echoed_even_for_invalid_claims() {
+        let ok = InputClaim::from_line(r#"{"key": {"note": "pe.md", "line": 7}, "title": "X"}"#);
+        assert_eq!(ok.echo()["key"], json!({"note": "pe.md", "line": 7}));
+        assert_eq!(ok.echo()["claim"], json!({"title": "X"}));
+        let bad = InputClaim::from_line(r#"{"key": "ref-12", "titel": "typo"}"#);
+        assert!(bad.claim.is_err());
+        assert_eq!(bad.echo()["key"], "ref-12");
+        assert!(bad.echo().get("claim").is_none());
     }
 }

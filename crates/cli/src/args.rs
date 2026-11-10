@@ -179,14 +179,24 @@ exist with the same title and authors but a different year.
 Stops early when the claim's identifiers, or two providers, confirm a match;
 otherwise OpenAlex title searches run too ($0.001 each, at most two per claim).
 
-Batch input on stdin, one claim per line, as text or JSON:
-  {\"title\": \"...\", \"authors\": [\"...\"], \"year\": 2017, \"doi\": \"...\"}
-  JSON keys: text, title, authors, year, doi, arxiv, id, ids
+Batch input on stdin (`verify -`), one claim per line: a free-text
+reference, or a JSON object of what you know (more reliable than text):
+  {\"key\": \"pe.md:7\", \"title\": \"...\", \"authors\": [\"Meyer G\"], \"year\": 2014,
+   \"journal\": \"N Engl J Med\", \"volume\": 370, \"page\": \"1402-11\", \"doi\": \"...\"}
+  keys: text, title, authors, year, journal (or container), volume, page,
+        doi, arxiv, id, ids, and key: anything, echoed back untouched
+Unknown keys are refused. With --format jsonl, one result per line, in
+input order; each carries `input`, your `key` and the `claim` as understood.
+
+The journal, volume and first page are checked too, from fields or from
+the text (\"N Engl J Med 2017;376:2545\"). A different volume or page makes
+a match plausible at best; it also tells an article from replies to it.
 
 Examples:
   aspero verify \"Vaswani et al. 2017. Attention is all you need. arXiv:1706.03762\"
   aspero verify --title \"Deep learning\" --author LeCun --year 2015 --id 10.1038/nature14539
-  aspero verify - < citations.jsonl")]
+  aspero verify --title \"Fibrinolysis for patients with intermediate-risk pulmonary embolism\" --journal \"N Engl J Med\" --volume 370 --page 1402
+  aspero verify --format jsonl - < citations.jsonl")]
     Verify {
         #[command(flatten)]
         claim: ClaimArgs,
@@ -284,6 +294,15 @@ pub struct ClaimArgs {
     /// Claimed publication year.
     #[arg(long)]
     pub year: Option<i16>,
+    /// Claimed journal, full or abbreviated ("N Engl J Med").
+    #[arg(long, visible_alias = "container")]
+    pub journal: Option<String>,
+    /// Claimed volume.
+    #[arg(long)]
+    pub volume: Option<String>,
+    /// Claimed first page (or page range).
+    #[arg(long, visible_alias = "pages")]
+    pub page: Option<String>,
     /// Claimed identifier (repeatable): DOI, arXiv ID, PMID, URL...
     #[arg(long = "id")]
     pub ids: Vec<String>,

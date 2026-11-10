@@ -10,7 +10,7 @@ use std::io::IsTerminal;
 
 use futures::StreamExt;
 
-use super::{Failure, Out, merge_usage, print, print_line};
+use super::{Failure, Out, merge_usage, merged, print, print_line};
 use crate::args::{ClaimArgs, Format};
 use crate::exit::Exit;
 use crate::output::{self, Level};
@@ -31,7 +31,7 @@ pub async fn run(engine: &Engine, args: ClaimArgs, out: Out) -> Result<Exit, Fai
     // warm, claims are then verified several at a time, streamed in order.
     let valid: Vec<_> = claims
         .iter()
-        .filter_map(|(_, c)| c.as_ref().ok().cloned())
+        .filter_map(|c| c.claim.as_ref().ok().cloned())
         .collect();
     if valid.len() > 1 {
         for (p, u) in engine.prefetch(&valid).await.usage {
@@ -42,10 +42,12 @@ pub async fn run(engine: &Engine, args: ClaimArgs, out: Out) -> Result<Exit, Fai
     let (mut rows, mut texts) = (Vec::new(), Vec::new());
     let total = claims.len();
     let show_progress = out.format == Format::Table && total > 1 && std::io::stderr().is_terminal();
-    for (input, claim) in claims {
-        let (item, item_exit, text) = match claim {
+    for claim in claims {
+        let echo = claim.echo();
+        let input = claim.input;
+        let (item, item_exit, text) = match claim.claim {
             Err(e) => (
-                json!({"input": input, "verdict": "invalid", "reason": e}),
+                merged(echo, json!({"verdict": "invalid", "reason": e})),
                 Exit::Usage,
                 format!("INVALID  {input}\n  {e}\n"),
             ),
@@ -57,7 +59,7 @@ pub async fn run(engine: &Engine, args: ClaimArgs, out: Out) -> Result<Exit, Fai
                 for (p, u) in &v.report.usage {
                     merge_usage(&mut usage, p, *u);
                 }
-                let mut item = item(&input, &v, out.full);
+                let mut item = item(echo, &v, out.full);
                 let mut text = verdict_text(&input, &v);
                 if out.abstracts
                     && let Some(best) = v.best.map(|i| &v.report.candidates[i])
@@ -133,6 +135,9 @@ pub fn split(args: ClaimArgs) -> (Option<String>, ClaimInput) {
         title: args.title,
         authors: args.authors,
         year: args.year,
+        container: args.journal,
+        volume: args.volume,
+        page: args.page,
         ids: args.ids,
         ..ClaimInput::default()
     };
@@ -169,12 +174,15 @@ fn exit_for(verdict: Verdict) -> Exit {
     }
 }
 
-fn item(input: &str, v: &Verification, full: bool) -> Value {
-    let mut item = json!({
-        "input": input,
-        "verdict": v.verdict.as_str(),
-        "reason": v.reason,
-    });
+/// One verification as JSON, after the claim's echo (input, key, claim).
+fn item(echo: Value, v: &Verification, full: bool) -> Value {
+    let mut item = merged(
+        echo,
+        json!({
+            "verdict": v.verdict.as_str(),
+            "reason": v.reason,
+        }),
+    );
     if let Some(best) = v.best {
         item["match"] = output::candidate(&v.report.candidates[best], full);
     }

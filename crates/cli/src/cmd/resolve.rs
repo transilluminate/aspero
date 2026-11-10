@@ -6,7 +6,7 @@ use serde_json::{Value, json};
 
 use super::claim::claims;
 use super::verify::split;
-use super::{Failure, Out, merge_usage, print, print_line};
+use super::{Failure, Out, merge_usage, merged, print, print_line};
 use crate::args::{ClaimArgs, Format};
 use crate::exit::Exit;
 use crate::output;
@@ -17,12 +17,14 @@ pub async fn run(engine: &Engine, args: ClaimArgs, out: Out) -> Result<Exit, Fai
     let mut exit = Exit::Ok;
     let mut docs = Vec::new();
 
-    for (input, claim) in claims(text, fields)? {
-        let claim = match claim {
+    for item in claims(text, fields)? {
+        let echo = item.echo();
+        let input = item.input;
+        let claim = match item.claim {
             Ok(c) => c,
             Err(e) => {
                 exit = exit.worst(Exit::Usage);
-                docs.push(json!({"input": input, "error": e}));
+                docs.push(merged(echo, json!({"error": e})));
                 continue;
             }
         };
@@ -111,12 +113,14 @@ pub async fn run(engine: &Engine, args: ClaimArgs, out: Out) -> Result<Exit, Fai
                 }
             }
             Format::Jsonl => candidates.iter().for_each(print_line),
-            Format::Json | Format::Auto => docs.push(json!({
-                "input": input,
-                "candidates": candidates,
-                "errors": errors,
-                "usage": output::usage(&report.usage),
-            })),
+            Format::Json | Format::Auto => docs.push(merged(
+                echo,
+                json!({
+                    "candidates": candidates,
+                    "errors": errors,
+                    "usage": output::usage(&report.usage),
+                }),
+            )),
         }
     }
 

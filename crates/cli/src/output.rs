@@ -187,12 +187,23 @@ pub fn hit_text(rank: usize, hit: &Hit) -> String {
 pub fn candidate(c: &Candidate, full: bool) -> Value {
     let a = &c.assessment;
     let checks = if full {
-        json!({"title": a.title, "authors": a.authors, "year": a.year, "ids": a.ids})
+        json!({
+            "title": a.title,
+            "authors": a.authors,
+            "year": a.year,
+            "container": a.container,
+            "volume": a.volume,
+            "page": a.page,
+            "ids": a.ids,
+        })
     } else {
         json!({
             "title": a.title.agreement,
             "authors": a.authors.agreement,
             "year": a.year.agreement,
+            "container": a.container.agreement,
+            "volume": a.volume.agreement,
+            "page": a.page.agreement,
             "ids": a.ids,
         })
     };
@@ -225,6 +236,9 @@ pub fn candidate_text(c: &Candidate, indent: &str) -> String {
         check("title", a.title.agreement),
         check("authors", a.authors.agreement),
         check("year", a.year.agreement),
+        check("journal", a.container.agreement),
+        check("volume", a.volume.agreement),
+        check("page", a.page.agreement),
         check("id", a.ids),
     ]
     .into_iter()

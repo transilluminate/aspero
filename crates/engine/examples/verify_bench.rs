@@ -18,8 +18,8 @@ use std::sync::Arc;
 
 use aspero_core::{Claim, WorkId};
 use aspero_engine::{
-    CrossrefConfig, DataciteConfig, DoiConfig, OpenAlexConfig, OpenLibraryConfig, SecretString,
-    SqliteCache, StandardConfig, Verification, standard,
+    CrossrefConfig, DataciteConfig, DoiConfig, EuropePmcConfig, OpenAlexConfig, OpenLibraryConfig,
+    SecretString, SqliteCache, StandardConfig, Verification, standard,
 };
 use serde::Deserialize;
 
@@ -104,6 +104,7 @@ async fn main() -> std::process::ExitCode {
     config.crossref = Some(CrossrefConfig::default());
     config.datacite = Some(DataciteConfig::default());
     config.doi = Some(DoiConfig::default());
+    config.europepmc = Some(EuropePmcConfig::default());
     config.openlibrary = Some(OpenLibraryConfig::default());
     let engine = standard(config).expect("engine");
 

@@ -23,3 +23,4 @@
 {"why": "book with ISBN (Open Library)", "claim": "Goodfellow I, Bengio Y, Courville A. Deep Learning. MIT Press; 2016. ISBN 978-0-262-03561-3.", "expect": ["verified"], "ids": ["isbn:9780262035613"]}
 {"why": "book without identifiers (Springer registers it chapter by chapter)", "claim": "Bishop CM. Pattern Recognition and Machine Learning. Springer; 2006.", "expect": ["verified"]}
 {"why": "book cited by its second edition's year", "claim": {"title": "Reinforcement Learning: An Introduction", "authors": ["Sutton, Richard S.", "Barto, Andrew G."], "year": 2018}, "expect": ["verified"]}
+{"why": "PMCID only Europe PMC can look up", "claim": "PMC6716493", "expect": ["verified"], "ids": ["doi:10.3389/fphys.2019.01083"]}

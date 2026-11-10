@@ -13,6 +13,8 @@ pub use aspero_crossref::CrossrefConfig;
 pub use aspero_datacite::DataciteConfig;
 #[cfg(feature = "doi")]
 pub use aspero_doi::DoiConfig;
+#[cfg(feature = "europepmc")]
+pub use aspero_europepmc::EuropePmcConfig;
 #[cfg(feature = "openalex")]
 pub use aspero_openalex::OpenAlexConfig;
 #[cfg(feature = "openlibrary")]
@@ -34,6 +36,8 @@ pub struct StandardConfig {
     pub datacite: Option<DataciteConfig>,
     #[cfg(feature = "doi")]
     pub doi: Option<DoiConfig>,
+    #[cfg(feature = "europepmc")]
+    pub europepmc: Option<EuropePmcConfig>,
     #[cfg(feature = "openlibrary")]
     pub openlibrary: Option<OpenLibraryConfig>,
 }
@@ -45,7 +49,8 @@ pub struct StandardConfig {
 /// kinds, indexes DataCite DOIs such as arXiv's), then Crossref, then
 /// DataCite (arXiv, Zenodo, data and software; batched), then doi.org (any
 /// registration agency, one DOI per request; its "not found" is
-/// authoritative). Open Library answers ISBNs (books) and adds book search.
+/// authoritative), then Europe PMC (PMIDs, PMCIDs, biomedical abstracts).
+/// Open Library answers ISBNs (books) and adds book search.
 pub fn standard(config: StandardConfig) -> Result<Engine, Error> {
     let user_agent = match &config.mailto {
         Some(mailto) => format!("aspero/{} (mailto:{mailto})", env!("CARGO_PKG_VERSION")),
@@ -96,6 +101,14 @@ pub fn standard(config: StandardConfig) -> Result<Engine, Error> {
         let policy = DoiOrg::default_policy();
         let provider = DoiOrg::new(doi, client("doi", &policy)?);
         builder = builder.provider(Arc::new(provider), policy, 30);
+    }
+
+    #[cfg(feature = "europepmc")]
+    if let Some(epmc) = config.europepmc {
+        use aspero_europepmc::EuropePmc;
+        let policy = EuropePmc::default_policy();
+        let provider = EuropePmc::new(epmc, client("europepmc", &policy)?);
+        builder = builder.provider(Arc::new(provider), policy, 35);
     }
 
     #[cfg(feature = "openlibrary")]

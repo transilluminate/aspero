@@ -43,6 +43,8 @@ pub use standard::CrossrefConfig;
 pub use standard::DataciteConfig;
 #[cfg(feature = "doi")]
 pub use standard::DoiConfig;
+#[cfg(feature = "europepmc")]
+pub use standard::EuropePmcConfig;
 #[cfg(feature = "openalex")]
 pub use standard::OpenAlexConfig;
 #[cfg(feature = "openlibrary")]

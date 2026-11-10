@@ -27,6 +27,11 @@ name = "aspero-crossref"
 version = "0.0.0"
 dependencies = [
  "aspero-core",
+ "async-trait",
+ "jiff",
+ "serde",
+ "serde_json",
+ "url",
 ]
 
 [[package]]

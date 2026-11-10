@@ -1,0 +1,6 @@
+HTTP/2 404 
+content-type: text/plain
+x-rate-limit-limit: 10
+x-rate-limit-interval: 1s
+x-concurrency-limit: 3
+x-api-pool: polite-single

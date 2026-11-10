@@ -1,0 +1,6 @@
+HTTP/2 400 
+content-type: application/json;charset=utf-8
+x-rate-limit-limit: 3
+x-rate-limit-interval: 1s
+x-concurrency-limit: 3
+x-api-pool: polite-array

@@ -170,8 +170,8 @@ Verdicts:
 A wrong year is treated as a strong mismatch: re-deposits of famous papers
 exist with the same title and authors but a different year.
 
-Stops as soon as a free source verifies the claim; OpenAlex title searches
-($0.001 each, at most two per claim) run only when needed.
+Stops early when the claim's identifiers, or two providers, confirm a match;
+otherwise OpenAlex title searches run too ($0.001 each, at most two per claim).
 
 Batch input on stdin, one claim per line, as text or JSON:
   {\"title\": \"...\", \"authors\": [\"...\"], \"year\": 2017, \"doi\": \"...\"}

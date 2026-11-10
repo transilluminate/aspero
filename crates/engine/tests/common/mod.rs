@@ -28,6 +28,7 @@ impl Scripted {
         let mut caps = Capabilities::default();
         caps.lookup_kinds = vec![IdKind::Doi, IdKind::Arxiv];
         caps.max_batch = 10;
+        caps.fields = FieldSet::ALL;
         Scripted {
             id: ProviderId::from_static(id),
             caps,

@@ -393,6 +393,11 @@ impl Accumulator<'_> {
                 let pooled: Vec<i16> = years(&c.record).chain(years(&record)).collect();
                 add_years(&mut c.record, &pooled);
                 add_years(&mut record, &pooled);
+                // And keep a free copy's location, whichever record wins.
+                let oa = |r: &SourceRecord| r.work.open_access.clone();
+                let known = oa(&c.record).or_else(|| oa(&record));
+                c.record.work.open_access.clone_from(&known);
+                record.work.open_access = record.work.open_access.take().or(known);
                 c.assessment = matching::assess(self.claim, &c.record);
                 let assessment = matching::assess(self.claim, &record);
                 if assessment.confidence > c.assessment.confidence {

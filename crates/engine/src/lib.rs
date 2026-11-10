@@ -55,7 +55,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use aspero_core::{
-    Error, ErrorCategory, FieldSet, Filter, Page, Provider, ProviderId, ResiliencePolicy,
+    Error, ErrorCategory, Field, FieldSet, Filter, Page, Provider, ProviderId, ResiliencePolicy,
     SearchMode, SearchQuery, SourceRecord, Usage, WorkId,
 };
 pub use aspero_store::{Cache, SqliteCache, Stats as CacheStats, StoreError};
@@ -311,33 +311,12 @@ impl Engine {
     /// a correction the work it corrects. Batched and cached, like lookups.
     pub async fn add_notices(&self, report: &mut LookupReport) {
         for entry in &self.entries {
-            let caps = entry.provider.capabilities();
-            if !caps.notices {
+            if !entry.provider.capabilities().notices {
                 continue;
             }
-            let provider = entry.provider.id();
-            let wanted: Vec<(usize, WorkId)> = report
-                .results
-                .iter()
-                .enumerate()
-                .filter_map(|(i, r)| {
-                    let record = r.record.as_ref().filter(|r| r.source != provider)?;
-                    let id = record
-                        .ids
-                        .iter()
-                        .find(|id| caps.lookup_kinds.contains(&id.kind()))?;
-                    Some((i, id.clone()))
-                })
-                .collect();
-            if wanted.is_empty() {
-                continue;
-            }
-            let ids: Vec<WorkId> = wanted.iter().map(|(_, id)| id.clone()).collect();
-            let answers = self
-                .lookup_at(entry, &ids, FieldSet::ALL, &mut report.usage)
-                .await;
-            for ((i, _), (_, found)) in wanted.into_iter().zip(answers) {
-                let (Some(found), Some(record)) = (found, report.results[i].record.as_mut()) else {
+            let works = found_records(&report.results, |_| true);
+            for (i, found) in self.ask_about(entry, works, &mut report.usage).await {
+                let Some(record) = report.results[i].record.as_mut() else {
                     continue;
                 };
                 let work = &mut record.work;
@@ -349,6 +328,60 @@ impl Engine {
                 }
             }
         }
+    }
+
+    /// Fills in where works can be read free, for records whose provider
+    /// didn't say, from the first provider (by priority) that does.
+    pub async fn add_open_access(&self, report: &mut LookupReport) {
+        for entry in &self.entries {
+            if !entry
+                .provider
+                .capabilities()
+                .fields
+                .contains(Field::OpenAccess)
+            {
+                continue;
+            }
+            let works = found_records(&report.results, |r| r.work.open_access.is_none());
+            for (i, found) in self.ask_about(entry, works, &mut report.usage).await {
+                if let (Some(oa), Some(record)) =
+                    (found.work.open_access, report.results[i].record.as_mut())
+                {
+                    record.work.open_access = Some(oa);
+                }
+            }
+        }
+    }
+
+    /// One provider's records of works it didn't supply itself, each asked
+    /// for by an identifier it accepts: `(work index, record)` per work it
+    /// knows.
+    async fn ask_about<'a>(
+        &self,
+        entry: &Entry,
+        works: impl IntoIterator<Item = (usize, &'a SourceRecord)>,
+        usage: &mut Vec<(ProviderId, Usage)>,
+    ) -> Vec<(usize, SourceRecord)> {
+        let provider = entry.provider.id();
+        let kinds = &entry.provider.capabilities().lookup_kinds;
+        let wanted: Vec<(usize, WorkId)> = works
+            .into_iter()
+            .filter(|(_, r)| r.source != provider)
+            .filter_map(|(i, r)| {
+                let id = r.ids.iter().find(|id| kinds.contains(&id.kind()))?;
+                Some((i, id.clone()))
+            })
+            .collect();
+        if wanted.is_empty() {
+            return Vec::new();
+        }
+        let ids: Vec<WorkId> = wanted.iter().map(|(_, id)| id.clone()).collect();
+        let answers = self.lookup_at(entry, &ids, FieldSet::ALL, usage).await;
+        wanted
+            .into_iter()
+            .zip(answers)
+            .filter_map(|((i, _), (_, record))| Some((i, record?)))
+            .collect()
     }
 
     /// Asks one provider about `ids` (all of kinds it accepts): fresh cached
@@ -623,6 +656,17 @@ impl Engine {
             let _ = cache.put_search(provider, query, page, (self.clock)());
         }
     }
+}
+
+/// The records found among `results`, by index, that `keep` selects.
+fn found_records(
+    results: &[LookupResult],
+    keep: impl Fn(&SourceRecord) -> bool,
+) -> impl Iterator<Item = (usize, &SourceRecord)> {
+    results
+        .iter()
+        .enumerate()
+        .filter_map(move |(i, r)| Some((i, r.record.as_ref().filter(|r| keep(r))?)))
 }
 
 fn add_usage(totals: &mut Vec<(ProviderId, Usage)>, provider: &ProviderId, usage: Usage) {

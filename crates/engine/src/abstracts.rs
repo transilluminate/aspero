@@ -8,7 +8,7 @@
 //! Crossref. The abstract keeps its provenance: it is never blended into
 //! another provider's record.
 
-use aspero_core::{FieldSet, ProviderId, SourceRecord, Usage, WorkId};
+use aspero_core::{Field, ProviderId, SourceRecord, Usage};
 
 use crate::Engine;
 
@@ -44,29 +44,24 @@ impl Engine {
         let mut usage = Vec::new();
 
         for entry in &self.entries {
-            let provider = entry.provider.id();
-            let kinds = &entry.provider.capabilities().lookup_kinds;
-            // One identifier per still-missing work that this provider
-            // accepts (and that it didn't already answer without one).
-            let wanted: Vec<(usize, WorkId)> = works
-                .iter()
-                .enumerate()
-                .filter(|(i, r)| found[*i].is_none() && r.source != provider)
-                .filter_map(|(i, r)| {
-                    let id = r.ids.iter().find(|id| kinds.contains(&id.kind()))?;
-                    Some((i, id.clone()))
-                })
-                .collect();
-            if wanted.is_empty() {
+            if !entry
+                .provider
+                .capabilities()
+                .fields
+                .contains(Field::Abstract)
+            {
                 continue;
             }
-            let ids: Vec<WorkId> = wanted.iter().map(|(_, id)| id.clone()).collect();
-            let answers = self.lookup_at(entry, &ids, FieldSet::ALL, &mut usage).await;
-            for ((i, _), (_, record)) in wanted.into_iter().zip(answers) {
-                if let Some(text) = record.and_then(|r| non_blank(r.work.abstract_text)) {
+            let missing = works
+                .iter()
+                .copied()
+                .enumerate()
+                .filter(|(i, _)| found[*i].is_none());
+            for (i, record) in self.ask_about(entry, missing, &mut usage).await {
+                if let Some(text) = non_blank(record.work.abstract_text) {
                     found[i] = Some(Abstract {
                         text,
-                        source: provider.clone(),
+                        source: entry.provider.id(),
                     });
                 }
             }

@@ -402,6 +402,10 @@ Design consequences:
 - Abstracts are JATS XML fragments; dates are `date-parts` with month/day
   optional (and occasionally out of range).
 - `next-cursor` is returned even past the last page; an empty page is the end.
+- **`cursor=*` silently drops relevance order.** The LeCun reference's right
+  match (92.1) vanished from the top 3 until `sort=score&order=desc` was
+  added. The provider now always sends it with query text; fixtures are
+  recorded with the provider's exact parameters so they can't hide this.
 - **Lookalikes.** `query.bibliographic` for "Vaswani 2017 Attention is all you
   need" returns five `10.65215/*` posted-content re-deposits (2025, another
   publisher) carrying the **real authors and abstract**. The real paper's only
@@ -413,6 +417,25 @@ Design consequences:
     (which indexes DataCite DOIs);
   - Crossref scores separate a real match well (91.9 vs 47.7 for the messy
     LeCun reference), so the top-to-second score ratio is a useful signal.
+
+### OpenAlex, live (2026-11-10)
+
+- Work type `conference-paper` now exists (older records may still be
+  `article` in a conference source).
+- Keyword search on a whole messy reference is poor: for "Vaswani 2017
+  Attention is all you need" the top two were other papers, though a plain
+  title search ranks the real one first.
+
+### Resolve quality: next steps
+
+Phase 0 `resolve` lists per-provider candidates. Observed failure modes
+(lookalike re-deposits; Crossref lacking DataCite DOIs; OpenAlex keyword
+search diluted by author/year/venue tokens) suggest, for `verify`:
+- extract title / first author / year from the reference, and query
+  OpenAlex with `title.search` plus a year filter;
+- score candidates across providers on title similarity, author overlap,
+  year delta and venue, using each provider's score margin as a signal;
+- merge candidates that share identifiers before ranking.
 
 To verify at implementation time: doi.org content-negotiation limits,
 arXiv (~1 req / 3 s).

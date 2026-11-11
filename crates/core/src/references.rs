@@ -239,8 +239,16 @@ impl<'a> List<'a> {
                 (None, None) => {}
             }
         }
+        // One marker counts only on the first line ("1. Smith J. …"): later,
+        // it may be a wrapped line ("2. ed. Berlin").
+        let first_marked = self
+            .lines
+            .iter()
+            .flatten()
+            .next()
+            .is_some_and(|l| marker(self.line(l)).is_some());
         groups.retain(|g| !g.is_empty());
-        (groups.len() >= 2).then_some(groups)
+        (groups.len() >= 2 || groups.len() == 1 && first_marked).then_some(groups)
     }
 
     /// Groups lines without markers: each its own reference if `alone`
@@ -562,6 +570,19 @@ mod tests {
         assert_eq!(
             texts("1. Smith J. doi:10.1038/x.\nNature. 2020.\n2. Jones K. 2021.")[0],
             "Smith J. doi:10.1038/x. Nature. 2020."
+        );
+    }
+
+    #[test]
+    fn a_single_numbered_reference_loses_its_number() {
+        assert_eq!(
+            texts("1. LeCun Y. Deep learning. Nature. 2015."),
+            ["LeCun Y. Deep learning. Nature. 2015."]
+        );
+        // A number further down is part of the reference.
+        assert_eq!(
+            texts("Smith J. A book.\n2. ed. Berlin: Springer; 2010."),
+            ["Smith J. A book. 2. ed. Berlin: Springer; 2010."]
         );
     }
 

@@ -42,7 +42,7 @@ pub struct Reference {
 /// point into `text` as given.
 pub fn split_references(text: &str) -> Vec<Reference> {
     let folded = Folded::new(text);
-    let list = List::new(&folded.text);
+    let list = List::new(&folded.text).split_inline();
     let groups = list.groups();
     references(text, &folded, &list, groups)
 }
@@ -191,6 +191,85 @@ impl<'a> List<'a> {
         List { text, lines }
     }
 
+    /// Lines holding references numbered inline, as a PDF's list copied
+    /// onto one line ("… 01159.x. [21] Finucane … [22] …"), split before
+    /// each number. Only `[n]` markers in sequence count: three or more,
+    /// or two with one starting the line, each starting the line or after
+    /// a full stop and before a capital, and every piece dated. Citations
+    /// in prose ("as shown. [3] The") rarely meet all of these.
+    fn split_inline(mut self) -> Self {
+        let lines = std::mem::take(&mut self.lines);
+        for line in lines {
+            match line.as_ref().and_then(|l| self.inline_starts(l)) {
+                Some(starts) => {
+                    let range = line.expect("has starts");
+                    let bounds: Vec<usize> = std::iter::once(range.start)
+                        .chain(starts)
+                        .chain(std::iter::once(range.end))
+                        .collect();
+                    for w in bounds.windows(2) {
+                        let piece = &self.text[w[0]..w[1]];
+                        let start = w[0] + (piece.len() - piece.trim_start().len());
+                        let end = w[0] + piece.trim_end().len();
+                        if start < end {
+                            self.lines.push(Some(start..end));
+                        }
+                    }
+                }
+                None => self.lines.push(line),
+            }
+        }
+        self
+    }
+
+    /// Where a line's inline-numbered references start, after its own
+    /// start: see [`List::split_inline`].
+    fn inline_starts(&self, line: &Range<usize>) -> Option<Vec<usize>> {
+        let text = self.line(line);
+        let mut markers: Vec<(usize, u32)> = Vec::new();
+        for (at, _) in text.match_indices('[') {
+            let Some((Marker::Number(n), used)) = marker(&text[at..]) else {
+                continue;
+            };
+            let follows_stop = text[..at].trim_end();
+            let next = text[at + used..].chars().next();
+            if (follows_stop.is_empty() || follows_stop.ends_with('.'))
+                && next.is_some_and(char::is_uppercase)
+            {
+                markers.push((at, n));
+            }
+        }
+        // The longest run numbered in sequence.
+        let mut runs: Vec<Vec<(usize, u32)>> = Vec::new();
+        for m in markers {
+            match runs
+                .iter_mut()
+                .find(|r| r.last().is_some_and(|l| l.1 + 1 == m.1))
+            {
+                Some(run) => run.push(m),
+                None => runs.push(vec![m]),
+            }
+        }
+        let run = runs.into_iter().max_by_key(Vec::len)?;
+        let at_start = run.first().is_some_and(|m| m.0 == 0);
+        if run.len() < 3 && !(run.len() == 2 && at_start) {
+            return None;
+        }
+        let starts: Vec<usize> = run
+            .iter()
+            .filter(|m| m.0 > 0)
+            .map(|m| line.start + m.0)
+            .collect();
+        let bounds: Vec<usize> = std::iter::once(line.start)
+            .chain(starts.iter().copied())
+            .chain(std::iter::once(line.end))
+            .collect();
+        bounds
+            .windows(2)
+            .all(|w| dated(&self.text[w[0]..w[1]]))
+            .then_some(starts)
+    }
+
     /// Groups by the text rules: numbers or bullets, else paragraphs, else
     /// lines.
     fn groups(&self) -> Vec<Vec<Range<usize>>> {
@@ -236,6 +315,9 @@ impl<'a> List<'a> {
                     }
                 }
                 (None, Some(group)) => group.push(line.clone()),
+                // Before the first number: a heading, or the end of a
+                // reference the copy began in the middle of.
+                (None, None) if dated(self.line(line)) => groups.push(vec![line.clone()]),
                 (None, None) => {}
             }
         }
@@ -612,6 +694,38 @@ mod tests {
             texts("Smith J. A book.\n2. ed. Berlin: Springer; 2010."),
             ["Smith J. A book. 2. ed. Berlin: Springer; 2010."]
         );
+    }
+
+    #[test]
+    fn references_numbered_inline_split_at_each_number() {
+        // Dogfood: a PDF's list copied by Preview onto one line.
+        let list = "Sanchez A, et al. Title one. J Thromb Haemost. 2011;9:1-8. doi:10.1111/j.1538-7836.2010.01159.x. \
+            [21] Finucane T, Smith B. Title two. Lancet. 2012;379:10-12. \
+            [22] Ortel TL. Title three. Blood Adv. 2020;4:4693. \
+            [23] Konstantinides SV. Title four. Eur Heart J. 2020;41:543.";
+        assert_eq!(
+            texts(list),
+            [
+                "Sanchez A, et al. Title one. J Thromb Haemost. 2011;9:1-8. doi:10.1111/j.1538-7836.2010.01159.x.",
+                "Finucane T, Smith B. Title two. Lancet. 2012;379:10-12.",
+                "Ortel TL. Title three. Blood Adv. 2020;4:4693.",
+                "Konstantinides SV. Title four. Eur Heart J. 2020;41:543.",
+            ]
+        );
+        // Two, when the first starts the line.
+        assert_eq!(
+            texts("[1] Smith J. One. 2019. [2] Jones K. Two. 2020.").len(),
+            2
+        );
+        // In-text citations: out of sequence, not after a full stop, or
+        // pieces without a year.
+        for prose in [
+            "Shown before [3] and since. [4] The trial. [5] Then 2019.",
+            "Smith J. Title. 2019. [3] Jones. 2020. [7] Brown. 2021. [9] Lee. 2022.",
+            "As shown. [1] The first. [2] The second. [3] The third 2019.",
+        ] {
+            assert_eq!(texts(prose).len(), 1, "{prose}");
+        }
     }
 
     #[test]

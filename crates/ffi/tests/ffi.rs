@@ -2,7 +2,8 @@
 //! offline from the cache, and awaitable from any executor.
 
 use aspero_ffi::records::{
-    Claim, ErrorKind, KeyStatus, LookupStatus, Reason, SearchRequest, Verdict,
+    Author, BibFormat, Claim, ErrorKind, ExportFormat, KeyStatus, LookupStatus, Reason,
+    SearchRequest, Verdict, Work,
 };
 use aspero_ffi::{Aspero, AsperoError, CallToken, Config, Patience};
 
@@ -90,6 +91,77 @@ fn laid_out_lines_split_by_indent() {
     ]);
     assert_eq!(refs.len(), 2);
     assert_eq!((refs[0].lines.start, refs[0].lines.end), (0, 2));
+}
+
+#[test]
+fn bibliography_files_become_claims() {
+    let handle = aspero(None);
+    let ris = "TY  - JOUR\nID  - lecun\nAU  - LeCun, Yann\nTI  - Deep learning\nT2  - Nature\nPY  - 2015\nVL  - 521\nSP  - 436\nDO  - 10.1038/nature14539\nER  - \n";
+    let read = handle.read_references(ris.into()).unwrap();
+    assert_eq!(read.format, BibFormat::Ris);
+    let entry = &read.entries[0];
+    assert_eq!(entry.claim.key.as_deref(), Some("lecun"));
+    assert_eq!(entry.claim.container.as_deref(), Some("Nature"));
+    assert_eq!(entry.claim.ids, ["doi:10.1038/nature14539"]);
+    assert!(entry.checkable);
+
+    let bib = handle
+        .read_references("@article{x, title = {T}, doi = {nope}}".into())
+        .unwrap();
+    assert_eq!(bib.format, BibFormat::Bibtex);
+    assert_eq!(bib.entries[0].notes.len(), 1);
+
+    let err = handle.read_references("1. Smith J. A study.".into());
+    assert!(matches!(err, Err(AsperoError::Unreadable(_))));
+}
+
+#[test]
+fn works_export_as_bibtex_and_ris() {
+    let handle = aspero(None);
+    let read = handle
+        .read_references(
+            r#"[{"id": "a", "type": "article-journal", "title": "Deep learning",
+                 "author": [{"family": "LeCun", "given": "Yann"}],
+                 "issued": {"date-parts": [[2015]]}, "DOI": "10.1038/nature14539"}]"#
+                .into(),
+        )
+        .unwrap();
+    assert_eq!(read.format, BibFormat::CslJson);
+    let work = Work {
+        source: "test".into(),
+        ids: read.entries[0].claim.ids.clone(),
+        canonical: None,
+        title: read.entries[0].claim.title.clone(),
+        authors: vec![Author {
+            name: "Yann LeCun".into(),
+            orcid: None,
+        }],
+        issued: Some("2015".into()),
+        year: Some(2015),
+        work_type: Some("article-journal".into()),
+        container: Some("Nature".into()),
+        volume: None,
+        issue: None,
+        page: None,
+        publisher: None,
+        url: None,
+        abstract_text: None,
+        notices: Vec::new(),
+        notice_for: Vec::new(),
+        open_access: None,
+        fetched_at: std::time::SystemTime::UNIX_EPOCH,
+        json: "{}".into(),
+    };
+    let bibtex = handle.export(vec![work.clone(), work.clone()], ExportFormat::Bibtex);
+    assert!(bibtex.starts_with("@article{lecun2015deep,\n  author = {LeCun, Yann},"));
+    assert!(bibtex.contains("@article{lecun2015deepa,"), "{bibtex}");
+    let ris = handle.export(vec![work], ExportFormat::Ris);
+    assert!(ris.contains("DO  - 10.1038/nature14539\n"), "{ris}");
+    let back = handle.read_references(ris).unwrap();
+    assert_eq!(
+        back.entries[0].claim.title.as_deref(),
+        Some("Deep learning")
+    );
 }
 
 #[test]

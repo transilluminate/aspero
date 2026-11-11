@@ -51,9 +51,13 @@ aspero verify "Vaswani 2017 Attention is all you need"
 aspero verify --title "Deep learning" --author LeCun --year 2015 --id 10.1038/nature14539
 aspero verify - < citations.txt        # one claim per line, text or JSON
 
-# Check a whole bibliography (CI-friendly: exits 9 on errors)
+# Check a whole bibliography: BibTeX, RIS or CSL-JSON (CI-friendly: exits 9 on errors)
 aspero check refs.bib
-aspero check --fail-on warning --format json thesis.bib
+aspero check --fail-on warning --format json thesis.ris
+
+# Write what's found as BibTeX or RIS, for a reference manager
+aspero lookup --format bibtex 10.1038/nature14539 arXiv:1706.03762
+aspero verify --format ris - < citations.txt
 
 # Look up identifiers: DOIs, arXiv IDs, PMIDs, PMCIDs, NBK IDs, ISBNs, URLs
 aspero lookup 10.1038/nature14539 arXiv:1706.03762 "ISBN 978-0-262-03561-3"
@@ -72,7 +76,8 @@ aspero verify -v "Bishop CM. Pattern Recognition and Machine Learning. 2006"
 
 On a terminal, results are tables (a single `verify` is a short report);
 piped, they're JSON. Pick explicitly with `--format table|text|json|jsonl`:
-`text` is a detailed report per result. Every command's `--help` has
+`text` is a detailed report per result. `lookup`, `search` and `verify`
+also take `--format bibtex|ris`. Every command's `--help` has
 examples and the exit codes.
 
 What `verify` and `check` catch: invented papers, real DOIs attached to the

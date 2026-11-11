@@ -1,5 +1,31 @@
 # Changelog
 
+## Unreleased
+
+Added:
+
+- `check` reads RIS and CSL-JSON as well as BibTeX, telling them apart
+  from the contents, and compares each entry's journal, volume and
+  pages too (BibTeX's `journal`/`journaltitle`, `volume`, `pages`).
+  PMIDs are read from BibTeX `pmid` or `eprinttype = {pubmed}`.
+- `--format bibtex|ris` on `lookup`, `search` and `verify`: the works
+  found, for a reference manager. `verify` writes the work each citation
+  refers to (verified, or found under other identifiers than those
+  cited) and names the rest on stderr. Whole names ("Yann LeCun") are
+  split into family and given names; organisations stay whole.
+- FFI: `readReferences(text)` reads a BibTeX, RIS or CSL-JSON file into
+  `Bibliography { format, entries }`, each entry's `claim` ready to
+  verify with `key` set to the entry key; `export(works, format)` writes
+  works as BibTeX or RIS.
+
+Changed (breaking):
+
+- `aspero-bib`: `BibError` is now `ReadError` (`Unrecognised`, or
+  `Invalid { format, line, message }`); new `read`, `detect`,
+  `parse_ris`, `parse_csl_json`, `bibtex`, `ris`, `cite_key`, `Keys`.
+- FFI: `AsperoError.unreadable(message)` for text that isn't a
+  bibliography file, or a broken one.
+
 ## 0.5.2
 
 Faster:

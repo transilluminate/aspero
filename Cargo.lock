@@ -136,6 +136,7 @@ version = "0.5.2"
 dependencies = [
  "aspero-core",
  "biblatex",
+ "serde_json",
  "thiserror",
 ]
 
@@ -228,6 +229,7 @@ dependencies = [
 name = "aspero-ffi"
 version = "0.5.2"
 dependencies = [
+ "aspero-bib",
  "aspero-core",
  "aspero-engine",
  "aspero-json",

@@ -41,6 +41,7 @@ pub async fn run(engine: &Engine, args: ClaimArgs, out: Out) -> Result<Exit, Fai
     let total = claims.len();
     let show_progress = out.format == Format::Table && total > 1 && std::io::stderr().is_terminal();
     let mut results = Results::new(out.format, total, show_progress);
+    let mut export = output::Exporter::new(out.format);
     for (i, claim) in claims.iter().enumerate() {
         if let Err(e) = &claim.claim {
             let item = aspero_json::invalid_claim(claim.echo(), e);
@@ -56,6 +57,22 @@ pub async fn run(engine: &Engine, args: ClaimArgs, out: Out) -> Result<Exit, Fai
             merge_usage(&mut usage, p, *u);
         }
         let mut item = aspero_json::verification(claim.echo(), &v, out.full);
+        if out.format.is_export() {
+            // The work the citation refers to, when that's known: verified,
+            // or found under other identifiers than those cited.
+            let best = v.best.map(|i| &v.report.candidates[i]);
+            let text = match best {
+                Some(c) if matches!(v.verdict, Verdict::Verified | Verdict::Mismatch) => {
+                    export.entry(&c.record.work, &c.ids)
+                }
+                _ => {
+                    eprintln!("skipped {}: {}", claim.input, v.reason);
+                    String::new()
+                }
+            };
+            results.add(i, item, text, exit_for(v.verdict));
+            continue;
+        }
         let mut text = verdict_text(&claim.input, &v);
         if out.abstracts
             && let Some(best) = v.best.map(|i| &v.report.candidates[i])
@@ -107,10 +124,12 @@ impl Results {
         self.done += 1;
         match self.format {
             Format::Jsonl => print_line(&item),
-            Format::Text => {
+            Format::Text | Format::Bibtex | Format::Ris => {
                 self.slots[i] = Some((item, text));
                 while let Some(Some((_, text))) = self.slots.get(self.next) {
-                    println!("{text}");
+                    if !text.is_empty() {
+                        println!("{text}");
+                    }
                     self.next += 1;
                 }
             }
@@ -129,7 +148,7 @@ impl Results {
         }
         let done = self.slots.into_iter().flatten();
         match self.format {
-            Format::Jsonl => {}
+            Format::Jsonl | Format::Bibtex | Format::Ris => {}
             Format::Text => {
                 if let Some(text) = output::usage_text(usage) {
                     eprintln!("{text}");

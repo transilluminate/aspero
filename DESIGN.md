@@ -42,7 +42,8 @@ crates/
                openalex, crossref, datacite, doi (doi.org), europepmc,
                openlibrary
   store/       disposable SQLite answer cache
-  bib/         BibTeX/BibLaTeX → claims (via the `biblatex` crate)
+  bib/         BibTeX/BibLaTeX (via the `biblatex` crate), RIS, CSL-JSON →
+               claims; works → BibTeX, RIS
   engine/      routing, caching, retries, pacing, resolve/verify/check
   json/        the JSON contract (works, lookups, verdicts, claims), shared
                by every front end
@@ -334,7 +335,8 @@ its container; different schema versions would rebuild each other's).
   rate-limited.
 - **Discovery**: citations/references, snowballing (co-citation, coupling),
   watches ("new since last run"), history and sessions.
-- **Integration**: export (BibTeX, CSL-JSON, RIS; styles via `hayagriva`),
+- **Integration**: citation styles (via `hayagriva`: +5.3 MB, and its
+  bundled Vancouver and NLM styles drop authors), CSL-JSON export,
   DOI-as-citekey builds, Zotero interop; an MCP adapter if ever wanted.
 
 ## Open questions

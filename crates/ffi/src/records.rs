@@ -1083,3 +1083,104 @@ impl SearchResults {
         }
     }
 }
+
+/// A bibliography file's format.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Enum)]
+pub enum BibFormat {
+    Bibtex,
+    Ris,
+    CslJson,
+}
+
+impl From<aspero_bib::Format> for BibFormat {
+    fn from(f: aspero_bib::Format) -> Self {
+        match f {
+            aspero_bib::Format::Ris => BibFormat::Ris,
+            aspero_bib::Format::CslJson => BibFormat::CslJson,
+            _ => BibFormat::Bibtex,
+        }
+    }
+}
+
+/// A bibliography file's entries, each a claim ready to verify.
+#[derive(Debug, Clone, uniffi::Record)]
+pub struct Bibliography {
+    pub format: BibFormat,
+    pub entries: Vec<BibEntry>,
+}
+
+#[derive(Debug, Clone, uniffi::Record)]
+pub struct BibEntry {
+    /// Its fields and identifiers, with `key` the entry's key (an RIS
+    /// record or CSL-JSON item without one: its 1-based position).
+    pub claim: Claim,
+    /// Lowercase, in the file's own vocabulary: `article` (BibTeX),
+    /// `jour` (RIS), `article-journal` (CSL-JSON).
+    pub entry_type: String,
+    /// Problems with the entry's own fields: a `doi` that isn't a DOI.
+    pub notes: Vec<String>,
+    /// Whether there is anything to verify: a title or an identifier.
+    pub checkable: bool,
+}
+
+impl From<aspero_bib::BibEntry> for BibEntry {
+    fn from(e: aspero_bib::BibEntry) -> Self {
+        let checkable = e.is_checkable();
+        let c = e.claim;
+        BibEntry {
+            claim: Claim {
+                text: None,
+                title: c.title,
+                authors: c.authors,
+                year: c.year,
+                container: c.container,
+                volume: c.volume,
+                page: c.page,
+                ids: c.ids.iter().map(ToString::to_string).collect(),
+                key: Some(e.key),
+                alternative_ids: Vec::new(),
+            },
+            entry_type: e.entry_type,
+            notes: e.notes,
+            checkable,
+        }
+    }
+}
+
+/// A format to write works in.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Enum)]
+pub enum ExportFormat {
+    Bibtex,
+    Ris,
+}
+
+impl Work {
+    /// The work and its identifiers as found, for writing out.
+    pub(crate) fn to_core(&self) -> (aspero_core::Work, Vec<aspero_core::WorkId>) {
+        let mut w = aspero_core::Work::default();
+        w.title = self.title.clone();
+        // The full JSON keeps family and given names apart.
+        let json: Option<serde_json::Value> = serde_json::from_str(&self.json).ok();
+        w.authors = json
+            .and_then(|j| serde_json::from_value(j.get("authors")?.clone()).ok())
+            .unwrap_or_else(|| {
+                self.authors
+                    .iter()
+                    .map(|a| aspero_core::Person::literal(&a.name))
+                    .collect()
+            });
+        w.issued = self.issued.as_deref().and_then(|d| d.parse().ok());
+        w.work_type = self
+            .work_type
+            .as_deref()
+            .map(aspero_core::WorkType::from_csl);
+        w.container_title = self.container.clone();
+        w.volume = self.volume.clone();
+        w.issue = self.issue.clone();
+        w.page = self.page.clone();
+        w.publisher = self.publisher.clone();
+        w.url = self.url.clone();
+        let ids = self.ids.iter().filter_map(|id| id.parse().ok()).collect();
+        (w, ids)
+    }
+}

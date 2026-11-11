@@ -13,6 +13,29 @@ const TABLE_ABSTRACT: usize = 600;
 /// Authors shown in a table before "et al.".
 const TABLE_AUTHORS: usize = 3;
 
+/// Works written as BibTeX entries or RIS records, BibTeX keys kept
+/// distinct (`lecun2015deep`, `lecun2015deepa`, …).
+pub struct Exporter {
+    format: crate::args::Format,
+    keys: aspero_bib::Keys,
+}
+
+impl Exporter {
+    pub fn new(format: crate::args::Format) -> Self {
+        Exporter {
+            format,
+            keys: aspero_bib::Keys::default(),
+        }
+    }
+
+    pub fn entry(&mut self, work: &Work, ids: &[WorkId]) -> String {
+        match self.format {
+            crate::args::Format::Ris => aspero_bib::ris(work, ids),
+            _ => aspero_bib::bibtex(work, ids, &self.keys.key(work)),
+        }
+    }
+}
+
 /// A work as a few lines of text, indented by `indent`.
 pub fn work_text(record: &SourceRecord, indent: &str) -> String {
     let w = &record.work;

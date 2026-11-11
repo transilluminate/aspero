@@ -97,13 +97,18 @@ impl<'a> List<'a> {
             match (starts, groups.last_mut()) {
                 (Some((m, used)), _) => {
                     last = Some(m);
+                    // A marker alone on its line: the text follows.
                     let first = line.start + used..line.end;
-                    groups.push(vec![first]);
+                    groups.push(Vec::new());
+                    if !first.is_empty() {
+                        groups.last_mut().expect("just pushed").push(first);
+                    }
                 }
                 (None, Some(group)) => group.push(line.clone()),
                 (None, None) => {}
             }
         }
+        groups.retain(|g| !g.is_empty());
         (groups.len() >= 2).then_some(groups)
     }
 
@@ -422,6 +427,14 @@ mod tests {
         assert_eq!(
             texts("1. Smith J. doi:10.1038/x.\nNature. 2020.\n2. Jones K. 2021.")[0],
             "Smith J. doi:10.1038/x. Nature. 2020."
+        );
+    }
+
+    #[test]
+    fn markers_alone_on_their_line_number_the_next() {
+        assert_eq!(
+            texts("[1]\nSmith J. One. 2020.\n[2]\nJones K. Two. 2021.\n[3] "),
+            ["Smith J. One. 2020.", "Jones K. Two. 2021."]
         );
     }
 

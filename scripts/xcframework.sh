@@ -1,14 +1,19 @@
 #!/usr/bin/env bash
-# Builds aspero-ffi for macOS apps: AsperoFFI.xcframework (arm64 and x86_64
-# in one static library) and its Swift bindings, zipped for a Swift
-# package's binaryTarget.
+# Builds aspero-ffi for macOS apps: AsperoFFI.xcframework (a static
+# library) and its Swift bindings, zipped for a Swift package's
+# binaryTarget.
 #
 # Usage: scripts/xcframework.sh    (needs Xcode; output in target/xcframework)
+#   MACOSX_DEPLOYMENT_TARGET  oldest macOS supported (default 26.0); also
+#                             applies to bundled C code (SQLite, aws-lc)
+#   UNIVERSAL=1               add x86_64 (default: Apple silicon only)
 set -euo pipefail
 
 root="$(cd "$(dirname "$0")/.." && pwd)"
 out="$root/target/xcframework"
-targets=(aarch64-apple-darwin x86_64-apple-darwin)
+export MACOSX_DEPLOYMENT_TARGET="${MACOSX_DEPLOYMENT_TARGET:-26.0}"
+targets=(aarch64-apple-darwin)
+if [[ "${UNIVERSAL:-}" == 1 ]]; then targets+=(x86_64-apple-darwin); fi
 cd "$root"
 
 rustup target add "${targets[@]}" >/dev/null

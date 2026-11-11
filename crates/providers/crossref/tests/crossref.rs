@@ -175,6 +175,16 @@ fn keyword_search_applies_filters_and_pages_by_cursor() {
     assert_eq!(page.hits.len(), 3);
     let scores: Vec<f64> = page.hits.iter().map(|h| h.score.unwrap()).collect();
     assert!(scores.is_sorted_by(|a, b| a >= b), "{scores:?}");
+    // Crossref sends entities and JATS tags in titles; works have plain text.
+    let containers: Vec<&str> = page
+        .hits
+        .iter()
+        .filter_map(|h| h.record.work.container_title.as_deref())
+        .collect();
+    assert!(
+        containers.contains(&"International Journal of Modern Trends in Engineering & Research"),
+        "{containers:?}"
+    );
     assert!(page.hits.iter().all(|h| {
         let year = h.record.work.issued.unwrap().year();
         (2017..=2018).contains(&year)

@@ -5,6 +5,8 @@ members = [
     "crates/bib",
     "crates/store",
     "crates/engine",
+    "crates/json",
+    "crates/ffi",
     "crates/cli",
     "crates/providers/*",
 ]
@@ -22,6 +24,7 @@ aspero-core = { path = "crates/core", version = "0.3.4" }
 aspero-bib = { path = "crates/bib", version = "0.3.4" }
 aspero-store = { path = "crates/store", version = "0.3.4" }
 aspero-engine = { path = "crates/engine", version = "0.3.4" }
+aspero-json = { path = "crates/json", version = "0.3.4" }
 aspero-openalex = { path = "crates/providers/openalex", version = "0.3.4" }
 aspero-crossref = { path = "crates/providers/crossref", version = "0.3.4" }
 aspero-datacite = { path = "crates/providers/datacite", version = "0.3.4" }

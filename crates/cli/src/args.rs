@@ -62,7 +62,8 @@ pub struct Global {
     #[arg(short, long, global = true, action = clap::ArgAction::Count)]
     pub verbose: u8,
 
-    /// Don't read or write the answer cache.
+    /// Don't read or write the answer cache (its file still paces requests
+    /// shared with other aspero processes).
     #[arg(long, global = true)]
     pub no_cache: bool,
 
@@ -207,8 +208,9 @@ reference, or a JSON object of what you know (more reliable than text):
    \"journal\": \"N Engl J Med\", \"volume\": 370, \"page\": \"1402-11\", \"doi\": \"...\"}
   keys: text, title, authors, year, journal (or container), volume, page,
         doi, arxiv, id, ids, and key: anything, echoed back untouched
-Unknown keys are refused. With --format jsonl, one result per line, in
-input order; each carries `input`, your `key` and the `claim` as understood.
+Unknown keys are refused. With --format jsonl, one result per line as
+each finishes, in any order: match them up by `input` or your `key`. Each
+also carries the `claim` as understood. Other formats keep input order.
 
 The journal, volume and first page are checked too, from fields or from
 the text (\"N Engl J Med 2017;376:2545\"). A different volume or page makes

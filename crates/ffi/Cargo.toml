@@ -1,0 +1,45 @@
+[package]
+name = "aspero-ffi"
+description = "aspero for apps: Swift (and Kotlin, Python) bindings via UniFFI"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+authors.workspace = true
+# Shipped as an .xcframework, not a crate.
+publish = false
+
+# Not the workspace lints: UniFFI's generated glue is `unsafe` by nature
+# (C ABI); this crate's own code has none.
+[lints.clippy]
+all = { level = "warn", priority = -1 }
+
+[lib]
+crate-type = ["lib", "staticlib", "cdylib"]
+
+[[bin]]
+name = "uniffi-bindgen"
+path = "src/bin/uniffi-bindgen.rs"
+required-features = ["bindgen"]
+
+[features]
+# The bindings generator: `cargo run -p aspero-ffi --features bindgen --bin uniffi-bindgen`.
+bindgen = ["uniffi/cli"]
+
+[dependencies]
+aspero-core.workspace = true
+aspero-engine.workspace = true
+aspero-json.workspace = true
+futures.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tokio = { workspace = true, features = ["rt-multi-thread"] }
+uniffi = "0.32.2"
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["rt"] }
+
+# Not a dist app: the xcframework workflow ships it.
+[package.metadata.dist]
+dist = false

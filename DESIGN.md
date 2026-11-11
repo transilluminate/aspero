@@ -44,7 +44,10 @@ crates/
   store/       disposable SQLite answer cache
   bib/         BibTeX/BibLaTeX → claims (via the `biblatex` crate)
   engine/      routing, caching, retries, pacing, resolve/verify/check
-  cli/         clap front end
+  json/        the JSON contract (works, lookups, verdicts, claims), shared
+               by every front end
+  cli/         clap front end: arguments, stdin, tables and text
+  ffi/         UniFFI bindings for apps (Swift), shipped as an .xcframework
 bench/         verify benchmark data (known-answer citations)
 scripts/       fixture recorders, one per provider
 ```
@@ -208,10 +211,29 @@ budget (`QuotaExhausted`) or rejected credentials stop further calls to
 that provider in a lookup. `-v` logs every request with time queued and
 taken.
 
-Deferred until real use needs them: a **cross-process** rate limiter
-(ticket scheme in SQLite, so parallel agent processes share one budget)
-and a **shared circuit breaker** (closed → open after N countable failures
-→ half-open probe).
+Callers share one engine (cheap clones, one per process): a lookup
+already in flight for the same provider, identifier and fields is joined,
+not repeated, and a cancelled leader's joiners ask themselves. Each caller
+sets its patience (`CallOptions`): `interactive()` caps deadlines and
+retries so someone waiting gets a fallback within seconds; `offline()`
+answers from the cache only, however old.
+
+The engine remembers providers that can't answer, across calls: a spent
+quota until it resets, rejected credentials for its life (new credentials
+mean a new engine), and a **circuit breaker** (closed → open after N
+consecutive failing calls → one probe after the cooldown). Refused calls
+fall back like failed ones (next provider, stale cache);
+`Engine::unavailable` says which providers are refusing and why. Batches
+verify a few claims at once and yield each as it finishes, so a slow
+claim doesn't hold up the rest, and a batch never queues so many requests
+that a caller sharing the engine waits behind it.
+
+Pacing is **shared across processes** through the cache file: each
+request claims its provider's next slot in a `pacing` table (one write
+transaction), so parallel agents keep to one rate between them, even with
+`--no-cache`. The table sits outside the versioned schema so rebuilds keep
+it; a slot more than five minutes ahead (a clock gone back) is reset; a
+failing store falls back to pacing one process alone.
 
 ## Provider notes and gotchas
 
@@ -254,6 +276,25 @@ fixture recorded with different parameters once hid a ranking bug.
 - **Semantic Scholar** (not built; key pending). Keyless requests mostly
   429 from an AWS gateway with no `Retry-After`; a fake key gets 403.
 
+## Apps (FFI)
+
+`aspero-ffi` (UniFFI) gives apps one `Aspero` handle: `lookup`, `verify`,
+`verify_each` (a callback per result as it finishes), `scan` and
+`unavailable`, all answering in the JSON contract, with a `Patience` per
+call (batch, interactive, offline). The app passes everything in: contact
+address, keys (it keeps them in the Keychain), cache directory; nothing is
+read from the environment. Calls run on the handle's own Tokio runtime,
+so any executor can await them, and a dropped call is aborted. Hold one
+handle per app. `just xcframework` builds `AsperoFFI.xcframework` (arm64 +
+x86_64, static) and the Swift bindings; a workflow attaches both to each
+release. Not published to crates.io.
+
+Not until needed: priority lanes in the pacer, a daemon, a SQLite
+connection pool, and CLI keys anywhere but the environment (agents run
+headless, where a Keychain prompt after an upgrade would hang them).
+The app and the CLI keep separate caches (the sandbox puts the app's in
+its container; different schema versions would rebuild each other's).
+
 ## Future
 
 - **S2 provider** when the key arrives: search, batch lookup,
@@ -275,9 +316,9 @@ fixture recorded with different parameters once hid a ranking bug.
   INSPIRE-HEP, HAL, CORE. Humanities stay thin (no usable APIs).
 - **Re-normalising cached records** from raw bodies when a mapping changes
   (providers declare a mapping version), instead of a cache rebuild.
-- **Configuration and credentials**: TOML config (enable/order providers,
-  per-provider resilience overrides); keys from env, OS keyring, then a
-  `0600` file; `auth status` distinguishing rejected from rate-limited.
+- **Configuration**: TOML config (enable/order providers, per-provider
+  resilience overrides); `auth status` distinguishing rejected from
+  rate-limited.
 - **Discovery**: citations/references, snowballing (co-citation, coupling),
   watches ("new since last run"), history and sessions.
 - **Integration**: export (BibTeX, CSL-JSON, RIS; styles via `hayagriva`),
@@ -286,7 +327,6 @@ fixture recorded with different parameters once hid a ranking bug.
 ## Open questions
 
 - Whether to cap OpenAlex spend per command or session.
-- When the cross-process limiter is worth building (many parallel agents?).
 - Whether a lookup should ever hedge (ask two providers at once) for
   latency.
 

@@ -44,6 +44,10 @@ pub enum Error {
         message: Option<String>,
     },
 
+    /// The caller asked for cached answers only, and there was none.
+    #[error("offline, and not in the cache")]
+    Offline,
+
     /// The engine's circuit breaker for this provider is open.
     #[error("provider temporarily disabled after repeated failures")]
     CircuitOpen { until: Option<Timestamp> },
@@ -126,7 +130,8 @@ impl Error {
             Error::Network(_)
             | Error::Timeout
             | Error::Server { .. }
-            | Error::CircuitOpen { .. } => ErrorCategory::Unavailable,
+            | Error::CircuitOpen { .. }
+            | Error::Offline => ErrorCategory::Unavailable,
             Error::RateLimited { .. } | Error::QuotaExhausted { .. } => ErrorCategory::Throttled,
             Error::AuthRejected { .. } => ErrorCategory::Auth,
             Error::NotFound => ErrorCategory::NotFound,

@@ -27,3 +27,7 @@ record provider name="":
 # release needs short of publishing.
 release-check: check
     cargo publish --workspace --dry-run --allow-dirty
+
+# Build the macOS app framework and Swift bindings (needs Xcode).
+xcframework:
+    scripts/xcframework.sh

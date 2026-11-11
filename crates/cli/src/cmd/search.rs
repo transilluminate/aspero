@@ -96,7 +96,7 @@ pub async fn run(
                 "hits": hits,
             });
             if let Some(u) = &report.usage {
-                doc["usage"] = json!({ report.provider.to_string(): output::usage_one(u) });
+                doc["usage"] = json!({ report.provider.to_string(): aspero_json::usage_one(u) });
             }
             print(&doc);
         }

@@ -1,0 +1,23 @@
+[package]
+name = "aspero-json"
+description = "aspero's JSON contract: works, lookups, verdicts and claims as agents and apps see them"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+authors.workspace = true
+keywords = ["citations", "doi", "bibliography", "scholarly", "json"]
+categories = ["science"]
+
+[lints]
+workspace = true
+
+[dependencies]
+aspero-core.workspace = true
+aspero-engine.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+
+[dev-dependencies]
+jiff.workspace = true

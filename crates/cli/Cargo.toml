@@ -18,6 +18,7 @@ workspace = true
 aspero-bib.workspace = true
 aspero-core.workspace = true
 aspero-engine.workspace = true
+aspero-json.workspace = true
 clap.workspace = true
 comfy-table.workspace = true
 directories.workspace = true

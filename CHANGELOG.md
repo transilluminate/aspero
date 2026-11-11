@@ -2,6 +2,29 @@
 
 ## Unreleased
 
+Breaking:
+
+- `verify --format jsonl` prints each result as it finishes, in any order
+  (match by `input` or `key`); a slow claim no longer holds up the rest.
+  Other formats keep input order. `Engine::verify_many` yields
+  `(index, verification)` as each completes.
+- The JSON contract moves to a new crate, `aspero-json`.
+
+Added:
+
+- A long-lived engine (for apps and parallel agents): lookups already in
+  flight are shared rather than repeated; `CallOptions` set a caller's
+  patience (`interactive()`: give up within seconds, `offline()`: cache
+  only); a spent quota, rejected key or failing provider (circuit
+  breaker) is skipped across calls, and `Engine::unavailable` says which
+  and why.
+- Parallel aspero processes (agents) share each provider's rate limit
+  through the cache file, even with `--no-cache`.
+- `aspero-ffi`: Swift bindings (UniFFI) for apps, answering in the same
+  JSON, with results streamed as they finish; `AsperoFFI.xcframework.zip`
+  and `aspero_ffi.swift` are attached to each release.
+- `Engine::lookup_inputs`: identifiers as written, with `Extras`, so every
+  front end answers as `aspero lookup` does.
 - Help: where notice dates come from, and why they can differ from a plain
   lookup of the notice DOI.
 

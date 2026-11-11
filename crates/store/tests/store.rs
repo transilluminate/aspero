@@ -201,3 +201,41 @@ fn a_cache_from_another_schema_version_is_rebuilt() {
         .put_lookups(&OA, &[(&id("W1"), Some(&record(&["W1"], "new")))], at(0))
         .unwrap();
 }
+
+mod pacing {
+    use std::time::Duration;
+
+    use aspero_store::{Pacing, SqliteCache};
+    use jiff::{SignedDuration, Timestamp};
+
+    fn at(ms: i64) -> Timestamp {
+        Timestamp::from_millisecond(ms).unwrap()
+    }
+
+    #[test]
+    fn slots_are_spaced_across_every_user_of_the_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("cache.sqlite");
+        // Two processes, as two connections to one file.
+        let (a, b) = (
+            SqliteCache::open(&path).unwrap(),
+            SqliteCache::open(&path).unwrap(),
+        );
+        let gap = Duration::from_millis(100);
+        assert_eq!(a.claim_slot("crossref", gap, at(1_000)).unwrap(), at(1_000));
+        assert_eq!(b.claim_slot("crossref", gap, at(1_010)).unwrap(), at(1_100));
+        assert_eq!(a.claim_slot("crossref", gap, at(1_020)).unwrap(), at(1_200));
+        // Providers are paced separately, and a free slot starts now.
+        assert_eq!(b.claim_slot("openalex", gap, at(1_030)).unwrap(), at(1_030));
+        assert_eq!(b.claim_slot("crossref", gap, at(5_000)).unwrap(), at(5_000));
+    }
+
+    #[test]
+    fn a_clock_that_went_back_does_not_stall_requests() {
+        let cache = SqliteCache::open_in_memory().unwrap();
+        let gap = Duration::from_millis(100);
+        let later = at(0) + SignedDuration::from_hours(1);
+        cache.claim_slot("crossref", gap, later).unwrap();
+        assert_eq!(cache.claim_slot("crossref", gap, at(0)).unwrap(), at(0));
+    }
+}

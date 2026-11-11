@@ -33,10 +33,12 @@ pub async fn run(
     let claims: Vec<_> = checkable.iter().map(|e| e.claim.clone()).collect();
     let show_progress = out.format.is_human() && std::io::stderr().is_terminal();
     let total = claims.len();
+    let mut done = 0;
     let checked = engine
-        .check(&claims, limit, |i| {
+        .check(&claims, limit, |_| {
+            done += 1;
             if show_progress {
-                eprint!("\rchecking {}/{total}…", i + 1);
+                eprint!("\rchecking {done}/{total}…");
             }
         })
         .await;

@@ -5,6 +5,7 @@ use std::time::Duration;
 
 use aspero_core::http::Method;
 use aspero_core::{Error, HttpClient, HttpRequest, HttpResponse};
+use aspero_store::Pacing;
 use async_trait::async_trait;
 use jiff::Timestamp;
 use tokio::sync::Mutex;
@@ -64,7 +65,10 @@ fn transport_error(e: reqwest::Error) -> Error {
 /// Spaces request *starts* at least `min_interval` apart, across all tasks
 /// sharing it. Slots are handed out in arrival order, so waiting is fair.
 ///
-/// In-process only; the cross-process limiter (DESIGN §6) is deferred.
+/// With [`shared`](Paced::shared) pacing, slots come from a store that
+/// every process using it shares (the cache file), so parallel processes
+/// keep to one rate between them; if the store fails, pacing falls back to
+/// this process alone.
 ///
 /// Logs each request (at `info`, target `aspero::http`) with the provider
 /// label, status, duration and time spent waiting for a slot.
@@ -73,6 +77,13 @@ pub struct Paced {
     inner: Arc<dyn HttpClient>,
     min_interval: Duration,
     next_slot: Mutex<Option<Instant>>,
+    shared: Option<Shared>,
+}
+
+struct Shared {
+    pacing: Arc<dyn Pacing>,
+    /// Wall-clock time, which processes share; swappable for tests.
+    clock: fn() -> Timestamp,
 }
 
 impl Paced {
@@ -86,14 +97,41 @@ impl Paced {
             inner,
             min_interval,
             next_slot: Mutex::new(None),
+            shared: None,
         }
+    }
+
+    /// Paces with every other process using `pacing`.
+    pub fn shared(self, pacing: Arc<dyn Pacing>) -> Self {
+        self.shared_by_clock(pacing, Timestamp::now)
+    }
+
+    fn shared_by_clock(mut self, pacing: Arc<dyn Pacing>, clock: fn() -> Timestamp) -> Self {
+        self.shared = Some(Shared { pacing, clock });
+        self
     }
 
     /// Claims the next slot and returns when it starts.
     async fn claim(&self) -> Instant {
         let mut next = self.next_slot.lock().await;
         let now = Instant::now();
-        let slot = next.map_or(now, |n| n.max(now));
+        let mut slot = next.map_or(now, |n| n.max(now));
+        if let Some(shared) = &self.shared {
+            let wall = (shared.clock)();
+            match shared
+                .pacing
+                .claim_slot(&self.label, self.min_interval, wall)
+            {
+                Ok(at) => {
+                    let wait = Duration::try_from(at.duration_since(wall)).unwrap_or_default();
+                    slot = slot.max(now + wait);
+                }
+                Err(e) => tracing::warn!(
+                    target: "aspero::http",
+                    provider = %self.label, error = %e, "shared pacing failed; pacing this process alone"
+                ),
+            }
+        }
         *next = Some(slot + self.min_interval);
         slot
     }
@@ -202,6 +240,49 @@ mod tests {
             loggable_url("https://doi.org/10.1038/nature14539"),
             "/10.1038/nature14539"
         );
+    }
+
+    thread_local! {
+        static START: std::cell::Cell<Option<Instant>> = const { std::cell::Cell::new(None) };
+    }
+
+    /// Wall-clock time that follows tokio's paused clock.
+    fn paused_clock() -> Timestamp {
+        let start = START.with(|s| {
+            let start = s.get().unwrap_or_else(Instant::now);
+            s.set(Some(start));
+            start
+        });
+        let elapsed = jiff::SignedDuration::try_from(start.elapsed()).unwrap();
+        Timestamp::UNIX_EPOCH + elapsed
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn processes_sharing_pacing_keep_to_one_rate() {
+        paused_clock();
+        let store = Arc::new(aspero_store::SqliteCache::open_in_memory().unwrap());
+        let process = || {
+            Arc::new(
+                Paced::new("test", Arc::new(Echo), Duration::from_millis(250))
+                    .shared_by_clock(store.clone(), paused_clock),
+            )
+        };
+        let (a, b) = (process(), process());
+        let start = Instant::now();
+        let mut tasks = Vec::new();
+        for paced in [&a, &b, &a, &b] {
+            let paced = paced.clone();
+            tasks.push(tokio::spawn(async move {
+                paced.send(HttpRequest::get("http://x")).await.unwrap();
+                start.elapsed().as_millis()
+            }));
+        }
+        let mut starts = Vec::new();
+        for t in tasks {
+            starts.push(t.await.unwrap());
+        }
+        starts.sort_unstable();
+        assert_eq!(starts, [0, 250, 500, 750]);
     }
 
     #[tokio::test(start_paused = true)]

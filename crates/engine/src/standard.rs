@@ -5,7 +5,7 @@ use std::sync::Arc;
 use aspero_core::{Error, HttpClient, ResiliencePolicy};
 
 use crate::transport::{Paced, ReqwestClient};
-use crate::{Cache, Engine, EngineBuilder};
+use crate::{Cache, Engine, EngineBuilder, Pacing};
 
 #[cfg(feature = "crossref")]
 pub use aspero_crossref::CrossrefConfig;
@@ -28,6 +28,9 @@ pub struct StandardConfig {
     pub mailto: Option<String>,
     /// Where provider answers are cached; `None` for no cache.
     pub cache: Option<Arc<dyn Cache>>,
+    /// Request pacing shared with other processes (usually the cache
+    /// file); `None` paces this process alone.
+    pub pacing: Option<Arc<dyn Pacing>>,
     #[cfg(feature = "openalex")]
     pub openalex: Option<OpenAlexConfig>,
     #[cfg(feature = "crossref")]
@@ -60,7 +63,11 @@ pub fn standard(config: StandardConfig) -> Result<Engine, Error> {
     #[allow(unused_variables)]
     let client = |label: &str, policy: &ResiliencePolicy| -> Result<Arc<dyn HttpClient>, Error> {
         let inner = Arc::new(ReqwestClient::new(&user_agent, policy.attempt_timeout)?);
-        Ok(Arc::new(Paced::new(label, inner, policy.min_interval)))
+        let paced = Paced::new(label, inner, policy.min_interval);
+        Ok(Arc::new(match &config.pacing {
+            Some(pacing) => paced.shared(pacing.clone()),
+            None => paced,
+        }))
     };
 
     let mut builder: EngineBuilder = Engine::builder();

@@ -38,7 +38,9 @@ const MAX_TITLE_SEARCHES: usize = 2;
 const DECISIVE: f64 = 0.95;
 
 /// Claims verified at once in batches. Providers pace themselves, so this
-/// overlaps different providers' waits rather than adding load to any one.
+/// overlaps different providers' waits rather than adding load to any one;
+/// and it keeps a batch from queueing so many requests that a caller
+/// sharing the engine (someone waiting) is stuck behind them.
 const CLAIM_CONCURRENCY: usize = 4;
 
 /// How a candidate was found.
@@ -146,15 +148,16 @@ impl Engine {
     }
 
     /// Verifies many claims, several at a time (each provider's pacing
-    /// still applies), yielding results in claim order as they complete.
+    /// still applies), yielding each with its claim's index as soon as it
+    /// completes: a slow claim doesn't hold up the rest.
     pub fn verify_many<'a>(
         &'a self,
         claims: &'a [Claim],
         limit: u32,
-    ) -> impl Stream<Item = Verification> + 'a {
-        stream::iter(claims)
-            .map(move |claim| self.verify(claim, limit))
-            .buffered(CLAIM_CONCURRENCY)
+    ) -> impl Stream<Item = (usize, Verification)> + 'a {
+        stream::iter(claims.iter().enumerate())
+            .map(move |(i, claim)| async move { (i, self.verify(claim, limit).await) })
+            .buffer_unordered(CLAIM_CONCURRENCY)
     }
 
     /// For candidates known to be retracted only by a bare flag (OpenAlex's

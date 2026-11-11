@@ -208,7 +208,8 @@ reference, or a JSON object of what you know (more reliable than text):
    \"journal\": \"N Engl J Med\", \"volume\": 370, \"page\": \"1402-11\", \"doi\": \"...\"}
   keys: text, title, authors, year, journal (or container), volume, page,
         doi, arxiv, id, ids, and key: anything, echoed back untouched
-Unknown keys are refused. With --format jsonl, one result per line as
+Unknown keys are refused. To paste a reference list as it is (numbered,
+one per paragraph, wrapped), use --split instead. With --format jsonl, one result per line as
 each finishes, in any order: match them up by `input` or your `key`. Each
 also carries the `claim` as understood. Other formats keep input order.
 
@@ -220,7 +221,8 @@ Examples:
   aspero verify \"Vaswani et al. 2017. Attention is all you need. arXiv:1706.03762\"
   aspero verify --title \"Deep learning\" --author LeCun --year 2015 --id 10.1038/nature14539
   aspero verify --title \"Fibrinolysis for patients with intermediate-risk pulmonary embolism\" --journal \"N Engl J Med\" --volume 370 --page 1402
-  aspero verify --format jsonl - < citations.jsonl")]
+  aspero verify --format jsonl - < citations.jsonl
+  pbpaste | aspero verify --split -")]
     Verify {
         #[command(flatten)]
         claim: ClaimArgs,
@@ -336,6 +338,11 @@ pub struct ClaimArgs {
     /// Results per provider search.
     #[arg(long, default_value_t = 5)]
     pub limit: u32,
+    /// Split the text (or stdin, with `-`) into references, as pasted from
+    /// a reference list: numbered, bulleted, one per paragraph or line,
+    /// wrapped lines rejoined.
+    #[arg(long, conflicts_with_all = ["title", "authors", "year", "journal", "volume", "page", "ids"])]
+    pub split: bool,
 }
 
 #[derive(Debug, Args)]

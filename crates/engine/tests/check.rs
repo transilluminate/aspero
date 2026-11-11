@@ -163,6 +163,7 @@ async fn retractions_are_errors_with_the_detailed_notice() {
         "{}",
         c.verification.reason
     );
+    assert!(c.verification.notes[0].kind.is_retraction());
     let notices: Vec<_> = c
         .findings
         .iter()

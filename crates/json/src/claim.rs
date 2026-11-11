@@ -51,6 +51,27 @@ fn text_or_number<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Option<Strin
 }
 
 impl ClaimInput {
+    /// The fields as one line, to label a claim given without text.
+    pub fn describe(&self) -> String {
+        let parts: Vec<String> = [
+            (!self.authors.is_empty()).then(|| self.authors.join(", ")),
+            self.title.clone(),
+            self.container.clone(),
+            self.year.map(|y| y.to_string()),
+            self.volume.clone(),
+            self.page.clone(),
+            self.doi
+                .clone()
+                .or(self.arxiv.clone())
+                .or(self.id.clone())
+                .or(self.ids.first().cloned()),
+        ]
+        .into_iter()
+        .flatten()
+        .collect();
+        parts.join(". ")
+    }
+
     pub fn into_claim(self) -> Result<Claim, String> {
         let mut claim = match &self.text {
             Some(text) => Claim::from_input(text),

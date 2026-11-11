@@ -125,6 +125,23 @@ async fn a_spent_quota_is_waited_out_until_it_resets() {
 }
 
 #[tokio::test(start_paused = true)]
+async fn a_spent_budget_is_remembered_without_asking_again() {
+    let resets_at = Timestamp::UNIX_EPOCH + jiff::SignedDuration::from_secs(600);
+    let failing = Failing::new(vec![Error::QuotaExhausted {
+        resets_at: Some(resets_at),
+    }]);
+    let engine = engine(failing.clone());
+    assert!(engine.budgets().is_empty());
+    outcome(&engine).await;
+    let [(provider, budget)] = &engine.budgets()[..] else {
+        panic!("{:?}", engine.budgets())
+    };
+    assert_eq!(provider.as_str(), "failing");
+    assert_eq!(budget.remaining, Some(0.0));
+    assert_eq!(budget.resets_at, Some(resets_at));
+}
+
+#[tokio::test(start_paused = true)]
 async fn repeated_failures_open_the_breaker_until_a_probe_succeeds() {
     let failing = Failing::new(vec![server_error(), server_error(), server_error()]);
     let engine = engine(failing.clone());

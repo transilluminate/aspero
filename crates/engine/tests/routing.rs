@@ -80,6 +80,7 @@ impl Mock {
             Some(cost) => {
                 let mut usage = Usage::default();
                 usage.cost = Some(cost);
+                usage.remaining = Some(1.0);
                 Response::with_usage(value, usage)
             }
             None => Response::new(value),
@@ -288,6 +289,8 @@ async fn usage_is_combined_per_provider() {
     };
     assert_eq!(provider.as_str(), "paid");
     assert_eq!(usage.cost, Some(0.5));
+    // What's left is remembered, to show without spending.
+    assert_eq!(engine.budgets()[0].1.remaining, Some(1.0));
 }
 
 #[tokio::test(start_paused = true)]

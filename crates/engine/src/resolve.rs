@@ -132,6 +132,26 @@ pub struct ResolveReport {
     pub usage: Vec<(ProviderId, Usage)>,
 }
 
+impl ResolveReport {
+    /// Every failure: providers' searches, and lookups of the claimed
+    /// identifiers that failed rather than finding nothing.
+    pub fn failures(&self) -> Vec<EngineError> {
+        let lookups = self
+            .lookups
+            .iter()
+            .filter(|l| l.record.is_none())
+            .flat_map(|l| &l.attempts)
+            .filter_map(|a| match &a.outcome {
+                crate::Outcome::Failed(error) => Some(EngineError::Provider {
+                    provider: a.provider.clone(),
+                    error: error.clone(),
+                }),
+                _ => None,
+            });
+        self.errors.iter().cloned().chain(lookups).collect()
+    }
+}
+
 impl Engine {
     /// Gathers and scores every candidate for `claim`. `limit` caps results
     /// per provider search.

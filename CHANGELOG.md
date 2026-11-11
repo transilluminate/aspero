@@ -1,5 +1,47 @@
 # Changelog
 
+## Unreleased
+
+Breaking:
+
+- A lookup that is offline and not in the cache has status `not_cached`
+  (it was `failed`).
+- `Verification` is `#[non_exhaustive]` and gains `why` and `notes`.
+- FFI `verify` and `verify_each` take typed `Claim`s (text and/or fields,
+  and a `key`) instead of strings.
+- FFI calls return typed records instead of JSON strings: `lookup` →
+  `Lookups`, `verify` → `Verifications`, `verify_each` hands the listener
+  a `Verification` (with its claim's `index`) and returns usage, `scan` →
+  `[Mention]`, `unavailable` → `[Unavailable]`. `AsperoError` gains
+  `Cache`.
+
+Added:
+
+- `aspero verify --split` (and `resolve`) takes a pasted reference list
+  (numbered, bulleted, one per paragraph or line, wrapped lines rejoined,
+  DOIs and URLs broken by PDF extraction mended) and checks each
+  reference; `split_references` in `aspero-core`, and
+  `splitReferences` over FFI with UTF-16 ranges.
+- `Engine::budgets()`: each provider's budget as its last response
+  reported it, so it can be shown without spending any.
+- FFI: `search`, `budgets`, `checkOpenalexKey` (one free lookup: valid,
+  rejected or unreachable, and what's left), `cacheStats` and
+  `clearCache`.
+- Verdicts say why as data as well as in English: `Verification::why`
+  (a `Reason`, with the fields that differ and their values) and `notes`
+  (retraction, newer version). JSON adds `why: {code, differs, cited}`.
+- Errors have a fine-grained `ErrorKind` (`rate_limited`,
+  `budget_spent`, `key_rejected`, `not_cached`, …) beside their category.
+  JSON adds `kind` to failed attempts and `error_kinds` to
+  verifications.
+- A verification's `errors` include failed lookups of its identifiers, not
+  only failed searches.
+
+Fixed:
+
+- Labelled identifiers glued to a colon (`ISBN-13:979…`, `PMID:123`)
+  are found by `scan` and parse as `scan` finds them.
+
 ## 0.4.1
 
 - Blank claims (`""`, whitespace, or JSON with only blank fields) are

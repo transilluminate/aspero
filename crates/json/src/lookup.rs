@@ -1,6 +1,6 @@
 //! Lookup results.
 
-use aspero_core::ErrorCategory;
+use aspero_core::{Error, ErrorCategory, ErrorKind};
 use aspero_engine::{Disagreement, InputLookup, LookupResult, Outcome, Served};
 use serde_json::{Value, json};
 
@@ -14,6 +14,8 @@ pub enum Status {
     /// No enabled provider looks up this kind of identifier.
     Unsupported,
     NotFound,
+    /// Offline, and no provider's answer was cached.
+    NotCached,
     /// Every provider asked failed; the first failure's category.
     Failed(ErrorCategory),
 }
@@ -26,13 +28,21 @@ impl Status {
         if result.attempts.is_empty() {
             return Status::Unsupported;
         }
-        let mut failures = result.attempts.iter().filter_map(|a| match &a.outcome {
-            Outcome::Failed(e) => Some(e.category()),
-            _ => None,
-        });
-        match failures.next() {
-            Some(first) if failures.count() + 1 == result.attempts.len() => Status::Failed(first),
-            _ => Status::NotFound,
+        let failures: Vec<&Error> = result
+            .attempts
+            .iter()
+            .filter_map(|a| match &a.outcome {
+                Outcome::Failed(e) => Some(e),
+                _ => None,
+            })
+            .collect();
+        match failures.first() {
+            _ if failures.len() < result.attempts.len() => Status::NotFound,
+            Some(_) if failures.iter().all(|e| e.kind() == ErrorKind::NotCached) => {
+                Status::NotCached
+            }
+            Some(first) => Status::Failed(first.category()),
+            None => Status::NotFound,
         }
     }
 
@@ -41,6 +51,7 @@ impl Status {
             Status::Found => "found",
             Status::Unsupported => "unsupported",
             Status::NotFound => "not_found",
+            Status::NotCached => "not_cached",
             Status::Failed(_) => "failed",
         }
     }
@@ -82,7 +93,12 @@ pub fn item(input: &str, result: &LookupResult, full: bool) -> Value {
                 Outcome::Found => json!({"provider": a.provider, "outcome": "found"}),
                 Outcome::NotFound => json!({"provider": a.provider, "outcome": "not_found"}),
                 Outcome::Failed(e) => {
-                    json!({"provider": a.provider, "outcome": "failed", "error": e.to_string()})
+                    json!({
+                        "provider": a.provider,
+                        "outcome": "failed",
+                        "kind": e.kind().as_str(),
+                        "error": e.to_string(),
+                    })
                 }
                 _ => json!({"provider": a.provider, "outcome": "unknown"}),
             })
@@ -131,7 +147,7 @@ pub fn disagreements(found: &[Disagreement]) -> Value {
 
 #[cfg(test)]
 mod tests {
-    use aspero_core::{Error, ProviderId};
+    use aspero_core::ProviderId;
     use aspero_engine::Attempt;
 
     use super::*;
@@ -167,6 +183,11 @@ mod tests {
             Status::of(&result(vec![failed(), failed()])),
             Status::Failed(_)
         ));
+        let offline = || Outcome::Failed(Error::Offline);
+        assert_eq!(
+            Status::of(&result(vec![offline(), offline()])),
+            Status::NotCached
+        );
     }
 
     #[test]

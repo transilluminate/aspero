@@ -279,17 +279,24 @@ fixture recorded with different parameters once hid a ranking bug.
 ## Apps (FFI)
 
 `aspero-ffi` (UniFFI) gives apps one `Aspero` handle: `lookup`, `verify`,
-`verify_each` (a callback per result as it finishes), `scan` and
-`unavailable`, all answering in the JSON contract, with a `Patience` per
-call (batch, interactive, offline). The app passes everything in: contact
+`verify_each` (a callback per result as it finishes), `search`, offline
+`scan` and `split_references`, and for settings `budgets` (as last
+reported: free), `check_openalex_key` (one free lookup), `cache_stats`,
+`clear_cache` and `unavailable`. Network calls take a `Patience` (batch,
+interactive, offline).
+They return typed records (`Lookup`, `Verification`, `Work`, …), mirrors
+of the engine's types converted in `aspero-ffi` so the engine stays free
+of UniFFI. Reasons and failures are data (`Reason`, `ErrorKind`) as well
+as English, so the app can word and localise them; `Work.json` carries
+everything the records leave out. The app links its own copy of aspero,
+so typed records cost no compatibility, unlike the CLI's JSON. The app passes everything in: contact
 address, keys (it keeps them in the Keychain), cache directory; nothing is
 read from the environment. Calls run on the handle's own Tokio runtime,
 so any executor can await them. Cancellation is explicit: UniFFI's Swift
 bindings (0.32) don't pass a `Task`'s cancellation to Rust, so calls take
 an optional `CallToken` the app cancels from `withTaskCancellationHandler`;
-the call's task is aborted and it throws `Cancelled`. `scan` adds `utf16`
-ranges for `NSString`. Hold one
-handle per app. `just xcframework` builds `AsperoFFI.xcframework` (static, arm64,
+the call's task is aborted and it throws `Cancelled`. Mentions carry
+`utf16` ranges for `NSString`. Hold one handle per app. `just xcframework` builds `AsperoFFI.xcframework` (static, arm64,
 macOS 26+; `UNIVERSAL=1` adds x86_64, `MACOSX_DEPLOYMENT_TARGET`
 overrides) and the Swift bindings; a workflow attaches both to each
 release. Not published to crates.io.

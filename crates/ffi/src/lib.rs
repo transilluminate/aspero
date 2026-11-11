@@ -1,6 +1,6 @@
-//! aspero for apps, through UniFFI: an [`Aspero`] handle that answers in
-//! the JSON contract (`aspero-json`), the same shapes `aspero … --format
-//! json` prints.
+//! aspero for apps, through UniFFI: an [`Aspero`] handle whose calls
+//! return typed records ([`records`]), with the reasons and failures as
+//! data so the app can word and localise them.
 //!
 //! The app passes everything in ([`Config`]): nothing is read from the
 //! environment, so the app keeps keys where it likes (the Keychain). Calls
@@ -13,21 +13,34 @@
 
 use std::sync::Arc;
 
-use aspero_core::{Claim, ProviderId, Usage};
+use aspero_core::{
+    Claim, Cursor, Error, ErrorKind, FieldSet, ProviderId, SearchQuery, Usage, WorkId, WorkType,
+    YearRange,
+};
 use aspero_engine::{
     CallOptions, CrossrefConfig, DataciteConfig, DoiConfig, Engine, EuropePmcConfig, Extras,
     OpenAlexConfig, OpenLibraryConfig, SecretString, SqliteCache, StandardConfig, standard,
 };
 use aspero_json::InputClaim;
 use futures::StreamExt;
-use serde_json::{Value, json};
 use tokio::sync::watch;
 use tokio::task::JoinHandle;
+
+pub mod records;
+
+use records::{
+    Budget, CacheStats, Claim as ClaimRecord, KeyCheck, KeyStatus, Lookup, Lookups, Mention,
+    ProviderUsage, Reference, SearchRequest, SearchResults, Unavailable, Verification,
+    Verifications,
+};
 
 uniffi::setup_scaffolding!();
 
 /// Results per call at most from each provider search when verifying.
 const SEARCH_LIMIT: u32 = 5;
+
+/// A work every OpenAlex key can look up, free: for checking keys.
+const KNOWN_WORK: &str = "doi:10.1038/nature14539";
 
 #[derive(Debug, Clone, uniffi::Record)]
 pub struct Config {
@@ -63,13 +76,16 @@ pub enum AsperoError {
     /// A bug: the call panicked or its task was lost.
     #[error("internal error: {0}")]
     Internal(String),
+    /// The cache file couldn't be read or written.
+    #[error("cache error: {0}")]
+    Cache(String),
 }
 
 /// Receives each verification as it finishes.
 #[uniffi::export(with_foreign)]
 pub trait VerifyListener: Send + Sync {
-    /// One result: the same object as an item of `verify`'s `results`.
-    fn on_result(&self, json: String);
+    /// One result; its `index` says which claim.
+    fn on_result(&self, result: Verification);
 }
 
 /// Cancels the calls it's passed. One token may cancel several calls; a
@@ -108,6 +124,8 @@ impl CallToken {
 pub struct Aspero {
     engine: Engine,
     runtime: tokio::runtime::Runtime,
+    cache: Option<Arc<SqliteCache>>,
+    mailto: Option<String>,
 }
 
 #[uniffi::export]
@@ -124,10 +142,11 @@ impl Aspero {
             }
             None => None,
         };
+        let mailto = config.mailto.filter(|m| !m.trim().is_empty());
         let mut standard_config = StandardConfig::default();
-        standard_config.mailto = config.mailto.filter(|m| !m.trim().is_empty());
+        standard_config.mailto = mailto.clone();
         standard_config.pacing = cache.clone().map(|c| c as _);
-        standard_config.cache = cache.map(|c| c as _);
+        standard_config.cache = cache.clone().map(|c| c as _);
         let mut openalex = OpenAlexConfig::default();
         openalex.api_key = config
             .openalex_key
@@ -146,12 +165,17 @@ impl Aspero {
             .enable_all()
             .build()
             .map_err(|e| setup(e.to_string()))?;
-        Ok(Arc::new(Aspero { engine, runtime }))
+        Ok(Arc::new(Aspero {
+            engine,
+            runtime,
+            cache,
+            mailto,
+        }))
     }
 
-    /// Looks up identifiers as written (DOIs, URLs, PMIDs, arXiv IDs, …):
-    /// `{"results": [...], "usage": {...}}`, as `aspero lookup --format
-    /// json [--full]`.
+    /// Looks up identifiers as written (DOIs, URLs, PMIDs, arXiv IDs, …).
+    /// With `full`: notices in both directions, open access, disagreements
+    /// with the DOI's registry, and the latest version.
     #[uniffi::method(default(cancel = None))]
     pub async fn lookup(
         &self,
@@ -159,44 +183,50 @@ impl Aspero {
         full: bool,
         patience: Patience,
         cancel: Option<Arc<CallToken>>,
-    ) -> Result<String, AsperoError> {
+    ) -> Result<Lookups, AsperoError> {
         let engine = self.engine(patience);
         self.run(
             async move {
                 let mut extras = Extras::default();
                 extras.full = full;
                 let report = engine.lookup_inputs(&ids, extras).await;
-                let results: Vec<Value> = ids
-                    .iter()
-                    .zip(&report.items)
-                    .map(|(input, item)| aspero_json::input_lookup(input, item, full))
-                    .collect();
-                json!({"results": results, "usage": aspero_json::usage(&report.usage)}).to_string()
+                Lookups {
+                    results: ids
+                        .iter()
+                        .zip(&report.items)
+                        .map(|(input, item)| Lookup::new(input, item))
+                        .collect(),
+                    usage: records::usage(&report.usage),
+                }
             },
             cancel,
         )
         .await
     }
 
-    /// Verifies citations, each free text or a JSON object of fields (as
-    /// `aspero verify -` reads lines): `{"results": [...], "usage":
-    /// {...}}` in claim order.
+    /// Verifies citations, answering in claim order. With `full`, every
+    /// candidate considered.
     #[uniffi::method(default(cancel = None))]
     pub async fn verify(
         &self,
-        claims: Vec<String>,
+        claims: Vec<ClaimRecord>,
         full: bool,
         patience: Patience,
         cancel: Option<Arc<CallToken>>,
-    ) -> Result<String, AsperoError> {
+    ) -> Result<Verifications, AsperoError> {
         let engine = self.engine(patience);
         self.run(
             async move {
-                let mut results: Vec<Option<Value>> = vec![None; claims.len()];
-                let usage =
-                    verify_all(&engine, &claims, full, |i, item| results[i] = Some(item)).await;
-                let results: Vec<Value> = results.into_iter().flatten().collect();
-                json!({"results": results, "usage": aspero_json::usage(&usage)}).to_string()
+                let mut results: Vec<Option<Verification>> = vec![None; claims.len()];
+                let usage = verify_all(&engine, claims, full, |v| {
+                    let i = v.index as usize;
+                    results[i] = Some(v);
+                })
+                .await;
+                Verifications {
+                    results: results.into_iter().flatten().collect(),
+                    usage,
+                }
             },
             cancel,
         )
@@ -204,64 +234,179 @@ impl Aspero {
     }
 
     /// As [`verify`](Self::verify), handing each result to `listener` as
-    /// soon as it finishes, in any order (each echoes its `input` and
-    /// `key`). Returns the usage.
+    /// soon as it finishes, in any order. Returns the usage.
     #[uniffi::method(default(cancel = None))]
     pub async fn verify_each(
         &self,
-        claims: Vec<String>,
+        claims: Vec<ClaimRecord>,
         full: bool,
         patience: Patience,
         listener: Arc<dyn VerifyListener>,
         cancel: Option<Arc<CallToken>>,
-    ) -> Result<String, AsperoError> {
+    ) -> Result<Vec<ProviderUsage>, AsperoError> {
+        let engine = self.engine(patience);
+        self.run(
+            async move { verify_all(&engine, claims, full, |v| listener.on_result(v)).await },
+            cancel,
+        )
+        .await
+    }
+
+    /// Searches one provider by keywords: `request.source`, or the first
+    /// that searches. A failed search has no hits and says why.
+    #[uniffi::method(default(cancel = None))]
+    pub async fn search(
+        &self,
+        request: SearchRequest,
+        patience: Patience,
+        cancel: Option<Arc<CallToken>>,
+    ) -> Result<SearchResults, AsperoError> {
         let engine = self.engine(patience);
         self.run(
             async move {
-                let usage = verify_all(&engine, &claims, full, |_, item| {
-                    listener.on_result(item.to_string())
-                })
-                .await;
-                aspero_json::usage(&usage).to_string()
+                let mut query = SearchQuery::new(request.text);
+                if request.year_from.is_some() || request.year_to.is_some() {
+                    query.years = Some(YearRange {
+                        from: request.year_from,
+                        to: request.year_to,
+                    });
+                }
+                query.work_type = request.work_type.as_deref().map(WorkType::from_csl);
+                query.open_access = request.open_access_only.then_some(true);
+                query.page.limit = request.limit;
+                query.page.cursor = request.cursor.map(Cursor);
+                SearchResults::new(engine.search(request.source.as_deref(), &query).await)
             },
             cancel,
         )
         .await
     }
 
-    /// The identifiers mentioned in `text`, where and as written:
-    /// `{"mentions": [...]}`, as `aspero scan --format json`, each also
-    /// with its `utf16` range (`{"start", "end"}`) for `NSString` and
-    /// `NSTextView`. Offline.
-    pub fn scan(&self, text: String) -> String {
-        let mentions: Vec<Value> = aspero_core::id::scan(&text)
+    /// The identifiers mentioned in `text`, in order, where and as written.
+    /// Offline.
+    pub fn scan(&self, text: String) -> Vec<Mention> {
+        aspero_core::id::scan(&text)
             .iter()
-            .map(|m| {
-                let mut mention = aspero_json::mention("-", &text, m);
-                let utf16 = |byte: usize| text[..byte].encode_utf16().count();
-                mention["utf16"] = json!({"start": utf16(m.span.start), "end": utf16(m.span.end)});
-                mention
-            })
-            .collect();
-        json!({"mentions": mentions}).to_string()
+            .map(|m| Mention::new(&text, m))
+            .collect()
     }
 
-    /// Providers refusing calls now and why (a spent quota, a rejected
-    /// key, repeated failures): `[{"provider", "error", "category"}]`.
-    pub fn unavailable(&self) -> String {
-        let list: Vec<Value> = self
-            .engine
+    /// The references in a pasted list (numbered, bulleted, one per
+    /// paragraph or line; wrapped lines rejoined), each ready to verify.
+    /// Offline.
+    pub fn split_references(&self, text: String) -> Vec<Reference> {
+        aspero_core::split_references(&text)
+            .iter()
+            .map(|r| Reference::new(&text, r))
+            .collect()
+    }
+
+    /// Each provider's budget as its last response reported it, without
+    /// spending any: OpenAlex's, once it has been called (or a key
+    /// checked) since launch.
+    pub fn budgets(&self) -> Vec<Budget> {
+        self.engine
+            .budgets()
+            .iter()
+            .map(|(p, b)| Budget::new(p, b))
+            .collect()
+    }
+
+    /// Whether OpenAlex accepts `key`, with one free lookup (never
+    /// cached), and what it has left. Doesn't change the handle's key.
+    #[uniffi::method(default(cancel = None))]
+    pub async fn check_openalex_key(
+        &self,
+        key: String,
+        cancel: Option<Arc<CallToken>>,
+    ) -> Result<KeyCheck, AsperoError> {
+        if key.trim().is_empty() {
+            return Ok(KeyCheck {
+                status: KeyStatus::Rejected,
+                message: Some("no key given".into()),
+                budget: None,
+            });
+        }
+        let mut config = StandardConfig::default();
+        config.mailto = self.mailto.clone();
+        config.pacing = self.cache.clone().map(|c| c as _);
+        let mut openalex = OpenAlexConfig::default();
+        openalex.api_key = Some(SecretString::from(key.trim().to_owned()));
+        config.openalex = Some(openalex);
+        let engine = standard(config)
+            .map_err(|e| AsperoError::Setup(e.to_string()))?
+            .with_options(CallOptions::interactive());
+        self.run(
+            async move {
+                let id: WorkId = KNOWN_WORK.parse().expect("a valid identifier");
+                let report = engine.lookup(&[id], FieldSet::DEFAULT).await;
+                let failure = report.results[0]
+                    .attempts
+                    .iter()
+                    .find_map(|a| match &a.outcome {
+                        aspero_engine::Outcome::Failed(e) => Some(e.clone()),
+                        _ => None,
+                    });
+                let status = match failure.as_ref().map(Error::kind) {
+                    None | Some(ErrorKind::BudgetSpent) => KeyStatus::Valid,
+                    Some(ErrorKind::KeyRejected) => KeyStatus::Rejected,
+                    Some(_) => KeyStatus::Unreachable,
+                };
+                KeyCheck {
+                    status,
+                    message: failure
+                        .filter(|_| status != KeyStatus::Valid)
+                        .map(|e| e.to_string()),
+                    budget: engine.budgets().first().map(|(p, b)| Budget::new(p, b)),
+                }
+            },
+            cancel,
+        )
+        .await
+    }
+
+    /// What the cache holds; `None` without one.
+    pub fn cache_stats(&self) -> Result<Option<CacheStats>, AsperoError> {
+        let Some(cache) = &self.cache else {
+            return Ok(None);
+        };
+        let s = cache
+            .stats()
+            .map_err(|e| AsperoError::Cache(e.to_string()))?;
+        Ok(Some(CacheStats {
+            records: s.records,
+            identifiers: s.identifiers,
+            misses: s.misses,
+            searches: s.searches,
+        }))
+    }
+
+    /// Empties the cache.
+    pub fn clear_cache(&self) -> Result<(), AsperoError> {
+        match &self.cache {
+            Some(cache) => cache.clear().map_err(|e| AsperoError::Cache(e.to_string())),
+            None => Ok(()),
+        }
+    }
+
+    /// Providers refusing calls now, and why: a spent budget, a rejected
+    /// key, repeated failures.
+    pub fn unavailable(&self) -> Vec<Unavailable> {
+        self.engine
             .unavailable()
             .into_iter()
-            .map(|(provider, e)| {
-                json!({
-                    "provider": provider,
-                    "error": e.to_string(),
-                    "category": format!("{:?}", e.category()).to_lowercase(),
-                })
+            .map(|(provider, e)| Unavailable {
+                provider: provider.to_string(),
+                kind: e.kind().into(),
+                message: e.to_string(),
+                until: match e {
+                    Error::QuotaExhausted { resets_at: t } | Error::CircuitOpen { until: t } => {
+                        t.map(Into::into)
+                    }
+                    _ => None,
+                },
             })
-            .collect();
-        Value::Array(list).to_string()
+            .collect()
     }
 }
 
@@ -309,15 +454,15 @@ impl<T> Drop for Abortable<T> {
     }
 }
 
-/// Verifies every claim, handing each item (by claim index) to `each` as
-/// it finishes: unreadable claims first, then the rest as they complete.
+/// Verifies every claim, handing each result to `each` as it finishes:
+/// unreadable claims first, then the rest as they complete.
 async fn verify_all(
     engine: &Engine,
-    lines: &[String],
+    claims: Vec<ClaimRecord>,
     full: bool,
-    mut each: impl FnMut(usize, Value),
-) -> Vec<(ProviderId, Usage)> {
-    let claims: Vec<InputClaim> = lines.iter().map(|l| InputClaim::from_line(l)).collect();
+    mut each: impl FnMut(Verification),
+) -> Vec<ProviderUsage> {
+    let claims: Vec<InputClaim> = claims.into_iter().map(ClaimRecord::into_input).collect();
     let (positions, valid): (Vec<usize>, Vec<Claim>) = claims
         .iter()
         .enumerate()
@@ -325,7 +470,7 @@ async fn verify_all(
         .unzip();
     for (i, claim) in claims.iter().enumerate() {
         if let Err(e) = &claim.claim {
-            each(i, aspero_json::invalid_claim(claim.echo(), e));
+            each(Verification::invalid(i, claim, e));
         }
     }
     let mut usage = Vec::new();
@@ -340,9 +485,9 @@ async fn verify_all(
             add_usage(&mut usage, p, *u);
         }
         let i = positions[k];
-        each(i, aspero_json::verification(claims[i].echo(), &v, full));
+        each(Verification::new(i, &claims[i], &v, full));
     }
-    usage
+    records::usage(&usage)
 }
 
 fn add_usage(totals: &mut Vec<(ProviderId, Usage)>, provider: &ProviderId, usage: Usage) {

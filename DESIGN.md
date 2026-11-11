@@ -222,7 +222,10 @@ quota until it resets, rejected credentials for its life (new credentials
 mean a new engine), and a **circuit breaker** (closed → open after N
 consecutive failing calls → one probe after the cooldown). Refused calls
 fall back like failed ones (next provider, stale cache);
-`Engine::unavailable` says which providers are refusing and why.
+`Engine::unavailable` says which providers are refusing and why. Batches
+verify a few claims at once and yield each as it finishes, so a slow
+claim doesn't hold up the rest, and a batch never queues so many requests
+that a caller sharing the engine waits behind it.
 
 Planned for 0.4 (below): a **cross-process** rate limiter (ticket scheme
 in SQLite, so parallel processes share one budget).
@@ -274,13 +277,10 @@ A GUI (a macOS app over FFI) and parallel agents hold one engine for a
 long time and ask many things at once. In order, each step tested on its
 own:
 
-1. **Streaming** results as they finish (JSON lines in the CLI), with
-   batches capped to a few items at once so interactive calls aren't
-   queued behind them.
-2. **The cross-process limiter**: SQLite tickets, one budget for the app,
+1. **The cross-process limiter**: SQLite tickets, one budget for the app,
    the CLI and parallel agents.
-3. **Credentials**: env, then the OS keyring, then a `0600` file.
-4. **`aspero-ffi`**: UniFFI, async calls, config passed in (the app owns
+2. **Credentials**: env, then the OS keyring, then a `0600` file.
+3. **`aspero-ffi`**: UniFFI, async calls, config passed in (the app owns
    the Keychain), an `.xcframework` attached to releases.
 
 Not until needed: priority lanes in the pacer, a daemon, a SQLite

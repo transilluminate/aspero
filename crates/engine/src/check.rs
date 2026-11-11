@@ -111,8 +111,8 @@ impl Checked {
 
 impl Engine {
     /// Verifies every claim and derives findings, including duplicates
-    /// across claims. `progress` is called with each claim's index as it
-    /// completes.
+    /// across claims; in claim order. `progress` is called with each
+    /// claim's index as it completes, in any order.
     pub async fn check(
         &self,
         claims: &[Claim],
@@ -120,17 +120,20 @@ impl Engine {
         mut progress: impl FnMut(usize),
     ) -> Vec<Checked> {
         self.prefetch(claims).await;
-        let mut checked = Vec::with_capacity(claims.len());
+        let mut slots: Vec<Option<Checked>> = (0..claims.len()).map(|_| None).collect();
         let mut verifications = std::pin::pin!(self.verify_many(claims, limit));
-        while let Some(verification) = verifications.next().await {
-            let i = checked.len();
+        while let Some((i, verification)) = verifications.next().await {
             let findings = findings(&claims[i], &verification);
-            checked.push(Checked {
+            slots[i] = Some(Checked {
                 verification,
                 findings,
             });
             progress(i);
         }
+        let mut checked: Vec<Checked> = slots
+            .into_iter()
+            .map(|c| c.expect("every claim verified"))
+            .collect();
         let matches: Vec<Option<&Candidate>> = checked.iter().map(Checked::matched).collect();
         let duplicates = duplicates(&matches);
         for (c, dup) in checked.iter_mut().zip(duplicates) {

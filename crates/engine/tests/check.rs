@@ -51,6 +51,7 @@ async fn a_bibliography_gets_verdicts_and_fixes() {
 
     let mut seen = Vec::new();
     let checked = engine.check(&claims, 5, |i| seen.push(i)).await;
+    seen.sort();
     assert_eq!(seen, [0, 1, 2, 3], "progress per claim");
 
     let findings: Vec<Vec<&Finding>> = checked

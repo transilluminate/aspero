@@ -1,16 +1,15 @@
 //! `aspero verify`: does a citation refer to a real work, with matching
 //! details?
 
+use std::io::IsTerminal;
+
 use aspero_core::{ProviderId, Usage};
 use aspero_engine::{Engine, Verdict, Verification};
+use aspero_json::ClaimInput;
+use futures::StreamExt;
 use serde_json::{Value, json};
 
 use super::claim::claims;
-use aspero_json::ClaimInput;
-use std::io::IsTerminal;
-
-use futures::StreamExt;
-
 use super::{Failure, Out, merge_usage, merged, print, print_line};
 use crate::args::{ClaimArgs, Format};
 use crate::exit::Exit;
@@ -24,110 +23,140 @@ pub async fn run(engine: &Engine, args: ClaimArgs, out: Out) -> Result<Exit, Fai
         return Err(Failure::usage("no claims given"));
     }
 
-    let mut exit = Exit::Ok;
     let mut usage: Vec<(ProviderId, Usage)> = Vec::new();
-    let mut items = Vec::new();
-
     // One batched lookup of every claimed identifier first; with the cache
-    // warm, claims are then verified several at a time, streamed in order.
-    let valid: Vec<_> = claims
+    // warm, claims are then verified several at a time.
+    let (positions, valid): (Vec<usize>, Vec<_>) = claims
         .iter()
-        .filter_map(|c| c.claim.as_ref().ok().cloned())
-        .collect();
+        .enumerate()
+        .filter_map(|(i, c)| Some((i, c.claim.as_ref().ok()?.clone())))
+        .unzip();
     if valid.len() > 1 {
         for (p, u) in engine.prefetch(&valid).await.usage {
             merge_usage(&mut usage, &p, u);
         }
     }
-    let mut verified = std::pin::pin!(engine.verify_many(&valid, limit));
-    let (mut rows, mut texts) = (Vec::new(), Vec::new());
+
     let total = claims.len();
     let show_progress = out.format == Format::Table && total > 1 && std::io::stderr().is_terminal();
-    for claim in claims {
-        let echo = claim.echo();
-        let input = claim.input;
-        let (item, item_exit, text) = match claim.claim {
-            Err(e) => (
-                merged(echo, json!({"verdict": "invalid", "reason": e})),
-                Exit::Usage,
-                format!("INVALID  {input}\n  {e}\n"),
-            ),
-            Ok(_) => {
-                let v = verified
-                    .next()
-                    .await
-                    .expect("one verification per valid claim");
-                for (p, u) in &v.report.usage {
-                    merge_usage(&mut usage, p, *u);
-                }
-                let mut item = aspero_json::verification(echo, &v, out.full);
-                let mut text = verdict_text(&input, &v);
-                if out.abstracts
-                    && let Some(best) = v.best.map(|i| &v.report.candidates[i])
-                {
-                    // Search under every identifier merged into the match.
-                    let mut record = best.record.clone();
-                    record.ids = best.ids.clone();
-                    let fetched = engine.abstracts(&[&record]).await;
-                    for (p, u) in &fetched.usage {
-                        merge_usage(&mut usage, p, *u);
-                    }
-                    let found = fetched.found.into_iter().next().flatten();
-                    output::set_abstract(&mut item["match"]["work"], found.as_ref());
-                    text.push_str(&output::abstract_text(found.as_ref(), "  "));
-                    text.push('\n');
-                }
-                (item, exit_for(v.verdict), text)
-            }
-        };
-        exit = exit.worst(item_exit);
-        // Stream line-oriented formats so long batches show progress.
-        match out.format {
-            Format::Jsonl => print_line(&item),
-            Format::Text => println!("{text}"),
-            Format::Table => {
-                rows.push(row(&item));
-                texts.push(text);
-                if show_progress {
-                    eprint!("\rverified {}/{total}…", rows.len());
-                }
-            }
-            _ => items.push(item),
+    let mut results = Results::new(out.format, total, show_progress);
+    for (i, claim) in claims.iter().enumerate() {
+        if let Err(e) = &claim.claim {
+            let item = merged(claim.echo(), json!({"verdict": "invalid", "reason": e}));
+            let text = format!("INVALID  {}\n  {e}\n", claim.input);
+            results.add(i, item, text, Exit::Usage);
         }
     }
-    if show_progress {
-        eprint!("\r\x1b[K");
+    let mut verified = std::pin::pin!(engine.verify_many(&valid, limit));
+    while let Some((k, v)) = verified.next().await {
+        let i = positions[k];
+        let claim = &claims[i];
+        for (p, u) in &v.report.usage {
+            merge_usage(&mut usage, p, *u);
+        }
+        let mut item = aspero_json::verification(claim.echo(), &v, out.full);
+        let mut text = verdict_text(&claim.input, &v);
+        if out.abstracts
+            && let Some(best) = v.best.map(|i| &v.report.candidates[i])
+        {
+            // Search under every identifier merged into the match.
+            let mut record = best.record.clone();
+            record.ids = best.ids.clone();
+            let fetched = engine.abstracts(&[&record]).await;
+            for (p, u) in &fetched.usage {
+                merge_usage(&mut usage, p, *u);
+            }
+            let found = fetched.found.into_iter().next().flatten();
+            aspero_json::set_abstract(&mut item["match"]["work"], found.as_ref());
+            text.push_str(&output::abstract_text(found.as_ref(), "  "));
+            text.push('\n');
+        }
+        results.add(i, item, text, exit_for(v.verdict));
+    }
+    results.finish(&usage)
+}
+
+/// Results as claims complete: JSON lines at once, in any order (each
+/// echoes its input and key); text in claim order as soon as each is
+/// next; tables and documents at the end.
+struct Results {
+    format: Format,
+    slots: Vec<Option<(Value, String)>>,
+    /// The next claim to print as text.
+    next: usize,
+    done: usize,
+    show_progress: bool,
+    exit: Exit,
+}
+
+impl Results {
+    fn new(format: Format, total: usize, show_progress: bool) -> Self {
+        Results {
+            format,
+            slots: (0..total).map(|_| None).collect(),
+            next: 0,
+            done: 0,
+            show_progress,
+            exit: Exit::Ok,
+        }
     }
 
-    match out.format {
-        // One claim is detail, not rows: show it as text.
-        Format::Table if texts.len() == 1 => {
-            println!("{}", texts[0]);
-            if let Some(text) = output::usage_text(&usage) {
-                eprintln!("{text}");
+    fn add(&mut self, i: usize, item: Value, text: String, exit: Exit) {
+        self.exit = self.exit.worst(exit);
+        self.done += 1;
+        match self.format {
+            Format::Jsonl => print_line(&item),
+            Format::Text => {
+                self.slots[i] = Some((item, text));
+                while let Some(Some((_, text))) = self.slots.get(self.next) {
+                    println!("{text}");
+                    self.next += 1;
+                }
             }
-        }
-        Format::Table => {
-            let mut table = output::table(&["Verdict", "Conf", "Citation", "Reason"]);
-            for row in rows {
-                table.add_row(row);
+            _ => {
+                self.slots[i] = Some((item, text));
+                if self.show_progress {
+                    eprint!("\rverified {}/{}…", self.done, self.slots.len());
+                }
             }
-            println!("{table}");
-            if let Some(text) = output::usage_text(&usage) {
-                eprintln!("{text}");
-            }
-        }
-        Format::Text => {
-            if let Some(text) = output::usage_text(&usage) {
-                eprintln!("{text}");
-            }
-        }
-        Format::Jsonl => {}
-        Format::Json | Format::Auto => {
-            print(&json!({"results": items, "usage": output::usage(&usage)}));
         }
     }
-    Ok(exit)
+
+    fn finish(self, usage: &[(ProviderId, Usage)]) -> Result<Exit, Failure> {
+        if self.show_progress {
+            eprint!("\r\x1b[K");
+        }
+        let done = self.slots.into_iter().flatten();
+        match self.format {
+            Format::Jsonl => {}
+            Format::Text => {
+                if let Some(text) = output::usage_text(usage) {
+                    eprintln!("{text}");
+                }
+            }
+            Format::Table => {
+                let done: Vec<(Value, String)> = done.collect();
+                // One claim is detail, not rows: show it as text.
+                if let [(_, text)] = &done[..] {
+                    println!("{text}");
+                } else {
+                    let mut table = output::table(&["Verdict", "Conf", "Citation", "Reason"]);
+                    for (item, _) in &done {
+                        table.add_row(row(item));
+                    }
+                    println!("{table}");
+                }
+                if let Some(text) = output::usage_text(usage) {
+                    eprintln!("{text}");
+                }
+            }
+            Format::Json | Format::Auto => {
+                let items: Vec<Value> = done.map(|(item, _)| item).collect();
+                print(&json!({"results": items, "usage": output::usage(usage)}));
+            }
+        }
+        Ok(self.exit)
+    }
 }
 
 /// Positional text and the field flags.

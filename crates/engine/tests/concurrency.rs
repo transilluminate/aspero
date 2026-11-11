@@ -11,6 +11,7 @@ use aspero_core::{
 };
 use aspero_engine::Engine;
 use async_trait::async_trait;
+use futures::StreamExt;
 use tokio::time::Instant;
 
 /// A search provider that answers (with nothing) after one second.
@@ -38,8 +39,14 @@ impl Provider for Slow {
         &self.caps
     }
 
-    async fn search(&self, _: &SearchQuery) -> Result<Response<Page>> {
-        tokio::time::sleep(Duration::from_secs(1)).await;
+    async fn search(&self, query: &SearchQuery) -> Result<Response<Page>> {
+        // "Slow …" titles take ten seconds.
+        let secs = if query.text.starts_with("Slow") {
+            10
+        } else {
+            1
+        };
+        tokio::time::sleep(Duration::from_secs(secs)).await;
         Ok(Response::new(Page::default()))
     }
 }
@@ -98,14 +105,31 @@ async fn claims_in_a_batch_are_checked_several_at_a_time() {
     let mut order = Vec::new();
     let checked = engine.check(&claims, 5, |i| order.push(i)).await;
     assert_eq!(checked.len(), 8);
-    assert_eq!(
-        order,
-        (0..8).collect::<Vec<_>>(),
-        "results stay in claim order"
-    );
+    order.sort();
+    assert_eq!(order, (0..8).collect::<Vec<_>>(), "progress per claim");
     assert_eq!(
         start.elapsed(),
         Duration::from_secs(2),
         "8 claims, 4 at a time"
+    );
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_slow_claim_does_not_hold_up_the_rest() {
+    let engine = engine(vec![Slow::new("keywords", false)]);
+    let claims = vec![titled("Slow title"), titled("Title 1"), titled("Title 2")];
+    let start = Instant::now();
+    let finished: Vec<(usize, Duration)> = engine
+        .verify_many(&claims, 5)
+        .map(|(i, _)| (i, start.elapsed()))
+        .collect()
+        .await;
+    assert_eq!(
+        finished,
+        vec![
+            (1, Duration::from_secs(1)),
+            (2, Duration::from_secs(1)),
+            (0, Duration::from_secs(10)),
+        ]
     );
 }

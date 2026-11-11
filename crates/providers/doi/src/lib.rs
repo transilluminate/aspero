@@ -56,6 +56,8 @@ impl DoiOrg {
         let mut capabilities = Capabilities::default();
         capabilities.lookup_kinds = vec![IdKind::Doi, IdKind::Arxiv];
         capabilities.max_batch = 1;
+        // Every registered DOI resolves here, whatever its agency.
+        capabilities.final_misses = vec![IdKind::Doi];
         // Records say nothing about free copies.
         capabilities.fields = FieldSet::ALL.difference(FieldSet::of(&[Field::OpenAccess]));
         DoiOrg {

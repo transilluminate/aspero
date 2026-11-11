@@ -225,3 +225,42 @@ fn live_key_checks() {
         assert!(checked.budget.is_some_and(|b| b.remaining.is_some()));
     }
 }
+
+/// Times the path where a DOI's reading without its line-break hyphen is
+/// needed: `cargo test -p aspero-ffi alternative_timing -- --ignored --nocapture`.
+#[test]
+#[ignore = "network"]
+fn alternative_timing() {
+    let lists = [
+        (
+            "alt",
+            "1. LeCun Y, Bengio Y, Hinton G. Deep learning. Nature. 2015;521:436-444. doi:10.1038/nature-\n14539",
+        ),
+        (
+            "whole",
+            "1. LeCun Y, Bengio Y, Hinton G. Deep learning. Nature. 2015;521:436-444. doi:10.1038/nature14539",
+        ),
+    ];
+    for run in 1..=3 {
+        for (name, list) in lists {
+            let handle = aspero(None);
+            let claims: Vec<Claim> = handle
+                .split_references(list.into())
+                .into_iter()
+                .map(|r| Claim {
+                    text: Some(r.text),
+                    alternative_ids: r.alternative_ids,
+                    ..Claim::default()
+                })
+                .collect();
+            let start = std::time::Instant::now();
+            let v = block_on(handle.verify(claims, false, Patience::Interactive, None)).unwrap();
+            eprintln!(
+                "{run} {name}: {:.1}s {:?} {}",
+                start.elapsed().as_secs_f64(),
+                v.results[0].verdict,
+                v.results[0].reason
+            );
+        }
+    }
+}

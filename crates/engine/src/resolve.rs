@@ -24,7 +24,7 @@ use aspero_core::{
     WorkId,
 };
 
-use futures::future::{join, join_all};
+use futures::future::{Either, join_all, select};
 use futures::stream::{self, Stream, StreamExt};
 
 use crate::verdict::{Verification, judge};
@@ -162,55 +162,19 @@ impl Engine {
     /// Decides whether `claim` refers to a real work, stopping early once it
     /// does.
     pub async fn verify(&self, claim: &Claim, limit: u32) -> Verification {
-        let (claim, usage) = self.with_alternatives(claim).await;
-        let mut report = self.gather(&claim, limit, true).await;
-        for (p, u) in usage {
-            add_usage(&mut report.usage, &p, u);
-        }
-        self.detail_notices(&mut report).await;
-        judge(&claim, report)
-    }
-
-    /// The claim with each claimed identifier that doesn't exist replaced
-    /// by an alternative reading that does (the claim's `alternatives`),
-    /// and the usage of finding out. Claims without alternatives cost
-    /// nothing; the lookups are cached for verifying.
-    async fn with_alternatives(&self, claim: &Claim) -> (Claim, Vec<(ProviderId, Usage)>) {
-        let mut claim = claim.clone();
-        if claim.alternatives.is_empty() {
-            return (claim, Vec::new());
-        }
-        let mut usage = Vec::new();
-        let claimed = self.lookup(&claim.ids, FieldSet::DEFAULT).await;
-        usage.extend(claimed.usage);
-        let missing: Vec<&WorkId> = claimed
-            .results
-            .iter()
-            .filter(|r| r.is_not_found())
-            .map(|r| &r.id)
-            .collect();
-        let tries: Vec<(WorkId, WorkId)> = claim
-            .alternatives
-            .iter()
-            .filter(|a| missing.contains(&&a.claimed))
-            .map(|a| (a.claimed.clone(), a.alternative.clone()))
-            .collect();
-        if tries.is_empty() {
-            return (claim, usage);
-        }
-        let ids: Vec<WorkId> = tries.iter().map(|(_, alt)| alt.clone()).collect();
-        let found = self.lookup(&ids, FieldSet::DEFAULT).await;
-        for (p, u) in found.usage {
-            add_usage(&mut usage, &p, u);
-        }
-        for ((claimed, alt), result) in tries.into_iter().zip(found.results) {
-            if result.record.is_some() {
-                for id in claim.ids.iter_mut().filter(|id| **id == claimed) {
-                    *id = alt.clone();
-                }
+        // Alternative readings of claimed identifiers are looked up with
+        // them, alongside the citation matchers; which was meant is settled
+        // after, so a broken DOI costs no extra round of lookups.
+        let mut wide = claim.clone();
+        for a in &claim.alternatives {
+            if claim.ids.contains(&a.claimed) && !wide.ids.contains(&a.alternative) {
+                wide.ids.push(a.alternative.clone());
             }
         }
-        (claim, usage)
+        let mut report = self.gather(&wide, limit, true).await;
+        let claim = settle_alternatives(claim, &mut report);
+        self.detail_notices(&mut report).await;
+        judge(&claim, report)
     }
 
     /// Verifies many claims, several at a time (each provider's pacing
@@ -313,7 +277,11 @@ impl Engine {
             let q = query(reference.as_deref().unwrap_or_default(), true);
             async move { self.search(Some(p.as_str()), &q).await }
         }));
-        let (lookup, matched) = join(lookup, matched).await;
+        let (lookup, matched) = (std::pin::pin!(lookup), std::pin::pin!(matched));
+        let (lookup, matched) = match select(lookup, matched).await {
+            Either::Left((lookup, matched)) => (lookup, Either::Left(matched)),
+            Either::Right((matched, lookup)) => (lookup.await, Either::Right(matched)),
+        };
 
         if let Some(lookup) = lookup {
             for record in lookup.results.iter().filter_map(|r| r.record.as_ref()) {
@@ -328,6 +296,14 @@ impl Engine {
             acc.usage(lookup.usage);
             acc.report.lookups = lookup.results;
         }
+        // When the identifiers' lookup alone verifies the claim, the
+        // matchers can't change the verdict: stop waiting for them (Crossref's
+        // takes seconds).
+        let matched = match matched {
+            Either::Right(matched) => matched,
+            Either::Left(_) if done(&acc) => Vec::new(),
+            Either::Left(pending) => pending.await,
+        };
         let mut titles: Vec<String> = claim.title.iter().cloned().collect();
         for (provider, result) in matchers.iter().zip(matched) {
             let hits = acc.add_search(provider, Via::CitationMatch, result);
@@ -512,25 +488,56 @@ impl Accumulator<'_> {
     }
 
     fn finish(mut self) -> ResolveReport {
-        // Most confident first; on a tie the earliest-published (an original
-        // precedes its reprints, abstracts and corrections), then the one
-        // more providers agree on.
-        let issued = |c: &Candidate| {
-            c.record.work.issued.map_or(i64::MAX, |d| {
-                i64::from(d.year()) * 10_000
-                    + i64::from(d.month().unwrap_or(12)) * 100
-                    + i64::from(d.day().unwrap_or(31))
-            })
-        };
-        self.report.candidates.sort_by(|a, b| {
-            b.assessment
-                .confidence
-                .total_cmp(&a.assessment.confidence)
-                .then(issued(a).cmp(&issued(b)))
-                .then(b.sightings.len().cmp(&a.sightings.len()))
-        });
+        rank(&mut self.report.candidates);
         self.report
     }
+}
+
+/// The claim with each claimed identifier that doesn't exist replaced by
+/// an alternative reading that does, and the report made about that
+/// claim: lookups of readings not taken dropped, candidates rescored.
+fn settle_alternatives(claim: &Claim, report: &mut ResolveReport) -> Claim {
+    let mut claim = claim.clone();
+    if claim.alternatives.is_empty() {
+        return claim;
+    }
+    let lookup = |id: &WorkId| report.lookups.iter().find(|l| l.id == *id);
+    for a in claim.alternatives.clone() {
+        let missing = lookup(&a.claimed).is_some_and(LookupResult::is_not_found);
+        let exists = lookup(&a.alternative).is_some_and(|l| l.record.is_some());
+        if missing && exists {
+            for id in claim.ids.iter_mut().filter(|id| **id == a.claimed) {
+                *id = a.alternative.clone();
+            }
+        }
+    }
+    report.lookups.retain(|l| claim.ids.contains(&l.id));
+    for c in &mut report.candidates {
+        c.assessment = matching::assess(&claim, &c.record);
+        c.assessment.ids = id_agreement(&claim.ids, &c.ids);
+    }
+    rank(&mut report.candidates);
+    claim
+}
+
+/// Most confident first; on a tie the earliest-published (an original
+/// precedes its reprints, abstracts and corrections), then the one more
+/// providers agree on.
+fn rank(candidates: &mut [Candidate]) {
+    let issued = |c: &Candidate| {
+        c.record.work.issued.map_or(i64::MAX, |d| {
+            i64::from(d.year()) * 10_000
+                + i64::from(d.month().unwrap_or(12)) * 100
+                + i64::from(d.day().unwrap_or(31))
+        })
+    };
+    candidates.sort_by(|a, b| {
+        b.assessment
+            .confidence
+            .total_cmp(&a.assessment.confidence)
+            .then(issued(a).cmp(&issued(b)))
+            .then(b.sightings.len().cmp(&a.sightings.len()))
+    });
 }
 
 /// Every year a record reports: issued, then other editions or versions.

@@ -196,6 +196,23 @@ async fn falls_through_to_the_next_provider_when_one_does_not_know_an_id() {
 }
 
 #[tokio::test(start_paused = true)]
+async fn a_final_not_found_ends_the_search() {
+    let mut registry = Mock::new("registry", &[IdKind::Doi]);
+    registry.caps.final_misses = vec![IdKind::Doi];
+    let registry = Arc::new(registry.knows(DOI_A, "A"));
+    let slow = Arc::new(Mock::new("slow", &[IdKind::Doi]));
+    let engine = engine(vec![(registry.clone(), 10), (slow.clone(), 20)]);
+
+    let report = engine
+        .lookup(&ids(&[DOI_A, DOI_B]), FieldSet::DEFAULT)
+        .await;
+
+    assert!(report.results[1].is_not_found());
+    // Nothing left to ask the next provider about.
+    assert!(slow.lookup_calls().is_empty());
+}
+
+#[tokio::test(start_paused = true)]
 async fn routes_ids_only_to_providers_accepting_their_kind() {
     let dois_only = Arc::new(Mock::new("dois", &[IdKind::Doi]).knows(DOI_A, "A"));
     let pmids = Arc::new(Mock::new("pmids", &[IdKind::Pmid]).knows("pmid:42", "P"));

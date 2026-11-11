@@ -63,7 +63,8 @@ pub fn standard(config: StandardConfig) -> Result<Engine, Error> {
     #[allow(unused_variables)]
     let client = |label: &str, policy: &ResiliencePolicy| -> Result<Arc<dyn HttpClient>, Error> {
         let inner = Arc::new(ReqwestClient::new(&user_agent, policy.attempt_timeout)?);
-        let paced = Paced::new(label, inner, policy.min_interval);
+        let paced =
+            Paced::new(label, inner, policy.min_interval).max_in_flight(policy.max_in_flight);
         Ok(Arc::new(match &config.pacing {
             Some(pacing) => paced.shared(pacing.clone()),
             None => paced,
@@ -89,7 +90,11 @@ pub fn standard(config: StandardConfig) -> Result<Engine, Error> {
         if cr.mailto.is_none() {
             cr.mailto = config.mailto.clone();
         }
-        let policy = Crossref::default_policy();
+        let mut policy = Crossref::default_policy();
+        // Crossref answers a second concurrent request from its public
+        // pool with 429; its polite pool (with a contact address) allows
+        // a few.
+        policy.max_in_flight = if cr.mailto.is_some() { 3 } else { 1 };
         let provider = Crossref::new(cr, client("crossref", &policy)?);
         builder = builder.provider(Arc::new(provider), policy, 20);
     }

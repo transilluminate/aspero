@@ -66,15 +66,19 @@ impl Engine {
             .collect();
         let mut usage: Vec<(ProviderId, Usage)> = Vec::new();
 
+        // Not found where that is final (doi.org for DOIs): ask no further.
+        let mut settled = vec![false; results.len()];
         for entry in &self.entries {
             let caps = entry.provider.capabilities();
             let eligible: Vec<usize> = (0..results.len())
-                .filter(|&i| results[i].record.is_none())
+                .filter(|&i| results[i].record.is_none() && !settled[i])
                 .filter(|&i| caps.lookup_kinds.contains(&results[i].id.kind()))
                 .collect();
             let ids: Vec<WorkId> = eligible.iter().map(|&i| results[i].id.clone()).collect();
             let answers = self.lookup_at(entry, &ids, fields, &mut usage).await;
             for (&i, (attempt, record)) in eligible.iter().zip(answers) {
+                settled[i] = matches!(attempt.outcome, Outcome::NotFound)
+                    && caps.final_misses.contains(&results[i].id.kind());
                 results[i].record = record;
                 results[i].attempts.push(attempt);
             }

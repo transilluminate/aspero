@@ -28,7 +28,7 @@ required-features = ["bindgen"]
 bindgen = ["uniffi/cli"]
 
 [dependencies]
-aspero-bib = { workspace = true, features = ["styles"] }
+aspero-bib = { workspace = true, features = ["docx", "styles"] }
 aspero-core.workspace = true
 aspero-engine.workspace = true
 aspero-json.workspace = true
@@ -41,6 +41,7 @@ uniffi = "0.32.2"
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["rt"] }
+zip = { workspace = true }
 
 # Not a dist app: the xcframework workflow ships it.
 [package.metadata.dist]

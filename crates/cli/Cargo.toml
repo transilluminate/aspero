@@ -15,7 +15,7 @@ categories = ["command-line-utilities", "science"]
 workspace = true
 
 [dependencies]
-aspero-bib = { workspace = true, features = ["styles"] }
+aspero-bib = { workspace = true, features = ["docx", "styles"] }
 aspero-core.workspace = true
 aspero-engine.workspace = true
 aspero-json.workspace = true

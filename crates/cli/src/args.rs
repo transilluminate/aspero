@@ -250,9 +250,11 @@ Examples:
         claim: ClaimArgs,
     },
 
-    /// Check every entry of a BibTeX/BibLaTeX, RIS or CSL-JSON file, CI-style.
+    /// Check every entry of a BibTeX/BibLaTeX, RIS or CSL-JSON file, or the
+    /// Zotero or Mendeley citations in a Word document, CI-style.
     #[command(after_help = "\
-The format is told from the contents. Each entry's title, authors, year,
+The format is told from the contents; a .docx file's citations are read
+from the fields Zotero and Mendeley keep in it. Each entry's title, authors, year,
 journal, volume, pages and identifiers (DOI, arXiv, PMID, ISBN, and those
 in URLs) are verified, then reported with fixes:
   error    retracted or withdrawn; not found; identifier wrong or
@@ -267,6 +269,7 @@ pre-commit hook or CI job. JSON output has a summary and every finding.
 
 Examples:
   aspero check refs.bib
+  aspero check paper.docx
   aspero check --fail-on warning --format json thesis.bib > report.json
   cat refs.bib | aspero check -")]
     Check {

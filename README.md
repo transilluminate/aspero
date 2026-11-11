@@ -51,8 +51,10 @@ aspero verify "Vaswani 2017 Attention is all you need"
 aspero verify --title "Deep learning" --author LeCun --year 2015 --id 10.1038/nature14539
 aspero verify - < citations.txt        # one claim per line, text or JSON
 
-# Check a whole bibliography: BibTeX, RIS or CSL-JSON (CI-friendly: exits 9 on errors)
+# Check a whole bibliography: BibTeX, RIS, CSL-JSON, or a Word document's
+# Zotero/Mendeley citations (CI-friendly: exits 9 on errors)
 aspero check refs.bib
+aspero check paper.docx
 aspero check --fail-on warning --format json thesis.ris
 
 # Write what's found as BibTeX or RIS, or as a reference list in a style

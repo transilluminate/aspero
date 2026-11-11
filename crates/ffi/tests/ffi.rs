@@ -3,8 +3,8 @@
 
 use aspero_ffi::records::ReadError;
 use aspero_ffi::records::{
-    Author, BibFormat, BibProblem, CiteFormat, Claim, ErrorKind, ExportFormat, KeyStatus,
-    LookupStatus, Reason, SearchRequest, StyleError, StyleSource, Verdict, Work,
+    Author, BibFormat, BibProblem, CitationManager, CiteFormat, Claim, ErrorKind, ExportFormat,
+    KeyStatus, LookupStatus, Reason, SearchRequest, StyleError, StyleSource, Verdict, Work,
 };
 use aspero_ffi::{Aspero, AsperoError, CallToken, Config, Patience};
 
@@ -255,6 +255,38 @@ fn works_cite_in_a_style() {
         Err(StyleError::Invalid { .. })
     ));
     assert!(handle.style_credits().contains("Attribution-ShareAlike"));
+}
+
+#[test]
+fn word_documents_give_their_citations() {
+    use std::io::Write;
+    let json = r#"{"citationItems":[{"id":1,"uris":["http://zotero.org/users/1/items/ABCD1234"],"itemData":{"type":"article-journal","title":"Deep learning","DOI":"10.1038/nature14539"}}]}"#;
+    let instr = format!("ADDIN ZOTERO_ITEM CSL_CITATION {json}")
+        .replace('&', "&amp;")
+        .replace('"', "&quot;");
+    let body = format!(
+        r#"<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body><w:p><w:r><w:t>See </w:t></w:r><w:fldSimple w:instr="{instr}"><w:r><w:t>[1]</w:t></w:r></w:fldSimple></w:p></w:body></w:document>"#
+    );
+    let mut data = Vec::new();
+    {
+        let mut zip = zip::ZipWriter::new(std::io::Cursor::new(&mut data));
+        let stored = zip::write::SimpleFileOptions::default()
+            .compression_method(zip::CompressionMethod::Stored);
+        zip.start_file("word/document.xml", stored).unwrap();
+        zip.write_all(body.as_bytes()).unwrap();
+        zip.finish().unwrap();
+    }
+    let handle = aspero(None);
+    let read = handle.read_docx(data).unwrap();
+    assert_eq!(read.manager, Some(CitationManager::Zotero));
+    assert_eq!(read.citations, 1);
+    assert_eq!(read.entries[0].claim.key.as_deref(), Some("ABCD1234"));
+    assert_eq!(read.entries[0].claim.ids, ["doi:10.1038/nature14539"]);
+    assert_eq!(read.text, "See [1]\n");
+    assert_eq!(
+        handle.read_docx(b"plain".to_vec()).unwrap_err(),
+        ReadError::Unrecognised
+    );
 }
 
 #[test]

@@ -30,9 +30,9 @@ pub mod records;
 
 use records::{
     Bibliography, Budget, CacheStats, CitationStyle, CiteFormat, CitedEntry, Claim as ClaimRecord,
-    ExportFormat, KeyCheck, KeyStatus, Line, LineReference, Lookup, Lookups, Mention,
-    ProviderUsage, ReadError, Reference, SearchRequest, SearchResults, StyleError, StyleSource,
-    Unavailable, Verification, Verifications, Work,
+    DocxReferences, ExportFormat, KeyCheck, KeyStatus, Line, LineReference, Lookup, Lookups,
+    Mention, ProviderUsage, ReadError, Reference, SearchRequest, SearchResults, StyleError,
+    StyleSource, Unavailable, Verification, Verifications, Work,
 };
 
 uniffi::setup_scaffolding!();
@@ -310,6 +310,14 @@ impl Aspero {
             format: format.into(),
             entries: entries.into_iter().map(Into::into).collect(),
         })
+    }
+
+    /// The citations Zotero or Mendeley keep in a Word document (.docx),
+    /// each work once as a claim to verify, and the document's text.
+    /// Throws `ReadError.Unrecognised` for anything but a .docx file.
+    /// Offline.
+    pub fn read_docx(&self, data: Vec<u8>) -> Result<DocxReferences, ReadError> {
+        Ok(aspero_bib::docx::read_docx(&data)?.into())
     }
 
     /// Works as BibTeX entries (keys kept distinct) or RIS records, one

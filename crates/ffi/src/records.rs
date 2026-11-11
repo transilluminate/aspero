@@ -1323,3 +1323,39 @@ impl From<aspero_bib::cite::StyleError> for StyleError {
         }
     }
 }
+
+/// The citation manager whose fields a Word document holds.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Enum)]
+pub enum CitationManager {
+    Zotero,
+    Mendeley,
+}
+
+/// What a Word document cites.
+#[derive(Debug, Clone, uniffi::Record)]
+pub struct DocxReferences {
+    /// Each work cited, once, in order of first citation, its `claim`
+    /// ready to verify; `key` is the manager's item key.
+    pub entries: Vec<BibEntry>,
+    /// Whose citation fields they came from; `nil` when there were none.
+    pub manager: Option<CitationManager>,
+    /// Citations in the text (one may cite several works).
+    pub citations: u32,
+    /// The document's text, a paragraph per line: without fields, its
+    /// reference list can be split with `splitReferences` instead.
+    pub text: String,
+}
+
+impl From<aspero_bib::docx::DocxReferences> for DocxReferences {
+    fn from(d: aspero_bib::docx::DocxReferences) -> Self {
+        DocxReferences {
+            entries: d.entries.into_iter().map(Into::into).collect(),
+            manager: d.manager.map(|m| match m {
+                aspero_bib::docx::Manager::Mendeley => CitationManager::Mendeley,
+                _ => CitationManager::Zotero,
+            }),
+            citations: d.citations as u32,
+            text: d.text,
+        }
+    }
+}

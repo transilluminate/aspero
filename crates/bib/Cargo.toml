@@ -17,7 +17,15 @@ biblatex.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
 hayagriva = { workspace = true, optional = true }
+quick-xml = { workspace = true, optional = true }
+serde = { workspace = true, optional = true }
+zip = { workspace = true, optional = true }
 
 [features]
 # Citation styles (APA, Vancouver, …) via hayagriva.
 styles = ["dep:hayagriva"]
+# Zotero and Mendeley citations in Word documents.
+docx = ["dep:quick-xml", "dep:serde", "dep:zip"]
+
+[dev-dependencies]
+zip = { workspace = true }

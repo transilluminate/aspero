@@ -85,7 +85,7 @@ impl Engine {
         let Some(registry) = self.registry() else {
             return found;
         };
-        let works = crate::found_records(&report.results, |_| true);
+        let works = crate::enrich::found_records(&report.results, |_| true);
         for (i, theirs) in self.ask_about(registry, works, &mut report.usage).await {
             if let Some(ours) = &report.results[i].record {
                 found[i] = disagreements(ours, &theirs);

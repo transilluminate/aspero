@@ -1,5 +1,18 @@
 # Changelog
 
+## Unreleased
+
+- Blank claims (`""`, whitespace, or JSON with only blank fields) are
+  `invalid` instead of being searched for.
+- FFI: `lookup`, `verify` and `verify_each` take an optional `cancel:
+  CallToken`; cancelling it aborts the call, which throws the new
+  `AsperoError.Cancelled`. Swift `Task` cancellation doesn't reach Rust
+  through UniFFI 0.32, so 0.4.0's claim that it did was wrong.
+- FFI: `scan` mentions add `utf16: {start, end}` for `NSString` ranges.
+- The xcframework is Apple silicon only and built for macOS 26.0
+  (`UNIVERSAL=1` and `MACOSX_DEPLOYMENT_TARGET` for other builds),
+  which also silences linker warnings about newer macOS versions.
+
 ## 0.4.0
 
 Breaking:

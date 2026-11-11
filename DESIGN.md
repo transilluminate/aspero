@@ -284,9 +284,14 @@ fixture recorded with different parameters once hid a ranking bug.
 call (batch, interactive, offline). The app passes everything in: contact
 address, keys (it keeps them in the Keychain), cache directory; nothing is
 read from the environment. Calls run on the handle's own Tokio runtime,
-so any executor can await them, and a dropped call is aborted. Hold one
-handle per app. `just xcframework` builds `AsperoFFI.xcframework` (arm64 +
-x86_64, static) and the Swift bindings; a workflow attaches both to each
+so any executor can await them. Cancellation is explicit: UniFFI's Swift
+bindings (0.32) don't pass a `Task`'s cancellation to Rust, so calls take
+an optional `CallToken` the app cancels from `withTaskCancellationHandler`;
+the call's task is aborted and it throws `Cancelled`. `scan` adds `utf16`
+ranges for `NSString`. Hold one
+handle per app. `just xcframework` builds `AsperoFFI.xcframework` (static, arm64,
+macOS 26+; `UNIVERSAL=1` adds x86_64, `MACOSX_DEPLOYMENT_TARGET`
+overrides) and the Swift bindings; a workflow attaches both to each
 release. Not published to crates.io.
 
 Not until needed: priority lanes in the pacer, a daemon, a SQLite

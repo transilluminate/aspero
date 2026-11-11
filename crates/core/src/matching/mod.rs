@@ -49,9 +49,10 @@ const UNCORROBORATED_CAP: f64 = 0.8;
 /// Author score that corroborates a match: the first author present
 /// (0.75 for structured claims, 0.9 in free text).
 const CORROBORATING_AUTHORS: f64 = 0.75;
-/// Confidence ceiling, below plausible, when the only evidence is a short
-/// title found inside free text.
-const SHORT_TITLE_CAP: f64 = 0.5;
+/// Confidence ceiling, below plausible, without evidence of which work is
+/// cited: only a year or journal agreeing, or a short title found inside
+/// free text.
+const NO_EVIDENCE_CAP: f64 = 0.5;
 /// Content words below which a title found inside free text is short: one
 /// or two words turn up in any text ("Aspero", "Deep learning").
 const SHORT_TITLE_WORDS: usize = 3;
@@ -134,12 +135,17 @@ impl Claim {
     /// otherwise a free-text reference (see [`Claim::from_text`]).
     pub fn from_input(input: &str) -> Self {
         let input = input.trim();
-        match input.parse::<WorkId>() {
-            Ok(id) => Claim {
+        let whole = || match crate::id::scan(input).as_slice() {
+            // As a copy spaced it out: `https:// doi. org/ 10. 1183/ …`.
+            [m] if m.span == (0..input.len()) => Some(m.id.clone()),
+            _ => None,
+        };
+        match input.parse::<WorkId>().ok().or_else(whole) {
+            Some(id) => Claim {
                 ids: vec![id],
                 ..Claim::default()
             },
-            Err(_) => Claim::from_text(input),
+            None => Claim::from_text(input),
         }
     }
 
@@ -243,12 +249,22 @@ pub struct Assessment {
     pub ids: Agreement,
 }
 
+/// A title that is a URL.
+fn is_url(title: &str) -> bool {
+    let t = title.trim();
+    let starts = |p: &str| t.get(..p.len()).is_some_and(|h| h.eq_ignore_ascii_case(p));
+    starts("http://") || starts("https://") || starts("www.") || t.contains("://")
+}
+
 /// Scores how well `record` matches `claim`.
 pub fn assess(claim: &Claim, record: &SourceRecord) -> Assessment {
     let work = &record.work;
     let text = claim.text.as_deref().map(Normalised::new);
+    // A placeholder record's "title" may be a URL (a registration agency's
+    // notice page): no title at all.
+    let work_title = work.title.clone().filter(|t| !is_url(t));
 
-    let title = match (&claim.title, &work.title, &text) {
+    let title = match (&claim.title, &work_title, &text) {
         (Some(claimed), Some(actual), _) => FieldCheck::scored(title_similarity(claimed, actual)),
         (None, Some(actual), Some(text)) => FieldCheck::scored(text.title_coverage(actual)),
         _ => FieldCheck::UNKNOWN,
@@ -356,12 +372,19 @@ pub fn assess(claim: &Claim, record: &SourceRecord) -> Assessment {
     // authors, the journal, the place or an identifier.
     let short_title_in_text = claim.title.is_none()
         && text.is_some()
-        && work
-            .title
+        && work_title
             .as_deref()
             .is_some_and(|t| content_words(t).len() < SHORT_TITLE_WORDS);
     if short_title_in_text && !corroborated && container.agreement != Agreement::Match {
-        confidence = confidence.min(SHORT_TITLE_CAP);
+        confidence = confidence.min(NO_EVIDENCE_CAP);
+    }
+    // A year, or a year and journal, identify nothing: some work matches
+    // them by chance. It takes the title, authors, an identifier or the
+    // place.
+    let identified =
+        matches!(title.agreement, Agreement::Match | Agreement::Partial) || corroborated;
+    if !id_only && !identified {
+        confidence = confidence.min(NO_EVIDENCE_CAP);
     }
     // A wrong volume or page is an error in the citation, and tells an
     // original from the letters and corrections in the same journal.
@@ -378,7 +401,7 @@ pub fn assess(claim: &Claim, record: &SourceRecord) -> Assessment {
     }
     // A reply, correction or commentary is not the work it responds to,
     // unless the citation says it is citing one.
-    if let Some(actual) = &work.title
+    if let Some(actual) = &work_title
         && is_derivative(actual)
         && !claim_mentions_derivative(claim)
     {

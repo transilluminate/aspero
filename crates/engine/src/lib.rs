@@ -20,11 +20,17 @@
 //!   cached with per-kind TTLs ([`CachePolicy`]) and served stale if a
 //!   provider fails; every answer says how it was [`Served`].
 //!
+//! - **Sharing**: one engine serves many callers at once. Lookups already
+//!   in flight are joined rather than repeated, and each caller sets its
+//!   own patience with [`CallOptions`].
+//!
 //! Not yet: fan-out search, the circuit breaker and the cross-process
 //! limiter.
 
 mod abstracts;
 mod check;
+mod inflight;
+mod options;
 mod registry;
 mod resolve;
 pub mod retry;
@@ -64,7 +70,9 @@ use aspero_core::{
 };
 pub use aspero_store::{Cache, SqliteCache, Stats as CacheStats, StoreError};
 use jiff::Timestamp;
+pub use options::CallOptions;
 
+use crate::inflight::{Answer, InFlight};
 use crate::retry::{Jitter, random_jitter, with_retries};
 
 /// A clock, injectable so cache expiry is testable.
@@ -113,6 +121,10 @@ impl Served {
     }
 }
 
+/// Cheap to clone: clones, and views made with
+/// [`with_options`](Engine::with_options), share the cache, providers'
+/// pacing and requests in flight. Hold one per process.
+#[derive(Clone)]
 pub struct Engine {
     /// In priority order.
     entries: Vec<Entry>,
@@ -120,8 +132,11 @@ pub struct Engine {
     cache: Option<Arc<dyn Cache>>,
     cache_policy: CachePolicy,
     clock: Clock,
+    options: CallOptions,
+    inflight: Arc<InFlight>,
 }
 
+#[derive(Clone)]
 struct Entry {
     provider: Arc<dyn Provider>,
     policy: ResiliencePolicy,
@@ -179,6 +194,8 @@ impl EngineBuilder {
             cache: self.cache,
             cache_policy: self.cache_policy,
             clock: self.clock,
+            options: CallOptions::default(),
+            inflight: Arc::default(),
         }
     }
 }
@@ -273,6 +290,19 @@ impl Engine {
             cache_policy: CachePolicy::default(),
             clock: Timestamp::now,
         }
+    }
+
+    /// This engine for a caller with different patience; it shares
+    /// everything else.
+    pub fn with_options(&self, options: CallOptions) -> Engine {
+        Engine {
+            options,
+            ..self.clone()
+        }
+    }
+
+    pub fn options(&self) -> CallOptions {
+        self.options
     }
 
     /// Registered providers, in priority order.
@@ -417,7 +447,10 @@ impl Engine {
             outcome,
             served,
         };
-        let mut answers: Vec<Option<(Attempt, Option<SourceRecord>)>> = vec![None; ids.len()];
+        if self.options.offline {
+            return self.offline_lookups(&provider, ids, fields);
+        }
+        let mut answers: Vec<Option<Answer>> = vec![None; ids.len()];
 
         // Fresh cached answers first (one cache read for the whole set).
         let mut pending = Vec::new();
@@ -446,10 +479,16 @@ impl Engine {
         if from_cache > 0 {
             tracing::info!(target: "aspero::cache", provider = %provider, ids = from_cache, "lookups served from cache");
         }
-        let mut chunks = pending.chunks(caps.max_batch.max(1));
+        // Ask about the rest, unless another caller is already asking.
+        let wanted: Vec<(usize, WorkId)> = pending.iter().map(|&i| (i, ids[i].clone())).collect();
+        let (mut leads, joined) = self.inflight.claim(&provider, &wanted, fields);
+        let led = leads.indices();
+        let policy = self.options.apply(&entry.policy);
+        let mut chunks = led.chunks(caps.max_batch.max(1));
         while let Some(chunk) = chunks.next() {
+            leads.publish(&answers);
             let batch: Vec<WorkId> = chunk.iter().map(|&i| ids[i].clone()).collect();
-            let answer = with_retries(&entry.policy, self.jitter, || {
+            let answer = with_retries(&policy, self.jitter, || {
                 entry.provider.lookup(&batch, fields)
             })
             .await;
@@ -509,6 +548,24 @@ impl Engine {
                     Some(record) => (attempt(Outcome::Found, Served::Stale), Some(record)),
                     None => (attempt(Outcome::Failed(error.clone()), Served::Live), None),
                 });
+            }
+        }
+        leads.publish(&answers);
+        drop(leads);
+
+        // Answers others fetched; ask again for any they gave up on.
+        let mut abandoned = Vec::new();
+        for (i, call) in joined {
+            match call.answer().await {
+                Some(answer) => answers[i] = Some(answer),
+                None => abandoned.push(i),
+            }
+        }
+        if !abandoned.is_empty() {
+            let retry: Vec<WorkId> = abandoned.iter().map(|&i| ids[i].clone()).collect();
+            let again = Box::pin(self.lookup_at(entry, &retry, fields, usage)).await;
+            for (i, answer) in abandoned.into_iter().zip(again) {
+                answers[i] = Some(answer);
             }
         }
         answers
@@ -580,11 +637,25 @@ impl Engine {
             served,
         };
         let cached = self.cached_search(&provider, &sent);
+        if self.options.offline {
+            return match cached {
+                Some((page, fresh)) => Ok(report(
+                    page,
+                    None,
+                    if fresh { Served::Cache } else { Served::Stale },
+                )),
+                None => Err(EngineError::Provider {
+                    provider: provider.clone(),
+                    error: Error::Offline,
+                }),
+            };
+        }
         if let Some((page, true)) = cached {
             tracing::info!(target: "aspero::cache", provider = %provider, text = %sent.text, "search served from cache");
             return Ok(report(page, None, Served::Cache));
         }
-        match with_retries(&entry.policy, self.jitter, || entry.provider.search(&sent)).await {
+        let policy = self.options.apply(&entry.policy);
+        match with_retries(&policy, self.jitter, || entry.provider.search(&sent)).await {
             Ok(resp) => {
                 self.remember_search(&provider, &sent, &resp.value);
                 Ok(report(resp.value, resp.usage, Served::Live))
@@ -627,6 +698,32 @@ impl Engine {
                     None if entry.is_fresh(now, policy.misses) => Some(None),
                     _ => None,
                 }
+            })
+            .collect()
+    }
+
+    /// Every answer from the cache, however old: offline.
+    fn offline_lookups(
+        &self,
+        provider: &ProviderId,
+        ids: &[WorkId],
+        fields: FieldSet,
+    ) -> Vec<Answer> {
+        let fresh = self.cached_lookups(provider, ids, fields);
+        let any = self.stale_lookups(provider, ids);
+        let attempt = |outcome, served| Attempt {
+            provider: provider.clone(),
+            outcome,
+            served,
+        };
+        fresh
+            .into_iter()
+            .zip(any)
+            .map(|answer| match answer {
+                (Some(Some(record)), _) => (attempt(Outcome::Found, Served::Cache), Some(record)),
+                (Some(None), _) => (attempt(Outcome::NotFound, Served::Cache), None),
+                (None, Some(record)) => (attempt(Outcome::Found, Served::Stale), Some(record)),
+                (None, None) => (attempt(Outcome::Failed(Error::Offline), Served::Live), None),
             })
             .collect()
     }

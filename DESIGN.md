@@ -210,6 +210,13 @@ budget (`QuotaExhausted`) or rejected credentials stop further calls to
 that provider in a lookup. `-v` logs every request with time queued and
 taken.
 
+Callers share one engine (cheap clones, one per process): a lookup
+already in flight for the same provider, identifier and fields is joined,
+not repeated, and a cancelled leader's joiners ask themselves. Each caller
+sets its patience (`CallOptions`): `interactive()` caps deadlines and
+retries so someone waiting gets a fallback within seconds; `offline()`
+answers from the cache only, however old.
+
 Planned for 0.4 (below): a **cross-process** rate limiter (ticket scheme
 in SQLite, so parallel processes share one budget) and a **shared circuit
 breaker** (closed → open after N countable failures → half-open probe).
@@ -261,18 +268,15 @@ A GUI (a macOS app over FFI) and parallel agents hold one engine for a
 long time and ask many things at once. In order, each step tested on its
 own:
 
-1. **In-flight sharing** (one HTTP call per provider, id and fields) and
-   **per-call options**: an interactive profile (short deadline, stale
-   cache served at once) and a batch one.
-2. **Provider state across calls**: a spent quota until it resets, a
+1. **Provider state across calls**: a spent quota until it resets, a
    rejected key, and the circuit breaker.
-3. **Streaming** results as they finish (JSON lines in the CLI), with
+2. **Streaming** results as they finish (JSON lines in the CLI), with
    batches capped to a few items at once so interactive calls aren't
    queued behind them.
-4. **The cross-process limiter**: SQLite tickets, one budget for the app,
+3. **The cross-process limiter**: SQLite tickets, one budget for the app,
    the CLI and parallel agents.
-5. **Credentials**: env, then the OS keyring, then a `0600` file.
-6. **`aspero-ffi`**: UniFFI, async calls, config passed in (the app owns
+4. **Credentials**: env, then the OS keyring, then a `0600` file.
+5. **`aspero-ffi`**: UniFFI, async calls, config passed in (the app owns
    the Keychain), an `.xcframework` attached to releases.
 
 Not until needed: priority lanes in the pacer, a daemon, a SQLite

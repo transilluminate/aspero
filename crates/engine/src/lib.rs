@@ -33,6 +33,7 @@ mod check;
 mod enrich;
 mod health;
 mod inflight;
+mod inputs;
 mod lookup;
 mod options;
 mod registry;
@@ -71,6 +72,7 @@ use std::time::Duration;
 
 use aspero_core::{Error, ErrorCategory, Provider, ProviderId, ResiliencePolicy, Usage};
 pub use aspero_store::{Cache, Pacing, SqliteCache, Stats as CacheStats, StoreError};
+pub use inputs::{Extras, InputLookup, InputsReport, Looked};
 use jiff::Timestamp;
 pub use lookup::{Attempt, LookupReport, LookupResult, Outcome};
 pub use options::CallOptions;

@@ -1,7 +1,7 @@
 //! Lookup results.
 
 use aspero_core::ErrorCategory;
-use aspero_engine::{Disagreement, LookupResult, Outcome, Served};
+use aspero_engine::{Disagreement, InputLookup, LookupResult, Outcome, Served};
 use serde_json::{Value, json};
 
 use crate::work;
@@ -90,6 +90,28 @@ pub fn item(input: &str, result: &LookupResult, full: bool) -> Value {
         item["attempts"] = json!(attempts);
     }
     item
+}
+
+/// One input's lookup, with whatever extras were asked for.
+pub fn input(input: &str, lookup: &InputLookup, full: bool) -> Value {
+    let looked = match lookup {
+        InputLookup::Invalid(e) => return invalid(input, &e.to_string()),
+        InputLookup::Looked(looked) => looked,
+    };
+    let mut out = item(input, &looked.result, full);
+    if looked.with_punctuation {
+        out["note"] = json!("found with the trailing punctuation kept");
+    }
+    if let Some(found) = &looked.abstract_text {
+        work::set_abstract(&mut out["work"], found.as_ref());
+    }
+    if let Some(latest) = &looked.latest {
+        out["latest"] = work::work(latest, false);
+    }
+    if !looked.disagreements.is_empty() {
+        out["disagreements"] = disagreements(&looked.disagreements);
+    }
+    out
 }
 
 /// Where a record contradicts its DOI's registry: `[{field, value,

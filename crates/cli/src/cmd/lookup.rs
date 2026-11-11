@@ -2,107 +2,35 @@
 
 use std::io::IsTerminal;
 
-use aspero_core::{Doi, FieldSet, IdError, SourceRecord, WorkId};
-use aspero_engine::{Abstract, Engine, LookupReport, LookupResult, describe_update};
+use aspero_engine::{Engine, Extras, InputLookup, Looked, LookupResult, describe_update};
 use aspero_json::Status;
-use serde_json::{Value, json};
+use serde_json::Value;
 
-use super::{Failure, Out, merge_usage, print, print_line, read_stdin};
+use super::{Failure, Out, print, print_line, read_stdin};
 use crate::args::Format;
 use crate::exit::Exit;
 use crate::output::{self, Level};
 
 pub async fn run(engine: &Engine, ids: Vec<String>, out: Out) -> Result<Exit, Failure> {
     let (inputs, from) = inputs(ids)?;
-    let parsed: Vec<Result<WorkId, IdError>> = inputs.iter().map(|s| s.parse()).collect();
-    let valid: Vec<WorkId> = parsed
-        .iter()
-        .filter_map(|p| p.as_ref().ok().cloned())
-        .collect();
-    let mut report = engine.lookup(&valid, FieldSet::DEFAULT).await;
-    let retried = retry_with_punctuation(engine, &inputs, &parsed, &mut report).await;
-    let mut conflicts = vec![Vec::new(); report.results.len()];
-    if out.full {
-        engine.add_notices(&mut report).await;
-        engine.add_open_access(&mut report).await;
-        conflicts = engine.cross_check(&mut report).await;
-    }
-
-    // Abstracts for the works found, one batched call; None per result
-    // when not asked for or not found.
-    let mut abstracts: Vec<Option<Option<Abstract>>> = vec![None; report.results.len()];
-    if out.abstracts {
-        let found: Vec<(usize, &SourceRecord)> = report
-            .results
-            .iter()
-            .enumerate()
-            .filter_map(|(i, r)| Some((i, r.record.as_ref()?)))
-            .collect();
-        let records: Vec<&SourceRecord> = found.iter().map(|(_, r)| *r).collect();
-        let fetched = engine.abstracts(&records).await;
-        for ((i, _), a) in found.iter().zip(fetched.found) {
-            abstracts[*i] = Some(a);
-        }
-        for (p, u) in fetched.usage {
-            merge_usage(&mut report.usage, &p, u);
-        }
-    }
-    // The latest version of each superseded work (Cochrane `.pubN`), one
-    // batched lookup per step along the chains.
-    let mut latest: Vec<Option<SourceRecord>> = vec![None; report.results.len()];
-    if out.full {
-        let found: Vec<(usize, &SourceRecord)> = report
-            .results
-            .iter()
-            .enumerate()
-            .filter_map(|(i, r)| Some((i, r.record.as_ref()?)))
-            .collect();
-        let records: Vec<&SourceRecord> = found.iter().map(|(_, r)| *r).collect();
-        let versions = engine.latest_versions(&records).await;
-        for ((i, _), record) in found.iter().zip(versions.latest) {
-            latest[*i] = record;
-        }
-        for (p, u) in versions.usage {
-            merge_usage(&mut report.usage, &p, u);
-        }
-    }
-    let mut results = report
-        .results
-        .iter()
-        .zip(&abstracts)
-        .zip(&latest)
-        .zip(&conflicts);
+    let mut extras = Extras::default();
+    extras.full = out.full;
+    extras.abstracts = out.abstracts;
+    let report = engine.lookup_inputs(&inputs, extras).await;
 
     // Every input gets an item, in input order, including ones that didn't
     // parse: a request is never silently dropped.
     let mut exit = Exit::Ok;
     let mut items = Vec::new();
-    for ((input, parsed), from) in inputs.iter().zip(&parsed).zip(from) {
-        let (mut item, item_exit) = match parsed {
-            Err(e) => (aspero_json::invalid(input, &e.to_string()), Exit::Usage),
-            Ok(_) => {
-                let (((result, found), newest), conflicts) =
-                    results.next().expect("one result per valid id");
-                let mut item = aspero_json::lookup_item(input, result, out.full);
-                if retried.contains(&result.id) {
-                    item["note"] = json!("found with the trailing punctuation kept");
-                }
-                if let Some(found) = found {
-                    output::set_abstract(&mut item["work"], found.as_ref());
-                }
-                if let Some(newest) = newest {
-                    item["latest"] = output::work(newest, false);
-                }
-                if !conflicts.is_empty() {
-                    item["disagreements"] = aspero_json::disagreements(conflicts);
-                }
-                (item, exit_for(result))
-            }
-        };
+    for ((input, lookup), from) in inputs.iter().zip(&report.items).zip(from) {
+        let mut item = aspero_json::input_lookup(input, lookup, out.full);
+        exit = exit.worst(match looked(lookup) {
+            None => Exit::Usage,
+            Some(l) => exit_for(&l.result),
+        });
         if let Some(from) = from {
             item["from"] = from;
         }
-        exit = exit.worst(item_exit);
         items.push(item);
     }
 
@@ -112,14 +40,12 @@ pub async fn run(engine: &Engine, ids: Vec<String>, out: Out) -> Result<Exit, Fa
             let mut table =
                 output::table(&["ID", "Status", "Year", "Author", "Title", "Free", "Via"]);
             let mut listed = Vec::new();
-            let mut abstracts = abstracts.iter();
-            for (item, result) in items.iter().zip(per_input(&parsed, &report.results)) {
-                table.add_row(row(item, result));
-                let found = result
-                    .and_then(|_| abstracts.next())
-                    .and_then(Option::as_ref);
+            for (item, lookup) in items.iter().zip(&report.items) {
+                let looked = looked(lookup);
+                table.add_row(row(item, looked.map(|l| &l.result)));
+                let found = looked.and_then(|l| l.abstract_text.as_ref());
                 if let (Some(found), Some(id)) = (found, item["id"].as_str()) {
-                    listed.push((id.to_owned(), found.clone()));
+                    listed.push((id.to_owned(), found));
                 }
             }
             println!("{table}");
@@ -131,13 +57,10 @@ pub async fn run(engine: &Engine, ids: Vec<String>, out: Out) -> Result<Exit, Fa
             }
         }
         Format::Text => {
-            let mut abstracts = abstracts.iter();
-            for (item, result) in items.iter().zip(per_input(&parsed, &report.results)) {
-                print!("{}", text(item, result));
-                let found = result
-                    .and_then(|_| abstracts.next())
-                    .and_then(Option::as_ref);
-                if let Some(found) = found {
+            for (item, lookup) in items.iter().zip(&report.items) {
+                let looked = looked(lookup);
+                print!("{}", text(item, looked.map(|l| &l.result)));
+                if let Some(found) = looked.and_then(|l| l.abstract_text.as_ref()) {
                     println!("{}", output::abstract_text(found.as_ref(), "  "));
                 }
                 println!();
@@ -147,51 +70,17 @@ pub async fn run(engine: &Engine, ids: Vec<String>, out: Out) -> Result<Exit, Fa
             }
         }
         Format::Json | Format::Auto => {
-            print(&json!({"results": items, "usage": output::usage(&report.usage)}));
+            print(&serde_json::json!({"results": items, "usage": output::usage(&report.usage)}));
         }
     }
     Ok(exit)
 }
 
-/// DOIs may legally end in `.` (or `,;:`), which parsing strips as sentence
-/// punctuation. For DOIs not found that way, ask once more with the
-/// punctuation kept, in one batch; found ones replace their results.
-/// Returns the identifiers that were found only on retry.
-async fn retry_with_punctuation(
-    engine: &Engine,
-    inputs: &[String],
-    parsed: &[Result<WorkId, IdError>],
-    report: &mut LookupReport,
-) -> Vec<WorkId> {
-    let valid_inputs = inputs
-        .iter()
-        .zip(parsed)
-        .filter(|(_, p)| p.is_ok())
-        .map(|(i, _)| i);
-    let retries: Vec<(usize, WorkId)> = valid_inputs
-        .zip(&report.results)
-        .enumerate()
-        .filter(|(_, (_, r))| r.is_not_found())
-        .filter_map(|(i, (input, _))| {
-            Some((i, WorkId::Doi(Doi::with_trailing_punctuation(input)?)))
-        })
-        .collect();
-    if retries.is_empty() {
-        return Vec::new();
+fn looked(lookup: &InputLookup) -> Option<&Looked> {
+    match lookup {
+        InputLookup::Looked(l) => Some(l),
+        _ => None,
     }
-    let ids: Vec<WorkId> = retries.iter().map(|(_, id)| id.clone()).collect();
-    let second = engine.lookup(&ids, FieldSet::DEFAULT).await;
-    for (p, u) in second.usage {
-        merge_usage(&mut report.usage, &p, u);
-    }
-    let mut found = Vec::new();
-    for ((i, _), result) in retries.into_iter().zip(second.results) {
-        if result.record.is_some() {
-            found.push(result.id.clone());
-            report.results[i] = result;
-        }
-    }
-    found
 }
 
 /// Arguments, or one identifier per stdin line when given none (or `-`).
@@ -220,17 +109,6 @@ fn inputs(ids: Vec<String>) -> Result<(Vec<String>, Vec<Option<Value>>), Failure
             _ => (line.to_owned(), None),
         })
         .unzip())
-}
-
-/// The engine result for each input, `None` for inputs that didn't parse.
-fn per_input<'a>(
-    parsed: &'a [Result<WorkId, IdError>],
-    results: &'a [LookupResult],
-) -> impl Iterator<Item = Option<&'a LookupResult>> {
-    let mut results = results.iter();
-    parsed
-        .iter()
-        .map(move |p| p.as_ref().ok().and_then(|_| results.next()))
 }
 
 /// The exit code a result implies.

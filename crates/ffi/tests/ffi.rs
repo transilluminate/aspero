@@ -62,6 +62,37 @@ fn pasted_lists_split_into_references() {
 }
 
 #[test]
+fn dois_broken_at_a_hyphen_carry_an_alternative() {
+    let text = "1. Smith J. doi:10.1038/nat-\n   ure14539\n2. Jones K. Two. 2021.";
+    let handle = aspero(None);
+    let refs = handle.split_references(text.into());
+    assert_eq!(
+        refs[0].alternative_ids[0].alternative,
+        "doi:10.1038/nature14539"
+    );
+    let found = handle.scan(text.into());
+    assert_eq!(
+        found[0].alternative_id.as_deref(),
+        Some("doi:10.1038/nature14539")
+    );
+}
+
+#[test]
+fn laid_out_lines_split_by_indent() {
+    let line = |text: &str, indent| aspero_ffi::records::Line {
+        text: text.into(),
+        indent,
+    };
+    let refs = aspero(None).split_lines(vec![
+        line("World Health Organization. Global report.", 72.0),
+        line("Geneva: WHO; 2020.", 90.0),
+        line("Smith J. A study. Nature. 2021.", 72.0),
+    ]);
+    assert_eq!(refs.len(), 2);
+    assert_eq!((refs[0].lines.start, refs[0].lines.end), (0, 2));
+}
+
+#[test]
 fn offline_lookups_answer_without_the_network() {
     let dir = std::env::temp_dir().join(format!("aspero-ffi-{}", std::process::id()));
     let handle = aspero(Some(dir.display().to_string()));
@@ -192,5 +223,44 @@ fn live_key_checks() {
         eprintln!("{checked:?}");
         assert_eq!(checked.status, KeyStatus::Valid);
         assert!(checked.budget.is_some_and(|b| b.remaining.is_some()));
+    }
+}
+
+/// Times the path where a DOI's reading without its line-break hyphen is
+/// needed: `cargo test -p aspero-ffi alternative_timing -- --ignored --nocapture`.
+#[test]
+#[ignore = "network"]
+fn alternative_timing() {
+    let lists = [
+        (
+            "alt",
+            "1. LeCun Y, Bengio Y, Hinton G. Deep learning. Nature. 2015;521:436-444. doi:10.1038/nature-\n14539",
+        ),
+        (
+            "whole",
+            "1. LeCun Y, Bengio Y, Hinton G. Deep learning. Nature. 2015;521:436-444. doi:10.1038/nature14539",
+        ),
+    ];
+    for run in 1..=3 {
+        for (name, list) in lists {
+            let handle = aspero(None);
+            let claims: Vec<Claim> = handle
+                .split_references(list.into())
+                .into_iter()
+                .map(|r| Claim {
+                    text: Some(r.text),
+                    alternative_ids: r.alternative_ids,
+                    ..Claim::default()
+                })
+                .collect();
+            let start = std::time::Instant::now();
+            let v = block_on(handle.verify(claims, false, Patience::Interactive, None)).unwrap();
+            eprintln!(
+                "{run} {name}: {:.1}s {:?} {}",
+                start.elapsed().as_secs_f64(),
+                v.results[0].verdict,
+                v.results[0].reason
+            );
+        }
     }
 }

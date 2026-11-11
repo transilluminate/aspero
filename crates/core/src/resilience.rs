@@ -11,6 +11,8 @@ use std::time::Duration;
 pub struct ResiliencePolicy {
     /// Minimum gap between request starts (1 / rate limit).
     pub min_interval: Duration,
+    /// Most requests in flight at once from this process; 0 for no limit.
+    pub max_in_flight: usize,
     /// Timeout for a single HTTP attempt.
     pub attempt_timeout: Duration,
     /// Retries after the first attempt, for retryable errors only.
@@ -32,6 +34,7 @@ impl Default for ResiliencePolicy {
     fn default() -> Self {
         ResiliencePolicy {
             min_interval: Duration::from_secs(1),
+            max_in_flight: 0,
             attempt_timeout: Duration::from_secs(20),
             max_retries: 4,
             backoff_base: Duration::from_millis(500),

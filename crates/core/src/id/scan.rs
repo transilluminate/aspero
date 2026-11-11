@@ -9,7 +9,9 @@
 //! often something else. Mentions are cleaned like pasted input: wrapping
 //! brackets, quotes and emphasis and trailing sentence punctuation are not
 //! part of them, while brackets inside a DOI are. Markdown links and table
-//! cells are split apart. A DOI broken across lines is not found.
+//! cells are split apart. A DOI or URL broken across lines, as text from
+//! PDFs is, is rejoined by the rules `split_references` uses: the mention
+//! then spans both lines.
 
 use std::ops::Range;
 
@@ -26,26 +28,130 @@ pub struct Mention {
     /// 1-based column of the mention's start, in characters.
     pub column: usize,
     /// Byte range of the mention as written, label included (`PMID:
-    /// 123`), wrappers and trailing punctuation not.
+    /// 123`), wrappers and trailing punctuation not. A link broken across
+    /// lines spans both, line break included.
     pub span: Range<usize>,
 }
 
-/// Every identifier mentioned in `text`, in order, repeats included.
+impl Mention {
+    /// For a DOI broken across lines at a hyphen, the DOI without that
+    /// hyphen: typesetters rarely add one inside a link, but some do, so
+    /// it's worth a lookup if the DOI as printed doesn't exist. `text` is
+    /// the text scanned.
+    pub fn alternative(&self, text: &str) -> Option<WorkId> {
+        let written = crate::fold::Folded::new(text.get(self.span.clone())?).text;
+        let mut joined = String::new();
+        let mut broken = false;
+        let mut rest = written.as_str();
+        while let Some(at) = rest.find('-') {
+            let after = &rest[at + 1..];
+            let gap = after.len() - after.trim_start().len();
+            let at_break = after[..gap].contains('\n');
+            joined.push_str(&rest[..at + usize::from(!at_break)]);
+            broken |= at_break;
+            rest = &after[if at_break { gap } else { 0 }..];
+        }
+        joined.push_str(rest);
+        if !broken || self.id.kind() != IdKind::Doi {
+            return None;
+        }
+        let joined: String = joined.split_whitespace().collect::<Vec<_>>().join(" ");
+        let id: WorkId = scan_clean(&joined)
+            .into_iter()
+            .find(|m| m.span.start == 0)?
+            .id;
+        (id != self.id && id.kind() == IdKind::Doi).then_some(id)
+    }
+}
+
+/// Every identifier mentioned in `text`, in order, repeats included. Text
+/// from PDFs is cleaned first (ligatures, invisible characters, look-alike
+/// dashes and quotes); spans point into `text` as given.
 pub fn scan(text: &str) -> Vec<Mention> {
+    let folded = crate::fold::Folded::new(text);
+    scan_clean(&folded.text)
+        .into_iter()
+        .map(|m| {
+            let span = folded.original(&m.span);
+            let line_start = text[..span.start].rfind('\n').map_or(0, |i| i + 1);
+            Mention {
+                line: m.line,
+                column: text[line_start..span.start].chars().count() + 1,
+                span,
+                ..m
+            }
+        })
+        .collect()
+}
+
+/// [`scan`] of text already cleaned.
+fn scan_clean(text: &str) -> Vec<Mention> {
+    let mut lines: Vec<(usize, &str)> = Vec::new();
+    let mut at = 0;
+    for line in text.split('\n') {
+        lines.push((at, line));
+        at += line.len() + 1;
+    }
     let mut found = Vec::new();
-    let mut line_start = 0;
-    for (n, line) in text.split('\n').enumerate() {
-        for (id, span) in scan_line(line) {
+    // Where a mention continued onto the next line ends: nothing before it
+    // there is scanned again.
+    let mut resume = 0;
+    for (n, &(start, line)) in lines.iter().enumerate() {
+        let mentions = scan_line(line);
+        let last = mentions.len().saturating_sub(1);
+        for (i, (id, span)) in mentions.into_iter().enumerate() {
+            let mut span = start + span.start..start + span.end;
+            if span.start < resume {
+                continue;
+            }
+            let mut id = id;
+            if i == last
+                && let Some(&(next_start, next)) = lines.get(n + 1)
+                && let Some((joined, end)) =
+                    rejoin(text, &span, start + line.len(), next_start, next)
+            {
+                id = joined;
+                span.end = end;
+                resume = end;
+            }
             found.push(Mention {
                 id,
                 line: n + 1,
-                column: line[..span.start].chars().count() + 1,
-                span: line_start + span.start..line_start + span.end,
+                column: text[start..span.start].chars().count() + 1,
+                span,
             });
         }
-        line_start += line.len() + 1;
     }
     found
+}
+
+/// A link mention at the end of its line (`span`, the line ending at
+/// `line_end`) continued at the start of the next: the whole identifier and
+/// where the continuation ends.
+fn rejoin(
+    text: &str,
+    span: &Range<usize>,
+    line_end: usize,
+    next_start: usize,
+    next: &str,
+) -> Option<(WorkId, usize)> {
+    // What the cleaning dropped after the mention (a `.` before the
+    // break), if nothing else follows it on the line.
+    let tail = text[span.end..line_end].trim_end();
+    if tail.chars().count() > 1 || tail.contains(char::is_whitespace) {
+        return None;
+    }
+    let raw = &text[span.start..span.end + tail.len()];
+    if !crate::references::link_continues(raw, next) {
+        return None;
+    }
+    let indent = next.len() - next.trim_start().len();
+    let token = next.split_whitespace().next()?;
+    let joined = format!("{raw}{token}");
+    let (id, within) = scan_line(&joined)
+        .into_iter()
+        .find(|(_, s)| s.start == 0 && s.end > raw.len())?;
+    Some((id, next_start + indent + within.end - raw.len()))
 }
 
 /// Identifiers in one line, with byte ranges within it.
@@ -153,6 +259,78 @@ mod tests {
                 ),
             ]
         );
+    }
+
+    #[test]
+    fn links_broken_across_lines_are_rejoined() {
+        let text = "3. Wakefield AJ. Lancet. 1998;351:637-641.\n   https://doi.org/10.1016/S0140-\n   6736(97)11096-0\nnext";
+        assert_eq!(
+            found(text),
+            [(
+                "doi:10.1016/s0140-6736(97)11096-0".into(),
+                "https://doi.org/10.1016/S0140-\n   6736(97)11096-0"
+            )]
+        );
+        let m = &scan(text)[0];
+        assert_eq!((m.line, m.column), (2, 4));
+        assert_eq!(
+            found("doi:10.1016/j.cell.\r\n2020.01.001."),
+            [(
+                "doi:10.1016/j.cell.2020.01.001".into(),
+                "doi:10.1016/j.cell.\r\n2020.01.001"
+            )]
+        );
+        assert_eq!(
+            found("DOI: 10.1016/j.ce\nll.2021.02.003 and PMID: 30252312"),
+            [
+                (
+                    "doi:10.1016/j.cell.2021.02.003".into(),
+                    "DOI: 10.1016/j.ce\nll.2021.02.003"
+                ),
+                ("pmid:30252312".into(), "PMID: 30252312"),
+            ]
+        );
+    }
+
+    #[test]
+    fn pdf_look_alikes_are_cleaned_but_spans_are_as_written() {
+        let text = "ﬁnding: doi:10.1038/s41586\u{2013}020\u{AD}-2649-2";
+        let m = &scan(text)[0];
+        assert_eq!(m.id.to_string(), "doi:10.1038/s41586-020-2649-2");
+        assert_eq!(
+            &text[m.span.clone()],
+            "doi:10.1038/s41586\u{2013}020\u{AD}-2649-2"
+        );
+        assert_eq!(m.column, 9);
+    }
+
+    #[test]
+    fn dois_broken_at_a_hyphen_have_an_alternative() {
+        let text = "see https://doi.org/10.1038/nat-\n   ure14539 and doi:10.1/x";
+        let m = &scan(text)[0];
+        assert_eq!(m.id.to_string(), "doi:10.1038/nat-ure14539");
+        assert_eq!(
+            m.alternative(text).map(|id| id.to_string()).as_deref(),
+            Some("doi:10.1038/nature14539")
+        );
+        // Not broken at a hyphen, or not broken at all: none.
+        let text = "doi:10.1016/j.cell.\n2020.01.001 doi:10.1038/s41586-020-2649-2";
+        assert!(scan(text).iter().all(|m| m.alternative(text).is_none()));
+    }
+
+    #[test]
+    fn links_ending_their_line_stay_whole() {
+        assert_eq!(
+            found("see doi:10.1038/nature14539.\nNature reviewed it, PMC6716493"),
+            [
+                ("doi:10.1038/nature14539".into(), "doi:10.1038/nature14539"),
+                ("pmcid:PMC6716493".into(), "PMC6716493"),
+            ]
+        );
+        for next in ["2015 was a good year", "2015. A good year"] {
+            let text = format!("doi:10.1038/nature14539\n{next}");
+            assert_eq!(found(&text)[0].1, "doi:10.1038/nature14539");
+        }
     }
 
     #[test]

@@ -108,6 +108,9 @@ pub struct Capabilities {
     /// records other providers supplied.
     pub notices: bool,
     pub search_filters: Vec<Filter>,
+    /// Identifier kinds whose "not found" here is final: no other provider
+    /// can know them (doi.org for DOIs), so lookups stop asking.
+    pub final_misses: Vec<IdKind>,
     pub citations: bool,
     pub references: bool,
     pub recommend: bool,

@@ -280,7 +280,8 @@ fixture recorded with different parameters once hid a ranking bug.
 
 `aspero-ffi` (UniFFI) gives apps one `Aspero` handle: `lookup`, `verify`,
 `verify_each` (a callback per result as it finishes), `search`, offline
-`scan` and `split_references`, and for settings `budgets` (as last
+`scan`, `split_references` and `split_lines` (laid-out lines with
+indents, from PDFKit), and for settings `budgets` (as last
 reported: free), `check_openalex_key` (one free lookup), `cache_stats`,
 `clear_cache` and `unavailable`. Network calls take a `Patience` (batch,
 interactive, offline).

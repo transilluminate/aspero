@@ -29,9 +29,9 @@ use tokio::task::JoinHandle;
 pub mod records;
 
 use records::{
-    Budget, CacheStats, Claim as ClaimRecord, KeyCheck, KeyStatus, Lookup, Lookups, Mention,
-    ProviderUsage, Reference, SearchRequest, SearchResults, Unavailable, Verification,
-    Verifications,
+    Budget, CacheStats, Claim as ClaimRecord, KeyCheck, KeyStatus, Line, LineReference, Lookup,
+    Lookups, Mention, ProviderUsage, Reference, SearchRequest, SearchResults, Unavailable,
+    Verification, Verifications,
 };
 
 uniffi::setup_scaffolding!();
@@ -387,6 +387,21 @@ impl Aspero {
             Some(cache) => cache.clear().map_err(|e| AsperoError::Cache(e.to_string())),
             None => Ok(()),
         }
+    }
+
+    /// The references in a list's lines as laid out (from PDFKit), using
+    /// their indents: hanging or first-line indents mark where references
+    /// start when the text alone can't. Numbered lists, and lines all at
+    /// one indent, are split as `splitReferences` splits text. Offline.
+    pub fn split_lines(&self, lines: Vec<Line>) -> Vec<LineReference> {
+        let lines: Vec<aspero_core::IndentedLine> = lines
+            .into_iter()
+            .map(|l| aspero_core::IndentedLine::new(l.text, l.indent))
+            .collect();
+        aspero_core::split_lines(&lines)
+            .iter()
+            .map(Into::into)
+            .collect()
     }
 
     /// Providers refusing calls now, and why: a spent budget, a rejected

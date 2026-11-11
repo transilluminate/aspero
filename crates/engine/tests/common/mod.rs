@@ -21,6 +21,8 @@ pub struct Scripted {
     pub works: Vec<SourceRecord>,
     pub matcher_hits: Vec<SourceRecord>,
     pub queries: Mutex<Vec<SearchQuery>>,
+    /// How long each search takes.
+    pub search_delay: std::time::Duration,
 }
 
 impl Scripted {
@@ -35,7 +37,14 @@ impl Scripted {
             works: Vec::new(),
             matcher_hits: Vec::new(),
             queries: Mutex::default(),
+            search_delay: std::time::Duration::ZERO,
         }
+    }
+
+    /// Searches take `delay` (as Crossref's matcher can).
+    pub fn slow(mut self, delay: std::time::Duration) -> Self {
+        self.search_delay = delay;
+        self
     }
 
     pub fn matcher(mut self, hits: Vec<SourceRecord>) -> Self {
@@ -90,6 +99,7 @@ impl Provider for Scripted {
 
     async fn search(&self, query: &SearchQuery) -> Result<Response<Page>> {
         self.queries.lock().unwrap().push(query.clone());
+        tokio::time::sleep(self.search_delay).await;
         let records: Vec<SourceRecord> = match query.mode {
             SearchMode::Citation => self.matcher_hits.clone(),
             _ => self

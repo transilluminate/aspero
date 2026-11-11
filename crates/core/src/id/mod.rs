@@ -286,8 +286,15 @@ impl FromStr for WorkId {
     /// Detects the kind: URL host first, then an explicit `kind:` prefix or
     /// a label (`PMID 123`, `ISBN 978-…`, as [`scan`] finds them), then the
     /// shape of a bare value. Bare all-digit input is ambiguous (PMID or
-    /// S2 CorpusId) and is rejected rather than guessed.
+    /// S2 CorpusId) and is rejected rather than guessed. Look-alike
+    /// characters are cleaned first, as [`scan`] does.
     fn from_str(input: &str) -> Result<Self, IdError> {
+        // Look-alikes from PDFs and word processors (a Unicode hyphen in a
+        // DOI, a zero-width space) are what they look like.
+        let folded = crate::fold::Folded::new(input);
+        if folded.text != input {
+            return folded.text.parse();
+        }
         let s = syntax::clean_pasted(input);
         if s.is_empty() {
             return Err(IdError::Empty);
@@ -361,6 +368,12 @@ mod tests {
 
     fn parse(s: &str) -> Result<WorkId, IdError> {
         s.parse()
+    }
+
+    #[test]
+    fn look_alikes_parse_as_what_they_look_like() {
+        let id: WorkId = "10.1038/s41586\u{2010}020\u{200B}-2649-2".parse().unwrap();
+        assert_eq!(id.to_string(), "doi:10.1038/s41586-020-2649-2");
     }
 
     #[test]

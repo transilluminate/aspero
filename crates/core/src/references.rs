@@ -20,6 +20,9 @@
 
 use std::ops::Range;
 
+use crate::Alternative;
+use crate::fold::Folded;
+
 /// One reference found in a list.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
@@ -29,29 +32,139 @@ pub struct Reference {
     /// Byte range in the list: from after the marker to the end of its
     /// last line.
     pub span: Range<usize>,
+    /// DOIs broken across lines at a hyphen, read without it: to try if
+    /// the DOI as printed doesn't exist.
+    pub alternatives: Vec<Alternative>,
 }
 
-/// The references in `text`, in order.
+/// The references in `text`, in order. Text from PDFs is cleaned first
+/// (ligatures, invisible characters, look-alike dashes and quotes); spans
+/// point into `text` as given.
 pub fn split_references(text: &str) -> Vec<Reference> {
-    let list = List::new(text);
-    let groups = list.numbered().unwrap_or_else(|| {
-        let paragraphs: Vec<Vec<Range<usize>>> = list
-            .lines
-            .split(Option::is_none)
-            .filter(|p| !p.is_empty())
-            .map(|p| p.iter().flatten().cloned().collect())
-            .collect();
-        let alone = paragraphs.len() == 1;
-        paragraphs
-            .into_iter()
-            .flat_map(|p| list.unnumbered(p, alone))
-            .collect()
-    });
+    let folded = Folded::new(text);
+    let list = List::new(&folded.text);
+    let groups = list.groups();
+    references(text, &folded, &list, groups)
+}
+
+/// A line of a reference list as laid out, with its distance from the
+/// left edge (any unit, such as PDF points).
+#[derive(Debug, Clone, PartialEq)]
+#[non_exhaustive]
+pub struct IndentedLine {
+    pub text: String,
+    pub indent: f64,
+}
+
+impl IndentedLine {
+    pub fn new(text: impl Into<String>, indent: f64) -> Self {
+        IndentedLine {
+            text: text.into(),
+            indent,
+        }
+    }
+}
+
+/// One reference found in laid-out lines.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct LineReference {
+    /// On one line, without its number or bullet.
+    pub text: String,
+    /// Indices of the lines it spans.
+    pub lines: Range<usize>,
+    pub alternatives: Vec<Alternative>,
+}
+
+/// The references in laid-out lines (as from a PDF), using the layout
+/// plain text loses: with a hanging indent, references start at the
+/// margin; with a first-line indent, indented. Numbered lists, and lines
+/// all at one indent, are split by the text rules of [`split_references`].
+pub fn split_lines(lines: &[IndentedLine]) -> Vec<LineReference> {
+    let text = lines
+        .iter()
+        .map(|l| l.text.replace(['\r', '\n'], " "))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let folded = Folded::new(&text);
+    let list = List::new(&folded.text);
+    let groups = match starts_by_indent(lines) {
+        Some(starts) if list.numbered().is_none() => {
+            let mut groups: Vec<Vec<Range<usize>>> = Vec::new();
+            for (i, line) in list.lines.iter().enumerate() {
+                let Some(line) = line else { continue };
+                match groups.last_mut() {
+                    Some(group) if !starts[i] => group.push(line.clone()),
+                    _ => groups.push(vec![line.clone()]),
+                }
+            }
+            groups
+        }
+        _ => list.groups(),
+    };
+    let line_starts: Vec<usize> = std::iter::once(0)
+        .chain(text.match_indices('\n').map(|(i, _)| i + 1))
+        .collect();
+    let line_of = |byte: usize| line_starts.partition_point(|&s| s <= byte) - 1;
+    references(&text, &folded, &list, groups)
+        .into_iter()
+        .map(|r| LineReference {
+            lines: line_of(r.span.start)..line_of(r.span.end.saturating_sub(1)) + 1,
+            text: r.text,
+            alternatives: r.alternatives,
+        })
+        .collect()
+}
+
+/// Which lines start a reference, by indent: `None` if the lines don't
+/// differ enough to tell. Indents within half the gap to the next level
+/// count as the same, so jitter in a PDF's positions doesn't matter.
+fn starts_by_indent(lines: &[IndentedLine]) -> Option<Vec<bool>> {
+    let content: Vec<&IndentedLine> = lines.iter().filter(|l| !l.text.trim().is_empty()).collect();
+    let margin = content
+        .iter()
+        .map(|l| l.indent)
+        .fold(f64::INFINITY, f64::min);
+    let next = content
+        .iter()
+        .map(|l| l.indent)
+        .filter(|&i| i > margin + 1.0)
+        .fold(f64::INFINITY, f64::min);
+    if !next.is_finite() {
+        return None;
+    }
+    let at_margin = |l: &IndentedLine| l.indent - margin < (next - margin) / 2.0;
+    let first = content.iter().find(|l| !is_heading(l.text.trim()))?;
+    let starting = at_margin(first);
+    Some(
+        lines
+            .iter()
+            .map(|l| !l.text.trim().is_empty() && at_margin(l) == starting)
+            .collect(),
+    )
+}
+
+/// Groups of lines (ranges in `folded`) as references in `text`.
+fn references(
+    text: &str,
+    folded: &Folded,
+    list: &List,
+    groups: Vec<Vec<Range<usize>>>,
+) -> Vec<Reference> {
     groups
         .into_iter()
-        .map(|g| Reference {
-            text: list.join(&g),
-            span: g[0].start..g[g.len() - 1].end,
+        .map(|g| {
+            let span = folded.original(&(g[0].start..g[g.len() - 1].end));
+            let written = &text[span.clone()];
+            let alternatives = crate::id::scan(written)
+                .iter()
+                .filter_map(|m| Some(Alternative::new(m.id.clone(), m.alternative(written)?)))
+                .collect();
+            Reference {
+                text: list.join(&g),
+                span,
+                alternatives,
+            }
         })
         .filter(|r| !is_heading(&r.text))
         .collect()
@@ -76,6 +189,24 @@ impl<'a> List<'a> {
             at += raw.len();
         }
         List { text, lines }
+    }
+
+    /// Groups by the text rules: numbers or bullets, else paragraphs, else
+    /// lines.
+    fn groups(&self) -> Vec<Vec<Range<usize>>> {
+        self.numbered().unwrap_or_else(|| {
+            let paragraphs: Vec<Vec<Range<usize>>> = self
+                .lines
+                .split(Option::is_none)
+                .filter(|p| !p.is_empty())
+                .map(|p| p.iter().flatten().cloned().collect())
+                .collect();
+            let alone = paragraphs.len() == 1;
+            paragraphs
+                .into_iter()
+                .flat_map(|p| self.unnumbered(p, alone))
+                .collect()
+        })
     }
 
     fn line(&self, r: &Range<usize>) -> &'a str {
@@ -108,8 +239,16 @@ impl<'a> List<'a> {
                 (None, None) => {}
             }
         }
+        // One marker counts only on the first line ("1. Smith J. …"): later,
+        // it may be a wrapped line ("2. ed. Berlin").
+        let first_marked = self
+            .lines
+            .iter()
+            .flatten()
+            .next()
+            .is_some_and(|l| marker(self.line(l)).is_some());
         groups.retain(|g| !g.is_empty());
-        (groups.len() >= 2).then_some(groups)
+        (groups.len() >= 2 || groups.len() == 1 && first_marked).then_some(groups)
     }
 
     /// Groups lines without markers: each its own reference if `alone`
@@ -256,10 +395,11 @@ fn hyphenated_word(text: &str) -> bool {
 /// `next` continues a DOI or URL that `text` ends with, broken where PDFs
 /// break them: after `/`, `-` or `_` (`10.1038/s41586-` + `020-2649-2`),
 /// after a dot before a digit or lower case (`j.cell.` + `2020.01.001`),
-/// or mid-word before more of the link (`j.ce` + `ll.2020.01.001`).
+/// or mid-word before more of the link (`j.ce` + `ll.2020.01.001`, not
+/// `2015` or `2015.`).
 /// Hyphens are kept as printed: DOIs have real ones, and typesetters
 /// rarely add their own inside a link.
-fn link_continues(text: &str, next: &str) -> bool {
+pub(crate) fn link_continues(text: &str, next: &str) -> bool {
     let token = next.split_whitespace().next().unwrap_or_default();
     let Some(first) = token.chars().next() else {
         return false;
@@ -273,13 +413,16 @@ fn link_continues(text: &str, next: &str) -> bool {
     } else if text.ends_with('.') {
         lower_or_digit
     } else {
-        lower_or_digit && token.contains(|c: char| c.is_ascii_digit() || "./-_".contains(c))
+        // Mid-word: only before more of a link, never a word or a year.
+        let inner = token.trim_end_matches(|c: char| !c.is_alphanumeric());
+        lower_or_digit && inner.contains(|c: char| "./-_".contains(c))
     }
 }
 
 /// `text` ends inside a DOI or URL.
 fn in_link(text: &str) -> bool {
     let word = text.rsplit(char::is_whitespace).next().unwrap_or_default();
+    let word = word.to_ascii_lowercase();
     word.starts_with("http") || word.starts_with("doi:") || word.starts_with("10.")
 }
 
@@ -431,11 +574,88 @@ mod tests {
     }
 
     #[test]
+    fn a_single_numbered_reference_loses_its_number() {
+        assert_eq!(
+            texts("1. LeCun Y. Deep learning. Nature. 2015."),
+            ["LeCun Y. Deep learning. Nature. 2015."]
+        );
+        // A number further down is part of the reference.
+        assert_eq!(
+            texts("Smith J. A book.\n2. ed. Berlin: Springer; 2010."),
+            ["Smith J. A book. 2. ed. Berlin: Springer; 2010."]
+        );
+    }
+
+    #[test]
     fn markers_alone_on_their_line_number_the_next() {
         assert_eq!(
             texts("[1]\nSmith J. One. 2020.\n[2]\nJones K. Two. 2021.\n[3] "),
             ["Smith J. One. 2020.", "Jones K. Two. 2021."]
         );
+    }
+
+    #[test]
+    fn pdf_text_is_cleaned_and_spans_point_into_it() {
+        let list = "1. Smith J. Neuro\u{AD}\nlogical ﬁndings. doi:10.1038/s41586\u{2010}020-2649-2\n\
+            2. Jones K. Two. 2021.";
+        let refs = split_references(list);
+        assert_eq!(
+            refs[0].text,
+            "Smith J. Neurological findings. doi:10.1038/s41586-020-2649-2"
+        );
+        assert!(list[refs[0].span.clone()].starts_with("Smith J. Neuro\u{AD}"));
+        assert!(list[refs[0].span.clone()].ends_with("\u{2010}020-2649-2"));
+    }
+
+    #[test]
+    fn dois_broken_at_a_hyphen_carry_the_reading_without_it() {
+        let refs = split_references("1. Smith J. doi:10.1038/nat-\nure14539\n2. Jones K. 2021.");
+        assert_eq!(refs[0].text, "Smith J. doi:10.1038/nat-ure14539");
+        let alt = &refs[0].alternatives[0];
+        assert_eq!(alt.claimed.to_string(), "doi:10.1038/nat-ure14539");
+        assert_eq!(alt.alternative.to_string(), "doi:10.1038/nature14539");
+        assert!(refs[1].alternatives.is_empty());
+    }
+
+    #[test]
+    fn hanging_indents_mark_starts_that_text_cannot() {
+        // Each line ends a sentence and the next starts with a capital,
+        // so the text alone reads three references.
+        let lines = [
+            IndentedLine::new("References", 72.4),
+            IndentedLine::new("World Health Organization. Global report.", 72.0),
+            IndentedLine::new("Geneva: WHO; 2020.", 90.2),
+            IndentedLine::new("Smith J. A study. Nature. 2021.", 71.8),
+        ];
+        let refs = split_lines(&lines);
+        assert_eq!(
+            refs.iter().map(|r| r.text.as_str()).collect::<Vec<_>>(),
+            [
+                "World Health Organization. Global report. Geneva: WHO; 2020.",
+                "Smith J. A study. Nature. 2021.",
+            ]
+        );
+        assert_eq!(refs[0].lines, 1..3);
+        assert_eq!(refs[1].lines, 3..4);
+    }
+
+    #[test]
+    fn first_line_indents_and_flat_lists() {
+        let lines = [
+            IndentedLine::new("Smith J. A study of", 90.0),
+            IndentedLine::new("Things. Nature. 2021.", 72.0),
+            IndentedLine::new("Jones K. Another. 2022.", 90.0),
+        ];
+        assert_eq!(split_lines(&lines).len(), 2);
+        // One indent throughout: the text rules decide.
+        let flat = [
+            IndentedLine::new("1. Smith J. One.", 72.0),
+            IndentedLine::new("2020.", 72.0),
+            IndentedLine::new("2. Jones K. Two. 2021.", 72.0),
+        ];
+        let refs = split_lines(&flat);
+        assert_eq!(refs[0].text, "Smith J. One. 2020.");
+        assert_eq!(refs[1].lines, 2..3);
     }
 
     #[test]

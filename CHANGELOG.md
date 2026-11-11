@@ -1,5 +1,45 @@
 # Changelog
 
+## Unreleased
+
+Added:
+
+- `scan`, `split_references` and identifier parsing clean text from PDFs
+  and word processors first: ligatures (`ﬁ`) expanded, soft hyphens and
+  zero-width characters dropped (a soft hyphen at a line end marks a
+  broken word), Unicode hyphens, dashes, quotes and spaces folded to
+  ASCII. Spans still point into the text as given.
+- A DOI broken across lines at a hyphen is kept as printed, and its
+  reading without the hyphen is tried if the printed one doesn't exist:
+  `Claim::alternatives`, `Reference::alternatives`,
+  `Mention::alternative` (JSON `scan`: `alternative`; FFI:
+  `alternativeIds` on `Claim` and `Reference`, `alternativeId` on
+  `Mention`). `verify --split` passes them on.
+- `split_lines` (FFI `splitLines`): splits a reference list's lines as
+  laid out, using their indents (hanging or first-line) where the text
+  alone can't tell; each reference gives its range of line indices.
+
+Faster:
+
+- `verify` no longer waits for citation matchers (Crossref's takes
+  seconds) once the claim's identifiers alone verify it: a cold verify
+  of a correct citation with its DOI takes about 0.4 s instead of 2–4 s.
+- Lookups stop at a final "not found" (doi.org for DOIs): a DOI that
+  doesn't exist is no longer searched for at Europe PMC, which took up
+  to 5 s.
+- Crossref gets one request in flight at a time without a contact
+  address (its public pool refuses a second with 429), a few with one.
+- A DOI's alternative reading is looked up alongside the printed one in
+  `verify`'s first stage instead of before it.
+
+Fixed:
+
+- A lone numbered reference (`1. LeCun Y. …`) loses its number.
+- `scan` rejoins a DOI or URL broken across lines (as in text from PDFs)
+  by the rules `split_references` uses; the mention spans both lines.
+  A link split mid-word is rejoined only before more of a link, never
+  before a word or a year.
+
 ## 0.5.0
 
 Breaking:

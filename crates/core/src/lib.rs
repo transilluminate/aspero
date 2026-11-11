@@ -14,6 +14,7 @@
 
 pub mod csl;
 pub mod error;
+mod fold;
 pub mod http;
 pub mod id;
 pub mod matching;
@@ -33,13 +34,13 @@ pub use id::{
     ArxivId, CorpusId, Doi, IdError, IdKind, Isbn, Nbk, OpenAlexId, Pmcid, Pmid, S2PaperId, WorkId,
     canonical,
 };
-pub use matching::{Agreement, Assessment, Claim, FieldCheck};
+pub use matching::{Agreement, Alternative, Assessment, Claim, FieldCheck};
 pub use provider::{
     Capabilities, Cursor, Filter, Hit, Lookup, Page, PageReq, Provider, ProviderId, Response,
     SearchMode, SearchQuery, Usage, YearRange,
 };
 pub use record::{Field, FieldSet, Raw, SourceRecord};
-pub use references::{Reference, split_references};
+pub use references::{IndentedLine, LineReference, Reference, split_lines, split_references};
 pub use resilience::ResiliencePolicy;
 pub use work::{
     OpenAccess, PartialDate, Person, Update, UpdateKind, UpdateTo, Work, WorkType, tidy_abstract,

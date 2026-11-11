@@ -63,7 +63,8 @@ fn transport_error(e: reqwest::Error) -> Error {
 }
 
 /// Spaces request *starts* at least `min_interval` apart, across all tasks
-/// sharing it. Slots are handed out in arrival order, so waiting is fair.
+/// sharing it, and optionally limits requests in flight. Slots are handed
+/// out in arrival order, so waiting is fair.
 ///
 /// With [`shared`](Paced::shared) pacing, slots come from a store that
 /// every process using it shares (the cache file), so parallel processes
@@ -78,6 +79,7 @@ pub struct Paced {
     min_interval: Duration,
     next_slot: Mutex<Option<Instant>>,
     shared: Option<Shared>,
+    in_flight: Option<Arc<tokio::sync::Semaphore>>,
 }
 
 struct Shared {
@@ -98,7 +100,15 @@ impl Paced {
             min_interval,
             next_slot: Mutex::new(None),
             shared: None,
+            in_flight: None,
         }
+    }
+
+    /// Keeps at most `n` requests in flight at once (0: no limit), for
+    /// providers that refuse concurrent requests rather than fast ones.
+    pub fn max_in_flight(mut self, n: usize) -> Self {
+        self.in_flight = (n > 0).then(|| Arc::new(tokio::sync::Semaphore::new(n)));
+        self
     }
 
     /// Paces with every other process using `pacing`.
@@ -141,6 +151,10 @@ impl Paced {
 impl HttpClient for Paced {
     async fn send(&self, request: HttpRequest) -> Result<HttpResponse, Error> {
         let queued = Instant::now();
+        let _permit = match &self.in_flight {
+            Some(limit) => Some(limit.acquire().await.expect("never closed")),
+            None => None,
+        };
         let slot = self.claim().await;
         tokio::time::sleep_until(slot).await;
         let started = Instant::now();

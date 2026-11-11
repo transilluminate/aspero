@@ -124,6 +124,80 @@ async fn an_invented_doi_is_a_mismatch_pointing_at_the_real_work() {
     assert_eq!(v.why, Reason::IdMissing);
 }
 
+#[tokio::test(start_paused = true)]
+async fn a_verifying_lookup_does_not_wait_for_slow_matchers() {
+    let openalex = Arc::new(Scripted::new("openalex").with(vec![deep_learning()]));
+    let crossref = Arc::new(
+        Scripted::new("crossref")
+            .matcher(vec![deep_learning()])
+            .slow(std::time::Duration::from_secs(60)),
+    );
+    let engine = engine(vec![openalex, crossref]);
+    let claim = Claim::from_text(
+        "LeCun Y, Bengio Y, Hinton G. Deep learning. Nature. 2015;521:436-444. doi:10.1038/nature14539",
+    );
+
+    let start = tokio::time::Instant::now();
+    let v = engine.verify(&claim, 5).await;
+    assert_eq!(v.verdict, Verdict::Verified, "{}", v.reason);
+    assert!(start.elapsed() < std::time::Duration::from_secs(60));
+
+    // Without an identifier to settle it, the matcher is waited for.
+    let start = tokio::time::Instant::now();
+    let text =
+        Claim::from_text("LeCun Y, Bengio Y, Hinton G. Deep learning. Nature. 2015;521:436-444.");
+    engine.verify(&text, 5).await;
+    assert!(start.elapsed() >= std::time::Duration::from_secs(60));
+}
+
+#[tokio::test]
+async fn a_doi_broken_at_a_hyphen_is_tried_without_it() {
+    let (engine, _, _) = live_like();
+    let mut claim = Claim::from_text(
+        "LeCun Y, Bengio Y, Hinton G. Deep learning. Nature. 2015. doi:10.1038/nat-ure14539",
+    );
+    claim.alternatives = vec![aspero_core::Alternative::new(
+        "10.1038/nat-ure14539".parse().unwrap(),
+        "10.1038/nature14539".parse().unwrap(),
+    )];
+
+    let v = engine.verify(&claim, 5).await;
+    assert_eq!(v.verdict, Verdict::Verified, "{}", v.reason);
+    assert!(
+        v.reason.starts_with("doi:10.1038/nature14539"),
+        "{}",
+        v.reason
+    );
+}
+
+#[tokio::test]
+async fn an_alternative_is_ignored_when_the_printed_doi_exists() {
+    let crossref = Arc::new(
+        Scripted::new("crossref")
+            .matcher(vec![deep_learning()])
+            .with(vec![deep_learning(), deep_learning_for_ai()]),
+    );
+    let engine = engine(vec![crossref]);
+    // The printed DOI is real (the 2021 CACM article); the alternative
+    // happens to be the cited paper's, but the printed one was meant.
+    let mut claim = Claim::from_text(
+        "LeCun Y, Bengio Y, Hinton G. Deep learning. Nature. 2015. doi:10.1145/3448250",
+    );
+    claim.alternatives = vec![aspero_core::Alternative::new(
+        "10.1145/3448250".parse().unwrap(),
+        "10.1038/nature14539".parse().unwrap(),
+    )];
+
+    let v = engine.verify(&claim, 5).await;
+    assert_eq!(v.verdict, Verdict::Mismatch, "{}", v.reason);
+    assert!(matches!(v.why, Reason::IdElsewhere { .. }), "{:?}", v.why);
+    assert!(
+        v.reason.starts_with("doi:10.1145/3448250 is"),
+        "{}",
+        v.reason
+    );
+}
+
 #[tokio::test]
 async fn a_real_doi_attached_to_the_wrong_citation_is_a_mismatch() {
     let crossref = Arc::new(

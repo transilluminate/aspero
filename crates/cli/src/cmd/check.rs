@@ -19,13 +19,11 @@ pub async fn run(
     out: Out,
 ) -> Result<Exit, Failure> {
     let source = if path == "-" {
-        read_stdin()?
+        read_stdin()?.into_bytes()
     } else {
-        std::fs::read_to_string(&path)
-            .map_err(|e| Failure::usage(format!("could not read {path}: {e}")))?
+        std::fs::read(&path).map_err(|e| Failure::usage(format!("could not read {path}: {e}")))?
     };
-    let (_, entries) =
-        aspero_bib::read(&source).map_err(|e| Failure::usage(format!("{path}: {e}")))?;
+    let entries = entries(&path, &source)?;
     if entries.is_empty() {
         return Err(Failure::usage(format!("{path}: no entries")));
     }
@@ -98,6 +96,27 @@ pub async fn run(
         })),
     }
     Ok(if failed { Exit::Unverified } else { Exit::Ok })
+}
+
+/// A bibliography file's entries, or a Word document's citations (a zip
+/// file, as .docx files are).
+fn entries(path: &str, source: &[u8]) -> Result<Vec<BibEntry>, Failure> {
+    if source.starts_with(b"PK") {
+        let read = aspero_bib::docx::read_docx(source)
+            .map_err(|_| Failure::usage(format!("{path}: not a .docx file")))?;
+        if read.entries.is_empty() {
+            return Err(Failure::usage(format!(
+                "{path}: no Zotero or Mendeley citations; to check its reference list, \
+                 paste it into `aspero verify --split -`"
+            )));
+        }
+        return Ok(read.entries);
+    }
+    let text =
+        std::str::from_utf8(source).map_err(|_| Failure::usage(format!("{path}: not text")))?;
+    let (_, entries) =
+        aspero_bib::read(text).map_err(|e| Failure::usage(format!("{path}: {e}")))?;
+    Ok(entries)
 }
 
 fn fails(severity: Option<Severity>, fail_on: FailOn) -> bool {

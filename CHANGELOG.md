@@ -1,5 +1,18 @@
 # Changelog
 
+## Unreleased
+
+Added:
+
+- Word documents: the citations Zotero and Mendeley (Desktop) keep in a
+  .docx file's field codes, read as claims with their identifiers, each
+  work once, from the body, footnotes and endnotes. `aspero check
+  paper.docx`; FFI `readDocx(data)` → `DocxReferences { entries,
+  manager, citations, text }`, `text` being the document's paragraphs
+  for splitting its reference list when it has no fields. Mendeley
+  Cite's content controls and EndNote's fields aren't read yet.
+  (`aspero-bib`'s `docx` feature.)
+
 ## 0.6.1
 
 Added:

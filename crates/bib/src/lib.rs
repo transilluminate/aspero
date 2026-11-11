@@ -13,6 +13,8 @@
 #[cfg(feature = "styles")]
 pub mod cite;
 mod csl;
+#[cfg(feature = "docx")]
+pub mod docx;
 mod ris;
 mod write;
 

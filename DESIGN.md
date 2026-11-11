@@ -43,7 +43,8 @@ crates/
                openlibrary
   store/       disposable SQLite answer cache
   bib/         BibTeX/BibLaTeX (via the `biblatex` crate), RIS, CSL-JSON →
-               claims; works → BibTeX, RIS, and citation styles (`styles`
+               claims, and .docx citation fields (`docx` feature: Zotero,
+               Mendeley); works → BibTeX, RIS, and citation styles (`styles`
                feature: hayagriva, with the official CSL styles bundled)
   engine/      routing, caching, retries, pacing, resolve/verify/check
   json/        the JSON contract (works, lookups, verdicts, claims), shared

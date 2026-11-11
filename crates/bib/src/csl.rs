@@ -26,7 +26,7 @@ pub fn parse_csl_json(src: &str) -> Result<Vec<BibEntry>, ReadError> {
         .collect())
 }
 
-fn entry(item: &CslItem, position: usize) -> BibEntry {
+pub(crate) fn entry(item: &CslItem, position: usize) -> BibEntry {
     let work = item.to_work();
     let mut claim = Claim::default();
     claim.title = work.title.clone();

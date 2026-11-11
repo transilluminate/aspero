@@ -208,10 +208,9 @@ budget (`QuotaExhausted`) or rejected credentials stop further calls to
 that provider in a lookup. `-v` logs every request with time queued and
 taken.
 
-Deferred until real use needs them: a **cross-process** rate limiter
-(ticket scheme in SQLite, so parallel agent processes share one budget)
-and a **shared circuit breaker** (closed → open after N countable failures
-→ half-open probe).
+Planned for 0.4 (below): a **cross-process** rate limiter (ticket scheme
+in SQLite, so parallel processes share one budget) and a **shared circuit
+breaker** (closed → open after N countable failures → half-open probe).
 
 ## Provider notes and gotchas
 
@@ -254,6 +253,31 @@ fixture recorded with different parameters once hid a ranking bug.
 - **Semantic Scholar** (not built; key pending). Keyless requests mostly
   429 from an AWS gateway with no `Retry-After`; a fake key gets 403.
 
+## Next: 0.4, the engine as a long-lived service
+
+A GUI (a macOS app over FFI) and parallel agents hold one engine for a
+long time and ask many things at once. In order, each step tested on its
+own:
+
+1. **The JSON contract in a library crate**, shared by the CLI and FFI.
+2. **In-flight sharing** (one HTTP call per provider, id and fields) and
+   **per-call options**: an interactive profile (short deadline, stale
+   cache served at once) and a batch one.
+3. **Provider state across calls**: a spent quota until it resets, a
+   rejected key, and the circuit breaker.
+4. **Streaming** results as they finish (JSON lines in the CLI), with
+   batches capped to a few items at once so interactive calls aren't
+   queued behind them.
+5. **The cross-process limiter**: SQLite tickets, one budget for the app,
+   the CLI and parallel agents.
+6. **Credentials**: env, then the OS keyring, then a `0600` file.
+7. **`aspero-ffi`**: UniFFI, async calls, config passed in (the app owns
+   the Keychain), an `.xcframework` attached to releases.
+
+Not until needed: priority lanes in the pacer, a daemon, a SQLite
+connection pool. One cache per process family: the app and CLI don't
+share one (schema versions would rebuild each other's).
+
 ## Future
 
 - **S2 provider** when the key arrives: search, batch lookup,
@@ -275,9 +299,9 @@ fixture recorded with different parameters once hid a ranking bug.
   INSPIRE-HEP, HAL, CORE. Humanities stay thin (no usable APIs).
 - **Re-normalising cached records** from raw bodies when a mapping changes
   (providers declare a mapping version), instead of a cache rebuild.
-- **Configuration and credentials**: TOML config (enable/order providers,
-  per-provider resilience overrides); keys from env, OS keyring, then a
-  `0600` file; `auth status` distinguishing rejected from rate-limited.
+- **Configuration**: TOML config (enable/order providers, per-provider
+  resilience overrides); `auth status` distinguishing rejected from
+  rate-limited.
 - **Discovery**: citations/references, snowballing (co-citation, coupling),
   watches ("new since last run"), history and sessions.
 - **Integration**: export (BibTeX, CSL-JSON, RIS; styles via `hayagriva`),
@@ -286,7 +310,6 @@ fixture recorded with different parameters once hid a ranking bug.
 ## Open questions
 
 - Whether to cap OpenAlex spend per command or session.
-- When the cross-process limiter is worth building (many parallel agents?).
 - Whether a lookup should ever hedge (ask two providers at once) for
   latency.
 

@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased
+
+Fixed:
+
+- `split_references` read a list copied from a PDF onto one line ("…
+  01159.x. [21] Finucane … [22] …", as Preview copies) as one reference.
+  A line is now split before inline `[n]` markers in sequence (three or
+  more, or two from the line's start), each after a full stop and before
+  a capital, when every piece has a year or identifier; text before the
+  first number is kept as a reference when dated (#31).
+
 ## 0.6.5
 
 Fixed:

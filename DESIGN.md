@@ -281,12 +281,13 @@ A GUI (a macOS app over FFI) and parallel agents hold one engine for a
 long time and ask many things at once. In order, each step tested on its
 own:
 
-1. **Credentials**: env, then the OS keyring, then a `0600` file.
-2. **`aspero-ffi`**: UniFFI, async calls, config passed in (the app owns
+1. **`aspero-ffi`**: UniFFI, async calls, config passed in (the app owns
    the Keychain), an `.xcframework` attached to releases.
 
 Not until needed: priority lanes in the pacer, a daemon, a SQLite
-connection pool. One cache per process family: the app and CLI don't
+connection pool, and CLI keys anywhere but the environment (agents run
+headless, where a Keychain prompt after an upgrade would hang them; the
+app keeps its own keys in the Keychain and passes them in). One cache per process family: the app and CLI don't
 share one (schema versions would rebuild each other's).
 
 ## Future

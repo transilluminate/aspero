@@ -17,6 +17,7 @@ use std::io::Read;
 
 use aspero_core::{ProviderId, Usage};
 use aspero_engine::EngineError;
+pub use aspero_json::merged;
 use serde_json::Value;
 
 use crate::args::Format;
@@ -79,14 +80,6 @@ pub fn print(value: &Value) {
         "{}",
         serde_json::to_string_pretty(value).expect("JSON values serialise")
     );
-}
-
-/// `base` with `extra`'s fields added (both JSON objects).
-pub fn merged(mut base: Value, extra: Value) -> Value {
-    if let (Value::Object(b), Value::Object(e)) = (&mut base, extra) {
-        b.extend(e);
-    }
-    base
 }
 
 /// One JSON Lines record.

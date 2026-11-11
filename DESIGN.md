@@ -44,7 +44,9 @@ crates/
   store/       disposable SQLite answer cache
   bib/         BibTeX/BibLaTeX → claims (via the `biblatex` crate)
   engine/      routing, caching, retries, pacing, resolve/verify/check
-  cli/         clap front end
+  json/        the JSON contract (works, lookups, verdicts, claims), shared
+               by every front end
+  cli/         clap front end: arguments, stdin, tables and text
 bench/         verify benchmark data (known-answer citations)
 scripts/       fixture recorders, one per provider
 ```
@@ -259,19 +261,18 @@ A GUI (a macOS app over FFI) and parallel agents hold one engine for a
 long time and ask many things at once. In order, each step tested on its
 own:
 
-1. **The JSON contract in a library crate**, shared by the CLI and FFI.
-2. **In-flight sharing** (one HTTP call per provider, id and fields) and
+1. **In-flight sharing** (one HTTP call per provider, id and fields) and
    **per-call options**: an interactive profile (short deadline, stale
    cache served at once) and a batch one.
-3. **Provider state across calls**: a spent quota until it resets, a
+2. **Provider state across calls**: a spent quota until it resets, a
    rejected key, and the circuit breaker.
-4. **Streaming** results as they finish (JSON lines in the CLI), with
+3. **Streaming** results as they finish (JSON lines in the CLI), with
    batches capped to a few items at once so interactive calls aren't
    queued behind them.
-5. **The cross-process limiter**: SQLite tickets, one budget for the app,
+4. **The cross-process limiter**: SQLite tickets, one budget for the app,
    the CLI and parallel agents.
-6. **Credentials**: env, then the OS keyring, then a `0600` file.
-7. **`aspero-ffi`**: UniFFI, async calls, config passed in (the app owns
+5. **Credentials**: env, then the OS keyring, then a `0600` file.
+6. **`aspero-ffi`**: UniFFI, async calls, config passed in (the app owns
    the Keychain), an `.xcframework` attached to releases.
 
 Not until needed: priority lanes in the pacer, a daemon, a SQLite

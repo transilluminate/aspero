@@ -3,9 +3,8 @@
 use std::io::IsTerminal;
 
 use aspero_core::{Doi, FieldSet, IdError, SourceRecord, WorkId};
-use aspero_engine::{
-    Abstract, Engine, LookupReport, LookupResult, Outcome, Served, describe_update,
-};
+use aspero_engine::{Abstract, Engine, LookupReport, LookupResult, describe_update};
+use aspero_json::Status;
 use serde_json::{Value, json};
 
 use super::{Failure, Out, merge_usage, print, print_line, read_stdin};
@@ -80,14 +79,11 @@ pub async fn run(engine: &Engine, ids: Vec<String>, out: Out) -> Result<Exit, Fa
     let mut items = Vec::new();
     for ((input, parsed), from) in inputs.iter().zip(&parsed).zip(from) {
         let (mut item, item_exit) = match parsed {
-            Err(e) => (
-                json!({"input": input, "status": "invalid", "error": e.to_string()}),
-                Exit::Usage,
-            ),
+            Err(e) => (aspero_json::invalid(input, &e.to_string()), Exit::Usage),
             Ok(_) => {
                 let (((result, found), newest), conflicts) =
                     results.next().expect("one result per valid id");
-                let (mut item, exit) = item(input, result, out.full);
+                let mut item = aspero_json::lookup_item(input, result, out.full);
                 if retried.contains(&result.id) {
                     item["note"] = json!("found with the trailing punctuation kept");
                 }
@@ -98,19 +94,9 @@ pub async fn run(engine: &Engine, ids: Vec<String>, out: Out) -> Result<Exit, Fa
                     item["latest"] = output::work(newest, false);
                 }
                 if !conflicts.is_empty() {
-                    let list: Vec<Value> = conflicts
-                        .iter()
-                        .map(|d| {
-                            json!({
-                                "field": d.field,
-                                "value": d.value,
-                                d.registry.as_str(): d.registry_value,
-                            })
-                        })
-                        .collect();
-                    item["disagreements"] = json!(list);
+                    item["disagreements"] = aspero_json::disagreements(conflicts);
                 }
-                (item, exit)
+                (item, exit_for(result))
             }
         };
         if let Some(from) = from {
@@ -247,63 +233,14 @@ fn per_input<'a>(
         .map(move |p| p.as_ref().ok().and_then(|_| results.next()))
 }
 
-/// One result as JSON, with the exit code it implies. Attempts are included
-/// when nothing was found (so the caller sees why) or with `--full`.
-pub fn item(input: &str, result: &LookupResult, full: bool) -> (Value, Exit) {
-    let mut item = json!({"input": input, "id": result.id});
-    let exit = if let Some(record) = &result.record {
-        item["status"] = json!("found");
-        // Say when the answer didn't come live from the provider.
-        let served = result
-            .attempts
-            .iter()
-            .rfind(|a| matches!(a.outcome, Outcome::Found))
-            .map(|a| a.served);
-        if let Some(s) = served.filter(|s| *s != Served::Live) {
-            item["served"] = json!(s.as_str());
-        }
-        item["work"] = output::work(record, full);
-        Exit::Ok
-    } else if result.attempts.is_empty() {
-        item["status"] = json!("unsupported");
-        item["error"] = json!(format!(
-            "no enabled provider looks up {} identifiers",
-            result.id.kind()
-        ));
-        Exit::Unsupported
-    } else {
-        let failures: Vec<_> = result
-            .attempts
-            .iter()
-            .filter_map(|a| match &a.outcome {
-                Outcome::Failed(e) => Some(e),
-                _ => None,
-            })
-            .collect();
-        let all_failed = failures.len() == result.attempts.len();
-        item["status"] = json!(if all_failed { "failed" } else { "not_found" });
-        if all_failed {
-            Exit::from_category(failures[0].category())
-        } else {
-            Exit::NotFound
-        }
-    };
-    if result.record.is_none() || full {
-        let attempts: Vec<Value> = result
-            .attempts
-            .iter()
-            .map(|a| match &a.outcome {
-                Outcome::Found => json!({"provider": a.provider, "outcome": "found"}),
-                Outcome::NotFound => json!({"provider": a.provider, "outcome": "not_found"}),
-                Outcome::Failed(e) => {
-                    json!({"provider": a.provider, "outcome": "failed", "error": e.to_string()})
-                }
-                _ => json!({"provider": a.provider, "outcome": "unknown"}),
-            })
-            .collect();
-        item["attempts"] = json!(attempts);
+/// The exit code a result implies.
+fn exit_for(result: &LookupResult) -> Exit {
+    match Status::of(result) {
+        Status::Found => Exit::Ok,
+        Status::Unsupported => Exit::Unsupported,
+        Status::Failed(category) => Exit::from_category(category),
+        _ => Exit::NotFound,
     }
-    (item, exit)
 }
 
 /// One result as a table row.

@@ -93,8 +93,8 @@ Lookalike re-deposits of famous papers are told apart by year and authors.
 
 ## Library
 
-The CLI is a thin adapter over `aspero-engine`; providers are separate
-crates behind features. See [DESIGN.md](DESIGN.md) for the architecture,
+The CLI is a thin adapter over `aspero-engine`, with its JSON shapes in
+`aspero-json`; providers are separate crates behind features. See [DESIGN.md](DESIGN.md) for the architecture,
 scoring rules, provider gotchas and plans.
 
 ## Development

@@ -5,7 +5,8 @@ use aspero_core::{ProviderId, Usage};
 use aspero_engine::{Engine, Verdict, Verification};
 use serde_json::{Value, json};
 
-use super::claim::{ClaimInput, claims};
+use super::claim::claims;
+use aspero_json::ClaimInput;
 use std::io::IsTerminal;
 
 use futures::StreamExt;
@@ -59,7 +60,7 @@ pub async fn run(engine: &Engine, args: ClaimArgs, out: Out) -> Result<Exit, Fai
                 for (p, u) in &v.report.usage {
                     merge_usage(&mut usage, p, *u);
                 }
-                let mut item = item(echo, &v, out.full);
+                let mut item = aspero_json::verification(echo, &v, out.full);
                 let mut text = verdict_text(&input, &v);
                 if out.abstracts
                     && let Some(best) = v.best.map(|i| &v.report.candidates[i])
@@ -172,34 +173,6 @@ fn exit_for(verdict: Verdict) -> Exit {
         Verdict::Unverifiable => Exit::Unavailable,
         _ => Exit::Unverified,
     }
-}
-
-/// One verification as JSON, after the claim's echo (input, key, claim).
-fn item(echo: Value, v: &Verification, full: bool) -> Value {
-    let mut item = merged(
-        echo,
-        json!({
-            "verdict": v.verdict.as_str(),
-            "reason": v.reason,
-        }),
-    );
-    if let Some(best) = v.best {
-        item["match"] = output::candidate(&v.report.candidates[best], full);
-    }
-    if !v.report.errors.is_empty() {
-        let errors: Vec<String> = v.report.errors.iter().map(ToString::to_string).collect();
-        item["errors"] = json!(errors);
-    }
-    if full {
-        let all: Vec<Value> = v
-            .report
-            .candidates
-            .iter()
-            .map(|c| output::candidate(c, true))
-            .collect();
-        item["candidates"] = json!(all);
-    }
-    item
 }
 
 fn verdict_text(input: &str, v: &Verification) -> String {

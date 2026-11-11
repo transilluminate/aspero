@@ -59,6 +59,7 @@ dependencies = [
  "aspero-bib",
  "aspero-core",
  "aspero-engine",
+ "aspero-json",
  "clap",
  "comfy-table",
  "directories",
@@ -162,6 +163,17 @@ dependencies = [
  "serde",
  "serde_json",
  "url",
+]
+
+[[package]]
+name = "aspero-json"
+version = "0.3.4"
+dependencies = [
+ "aspero-core",
+ "aspero-engine",
+ "jiff",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

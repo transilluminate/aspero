@@ -38,10 +38,20 @@ async fn main() -> ExitCode {
         full: cli.global.full,
         abstracts: cli.global.abstracts,
     };
-    match run(cli, out).await {
+    let exports = matches!(
+        cli.command,
+        Command::Lookup { .. } | Command::Search { .. } | Command::Verify { .. }
+    );
+    let result = match format.is_export() && !exports {
+        true => Err(Failure::usage(
+            "--format bibtex and ris are for lookup, search and verify",
+        )),
+        false => run(cli, out).await,
+    };
+    match result {
         Ok(exit) => exit.code(),
         Err(failure) => {
-            if format.is_human() {
+            if format.is_human() || format.is_export() {
                 eprintln!("error: {}", failure.message);
             } else {
                 let category = format!("{:?}", failure.exit).to_lowercase();

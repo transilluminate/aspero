@@ -85,6 +85,12 @@ pub async fn run(
             }
             footer(&report, next.as_deref());
         }
+        Format::Bibtex | Format::Ris => {
+            let mut export = output::Exporter::new(out.format);
+            for hit in &page.hits {
+                println!("{}", export.entry(&hit.record.work, &hit.record.ids));
+            }
+        }
         Format::Json | Format::Auto => {
             let mut doc = json!({
                 "provider": report.provider,

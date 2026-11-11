@@ -24,7 +24,8 @@ pub async fn run(
         std::fs::read_to_string(&path)
             .map_err(|e| Failure::usage(format!("could not read {path}: {e}")))?
     };
-    let entries = aspero_bib::parse(&source).map_err(|e| Failure::usage(format!("{path}: {e}")))?;
+    let (_, entries) =
+        aspero_bib::read(&source).map_err(|e| Failure::usage(format!("{path}: {e}")))?;
     if entries.is_empty() {
         return Err(Failure::usage(format!("{path}: no entries")));
     }
@@ -88,6 +89,7 @@ pub async fn run(
             }
         }
         Format::Jsonl => reports.iter().for_each(|r| print_line(&r.json(out.full))),
+        Format::Bibtex | Format::Ris => unreachable!("rejected in main"),
         Format::Json | Format::Auto => print(&json!({
             "file": path,
             "summary": summary.json(),
@@ -131,8 +133,12 @@ impl<'a> Report<'a> {
             .map(|note| Line {
                 kind: "entry",
                 severity: Severity::Warning,
-                message: note.clone(),
-                detail: Value::Null,
+                message: note.to_string(),
+                detail: json!({
+                    "field": note.field,
+                    "value": note.value,
+                    "problem": note.problem.as_str(),
+                }),
             })
             .collect();
         match checked {

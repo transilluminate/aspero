@@ -29,9 +29,9 @@ use tokio::task::JoinHandle;
 pub mod records;
 
 use records::{
-    Budget, CacheStats, Claim as ClaimRecord, KeyCheck, KeyStatus, Line, LineReference, Lookup,
-    Lookups, Mention, ProviderUsage, Reference, SearchRequest, SearchResults, Unavailable,
-    Verification, Verifications,
+    Bibliography, Budget, CacheStats, Claim as ClaimRecord, ExportFormat, KeyCheck, KeyStatus,
+    Line, LineReference, Lookup, Lookups, Mention, ProviderUsage, ReadError, Reference,
+    SearchRequest, SearchResults, Unavailable, Verification, Verifications, Work,
 };
 
 uniffi::setup_scaffolding!();
@@ -299,6 +299,33 @@ impl Aspero {
             .iter()
             .map(|r| Reference::new(&text, r))
             .collect()
+    }
+
+    /// A BibTeX/BibLaTeX, RIS or CSL-JSON file's entries, each a claim to
+    /// verify; the format is told from the contents. Offline.
+    pub fn read_references(&self, text: String) -> Result<Bibliography, ReadError> {
+        let (format, entries) = aspero_bib::read(&text)?;
+        Ok(Bibliography {
+            format: format.into(),
+            entries: entries.into_iter().map(Into::into).collect(),
+        })
+    }
+
+    /// Works as BibTeX entries (keys kept distinct) or RIS records, one
+    /// after another. Offline.
+    pub fn export(&self, works: Vec<Work>, format: ExportFormat) -> String {
+        let mut keys = aspero_bib::Keys::default();
+        let entries: Vec<String> = works
+            .iter()
+            .map(|work| {
+                let (w, ids) = work.to_core();
+                match format {
+                    ExportFormat::Ris => aspero_bib::ris(&w, &ids),
+                    ExportFormat::Bibtex => aspero_bib::bibtex(&w, &ids, &keys.key(&w)),
+                }
+            })
+            .collect();
+        entries.join("\n")
     }
 
     /// Each provider's budget as its last response reported it, without

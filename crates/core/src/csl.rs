@@ -21,6 +21,8 @@ use crate::work::{
 #[serde(default, rename_all = "kebab-case")]
 #[non_exhaustive]
 pub struct CslItem {
+    /// The item's key in a CSL-JSON file.
+    pub id: Option<Scalar>,
     #[serde(rename = "type")]
     pub item_type: Option<String>,
     pub title: Option<OneOrMany>,
@@ -36,6 +38,12 @@ pub struct CslItem {
     pub doi: Option<String>,
     #[serde(rename = "URL")]
     pub url: Option<String>,
+    #[serde(rename = "ISBN")]
+    pub isbn: Option<String>,
+    #[serde(rename = "PMID")]
+    pub pmid: Option<Scalar>,
+    #[serde(rename = "PMCID")]
+    pub pmcid: Option<String>,
     #[serde(rename = "abstract")]
     pub abstract_text: Option<String>,
     pub is_referenced_by_count: Option<u64>,
@@ -140,7 +148,7 @@ pub enum Scalar {
 }
 
 impl Scalar {
-    fn text(&self) -> String {
+    pub fn text(&self) -> String {
         match self {
             Scalar::Text(s) => s.clone(),
             Scalar::Number(n) => n.to_string(),

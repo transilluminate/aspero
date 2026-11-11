@@ -1,5 +1,42 @@
 # Changelog
 
+## Unreleased
+
+Added:
+
+- `check` reads RIS and CSL-JSON as well as BibTeX, telling them apart
+  from the contents, and compares each entry's journal, volume and
+  pages too (BibTeX's `journal`/`journaltitle`, `volume`, `pages`).
+  PMIDs are read from BibTeX `pmid` or `eprinttype = {pubmed}`.
+- `--format bibtex|ris` on `lookup`, `search` and `verify`: the works
+  found, for a reference manager. `verify` writes the work each citation
+  refers to (verified, or found under other identifiers than those
+  cited) and names the rest on stderr. Whole names ("Yann LeCun") are
+  split into family and given names; organisations stay whole.
+- `check`'s findings about an entry's own fields carry `field`, `value`
+  and `problem` (`not_a_doi`, `not_an_arxiv_id`, `not_an_isbn`,
+  `not_a_pmid`).
+- FFI: `readReferences(text)` reads a BibTeX, RIS or CSL-JSON file into
+  `Bibliography { format, entries }`, each entry's `claim` ready to
+  verify with `key` set to the entry key, and its `notes` as `BibNote {
+  field, value, problem, message }`; it throws `ReadError.unrecognised`
+  or `.invalid(format, line, message)`. `export(works, format)` writes
+  works as BibTeX or RIS.
+
+Changed:
+
+- A citation whose identifier is the right work, with the same title and
+  matching authors but a wrong year, is `plausible` /
+  `id_partly_matches` naming the year, not `mismatch` / `id_disagrees`.
+  `check` still reports a year off by more than one as an error.
+
+Changed (breaking):
+
+- `aspero-bib`: `BibError` is now `ReadError` (`Unrecognised`, or
+  `Invalid { format, line, message }`); new `read`, `detect`,
+  `parse_ris`, `parse_csl_json`, `bibtex`, `ris`, `cite_key`, `Keys`.
+  `BibEntry::notes` are `Note { field, value, problem }`.
+
 ## 0.5.2
 
 Faster:

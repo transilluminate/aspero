@@ -84,12 +84,21 @@ pub enum Format {
     Table,
     /// A readable report: each result in detail.
     Text,
+    /// The works found as BibTeX entries (lookup, search, verify).
+    Bibtex,
+    /// The works found as RIS records (lookup, search, verify).
+    Ris,
 }
 
 impl Format {
     /// Meant for people (table or text) rather than programs.
     pub fn is_human(self) -> bool {
         matches!(self, Format::Table | Format::Text)
+    }
+
+    /// The works found, for a reference manager.
+    pub fn is_export(self) -> bool {
+        matches!(self, Format::Bibtex | Format::Ris)
     }
 }
 
@@ -228,10 +237,11 @@ Examples:
         claim: ClaimArgs,
     },
 
-    /// Check every entry of a BibTeX/BibLaTeX file, CI-style.
+    /// Check every entry of a BibTeX/BibLaTeX, RIS or CSL-JSON file, CI-style.
     #[command(after_help = "\
-Each entry's title, authors, year and identifiers (doi, arXiv eprint, DOI
-or arXiv URLs) are verified, then reported with fixes:
+The format is told from the contents. Each entry's title, authors, year,
+journal, volume, pages and identifiers (DOI, arXiv, PMID, ISBN, and those
+in URLs) are verified, then reported with fixes:
   error    retracted or withdrawn; not found; identifier wrong or
            nonexistent (with the right one); year off by more than one
   warning  expression of concern; only a plausible match; duplicate

@@ -322,6 +322,20 @@ impl Gen {
         if self.rng.chance(30) {
             self.identifier();
         }
+        if self.rng.chance(15) {
+            // A link broken after the DOI's prefix, as PDFs break them.
+            let doi = self.doi();
+            let (prefix, suffix) = doi.split_once('/').unwrap_or_default();
+            self.text.push(' ');
+            let start = self.text.len();
+            self.text
+                .push_str(&format!("https://doi.org/{prefix}/\n   {suffix}"));
+            self.expected.push((
+                format!("doi:{}", doi.to_lowercase()),
+                start..self.text.len(),
+            ));
+            self.text.push('.');
+        }
         self.text.push('\n');
         self.column = 0;
     }

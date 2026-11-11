@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+Fixed:
+
+- `scan` found nothing in a DOI link broken across lines right after
+  the DOI's prefix (`http://dx.doi.org/10.1017/` then
+  `S1049023X15004653.`), as PDFs break them. A link ending in `/` at the
+  end of a line now continues onto the next (#25).
+
 ## 0.6.3
 
 Changed:

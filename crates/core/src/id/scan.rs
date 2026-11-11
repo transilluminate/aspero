@@ -105,7 +105,12 @@ fn scan_clean(text: &str) -> Vec<Mention> {
 fn located(text: &str) -> Vec<(Mention, usize)> {
     let bytes = text.as_bytes();
     let mut raw = Vec::new();
-    find(text, &mut raw);
+    let mut broken = Vec::new();
+    find(text, &mut raw, &mut broken);
+    if !broken.is_empty() {
+        raw.extend(broken.iter().filter_map(|b| mend(text, b)));
+        raw.sort_by_key(|(_, span)| span.start);
+    }
     let starts: Vec<usize> = raw.iter().map(|(_, span)| span.start).collect();
     let mut found = Vec::with_capacity(raw.len());
     // Where a mention continued onto the next line ends: nothing before it
@@ -143,6 +148,9 @@ fn located(text: &str) -> Vec<(Mention, usize)> {
                 resume = end;
             }
         }
+        // A mention mended or rejoined across lines covers what starts the
+        // next.
+        resume = resume.max(span.end);
         found.push((
             Mention {
                 id,
@@ -180,7 +188,7 @@ fn rejoin(
     let token = next.split_whitespace().next()?;
     let joined = format!("{raw}{token}");
     let mut mentions = Vec::new();
-    find(&joined, &mut mentions);
+    find(&joined, &mut mentions, &mut Vec::new());
     let (id, within) = mentions
         .into_iter()
         .find(|(_, s)| s.start == 0 && s.end > raw.len())?;
@@ -193,7 +201,7 @@ fn rejoin(
 /// Most pieces of a text are words, which can't be identifiers: only a
 /// piece with a digit, `/` or `:` (bytes `/` to `:`, found a chunk at a
 /// time) is parsed, and the piece before it is read as a label only then.
-fn find(text: &str, found: &mut Vec<(WorkId, Range<usize>)>) {
+fn find(text: &str, found: &mut Vec<(WorkId, Range<usize>)>, broken: &mut Vec<Broken>) {
     let bytes = text.as_bytes();
     // The last piece parsed: where it ends, and the label it was.
     let mut last: Option<(usize, Option<(IdKind, usize)>)> = None;
@@ -234,8 +242,55 @@ fn find(text: &str, found: &mut Vec<(WorkId, Range<usize>)>) {
             && let Some(id) = unlabelled(cleaned)
         {
             found.push((id, span));
+        } else if cleaned.ends_with('/') {
+            broken.push(Broken {
+                from: label.map_or(span.start, |(_, at)| at),
+                cleaned: span,
+                label: label.map(|(kind, _)| kind),
+            });
         }
     }
+}
+
+/// A piece ending in `/` that isn't an identifier, maybe because the line
+/// broke after it (`https://doi.org/10.1017/` then the suffix): where it
+/// starts, label included, its cleaned bytes and its label.
+struct Broken {
+    from: usize,
+    cleaned: Range<usize>,
+    label: Option<IdKind>,
+}
+
+/// The identifier a [`Broken`] piece ending its line makes with the start
+/// of the next, and its span.
+fn mend(text: &str, broken: &Broken) -> Option<(WorkId, Range<usize>)> {
+    let bytes = text.as_bytes();
+    let line_end = broken.cleaned.end + memchr(b'\n', &bytes[broken.cleaned.end..])?;
+    if !text[broken.cleaned.end..line_end].trim().is_empty() {
+        return None;
+    }
+    let next_start = line_end + 1;
+    let next_end = memchr(b'\n', &bytes[next_start..]).map_or(text.len(), |i| next_start + i);
+    let next = &text[next_start..next_end];
+    let raw = &text[broken.cleaned.clone()];
+    if !crate::references::link_continues(raw, next) {
+        return None;
+    }
+    let indent = next.len() - next.trim_start().len();
+    let joined = format!("{raw}{}", next.split_whitespace().next()?);
+    let cleaned = clean_pasted(&joined);
+    if offset(&joined, cleaned) != 0 || cleaned.len() <= raw.len() {
+        return None;
+    }
+    let id = match broken.label {
+        Some(kind) => WorkId::parse_as(kind, cleaned).ok()?,
+        None if could_be_unlabelled(cleaned) => unlabelled(cleaned)?,
+        None => return None,
+    };
+    Some((
+        id,
+        broken.from..next_start + indent + cleaned.len() - raw.len(),
+    ))
 }
 
 /// The label the piece starting at `start` follows, if any: the last
@@ -546,7 +601,7 @@ mod tests {
         ) {
             let text = parts.concat();
             let mut found = Vec::new();
-            find(&text, &mut found);
+            find(&text, &mut found, &mut Vec::new());
             let mut want = Vec::new();
             let mut at = 0;
             for line in text.split('\n') {
@@ -627,6 +682,33 @@ mod tests {
             "doi:10.1038/s41586\u{2013}020\u{AD}-2649-2"
         );
         assert_eq!(m.column, 9);
+    }
+
+    #[test]
+    fn links_broken_after_a_slash_are_mended() {
+        let text =
+            "Disaster Med. 2015;30:1-9. http://dx.doi.org/10.1017/\n   S1049023X15004653.\nnext";
+        assert_eq!(
+            found(text),
+            [(
+                "doi:10.1017/s1049023x15004653".into(),
+                "http://dx.doi.org/10.1017/\n   S1049023X15004653"
+            )]
+        );
+        assert_eq!((scan(text)[0].line, scan(text)[0].column), (1, 28));
+        assert_eq!(
+            found("DOI: 10.1017/\nS1049023X15004653 and PMC6716493"),
+            [
+                (
+                    "doi:10.1017/s1049023x15004653".into(),
+                    "DOI: 10.1017/\nS1049023X15004653"
+                ),
+                ("pmcid:PMC6716493".into(), "PMC6716493"),
+            ]
+        );
+        // Not at the end of its line, or nothing to mend it with: nothing.
+        assert!(found("https://doi.org/10.1017/ and S1049023X15004653").is_empty());
+        assert!(found("https://doi.org/10.1017/\n\nS1049023X15004653").is_empty());
     }
 
     #[test]

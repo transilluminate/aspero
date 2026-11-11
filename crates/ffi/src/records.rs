@@ -461,6 +461,58 @@ pub struct Lookups {
 
 // Verifications.
 
+/// A citation to verify: free text, fields, or both. Fields are more
+/// reliable than text, which is parsed for them.
+#[derive(Debug, Clone, Default, uniffi::Record)]
+pub struct Claim {
+    /// The reference in any style; identifiers in it count as claimed.
+    #[uniffi(default = None)]
+    pub text: Option<String>,
+    #[uniffi(default = None)]
+    pub title: Option<String>,
+    /// Names as written: "Vaswani, A.", "Ashish Vaswani".
+    #[uniffi(default = [])]
+    pub authors: Vec<String>,
+    #[uniffi(default = None)]
+    pub year: Option<i16>,
+    /// The journal (or other container), full or abbreviated.
+    #[uniffi(default = None)]
+    pub container: Option<String>,
+    #[uniffi(default = None)]
+    pub volume: Option<String>,
+    /// The first page, or a range.
+    #[uniffi(default = None)]
+    pub page: Option<String>,
+    /// Identifiers in any form `lookup` takes.
+    #[uniffi(default = [])]
+    pub ids: Vec<String>,
+    /// The app's own reference, echoed back.
+    #[uniffi(default = None)]
+    pub key: Option<String>,
+}
+
+impl Claim {
+    pub(crate) fn into_input(self) -> InputClaim {
+        let fields = aspero_json::ClaimInput {
+            text: self.text,
+            title: self.title,
+            authors: self.authors,
+            year: self.year,
+            container: self.container,
+            volume: self.volume,
+            page: self.page,
+            ids: self.ids,
+            ..Default::default()
+        };
+        let input = fields.text.clone().unwrap_or_else(|| fields.describe());
+        InputClaim {
+            input,
+            key: self.key.map(serde_json::Value::String),
+            claim: fields.into_claim(),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Enum)]
 pub enum Verdict {
     /// A work matching the claim exists (and so do its identifiers).
@@ -662,9 +714,9 @@ impl From<&CoreCandidate> for Candidate {
 pub struct Verification {
     /// The claim's position in the call's `claims`.
     pub index: u32,
-    /// The claim as given.
+    /// The claim's text, or its fields on one line.
     pub input: String,
-    /// A JSON claim's `key`, as a string.
+    /// The claim's `key`.
     pub key: Option<String>,
     pub verdict: Verdict,
     pub why: Reason,

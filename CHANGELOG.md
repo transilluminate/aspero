@@ -7,6 +7,8 @@ Breaking:
 - A lookup that is offline and not in the cache has status `not_cached`
   (it was `failed`).
 - `Verification` is `#[non_exhaustive]` and gains `why` and `notes`.
+- FFI `verify` and `verify_each` take typed `Claim`s (text and/or fields,
+  and a `key`) instead of strings.
 - FFI calls return typed records instead of JSON strings: `lookup` →
   `Lookups`, `verify` → `Verifications`, `verify_each` hands the listener
   a `Verification` (with its claim's `index`) and returns usage, `scan` →
@@ -16,8 +18,9 @@ Breaking:
 Added:
 
 - `aspero verify --split` (and `resolve`) takes a pasted reference list
-  (numbered, bulleted, one per paragraph or line, wrapped lines rejoined)
-  and checks each reference; `split_references` in `aspero-core`, and
+  (numbered, bulleted, one per paragraph or line, wrapped lines rejoined,
+  DOIs and URLs broken by PDF extraction mended) and checks each
+  reference; `split_references` in `aspero-core`, and
   `splitReferences` over FFI with UTF-16 ranges.
 - `Engine::budgets()`: each provider's budget as its last response
   reported it, so it can be shown without spending any.

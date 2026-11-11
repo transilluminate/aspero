@@ -113,9 +113,10 @@ impl<'a> List<'a> {
     fn unnumbered(&self, lines: Vec<Range<usize>>, alone: bool) -> Vec<Vec<Range<usize>>> {
         let one_per_line = alone
             && lines.iter().all(|l| dated(self.line(l)))
-            && lines
-                .windows(2)
-                .all(|w| ends_reference(self.line(&w[0])) && !continues(self.line(&w[1])));
+            && lines.windows(2).all(|w| {
+                let (line, next) = (self.line(&w[0]), self.line(&w[1]));
+                ends_reference(line) && !continues(next) && !link_continues(line, next)
+            });
         if one_per_line {
             return lines.into_iter().map(|l| vec![l]).collect();
         }
@@ -123,10 +124,7 @@ impl<'a> List<'a> {
         for line in lines {
             let text = self.line(&line);
             match groups.last_mut() {
-                Some(group)
-                    if !(ends_sentence(self.line(&group[group.len() - 1]))
-                        && starts_with_author(text)) =>
-                {
+                Some(group) if !(ends_sentence(&self.join(group)) && starts_with_author(text)) => {
                     group.push(line)
                 }
                 _ => groups.push(vec![line]),
@@ -146,7 +144,7 @@ impl<'a> List<'a> {
                 // Nothing to join to.
             } else if out.ends_with('-') && first.is_lowercase() && hyphenated_word(&out) {
                 out.pop();
-            } else if !(out.ends_with('/') || out.ends_with('-') && in_link(&out)) {
+            } else if !link_continues(&out, next) {
                 out.push(' ');
             }
             out.push_str(next);
@@ -248,6 +246,30 @@ fn starts_with_author(line: &str) -> bool {
 fn hyphenated_word(text: &str) -> bool {
     let word = text.rsplit(char::is_whitespace).next().unwrap_or_default();
     !in_link(text) && word.trim_end_matches('-').chars().all(char::is_alphabetic)
+}
+
+/// `next` continues a DOI or URL that `text` ends with, broken where PDFs
+/// break them: after `/`, `-` or `_` (`10.1038/s41586-` + `020-2649-2`),
+/// after a dot before a digit or lower case (`j.cell.` + `2020.01.001`),
+/// or mid-word before more of the link (`j.ce` + `ll.2020.01.001`).
+/// Hyphens are kept as printed: DOIs have real ones, and typesetters
+/// rarely add their own inside a link.
+fn link_continues(text: &str, next: &str) -> bool {
+    let token = next.split_whitespace().next().unwrap_or_default();
+    let Some(first) = token.chars().next() else {
+        return false;
+    };
+    if !in_link(text) || !first.is_alphanumeric() {
+        return false;
+    }
+    let lower_or_digit = first.is_lowercase() || first.is_ascii_digit();
+    if text.ends_with(['/', '-', '_']) {
+        true
+    } else if text.ends_with('.') {
+        lower_or_digit
+    } else {
+        lower_or_digit && token.contains(|c: char| c.is_ascii_digit() || "./-_".contains(c))
+    }
 }
 
 /// `text` ends inside a DOI or URL.
@@ -373,6 +395,33 @@ mod tests {
                 "Smith J. Neurological findings. doi:10.1038/nature14539",
                 "Jones K. https://example.org/a-b/c",
             ]
+        );
+    }
+
+    #[test]
+    fn links_broken_by_pdf_extraction_are_rejoined_as_printed() {
+        let list = "[1] Smith J. Cells. Cell. 2020. https://doi.org/10.1016/j.cell.\n\
+            2020.01.001\n\
+            [2] Jones K. Folds. Nature. 2020. doi:10.1038/s41586-\n\
+            020-2649-2\n\
+            [3] Brown L. Stems. https://doi.org/10.1016/j.ce\n\
+            ll.2021.02.003\n";
+        assert_eq!(
+            texts(list),
+            [
+                "Smith J. Cells. Cell. 2020. https://doi.org/10.1016/j.cell.2020.01.001",
+                "Jones K. Folds. Nature. 2020. doi:10.1038/s41586-020-2649-2",
+                "Brown L. Stems. https://doi.org/10.1016/j.cell.2021.02.003",
+            ]
+        );
+        // Unnumbered, the continuation isn't a reference of its own.
+        let list = "Smith J. Cells. Cell. 2020. doi:10.1016/j.cell.\n2020.01.001\n\
+            Jones K. Folds. Nature. 2020.\n";
+        assert_eq!(texts(list).len(), 2);
+        // A link that ends the line, then a new sentence, stays apart.
+        assert_eq!(
+            texts("1. Smith J. doi:10.1038/x.\nNature. 2020.\n2. Jones K. 2021.")[0],
+            "Smith J. doi:10.1038/x. Nature. 2020."
         );
     }
 

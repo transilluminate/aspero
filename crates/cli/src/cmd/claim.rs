@@ -32,27 +32,11 @@ pub fn claims(
             .map(InputClaim::from_line)
             .collect());
     }
-    let label = text.clone().unwrap_or_else(|| describe_fields(&fields));
+    let label = text.clone().unwrap_or_else(|| fields.describe());
     let input = ClaimInput { text, ..fields };
     Ok(vec![InputClaim {
         input: label,
         key: None,
         claim: input.into_claim(),
     }])
-}
-
-fn describe_fields(f: &ClaimInput) -> String {
-    let parts: Vec<String> = [
-        (!f.authors.is_empty()).then(|| f.authors.join(", ")),
-        f.title.clone(),
-        f.container.clone(),
-        f.year.map(|y| y.to_string()),
-        f.volume.clone(),
-        f.page.clone(),
-        f.doi.clone().or(f.arxiv.clone()).or(f.id.clone()),
-    ]
-    .into_iter()
-    .flatten()
-    .collect();
-    parts.join(". ")
 }

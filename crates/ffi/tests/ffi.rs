@@ -1,8 +1,17 @@
 //! The handle as an app sees it, without the network: typed answers,
 //! offline from the cache, and awaitable from any executor.
 
-use aspero_ffi::records::{ErrorKind, KeyStatus, LookupStatus, Reason, SearchRequest, Verdict};
+use aspero_ffi::records::{
+    Claim, ErrorKind, KeyStatus, LookupStatus, Reason, SearchRequest, Verdict,
+};
 use aspero_ffi::{Aspero, AsperoError, CallToken, Config, Patience};
+
+fn text(text: &str) -> Claim {
+    Claim {
+        text: Some(text.into()),
+        ..Claim::default()
+    }
+}
 
 fn aspero(cache_dir: Option<String>) -> std::sync::Arc<Aspero> {
     Aspero::new(Config {
@@ -76,7 +85,10 @@ fn offline_lookups_answer_without_the_network() {
 #[test]
 fn unreadable_claims_answer_at_once() {
     let checked = block_on(aspero(None).verify(
-        vec![r#"{"titel": "typo", "key": 7}"#.into()],
+        vec![Claim {
+            key: Some("7".into()),
+            ..Claim::default()
+        }],
         false,
         Patience::Offline,
         None,
@@ -89,9 +101,24 @@ fn unreadable_claims_answer_at_once() {
 }
 
 #[test]
+fn claims_can_be_fields() {
+    let claim = Claim {
+        title: Some("Deep learning".into()),
+        year: Some(2015),
+        ids: vec!["10.1234/never-seen".into()],
+        ..Claim::default()
+    };
+    let checked =
+        block_on(aspero(None).verify(vec![claim], false, Patience::Offline, None)).unwrap();
+    let v = &checked.results[0];
+    assert_eq!(v.input, "Deep learning. 2015. 10.1234/never-seen");
+    assert_eq!(v.verdict, Verdict::Unverifiable, "{}", v.reason);
+}
+
+#[test]
 fn failures_say_what_kind() {
     let checked = block_on(aspero(None).verify(
-        vec!["".into(), "doi:10.1234/never-seen".into()],
+        vec![text(""), text("doi:10.1234/never-seen")],
         false,
         Patience::Offline,
         None,
@@ -110,7 +137,7 @@ fn a_cancelled_token_ends_calls_at_once() {
     let token = CallToken::new();
     token.cancel();
     let result = block_on(aspero(None).verify(
-        vec!["Some citation, 2020".into()],
+        vec![text("Some citation, 2020")],
         false,
         Patience::Batch,
         Some(token),

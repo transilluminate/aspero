@@ -29,8 +29,9 @@ use tokio::task::JoinHandle;
 pub mod records;
 
 use records::{
-    Budget, CacheStats, KeyCheck, KeyStatus, Lookup, Lookups, Mention, ProviderUsage, Reference,
-    SearchRequest, SearchResults, Unavailable, Verification, Verifications,
+    Budget, CacheStats, Claim as ClaimRecord, KeyCheck, KeyStatus, Lookup, Lookups, Mention,
+    ProviderUsage, Reference, SearchRequest, SearchResults, Unavailable, Verification,
+    Verifications,
 };
 
 uniffi::setup_scaffolding!();
@@ -203,13 +204,12 @@ impl Aspero {
         .await
     }
 
-    /// Verifies citations, each free text or a JSON object of fields (as
-    /// `aspero verify -` reads lines), answering in claim order. With
-    /// `full`, every candidate considered.
+    /// Verifies citations, answering in claim order. With `full`, every
+    /// candidate considered.
     #[uniffi::method(default(cancel = None))]
     pub async fn verify(
         &self,
-        claims: Vec<String>,
+        claims: Vec<ClaimRecord>,
         full: bool,
         patience: Patience,
         cancel: Option<Arc<CallToken>>,
@@ -218,7 +218,7 @@ impl Aspero {
         self.run(
             async move {
                 let mut results: Vec<Option<Verification>> = vec![None; claims.len()];
-                let usage = verify_all(&engine, &claims, full, |v| {
+                let usage = verify_all(&engine, claims, full, |v| {
                     let i = v.index as usize;
                     results[i] = Some(v);
                 })
@@ -238,7 +238,7 @@ impl Aspero {
     #[uniffi::method(default(cancel = None))]
     pub async fn verify_each(
         &self,
-        claims: Vec<String>,
+        claims: Vec<ClaimRecord>,
         full: bool,
         patience: Patience,
         listener: Arc<dyn VerifyListener>,
@@ -246,7 +246,7 @@ impl Aspero {
     ) -> Result<Vec<ProviderUsage>, AsperoError> {
         let engine = self.engine(patience);
         self.run(
-            async move { verify_all(&engine, &claims, full, |v| listener.on_result(v)).await },
+            async move { verify_all(&engine, claims, full, |v| listener.on_result(v)).await },
             cancel,
         )
         .await
@@ -458,11 +458,11 @@ impl<T> Drop for Abortable<T> {
 /// unreadable claims first, then the rest as they complete.
 async fn verify_all(
     engine: &Engine,
-    lines: &[String],
+    claims: Vec<ClaimRecord>,
     full: bool,
     mut each: impl FnMut(Verification),
 ) -> Vec<ProviderUsage> {
-    let claims: Vec<InputClaim> = lines.iter().map(|l| InputClaim::from_line(l)).collect();
+    let claims: Vec<InputClaim> = claims.into_iter().map(ClaimRecord::into_input).collect();
     let (positions, valid): (Vec<usize>, Vec<Claim>) = claims
         .iter()
         .enumerate()

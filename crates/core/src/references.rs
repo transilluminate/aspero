@@ -404,26 +404,54 @@ pub(crate) fn link_continues(text: &str, next: &str) -> bool {
     let Some(first) = token.chars().next() else {
         return false;
     };
-    if !in_link(text) || !first.is_alphanumeric() {
+    if !in_link(text) || !first.is_alphanumeric() || starts_link(token) || is_number(token) {
         return false;
     }
     let lower_or_digit = first.is_lowercase() || first.is_ascii_digit();
+    // A DOI of its own, unless the line broke right before it
+    // (`https://doi.org/` then `10.…`).
+    let doi = token.starts_with("10.") && token.contains('/');
     if text.ends_with(['/', '-', '_']) {
         true
     } else if text.ends_with('.') {
-        lower_or_digit
+        lower_or_digit && !doi
     } else {
-        // Mid-word: only before more of a link, never a word or a year.
+        // Mid-word: only before more of a link, never a word, a
+        // hyphenated word or a number.
         let inner = token.trim_end_matches(|c: char| !c.is_alphanumeric());
-        lower_or_digit && inner.contains(|c: char| "./-_".contains(c))
+        lower_or_digit
+            && !doi
+            && inner.parse::<f64>().is_err()
+            && (inner.contains(['.', '/', '_']) || (first.is_ascii_digit() && inner.contains('-')))
     }
+}
+
+/// `token` is a link of its own, not the rest of one.
+fn starts_link(token: &str) -> bool {
+    let lower = token.get(..8).unwrap_or(token).to_ascii_lowercase();
+    ["http://", "https://", "www."]
+        .iter()
+        .any(|p| lower.starts_with(p))
+        || token
+            .split_once(':')
+            .is_some_and(|(head, _)| crate::id::IdKind::from_prefix(head).is_some())
+}
+
+/// `token` numbers a list item (`18.`).
+fn is_number(token: &str) -> bool {
+    token
+        .strip_suffix('.')
+        .is_some_and(|n| !n.is_empty() && n.bytes().all(|b| b.is_ascii_digit()))
 }
 
 /// `text` ends inside a DOI or URL.
 fn in_link(text: &str) -> bool {
     let word = text.rsplit(char::is_whitespace).next().unwrap_or_default();
-    let word = word.to_ascii_lowercase();
-    word.starts_with("http") || word.starts_with("doi:") || word.starts_with("10.")
+    let starts = |p: &str| {
+        word.get(..p.len())
+            .is_some_and(|h| h.eq_ignore_ascii_case(p))
+    };
+    starts("http") || starts("doi:") || word.starts_with("10.")
 }
 
 fn is_heading(text: &str) -> bool {

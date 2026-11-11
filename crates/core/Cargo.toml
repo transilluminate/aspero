@@ -26,3 +26,8 @@ unicode-normalization.workspace = true
 
 [dev-dependencies]
 proptest.workspace = true
+
+# `cargo bench -p aspero-core --bench scan`: no harness, no dependencies.
+[[bench]]
+name = "scan"
+harness = false

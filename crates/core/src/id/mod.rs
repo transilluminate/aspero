@@ -94,15 +94,23 @@ impl IdKind {
     /// The kind a label written before an identifier names: `PMID`,
     /// `PMID:`, `ISBN-13`, `doi:`, …
     pub fn from_label(label: &str) -> Option<Self> {
-        match label.trim_end_matches(':').to_ascii_lowercase().as_str() {
-            "pmid" => Some(IdKind::Pmid),
-            "pmcid" => Some(IdKind::Pmcid),
-            "doi" => Some(IdKind::Doi),
-            "arxiv" => Some(IdKind::Arxiv),
-            "nbk" => Some(IdKind::Nbk),
-            "isbn" | "isbn-13" | "isbn-10" | "isbn13" | "isbn10" => Some(IdKind::Isbn),
-            _ => None,
-        }
+        const LABELS: &[(&str, IdKind)] = &[
+            ("pmid", IdKind::Pmid),
+            ("pmcid", IdKind::Pmcid),
+            ("doi", IdKind::Doi),
+            ("arxiv", IdKind::Arxiv),
+            ("nbk", IdKind::Nbk),
+            ("isbn", IdKind::Isbn),
+            ("isbn-13", IdKind::Isbn),
+            ("isbn-10", IdKind::Isbn),
+            ("isbn13", IdKind::Isbn),
+            ("isbn10", IdKind::Isbn),
+        ];
+        let label = label.trim_end_matches(':');
+        LABELS
+            .iter()
+            .find(|(name, _)| name.eq_ignore_ascii_case(label))
+            .map(|&(_, kind)| kind)
     }
 }
 

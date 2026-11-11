@@ -150,6 +150,41 @@ async fn a_verifying_lookup_does_not_wait_for_slow_matchers() {
     assert!(start.elapsed() >= std::time::Duration::from_secs(60));
 }
 
+#[tokio::test(start_paused = true)]
+async fn a_match_two_providers_agree_on_does_not_wait_for_slow_searches() {
+    let minute = std::time::Duration::from_secs(60);
+    let openalex = Arc::new(
+        Scripted::new("openalex")
+            .keyword()
+            .with(vec![deep_learning(), deep_learning_for_ai()]),
+    );
+    let crossref = Arc::new(Scripted::new("crossref").matcher(vec![deep_learning()]));
+    let europepmc = Arc::new(
+        Scripted::new("europepmc")
+            .keyword()
+            .with(vec![deep_learning()])
+            .slow(minute),
+    );
+    let engine = engine(vec![openalex, crossref, europepmc]);
+
+    let start = tokio::time::Instant::now();
+    let text =
+        Claim::from_text("LeCun Y, Bengio Y, Hinton G. Deep learning. Nature. 2015;521:436-444.");
+    let v = engine.verify(&text, 5).await;
+    assert_eq!(v.verdict, Verdict::Verified, "{}", v.reason);
+    assert!(start.elapsed() < minute);
+
+    // A DOI naming another work is settled the same way.
+    let start = tokio::time::Instant::now();
+    let claim = Claim::from_text(
+        "LeCun Y, Bengio Y, Hinton G. Deep learning. Nature. 2015. doi:10.1145/3448250",
+    );
+    let v = engine.verify(&claim, 5).await;
+    assert_eq!(v.verdict, Verdict::Mismatch, "{}", v.reason);
+    assert!(matches!(v.why, Reason::IdElsewhere { .. }), "{:?}", v.why);
+    assert!(start.elapsed() < minute);
+}
+
 #[tokio::test]
 async fn a_doi_broken_at_a_hyphen_is_tried_without_it() {
     let (engine, _, _) = live_like();

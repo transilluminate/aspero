@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased
+
+Faster:
+
+- `verify` stops waiting for the remaining title and keyword searches as
+  soon as a candidate verifies, instead of waiting for the slowest
+  provider (Europe PMC's search can take 3–11 s). A citation whose DOI
+  names another work now settles once two providers agree on the work
+  it cites: 11–17 s → 3–5 s live; a citation without an identifier, 4–17 s
+  → 2.5–4.5 s.
+
 ## 0.5.1
 
 Added:

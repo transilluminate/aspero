@@ -10,6 +10,10 @@ Fixed:
   more, or two from the line's start), each after a full stop and before
   a capital, when every piece has a year or identifier; text before the
   first number is kept as a reference when dated (#31).
+- A title of one or two words found inside free text no longer makes a
+  work plausible by itself or with only a year: `verify "aspero 0.6.5 is
+  in"` matched an encyclopedia entry titled "Aspero". It takes the
+  authors, the journal, the volume and page, or an identifier (#29).
 
 ## 0.6.5
 

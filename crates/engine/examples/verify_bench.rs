@@ -140,6 +140,9 @@ async fn main() -> std::process::ExitCode {
                     case.why,
                     v.reason
                 );
+                for e in &v.report.errors {
+                    println!("      error: {e}");
+                }
             }
         }
     }

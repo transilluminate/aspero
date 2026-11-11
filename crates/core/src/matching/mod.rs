@@ -28,7 +28,7 @@ use crate::record::SourceRecord;
 use authors::{author_overlap, family_name};
 use derivative::claim_mentions_derivative;
 pub use derivative::is_derivative;
-use text::Normalised;
+use text::{Normalised, content_words};
 pub use text::{normalise, search_terms, shared_title, title_similarity, unmarked};
 
 /// Field weights in the confidence (before penalties).
@@ -49,6 +49,12 @@ const UNCORROBORATED_CAP: f64 = 0.8;
 /// Author score that corroborates a match: the first author present
 /// (0.75 for structured claims, 0.9 in free text).
 const CORROBORATING_AUTHORS: f64 = 0.75;
+/// Confidence ceiling, below plausible, when the only evidence is a short
+/// title found inside free text.
+const SHORT_TITLE_CAP: f64 = 0.5;
+/// Content words below which a title found inside free text is short: one
+/// or two words turn up in any text ("Aspero", "Deep learning").
+const SHORT_TITLE_WORDS: usize = 3;
 /// Multiplier for replies, corrections, errata and commentaries.
 const DERIVATIVE_PENALTY: f64 = 0.5;
 /// Confidence ceiling when the claimed volume or first page differs.
@@ -344,6 +350,18 @@ pub fn assess(claim: &Claim, record: &SourceRecord) -> Assessment {
         || located;
     if !id_only && !corroborated {
         confidence = confidence.min(UNCORROBORATED_CAP);
+    }
+    // A title of a word or two inside free text ("Aspero" in "aspero 0.6.5
+    // is in") is no evidence by itself, nor with a year: it takes the
+    // authors, the journal, the place or an identifier.
+    let short_title_in_text = claim.title.is_none()
+        && text.is_some()
+        && work
+            .title
+            .as_deref()
+            .is_some_and(|t| content_words(t).len() < SHORT_TITLE_WORDS);
+    if short_title_in_text && !corroborated && container.agreement != Agreement::Match {
+        confidence = confidence.min(SHORT_TITLE_CAP);
     }
     // A wrong volume or page is an error in the citation, and tells an
     // original from the letters and corrections in the same journal.

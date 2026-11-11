@@ -3,7 +3,7 @@
 //! Lenient: every field defaults; unknown fields are ignored (the whole
 //! record is kept in `Raw`).
 
-use aspero_core::csl::{self, strip_markup};
+use aspero_core::csl::{self, plain_text, strip_markup};
 use aspero_core::{
     ArxivId, Doi, FieldSet, PartialDate, Person, Raw, SourceRecord, Work, WorkId, WorkType,
     tidy_abstract,
@@ -160,7 +160,8 @@ impl Attributes {
             .iter()
             .find(|t| t.title_type.is_none())
             .or(self.titles.first())
-            .and_then(|t| t.title.clone());
+            .and_then(|t| t.title.clone())
+            .map(plain_text);
         work.authors = self.creators.iter().filter_map(Creator::person).collect();
         work.issued = self
             .publication_year
@@ -173,7 +174,7 @@ impl Attributes {
             .and_then(|y| i16::try_from(y).ok())
             .map(PartialDate::from_year);
         work.work_type = work_type(&self.types);
-        work.container_title = self.container.title.clone();
+        work.container_title = self.container.title.clone().map(plain_text);
         work.volume = self.container.volume.clone();
         work.issue = self.container.issue.clone();
         work.page = self.container.first_page.clone();

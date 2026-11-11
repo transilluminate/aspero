@@ -5,7 +5,9 @@
 
 use std::collections::BTreeMap;
 
-use aspero_core::csl::{CrossrefRelation, CrossrefUpdate, relation_updates};
+use aspero_core::csl::{
+    CrossrefRelation, CrossrefUpdate, plain_text, relation_updates, strip_markup,
+};
 use aspero_core::{
     Doi, FieldSet, PartialDate, Person, Raw, SourceRecord, Work, WorkId, WorkType, tidy_abstract,
 };
@@ -117,7 +119,7 @@ pub(crate) fn to_record(
 impl WireWork {
     fn work(self) -> Work {
         let mut work = Work::default();
-        work.title = self.title.into_iter().next();
+        work.title = self.title.into_iter().next().map(plain_text);
         work.authors = self
             .author
             .into_iter()
@@ -128,7 +130,7 @@ impl WireWork {
             .to_partial()
             .or_else(|| self.published.to_partial());
         work.work_type = self.work_type.as_deref().map(work_type);
-        work.container_title = self.container_title.into_iter().next();
+        work.container_title = self.container_title.into_iter().next().map(plain_text);
         work.publisher = self.publisher;
         work.volume = self.volume;
         work.issue = self.issue;
@@ -136,7 +138,7 @@ impl WireWork {
         work.abstract_text = self
             .abstract_jats
             .as_deref()
-            .map(|jats| tidy_abstract(&strip_jats(jats)));
+            .map(|jats| tidy_abstract(&strip_markup(jats)));
         work.url = self.url;
         work.cited_by_count = self.is_referenced_by_count;
         // Online-first and print years often differ by one; citations use
@@ -217,30 +219,6 @@ pub(crate) fn crossref_type(t: &WorkType) -> Option<&str> {
     })
 }
 
-/// Crossref abstracts are JATS XML fragments; reduce them to plain text.
-fn strip_jats(jats: &str) -> String {
-    let mut text = String::with_capacity(jats.len());
-    let mut in_tag = false;
-    for c in jats.chars() {
-        match c {
-            '<' => in_tag = true,
-            '>' if in_tag => {
-                in_tag = false;
-                text.push(' ');
-            }
-            _ if !in_tag => text.push(c),
-            _ => {}
-        }
-    }
-    let text = text
-        .replace("&lt;", "<")
-        .replace("&gt;", ">")
-        .replace("&quot;", "\"")
-        .replace("&#39;", "'")
-        .replace("&amp;", "&");
-    text.split_whitespace().collect::<Vec<_>>().join(" ")
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -248,7 +226,7 @@ mod tests {
     #[test]
     fn strips_jats_to_plain_text() {
         let jats = "<jats:title>Abstract</jats:title><jats:p>Deep  learning &amp; <jats:italic>more</jats:italic>.</jats:p>";
-        assert_eq!(strip_jats(jats), "Abstract Deep learning & more .");
+        assert_eq!(strip_markup(jats), "Abstract Deep learning & more.");
     }
 
     #[test]

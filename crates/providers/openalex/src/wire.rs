@@ -6,6 +6,7 @@
 
 use std::collections::BTreeMap;
 
+use aspero_core::csl::plain_text;
 use aspero_core::{
     ArxivId, Doi, FieldSet, OpenAccess, OpenAlexId, PartialDate, Person, Pmcid, Pmid, Raw,
     SourceRecord, Update, UpdateKind, Work, WorkId, WorkType, tidy_abstract,
@@ -188,7 +189,11 @@ impl WireWork {
             .as_ref()
             .and_then(|l| l.source.as_ref());
         let mut work = Work::default();
-        work.title = self.title.clone().or_else(|| self.display_name.clone());
+        work.title = self
+            .title
+            .clone()
+            .or_else(|| self.display_name.clone())
+            .map(plain_text);
         work.authors = self
             .authorships
             .iter()
@@ -203,7 +208,7 @@ impl WireWork {
             .work_type
             .as_deref()
             .map(|t| work_type(t, source.and_then(|s| s.source_type.as_deref())));
-        work.container_title = source.and_then(|s| s.display_name.clone());
+        work.container_title = source.and_then(|s| s.display_name.clone()).map(plain_text);
         work.publisher = source.and_then(|s| s.host_organization_name.clone());
         work.volume = self.biblio.volume.clone();
         work.issue = self.biblio.issue.clone();

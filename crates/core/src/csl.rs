@@ -225,35 +225,141 @@ pub fn work_type(name: &str) -> WorkType {
     }
 }
 
-/// Strips tags from a JATS/HTML fragment and decodes the basic entities.
+/// Plain text from a JATS/HTML fragment: tags dropped (inline ones such
+/// as `<i>` and `<sub>` without a trace, others as a space), entities
+/// decoded (`&amp;`, `&#8211;`, `&#x2013;`, …) and whitespace collapsed.
+/// A `<` that doesn't open a tag (`age < 65`) is text.
 pub fn strip_markup(text: &str) -> String {
     let mut out = String::with_capacity(text.len());
-    let mut in_tag = false;
-    for c in text.chars() {
-        match c {
-            '<' => in_tag = true,
-            '>' if in_tag => {
-                in_tag = false;
-                out.push(' ');
+    let mut rest = text;
+    while let Some(at) = rest.find(['<', '&']) {
+        out.push_str(&rest[..at]);
+        rest = &rest[at..];
+        if rest.starts_with('<') {
+            match tag(rest) {
+                Some((len, inline)) => {
+                    if !inline {
+                        out.push(' ');
+                    }
+                    rest = &rest[len..];
+                }
+                None => {
+                    out.push('<');
+                    rest = &rest[1..];
+                }
             }
-            _ if !in_tag => out.push(c),
-            _ => {}
+        } else {
+            match entity(rest) {
+                Some((len, c)) => {
+                    out.push(c);
+                    rest = &rest[len..];
+                }
+                None => {
+                    out.push('&');
+                    rest = &rest[1..];
+                }
+            }
         }
     }
-    let out = out
-        .replace("&lt;", "<")
-        .replace("&gt;", ">")
-        .replace("&quot;", "\"")
-        .replace("&#39;", "'")
-        .replace("&amp;", "&");
+    out.push_str(rest);
     out.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+/// A title or name as plain text: [`strip_markup`] if it has any markup,
+/// else as it is.
+pub fn plain_text(text: String) -> String {
+    if text.contains(['<', '&']) {
+        strip_markup(&text)
+    } else {
+        text
+    }
+}
+
+/// The tag `s` starts with, if it is one: its length and whether it is
+/// inline (styling within a word or sentence).
+fn tag(s: &str) -> Option<(usize, bool)> {
+    const INLINE: &[&str] = &[
+        "a",
+        "b",
+        "bold",
+        "em",
+        "font",
+        "i",
+        "inline-formula",
+        "italic",
+        "math",
+        "mi",
+        "mn",
+        "mo",
+        "monospace",
+        "mrow",
+        "msub",
+        "msup",
+        "named-content",
+        "sc",
+        "scp",
+        "small",
+        "span",
+        "strong",
+        "styled-content",
+        "sub",
+        "sup",
+        "tt",
+        "u",
+        "underline",
+    ];
+    let inner = s.strip_prefix('<')?;
+    let name_start = inner.trim_start_matches('/');
+    if !name_start.starts_with(|c: char| c.is_ascii_alphabetic()) {
+        return None;
+    }
+    let end = inner.find('>')?;
+    if inner[..end].contains('<') {
+        return None;
+    }
+    let name = name_start
+        .split(|c: char| c.is_whitespace() || c == '>' || c == '/')
+        .next()
+        .unwrap_or_default();
+    // Without a namespace prefix: `jats:italic`, `mml:mi`.
+    let name = name.rsplit(':').next().unwrap_or(name).to_ascii_lowercase();
+    Some((end + 2, INLINE.contains(&name.as_str())))
+}
+
+/// The entity `s` starts with, if it is one: its length and character.
+fn entity(s: &str) -> Option<(usize, char)> {
+    let end = s.get(..12).unwrap_or(s).find(';')?;
+    let name = &s[1..end];
+    let c = if let Some(hex) = name.strip_prefix("#x").or_else(|| name.strip_prefix("#X")) {
+        char::from_u32(u32::from_str_radix(hex, 16).ok()?)?
+    } else if let Some(dec) = name.strip_prefix('#') {
+        char::from_u32(dec.parse().ok()?)?
+    } else {
+        match name {
+            "amp" => '&',
+            "lt" => '<',
+            "gt" => '>',
+            "quot" => '"',
+            "apos" => '\'',
+            "nbsp" => ' ',
+            "ndash" => '\u{2013}',
+            "mdash" => '\u{2014}',
+            "hellip" => '\u{2026}',
+            "lsquo" => '\u{2018}',
+            "rsquo" => '\u{2019}',
+            "ldquo" => '\u{201C}',
+            "rdquo" => '\u{201D}',
+            _ => return None,
+        }
+    };
+    Some((end + 1, c))
 }
 
 impl CslItem {
     pub fn to_work(&self) -> Work {
         let first = |t: &Option<OneOrMany>| t.as_ref().and_then(|t| t.first()).map(str::to_owned);
         let mut work = Work {
-            title: first(&self.title),
+            title: first(&self.title).map(plain_text),
             authors: self.author.iter().filter_map(CslName::person).collect(),
             issued: self
                 .issued
@@ -261,7 +367,7 @@ impl CslItem {
                 .and_then(CslDate::to_partial)
                 .or_else(|| self.published.as_ref().and_then(CslDate::to_partial)),
             work_type: self.item_type.as_deref().map(work_type),
-            container_title: first(&self.container_title),
+            container_title: first(&self.container_title).map(plain_text),
             publisher: self.publisher.clone(),
             volume: self.volume.as_ref().map(Scalar::text),
             issue: self.issue.as_ref().map(Scalar::text),
@@ -388,6 +494,31 @@ mod tests {
         assert_eq!(target.work.to_string(), "doi:10.1161/cir.0000000000001415");
         assert_eq!(target.date.unwrap().to_string(), "2026-07-13");
         assert_eq!(target.source.as_deref(), Some("publisher"));
+    }
+
+    #[test]
+    fn markup_becomes_plain_text() {
+        for (markup, plain) in [
+            ("Anesthesia &amp; Analgesia", "Anesthesia & Analgesia"),
+            ("H<sub>2</sub>O and <i>E. coli</i>", "H2O and E. coli"),
+            (
+                "<jats:italic>In vivo</jats:italic> imaging",
+                "In vivo imaging",
+            ),
+            (
+                "<jats:title>Abstract</jats:title><jats:p>Text.</jats:p>",
+                "Abstract Text.",
+            ),
+            ("Age < 65 &amp; > 18", "Age < 65 & > 18"),
+            (
+                "1990&#8211;2000 &#x2013; &ndash; caf&eacute; R&D",
+                "1990\u{2013}2000 \u{2013} \u{2013} caf&eacute; R&D",
+            ),
+            ("<b>Bold</b> <unclosed", "Bold <unclosed"),
+        ] {
+            assert_eq!(strip_markup(markup), plain, "{markup:?}");
+        }
+        assert_eq!(plain_text("No  markup ".into()), "No  markup ");
     }
 
     #[test]

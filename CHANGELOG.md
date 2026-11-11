@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased
+
+Fixed:
+
+- Titles and journal names from Crossref (and OpenAlex, DataCite,
+  Europe PMC) kept their HTML entities and JATS tags (`Anesthesia &amp;
+  Analgesia`, `<i>E. coli</i>`), into citations, BibTeX and RIS. They
+  are plain text now. Abstracts no longer gain a space where an inline
+  tag was (`H<sub>2</sub>O` is `H2O`), and a `<` that opens no tag
+  (`age < 65`) is kept (#27).
+
 ## 0.6.4
 
 Fixed:

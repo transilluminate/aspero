@@ -13,7 +13,7 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use aspero_core::csl::strip_markup;
+use aspero_core::csl::{plain_text, strip_markup};
 use aspero_core::http::escape_lucene;
 use aspero_core::{
     Capabilities, Cursor, Doi, Error, FieldSet, Filter, Hit, HttpClient, HttpRequest, HttpResponse,
@@ -300,7 +300,9 @@ fn to_record(value: &serde_json::Value, at: Timestamp) -> serde_json::Result<Sou
     let types = &r.pub_type_list.pub_type;
     let has = |t: &str| types.iter().any(|p| p.eq_ignore_ascii_case(t));
     let mut work = Work::default();
-    work.title = r.title.map(|t| t.trim_end_matches('.').to_owned());
+    work.title = r
+        .title
+        .map(|t| plain_text(t).trim_end_matches('.').to_owned());
     work.authors = r
         .author_list
         .author
@@ -347,7 +349,8 @@ fn to_record(value: &serde_json::Value, at: Timestamp) -> serde_json::Result<Sou
         .journal_info
         .journal
         .title
-        .or_else(|| book.comprising_title.clone());
+        .or_else(|| book.comprising_title.clone())
+        .map(plain_text);
     work.publisher = book.publisher.clone();
     work.volume = r.journal_info.volume;
     work.issue = r.journal_info.issue;

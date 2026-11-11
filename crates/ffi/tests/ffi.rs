@@ -1,7 +1,7 @@
 //! The handle as an app sees it, without the network: typed answers,
 //! offline from the cache, and awaitable from any executor.
 
-use aspero_ffi::records::{ErrorKind, LookupStatus, Reason, Verdict};
+use aspero_ffi::records::{ErrorKind, KeyStatus, LookupStatus, Reason, SearchRequest, Verdict};
 use aspero_ffi::{Aspero, AsperoError, CallToken, Config, Patience};
 
 fn aspero(cache_dir: Option<String>) -> std::sync::Arc<Aspero> {
@@ -116,4 +116,54 @@ fn a_cancelled_token_ends_calls_at_once() {
         Some(token),
     ));
     assert!(matches!(result, Err(AsperoError::Cancelled)));
+}
+
+#[test]
+fn failed_searches_say_why() {
+    let request = SearchRequest {
+        text: "deep learning".into(),
+        year_from: None,
+        year_to: None,
+        work_type: None,
+        open_access_only: false,
+        limit: 5,
+        source: None,
+        cursor: None,
+    };
+    let found = block_on(aspero(None).search(request, Patience::Offline, None)).unwrap();
+    assert!(found.hits.is_empty());
+    assert_eq!(found.failure.unwrap().kind, ErrorKind::NotCached);
+}
+
+#[test]
+fn caches_report_and_clear() {
+    let dir = std::env::temp_dir().join(format!("aspero-ffi-cache-{}", std::process::id()));
+    let handle = aspero(Some(dir.display().to_string()));
+    assert_eq!(handle.cache_stats().unwrap().unwrap().records, 0);
+    handle.clear_cache().unwrap();
+    assert!(aspero(None).cache_stats().unwrap().is_none());
+    drop(handle);
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn blank_keys_are_rejected_without_asking() {
+    let checked = block_on(aspero(None).check_openalex_key("  ".into(), None)).unwrap();
+    assert_eq!(checked.status, KeyStatus::Rejected);
+}
+
+/// Asks OpenAlex: `cargo test -p aspero-ffi -- --ignored`.
+#[test]
+#[ignore = "network"]
+fn live_key_checks() {
+    let handle = aspero(None);
+    let checked = block_on(handle.check_openalex_key("not-a-real-key".into(), None)).unwrap();
+    eprintln!("{checked:?}");
+    assert_eq!(checked.status, KeyStatus::Rejected);
+    if let Ok(key) = std::env::var("OPENALEX_API_KEY") {
+        let checked = block_on(handle.check_openalex_key(key, None)).unwrap();
+        eprintln!("{checked:?}");
+        assert_eq!(checked.status, KeyStatus::Valid);
+        assert!(checked.budget.is_some_and(|b| b.remaining.is_some()));
+    }
 }

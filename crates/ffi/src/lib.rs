@@ -13,7 +13,10 @@
 
 use std::sync::Arc;
 
-use aspero_core::{Claim, Error, ProviderId, Usage};
+use aspero_core::{
+    Claim, Cursor, Error, ErrorKind, FieldSet, ProviderId, SearchQuery, Usage, WorkId, WorkType,
+    YearRange,
+};
 use aspero_engine::{
     CallOptions, CrossrefConfig, DataciteConfig, DoiConfig, Engine, EuropePmcConfig, Extras,
     OpenAlexConfig, OpenLibraryConfig, SecretString, SqliteCache, StandardConfig, standard,
@@ -26,13 +29,17 @@ use tokio::task::JoinHandle;
 pub mod records;
 
 use records::{
-    Lookup, Lookups, Mention, ProviderUsage, Reference, Unavailable, Verification, Verifications,
+    Budget, CacheStats, KeyCheck, KeyStatus, Lookup, Lookups, Mention, ProviderUsage, Reference,
+    SearchRequest, SearchResults, Unavailable, Verification, Verifications,
 };
 
 uniffi::setup_scaffolding!();
 
 /// Results per call at most from each provider search when verifying.
 const SEARCH_LIMIT: u32 = 5;
+
+/// A work every OpenAlex key can look up, free: for checking keys.
+const KNOWN_WORK: &str = "doi:10.1038/nature14539";
 
 #[derive(Debug, Clone, uniffi::Record)]
 pub struct Config {
@@ -68,6 +75,9 @@ pub enum AsperoError {
     /// A bug: the call panicked or its task was lost.
     #[error("internal error: {0}")]
     Internal(String),
+    /// The cache file couldn't be read or written.
+    #[error("cache error: {0}")]
+    Cache(String),
 }
 
 /// Receives each verification as it finishes.
@@ -113,6 +123,8 @@ impl CallToken {
 pub struct Aspero {
     engine: Engine,
     runtime: tokio::runtime::Runtime,
+    cache: Option<Arc<SqliteCache>>,
+    mailto: Option<String>,
 }
 
 #[uniffi::export]
@@ -129,10 +141,11 @@ impl Aspero {
             }
             None => None,
         };
+        let mailto = config.mailto.filter(|m| !m.trim().is_empty());
         let mut standard_config = StandardConfig::default();
-        standard_config.mailto = config.mailto.filter(|m| !m.trim().is_empty());
+        standard_config.mailto = mailto.clone();
         standard_config.pacing = cache.clone().map(|c| c as _);
-        standard_config.cache = cache.map(|c| c as _);
+        standard_config.cache = cache.clone().map(|c| c as _);
         let mut openalex = OpenAlexConfig::default();
         openalex.api_key = config
             .openalex_key
@@ -151,7 +164,12 @@ impl Aspero {
             .enable_all()
             .build()
             .map_err(|e| setup(e.to_string()))?;
-        Ok(Arc::new(Aspero { engine, runtime }))
+        Ok(Arc::new(Aspero {
+            engine,
+            runtime,
+            cache,
+            mailto,
+        }))
     }
 
     /// Looks up identifiers as written (DOIs, URLs, PMIDs, arXiv IDs, …).
@@ -234,6 +252,36 @@ impl Aspero {
         .await
     }
 
+    /// Searches one provider by keywords: `request.source`, or the first
+    /// that searches. A failed search has no hits and says why.
+    #[uniffi::method(default(cancel = None))]
+    pub async fn search(
+        &self,
+        request: SearchRequest,
+        patience: Patience,
+        cancel: Option<Arc<CallToken>>,
+    ) -> Result<SearchResults, AsperoError> {
+        let engine = self.engine(patience);
+        self.run(
+            async move {
+                let mut query = SearchQuery::new(request.text);
+                if request.year_from.is_some() || request.year_to.is_some() {
+                    query.years = Some(YearRange {
+                        from: request.year_from,
+                        to: request.year_to,
+                    });
+                }
+                query.work_type = request.work_type.as_deref().map(WorkType::from_csl);
+                query.open_access = request.open_access_only.then_some(true);
+                query.page.limit = request.limit;
+                query.page.cursor = request.cursor.map(Cursor);
+                SearchResults::new(engine.search(request.source.as_deref(), &query).await)
+            },
+            cancel,
+        )
+        .await
+    }
+
     /// The identifiers mentioned in `text`, in order, where and as written.
     /// Offline.
     pub fn scan(&self, text: String) -> Vec<Mention> {
@@ -251,6 +299,94 @@ impl Aspero {
             .iter()
             .map(|r| Reference::new(&text, r))
             .collect()
+    }
+
+    /// Each provider's budget as its last response reported it, without
+    /// spending any: OpenAlex's, once it has been called (or a key
+    /// checked) since launch.
+    pub fn budgets(&self) -> Vec<Budget> {
+        self.engine
+            .budgets()
+            .iter()
+            .map(|(p, b)| Budget::new(p, b))
+            .collect()
+    }
+
+    /// Whether OpenAlex accepts `key`, with one free lookup (never
+    /// cached), and what it has left. Doesn't change the handle's key.
+    #[uniffi::method(default(cancel = None))]
+    pub async fn check_openalex_key(
+        &self,
+        key: String,
+        cancel: Option<Arc<CallToken>>,
+    ) -> Result<KeyCheck, AsperoError> {
+        if key.trim().is_empty() {
+            return Ok(KeyCheck {
+                status: KeyStatus::Rejected,
+                message: Some("no key given".into()),
+                budget: None,
+            });
+        }
+        let mut config = StandardConfig::default();
+        config.mailto = self.mailto.clone();
+        config.pacing = self.cache.clone().map(|c| c as _);
+        let mut openalex = OpenAlexConfig::default();
+        openalex.api_key = Some(SecretString::from(key.trim().to_owned()));
+        config.openalex = Some(openalex);
+        let engine = standard(config)
+            .map_err(|e| AsperoError::Setup(e.to_string()))?
+            .with_options(CallOptions::interactive());
+        self.run(
+            async move {
+                let id: WorkId = KNOWN_WORK.parse().expect("a valid identifier");
+                let report = engine.lookup(&[id], FieldSet::DEFAULT).await;
+                let failure = report.results[0]
+                    .attempts
+                    .iter()
+                    .find_map(|a| match &a.outcome {
+                        aspero_engine::Outcome::Failed(e) => Some(e.clone()),
+                        _ => None,
+                    });
+                let status = match failure.as_ref().map(Error::kind) {
+                    None | Some(ErrorKind::BudgetSpent) => KeyStatus::Valid,
+                    Some(ErrorKind::KeyRejected) => KeyStatus::Rejected,
+                    Some(_) => KeyStatus::Unreachable,
+                };
+                KeyCheck {
+                    status,
+                    message: failure
+                        .filter(|_| status != KeyStatus::Valid)
+                        .map(|e| e.to_string()),
+                    budget: engine.budgets().first().map(|(p, b)| Budget::new(p, b)),
+                }
+            },
+            cancel,
+        )
+        .await
+    }
+
+    /// What the cache holds; `None` without one.
+    pub fn cache_stats(&self) -> Result<Option<CacheStats>, AsperoError> {
+        let Some(cache) = &self.cache else {
+            return Ok(None);
+        };
+        let s = cache
+            .stats()
+            .map_err(|e| AsperoError::Cache(e.to_string()))?;
+        Ok(Some(CacheStats {
+            records: s.records,
+            identifiers: s.identifiers,
+            misses: s.misses,
+            searches: s.searches,
+        }))
+    }
+
+    /// Empties the cache.
+    pub fn clear_cache(&self) -> Result<(), AsperoError> {
+        match &self.cache {
+            Some(cache) => cache.clear().map_err(|e| AsperoError::Cache(e.to_string())),
+            None => Ok(()),
+        }
     }
 
     /// Providers refusing calls now, and why: a spent budget, a rejected

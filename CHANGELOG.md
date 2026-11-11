@@ -10,7 +10,8 @@ Breaking:
 - FFI calls return typed records instead of JSON strings: `lookup` →
   `Lookups`, `verify` → `Verifications`, `verify_each` hands the listener
   a `Verification` (with its claim's `index`) and returns usage, `scan` →
-  `[Mention]`, `unavailable` → `[Unavailable]`.
+  `[Mention]`, `unavailable` → `[Unavailable]`. `AsperoError` gains
+  `Cache`.
 
 Added:
 
@@ -18,6 +19,11 @@ Added:
   (numbered, bulleted, one per paragraph or line, wrapped lines rejoined)
   and checks each reference; `split_references` in `aspero-core`, and
   `splitReferences` over FFI with UTF-16 ranges.
+- `Engine::budgets()`: each provider's budget as its last response
+  reported it, so it can be shown without spending any.
+- FFI: `search`, `budgets`, `checkOpenalexKey` (one free lookup: valid,
+  rejected or unreachable, and what's left), `cacheStats` and
+  `clearCache`.
 - Verdicts say why as data as well as in English: `Verification::why`
   (a `Reason`, with the fields that differ and their values) and `notes`
   (retraction, newer version). JSON adds `why: {code, differs, cited}`.

@@ -29,6 +29,7 @@
 //! Not yet: fan-out search.
 
 mod abstracts;
+mod budget;
 mod check;
 mod enrich;
 mod health;
@@ -46,6 +47,7 @@ mod verdict;
 mod versions;
 
 pub use abstracts::{Abstract, AbstractsReport};
+pub use budget::Budget;
 pub use check::{Checked, Finding, Severity, duplicates, findings};
 pub use registry::{Disagreement, disagreements};
 pub use resolve::{Candidate, ResolveReport, Sighting, Via};
@@ -70,7 +72,9 @@ pub use versions::VersionsReport;
 use std::sync::Arc;
 use std::time::Duration;
 
-use aspero_core::{Error, ErrorCategory, ErrorKind, Provider, ProviderId, ResiliencePolicy, Usage};
+use aspero_core::{
+    Error, ErrorCategory, ErrorKind, Provider, ProviderId, ResiliencePolicy, Response, Usage,
+};
 pub use aspero_store::{Cache, Pacing, SqliteCache, Stats as CacheStats, StoreError};
 pub use inputs::{Extras, InputLookup, InputsReport, Looked};
 use jiff::Timestamp;
@@ -78,6 +82,7 @@ pub use lookup::{Attempt, LookupReport, LookupResult, Outcome};
 pub use options::CallOptions;
 pub use search::SearchReport;
 
+use crate::budget::Budgets;
 use crate::health::Health;
 use crate::inflight::InFlight;
 use crate::retry::{Jitter, random_jitter, with_retries};
@@ -142,6 +147,7 @@ pub struct Engine {
     options: CallOptions,
     inflight: Arc<InFlight>,
     health: Arc<Health>,
+    budgets: Arc<Budgets>,
 }
 
 #[derive(Clone)]
@@ -205,6 +211,7 @@ impl EngineBuilder {
             options: CallOptions::default(),
             inflight: Arc::default(),
             health: Arc::default(),
+            budgets: Arc::default(),
         }
     }
 }
@@ -272,17 +279,29 @@ impl Engine {
         self.health.unavailable((self.clock)())
     }
 
+    /// Each provider's budget as its last response reported it: what's
+    /// left without spending any. Only providers with budgets (OpenAlex)
+    /// report one, and only once called.
+    pub fn budgets(&self) -> Vec<(ProviderId, Budget)> {
+        self.budgets.all()
+    }
+
     /// Runs one provider operation with retries, unless the provider is
     /// refusing calls, and remembers how it went.
-    async fn call<T, F, Fut>(&self, entry: &Entry, op: F) -> Result<T, Error>
+    async fn call<T, F, Fut>(&self, entry: &Entry, op: F) -> Result<Response<T>, Error>
     where
         F: FnMut() -> Fut,
-        Fut: std::future::Future<Output = Result<T, Error>>,
+        Fut: std::future::Future<Output = Result<Response<T>, Error>>,
     {
-        let pass = self.health.admit(&entry.provider.id(), (self.clock)())?;
+        let provider = entry.provider.id();
+        let pass = self.health.admit(&provider, (self.clock)())?;
         let policy = self.options.apply(&entry.policy);
         let result = with_retries(&policy, self.jitter, op).await;
-        pass.record(&entry.policy, result.as_ref().err(), (self.clock)());
+        let now = (self.clock)();
+        pass.record(&entry.policy, result.as_ref().err(), now);
+        let usage = result.as_ref().ok().and_then(|r| r.usage.as_ref());
+        self.budgets
+            .note(&provider, usage, result.as_ref().err(), now);
         result
     }
 

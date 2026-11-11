@@ -279,8 +279,11 @@ fixture recorded with different parameters once hid a ranking bug.
 ## Apps (FFI)
 
 `aspero-ffi` (UniFFI) gives apps one `Aspero` handle: `lookup`, `verify`,
-`verify_each` (a callback per result as it finishes), `scan` and
-`unavailable`, with a `Patience` per call (batch, interactive, offline).
+`verify_each` (a callback per result as it finishes), `search`, offline
+`scan` and `split_references`, and for settings `budgets` (as last
+reported: free), `check_openalex_key` (one free lookup), `cache_stats`,
+`clear_cache` and `unavailable`. Network calls take a `Patience` (batch,
+interactive, offline).
 They return typed records (`Lookup`, `Verification`, `Work`, …), mirrors
 of the engine's types converted in `aspero-ffi` so the engine stays free
 of UniFFI. Reasons and failures are data (`Reason`, `ErrorKind`) as well

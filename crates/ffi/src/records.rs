@@ -811,3 +811,142 @@ pub struct Unavailable {
     /// When it will be tried again; never, for a rejected key.
     pub until: Option<SystemTime>,
 }
+
+// Settings.
+
+/// What a provider last said was left of its budget.
+#[derive(Debug, Clone, uniffi::Record)]
+pub struct Budget {
+    pub provider: String,
+    /// OpenAlex: US dollars.
+    pub remaining: Option<f64>,
+    pub resets_at: Option<SystemTime>,
+    /// When the provider said so.
+    pub seen_at: SystemTime,
+}
+
+impl Budget {
+    pub(crate) fn new(provider: &aspero_core::ProviderId, b: &engine::Budget) -> Self {
+        Budget {
+            provider: provider.to_string(),
+            remaining: b.remaining,
+            resets_at: b.resets_at.map(time),
+            seen_at: time(b.seen_at),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Enum)]
+pub enum KeyStatus {
+    /// Accepted (even if its budget is spent: see `budget`).
+    Valid,
+    Rejected,
+    /// OpenAlex couldn't be reached, so the key is untested.
+    Unreachable,
+}
+
+#[derive(Debug, Clone, uniffi::Record)]
+pub struct KeyCheck {
+    pub status: KeyStatus,
+    /// Why, in English, unless valid.
+    pub message: Option<String>,
+    /// What the key has left.
+    pub budget: Option<Budget>,
+}
+
+#[derive(Debug, Clone, uniffi::Record)]
+pub struct CacheStats {
+    pub records: u64,
+    pub identifiers: u64,
+    /// Remembered "not found" answers.
+    pub misses: u64,
+    pub searches: u64,
+}
+
+// Searching.
+
+#[derive(Debug, Clone, uniffi::Record)]
+pub struct SearchRequest {
+    /// Keywords or a title.
+    pub text: String,
+    #[uniffi(default = None)]
+    pub year_from: Option<i16>,
+    #[uniffi(default = None)]
+    pub year_to: Option<i16>,
+    /// A CSL type: `article-journal`, `book`, ….
+    #[uniffi(default = None)]
+    pub work_type: Option<String>,
+    #[uniffi(default = false)]
+    pub open_access_only: bool,
+    #[uniffi(default = 10)]
+    pub limit: u32,
+    /// A provider by name; otherwise the first that searches (OpenAlex,
+    /// $0.001 a page).
+    #[uniffi(default = None)]
+    pub source: Option<String>,
+    /// A previous page's `next`, with the same request otherwise.
+    #[uniffi(default = None)]
+    pub cursor: Option<String>,
+}
+
+#[derive(Debug, Clone, uniffi::Record)]
+pub struct SearchHit {
+    pub work: Work,
+    /// The provider's relevance score.
+    pub score: Option<f64>,
+}
+
+#[derive(Debug, Clone, uniffi::Record)]
+pub struct SearchResults {
+    /// Who answered.
+    pub provider: Option<String>,
+    pub hits: Vec<SearchHit>,
+    /// Total matches, if the provider reports it.
+    pub total: Option<u64>,
+    /// The cursor for the next page; none on the last.
+    pub next: Option<String>,
+    pub freshness: Option<Freshness>,
+    /// Why there are no hits, if the search failed.
+    pub failure: Option<Failure>,
+    pub usage: Vec<ProviderUsage>,
+}
+
+impl SearchResults {
+    pub(crate) fn new(result: Result<engine::SearchReport, engine::EngineError>) -> Self {
+        match result {
+            Err(e) => SearchResults {
+                provider: None,
+                hits: Vec::new(),
+                total: None,
+                next: None,
+                freshness: None,
+                failure: Some(Failure::from(&e)),
+                usage: Vec::new(),
+            },
+            Ok(report) => SearchResults {
+                provider: Some(report.provider.to_string()),
+                hits: report
+                    .page
+                    .hits
+                    .iter()
+                    .map(|h| SearchHit {
+                        work: Work::from_record(&h.record),
+                        score: h.score,
+                    })
+                    .collect(),
+                total: report.page.total,
+                next: report.page.next.map(|c| c.0),
+                freshness: Some(match report.served {
+                    Served::Cache => Freshness::Cache,
+                    Served::Stale => Freshness::Stale,
+                    _ => Freshness::Live,
+                }),
+                failure: None,
+                usage: report
+                    .usage
+                    .map(|u| usage(&[(report.provider.clone(), u)]))
+                    .unwrap_or_default(),
+            },
+        }
+    }
+}

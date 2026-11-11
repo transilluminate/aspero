@@ -69,14 +69,20 @@ pub async fn run(engine: &Engine, ids: Vec<String>, out: Out) -> Result<Exit, Fa
                 eprintln!("{usage}");
             }
         }
-        Format::Bibtex | Format::Ris => {
-            let mut export = output::Exporter::new(out.format);
+        Format::Bibtex | Format::Ris | Format::Cite => {
+            let mut export = output::Exporter::new(&out)?;
             for (input, lookup) in inputs.iter().zip(&report.items) {
                 match looked(lookup).and_then(|l| l.result.record.as_ref()) {
-                    Some(r) => println!("{}", export.entry(&r.work, &r.ids)),
+                    Some(r) => {
+                        let entry = export.entry(&r.work, &r.ids);
+                        if !entry.is_empty() {
+                            println!("{entry}");
+                        }
+                    }
                     None => eprintln!("skipped {input}: not found"),
                 }
             }
+            print!("{}", export.finish());
         }
         Format::Json | Format::Auto => {
             print(&serde_json::json!({"results": items, "usage": output::usage(&report.usage)}));

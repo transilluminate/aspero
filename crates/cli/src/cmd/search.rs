@@ -85,11 +85,15 @@ pub async fn run(
             }
             footer(&report, next.as_deref());
         }
-        Format::Bibtex | Format::Ris => {
-            let mut export = output::Exporter::new(out.format);
+        Format::Bibtex | Format::Ris | Format::Cite => {
+            let mut export = output::Exporter::new(&out)?;
             for hit in &page.hits {
-                println!("{}", export.entry(&hit.record.work, &hit.record.ids));
+                let entry = export.entry(&hit.record.work, &hit.record.ids);
+                if !entry.is_empty() {
+                    println!("{entry}");
+                }
             }
+            print!("{}", export.finish());
         }
         Format::Json | Format::Auto => {
             let mut doc = json!({

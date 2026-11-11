@@ -41,7 +41,7 @@ pub async fn run(engine: &Engine, args: ClaimArgs, out: Out) -> Result<Exit, Fai
     let total = claims.len();
     let show_progress = out.format == Format::Table && total > 1 && std::io::stderr().is_terminal();
     let mut results = Results::new(out.format, total, show_progress);
-    let mut export = output::Exporter::new(out.format);
+    let mut export = output::Exporter::new(&out)?;
     for (i, claim) in claims.iter().enumerate() {
         if let Err(e) = &claim.claim {
             let item = aspero_json::invalid_claim(claim.echo(), e);
@@ -91,7 +91,9 @@ pub async fn run(engine: &Engine, args: ClaimArgs, out: Out) -> Result<Exit, Fai
         }
         results.add(i, item, text, exit_for(v.verdict));
     }
-    results.finish(&usage)
+    let exit = results.finish(&usage);
+    print!("{}", export.finish());
+    exit
 }
 
 /// Results as claims complete: JSON lines at once, in any order (each
@@ -124,7 +126,7 @@ impl Results {
         self.done += 1;
         match self.format {
             Format::Jsonl => print_line(&item),
-            Format::Text | Format::Bibtex | Format::Ris => {
+            Format::Text | Format::Bibtex | Format::Ris | Format::Cite => {
                 self.slots[i] = Some((item, text));
                 while let Some(Some((_, text))) = self.slots.get(self.next) {
                     if !text.is_empty() {
@@ -148,7 +150,7 @@ impl Results {
         }
         let done = self.slots.into_iter().flatten();
         match self.format {
-            Format::Jsonl | Format::Bibtex | Format::Ris => {}
+            Format::Jsonl | Format::Bibtex | Format::Ris | Format::Cite => {}
             Format::Text => {
                 if let Some(text) = output::usage_text(usage) {
                     eprintln!("{text}");

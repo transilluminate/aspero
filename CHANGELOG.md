@@ -1,5 +1,24 @@
 # Changelog
 
+## Unreleased
+
+Added:
+
+- Citation styles, offline, by the hayagriva CSL processor, with eight
+  styles from the official CSL repository bundled: APA 7th, Vancouver
+  (NLM), Harvard (Cite Them Right), Chicago author-date, IEEE, Nature,
+  AMA and MLA. Any independent `.csl` style can be used too. Styles and
+  locales are CC BY-SA 3.0 (`crates/bib/styles/NOTICE.md`).
+  - CLI: `--style <id|file.csl>` (implies `--format cite`) and
+    `--locale en-GB` on `lookup`, `search` and `verify`; `aspero styles`
+    lists the bundled ones, `--credits` prints their license and authors.
+  - FFI: `citationStyles()`, `cite(works, style: StyleSource, format:
+    CiteFormat, locale:)` → `[CitedEntry { index, label, text, inText }]`
+    in the style's order (`.text` or `.html`), `styleCredits()`; throws
+    `StyleError` (`unknownStyle`, `dependent(parent)`, `invalid`).
+  - `aspero-bib`'s `styles` feature: `cite::{Style, cite, credits,
+    BUNDLED}`.
+
 ## 0.6.0
 
 Added:

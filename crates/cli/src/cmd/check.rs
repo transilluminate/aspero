@@ -89,7 +89,7 @@ pub async fn run(
             }
         }
         Format::Jsonl => reports.iter().for_each(|r| print_line(&r.json(out.full))),
-        Format::Bibtex | Format::Ris => unreachable!("rejected in main"),
+        Format::Bibtex | Format::Ris | Format::Cite => unreachable!("rejected in main"),
         Format::Json | Format::Auto => print(&json!({
             "file": path,
             "summary": summary.json(),

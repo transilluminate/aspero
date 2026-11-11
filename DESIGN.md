@@ -43,7 +43,8 @@ crates/
                openlibrary
   store/       disposable SQLite answer cache
   bib/         BibTeX/BibLaTeX (via the `biblatex` crate), RIS, CSL-JSON →
-               claims; works → BibTeX, RIS
+               claims; works → BibTeX, RIS, and citation styles (`styles`
+               feature: hayagriva, with the official CSL styles bundled)
   engine/      routing, caching, retries, pacing, resolve/verify/check
   json/        the JSON contract (works, lookups, verdicts, claims), shared
                by every front end
@@ -335,9 +336,11 @@ its container; different schema versions would rebuild each other's).
   rate-limited.
 - **Discovery**: citations/references, snowballing (co-citation, coupling),
   watches ("new since last run"), history and sessions.
-- **Integration**: citation styles (via `hayagriva`: +5.3 MB, and its
-  bundled Vancouver and NLM styles drop authors), CSL-JSON export,
-  DOI-as-citekey builds, Zotero interop; an MCP adapter if ever wanted.
+- **Integration**: CSL-JSON export, DOI-as-citekey builds, Zotero
+  interop; an MCP adapter if ever wanted.
+- **hayagriva workarounds** in `bib/src/cite.rs` (a default `<name/>`;
+  spaces before punctuation tidied): drop them once a release includes
+  typst/hayagriva#520 and fixes empty date-part delimiters.
 
 ## Open questions
 

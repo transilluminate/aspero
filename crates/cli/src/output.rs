@@ -13,26 +13,81 @@ const TABLE_ABSTRACT: usize = 600;
 /// Authors shown in a table before "et al.".
 const TABLE_AUTHORS: usize = 3;
 
-/// Works written as BibTeX entries or RIS records, BibTeX keys kept
-/// distinct (`lecun2015deep`, `lecun2015deepa`, …).
+/// Works written as BibTeX entries or RIS records (BibTeX keys kept
+/// distinct: `lecun2015deep`, `lecun2015deepa`, …), or gathered into a
+/// reference list in a citation style.
 pub struct Exporter {
     format: crate::args::Format,
     keys: aspero_bib::Keys,
+    style: Option<aspero_bib::cite::Style>,
+    locale: Option<String>,
+    works: Vec<(Work, Vec<WorkId>)>,
 }
 
 impl Exporter {
-    pub fn new(format: crate::args::Format) -> Self {
-        Exporter {
-            format,
+    pub fn new(out: &crate::cmd::Out) -> Result<Self, crate::cmd::Failure> {
+        use crate::cmd::Failure;
+        let style = match (out.format, &out.style) {
+            (crate::args::Format::Cite, None) => {
+                return Err(Failure::usage(
+                    "--format cite needs --style (`aspero styles` lists them)",
+                ));
+            }
+            (crate::args::Format::Cite, Some(s)) if s.ends_with(".csl") => {
+                let xml = std::fs::read_to_string(s)
+                    .map_err(|e| Failure::usage(format!("could not read {s}: {e}")))?;
+                let style = aspero_bib::cite::Style::from_xml(&xml)
+                    .map_err(|e| Failure::usage(format!("{s}: {e}")))?;
+                Some(style)
+            }
+            (crate::args::Format::Cite, Some(id)) => Some(
+                aspero_bib::cite::Style::bundled(id)
+                    .map_err(|e| Failure::usage(format!("{e} (`aspero styles` lists them)")))?,
+            ),
+            _ => None,
+        };
+        Ok(Exporter {
+            format: out.format,
             keys: aspero_bib::Keys::default(),
-        }
+            style,
+            locale: out.locale.clone(),
+            works: Vec::new(),
+        })
     }
 
+    /// The work's entry to print now; empty for a style, whose list is
+    /// ordered once every work is in ([`Exporter::finish`]).
     pub fn entry(&mut self, work: &Work, ids: &[WorkId]) -> String {
         match self.format {
             crate::args::Format::Ris => aspero_bib::ris(work, ids),
+            crate::args::Format::Cite => {
+                self.works.push((work.clone(), ids.to_vec()));
+                String::new()
+            }
             _ => aspero_bib::bibtex(work, ids, &self.keys.key(work)),
         }
+    }
+
+    /// A style's reference list, one entry per line; empty otherwise.
+    pub fn finish(self) -> String {
+        let Some(style) = &self.style else {
+            return String::new();
+        };
+        let works: Vec<(&Work, &[WorkId])> =
+            self.works.iter().map(|(w, ids)| (w, &ids[..])).collect();
+        let cited = aspero_bib::cite::cite(
+            &works,
+            style,
+            self.locale.as_deref(),
+            aspero_bib::cite::Markup::Text,
+        );
+        cited
+            .iter()
+            .map(|c| match &c.label {
+                Some(label) => format!("{label} {}\n", c.text),
+                None => format!("{}\n", c.text),
+            })
+            .collect()
     }
 }
 

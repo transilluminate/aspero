@@ -11,6 +11,7 @@ pub mod lookup;
 pub mod resolve;
 pub mod scan;
 pub mod search;
+pub mod styles;
 pub mod verify;
 
 use std::io::Read;
@@ -49,11 +50,14 @@ impl From<EngineError> for Failure {
 }
 
 /// Resolved output settings. `format` is never `Auto` here.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub struct Out {
     pub format: Format,
     pub full: bool,
     pub abstracts: bool,
+    /// For `--format cite`: a bundled style's id, or a `.csl` file.
+    pub style: Option<String>,
+    pub locale: Option<String>,
 }
 
 pub fn read_stdin() -> Result<String, Failure> {

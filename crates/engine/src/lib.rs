@@ -22,13 +22,15 @@
 //!
 //! - **Sharing**: one engine serves many callers at once. Lookups already
 //!   in flight are joined rather than repeated, and each caller sets its
-//!   own patience with [`CallOptions`].
+//!   own patience with [`CallOptions`]. Providers that can't answer (a
+//!   spent quota, a rejected key, repeated failures) are skipped until
+//!   they can ([`Engine::unavailable`]).
 //!
-//! Not yet: fan-out search, the circuit breaker and the cross-process
-//! limiter.
+//! Not yet: fan-out search and the cross-process limiter.
 
 mod abstracts;
 mod check;
+mod health;
 mod inflight;
 mod options;
 mod registry;
@@ -72,6 +74,7 @@ pub use aspero_store::{Cache, SqliteCache, Stats as CacheStats, StoreError};
 use jiff::Timestamp;
 pub use options::CallOptions;
 
+use crate::health::Health;
 use crate::inflight::{Answer, InFlight};
 use crate::retry::{Jitter, random_jitter, with_retries};
 
@@ -134,6 +137,7 @@ pub struct Engine {
     clock: Clock,
     options: CallOptions,
     inflight: Arc<InFlight>,
+    health: Arc<Health>,
 }
 
 #[derive(Clone)]
@@ -196,6 +200,7 @@ impl EngineBuilder {
             clock: self.clock,
             options: CallOptions::default(),
             inflight: Arc::default(),
+            health: Arc::default(),
         }
     }
 }
@@ -303,6 +308,26 @@ impl Engine {
 
     pub fn options(&self) -> CallOptions {
         self.options
+    }
+
+    /// Providers refusing calls now, and why: a spent quota (until it
+    /// resets), rejected credentials, or an open circuit breaker.
+    pub fn unavailable(&self) -> Vec<(ProviderId, Error)> {
+        self.health.unavailable((self.clock)())
+    }
+
+    /// Runs one provider operation with retries, unless the provider is
+    /// refusing calls, and remembers how it went.
+    async fn call<T, F, Fut>(&self, entry: &Entry, op: F) -> Result<T, Error>
+    where
+        F: FnMut() -> Fut,
+        Fut: std::future::Future<Output = Result<T, Error>>,
+    {
+        let pass = self.health.admit(&entry.provider.id(), (self.clock)())?;
+        let policy = self.options.apply(&entry.policy);
+        let result = with_retries(&policy, self.jitter, op).await;
+        pass.record(&entry.policy, result.as_ref().err(), (self.clock)());
+        result
     }
 
     /// Registered providers, in priority order.
@@ -483,15 +508,13 @@ impl Engine {
         let wanted: Vec<(usize, WorkId)> = pending.iter().map(|&i| (i, ids[i].clone())).collect();
         let (mut leads, joined) = self.inflight.claim(&provider, &wanted, fields);
         let led = leads.indices();
-        let policy = self.options.apply(&entry.policy);
         let mut chunks = led.chunks(caps.max_batch.max(1));
         while let Some(chunk) = chunks.next() {
             leads.publish(&answers);
             let batch: Vec<WorkId> = chunk.iter().map(|&i| ids[i].clone()).collect();
-            let answer = with_retries(&policy, self.jitter, || {
-                entry.provider.lookup(&batch, fields)
-            })
-            .await;
+            let answer = self
+                .call(entry, || entry.provider.lookup(&batch, fields))
+                .await;
 
             let error = match answer {
                 Ok(resp) => {
@@ -654,8 +677,7 @@ impl Engine {
             tracing::info!(target: "aspero::cache", provider = %provider, text = %sent.text, "search served from cache");
             return Ok(report(page, None, Served::Cache));
         }
-        let policy = self.options.apply(&entry.policy);
-        match with_retries(&policy, self.jitter, || entry.provider.search(&sent)).await {
+        match self.call(entry, || entry.provider.search(&sent)).await {
             Ok(resp) => {
                 self.remember_search(&provider, &sent, &resp.value);
                 Ok(report(resp.value, resp.usage, Served::Live))

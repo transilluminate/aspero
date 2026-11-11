@@ -5,6 +5,8 @@ use aspero_core::{Claim, WorkId};
 use serde::Deserialize;
 use serde_json::{Value, json};
 
+const EMPTY: &str = "claim has no text, title, authors or identifiers";
+
 /// A claim as an agent would write it, one JSON object per stdin line.
 /// Unknown keys are rejected so typos aren't silently ignored.
 #[derive(Debug, Default, Deserialize)]
@@ -72,7 +74,7 @@ impl ClaimInput {
         claim.volume = self.volume;
         claim.page = self.page;
         if claim.is_empty() {
-            return Err("claim has no text, title, authors or identifiers".into());
+            return Err(EMPTY.into());
         }
         Ok(claim)
     }
@@ -91,7 +93,12 @@ impl InputClaim {
     /// `key` is kept even when the rest of it is invalid.
     pub fn from_line(line: &str) -> Self {
         let (key, claim) = match line.trim_start().starts_with('{') {
-            false => (None, Ok(Claim::from_input(line))),
+            false => (
+                None,
+                Some(Claim::from_input(line))
+                    .filter(|c| !c.is_empty())
+                    .ok_or_else(|| EMPTY.to_owned()),
+            ),
             true => match serde_json::from_str::<Value>(line) {
                 Err(e) => (None, Err(format!("invalid claim JSON: {e}"))),
                 Ok(value) => (
@@ -164,6 +171,9 @@ mod tests {
         let ok = InputClaim::from_line(r#"{"key": {"note": "pe.md", "line": 7}, "title": "X"}"#);
         assert_eq!(ok.echo()["key"], json!({"note": "pe.md", "line": 7}));
         assert_eq!(ok.echo()["claim"], json!({"title": "X"}));
+        for blank in ["", "   ", r#"{"text": "  ", "key": 1}"#] {
+            assert!(claim(blank).is_err(), "{blank:?}");
+        }
         let bad = InputClaim::from_line(r#"{"key": "ref-12", "titel": "typo"}"#);
         assert!(bad.claim.is_err());
         assert_eq!(bad.echo()["key"], "ref-12");

@@ -116,11 +116,14 @@ impl Claim {
         }
     }
 
+    /// Nothing to search with: no identifiers, and no text, title or
+    /// authors that aren't blank.
     pub fn is_empty(&self) -> bool {
-        self.text.is_none()
+        let blank = |s: &Option<String>| s.as_deref().is_none_or(|s| s.trim().is_empty());
+        blank(&self.text)
             && self.ids.is_empty()
-            && self.title.is_none()
-            && self.authors.is_empty()
+            && blank(&self.title)
+            && self.authors.iter().all(|a| a.trim().is_empty())
     }
 
     /// A reference string for citation matchers: the text, or one composed

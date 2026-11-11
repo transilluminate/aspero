@@ -264,10 +264,14 @@ impl<'a> List<'a> {
             .chain(starts.iter().copied())
             .chain(std::iter::once(line.end))
             .collect();
-        bounds
+        // Every piece dated, or all but one of four or more: a reference
+        // the style or copy left without a date doesn't undo the list.
+        let pieces = bounds.len() - 1;
+        let undated = bounds
             .windows(2)
-            .all(|w| dated(&self.text[w[0]..w[1]]))
-            .then_some(starts)
+            .filter(|w| !dated(&self.text[w[0]..w[1]]))
+            .count();
+        (undated == 0 || (undated == 1 && pieces >= 4)).then_some(starts)
     }
 
     /// Groups by the text rules: numbers or bullets, else paragraphs, else
@@ -430,7 +434,19 @@ fn dated(line: &str) -> bool {
     let year = line
         .split(|c: char| !c.is_ascii_digit())
         .any(|n| n.len() == 4 && ("1600".."2100").contains(&n));
-    year || line.contains("doi") || line.contains("10.") || line.contains("http")
+    // What styles write for a work without a year, or a web page's date.
+    let lower = line.to_lowercase();
+    let undated = [
+        "n.d.",
+        "n. d.",
+        "no date",
+        "accessed",
+        "[cited",
+        "available from",
+    ]
+    .iter()
+    .any(|m| lower.contains(m));
+    year || undated || line.contains("doi") || line.contains("10.") || line.contains("http")
 }
 
 /// Starts as a wrapped line's continuation does: in lower case, or with
@@ -712,6 +728,14 @@ mod tests {
                 "Konstantinides SV. Title four. Eur Heart J. 2020;41:543.",
             ]
         );
+        // Undated, as styles write it ("n.d."), or one piece of four
+        // without a date.
+        let undated = "Sanchez A. One. Blood. 2011;9:1-8. \
+            [21] Finucane T. Two. Lancet. 2012;379:10. \
+            [22] Defense Health Board. Three. Falls Church, VA, n.d. \
+            [23] Konstantinides SV. Four. Eur Heart J. 2020;41:543.";
+        assert_eq!(texts(undated).len(), 4);
+        assert_eq!(texts(&undated.replace("n.d.", "undated.")).len(), 4);
         // Two, when the first starts the line.
         assert_eq!(
             texts("[1] Smith J. One. 2019. [2] Jones K. Two. 2020.").len(),

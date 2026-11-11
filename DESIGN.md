@@ -227,8 +227,12 @@ verify a few claims at once and yield each as it finishes, so a slow
 claim doesn't hold up the rest, and a batch never queues so many requests
 that a caller sharing the engine waits behind it.
 
-Planned for 0.4 (below): a **cross-process** rate limiter (ticket scheme
-in SQLite, so parallel processes share one budget).
+Pacing is **shared across processes** through the cache file: each
+request claims its provider's next slot in a `pacing` table (one write
+transaction), so parallel agents keep to one rate between them, even with
+`--no-cache`. The table sits outside the versioned schema so rebuilds keep
+it; a slot more than five minutes ahead (a clock gone back) is reset; a
+failing store falls back to pacing one process alone.
 
 ## Provider notes and gotchas
 
@@ -277,10 +281,8 @@ A GUI (a macOS app over FFI) and parallel agents hold one engine for a
 long time and ask many things at once. In order, each step tested on its
 own:
 
-1. **The cross-process limiter**: SQLite tickets, one budget for the app,
-   the CLI and parallel agents.
-2. **Credentials**: env, then the OS keyring, then a `0600` file.
-3. **`aspero-ffi`**: UniFFI, async calls, config passed in (the app owns
+1. **Credentials**: env, then the OS keyring, then a `0600` file.
+2. **`aspero-ffi`**: UniFFI, async calls, config passed in (the app owns
    the Keychain), an `.xcframework` attached to releases.
 
 Not until needed: priority lanes in the pacer, a daemon, a SQLite

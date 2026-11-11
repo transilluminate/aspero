@@ -62,7 +62,8 @@ pub struct Global {
     #[arg(short, long, global = true, action = clap::ArgAction::Count)]
     pub verbose: u8,
 
-    /// Don't read or write the answer cache.
+    /// Don't read or write the answer cache (its file still paces requests
+    /// shared with other aspero processes).
     #[arg(long, global = true)]
     pub no_cache: bool,
 

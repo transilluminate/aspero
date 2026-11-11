@@ -97,12 +97,9 @@ fn cache_path() -> Result<PathBuf, Failure> {
     Ok(dir.join("cache.sqlite"))
 }
 
-/// The cache, unless disabled. A cache that can't be opened is a warning,
-/// not a failure: everything works without it, just slower and costlier.
-fn open_cache(disabled: bool) -> Option<Arc<SqliteCache>> {
-    if disabled {
-        return None;
-    }
+/// The cache file. One that can't be opened is a warning, not a failure:
+/// everything works without it, just slower and costlier.
+fn open_cache() -> Option<Arc<SqliteCache>> {
     let opened = cache_path()
         .map_err(|f| f.message)
         .and_then(|path| SqliteCache::open(&path).map_err(|e| format!("{e} ({})", path.display())));
@@ -117,10 +114,13 @@ fn open_cache(disabled: bool) -> Option<Arc<SqliteCache>> {
 
 /// Credentials and contact details come from the environment for now; the
 /// config file and keyring (DESIGN §7) come later.
-fn engine(cache: Option<Arc<SqliteCache>>) -> Result<Engine, Failure> {
+/// `file` paces requests across processes (parallel agents), and caches
+/// answers unless `no_cache`.
+fn engine(file: Option<Arc<SqliteCache>>, no_cache: bool) -> Result<Engine, Failure> {
     let mut config = StandardConfig::default();
     config.mailto = env("ASPERO_MAILTO");
-    config.cache = cache.map(|c| c as _);
+    config.pacing = file.clone().map(|c| c as _);
+    config.cache = file.filter(|_| !no_cache).map(|c| c as _);
     let mut openalex = OpenAlexConfig::default();
     openalex.api_key = env("OPENALEX_API_KEY").map(SecretString::from);
     config.openalex = Some(openalex);
@@ -141,7 +141,7 @@ async fn run(cli: Cli, out: Out) -> Result<Exit, Failure> {
         Command::Scan { files } => return cmd::scan::run(files, out),
         _ => {}
     }
-    let engine = engine(open_cache(cli.global.no_cache))?;
+    let engine = engine(open_cache(), cli.global.no_cache)?;
     match cli.command {
         Command::Lookup { ids } => cmd::lookup::run(&engine, ids, out).await,
         Command::Search { query, options } => cmd::search::run(&engine, query, options, out).await,

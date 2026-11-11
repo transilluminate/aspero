@@ -26,7 +26,7 @@
 //!   spent quota, a rejected key, repeated failures) are skipped until
 //!   they can ([`Engine::unavailable`]).
 //!
-//! Not yet: fan-out search and the cross-process limiter.
+//! Not yet: fan-out search.
 
 mod abstracts;
 mod check;
@@ -70,7 +70,7 @@ use aspero_core::{
     Error, ErrorCategory, Field, FieldSet, Filter, IdKind, Page, Provider, ProviderId,
     ResiliencePolicy, SearchMode, SearchQuery, SourceRecord, Update, Usage, WorkId,
 };
-pub use aspero_store::{Cache, SqliteCache, Stats as CacheStats, StoreError};
+pub use aspero_store::{Cache, Pacing, SqliteCache, Stats as CacheStats, StoreError};
 use jiff::Timestamp;
 pub use options::CallOptions;
 

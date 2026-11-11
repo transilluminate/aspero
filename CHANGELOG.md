@@ -18,6 +18,8 @@ Added:
   only); a spent quota, rejected key or failing provider (circuit
   breaker) is skipped across calls, and `Engine::unavailable` says which
   and why.
+- Parallel aspero processes (agents) share each provider's rate limit
+  through the cache file, even with `--no-cache`.
 - Help: where notice dates come from, and why they can differ from a plain
   lookup of the notice DOI.
 

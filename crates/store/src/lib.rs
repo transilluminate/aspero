@@ -15,7 +15,8 @@
 //! many answers is one transaction (one disk sync, not one per ID).
 //!
 //! SQLite in WAL mode with a busy timeout, so several agent processes can
-//! share one cache file.
+//! share one cache file. The same file paces them: [`Pacing`] hands out
+//! request slots per provider across every process using it.
 
 use std::path::Path;
 use std::sync::Mutex;
@@ -62,6 +63,19 @@ CREATE TABLE search (
     PRIMARY KEY (provider, query)
 );
 ";
+
+/// Pacing state, kept apart from the versioned schema: rebuilds keep it,
+/// since processes still running depend on it.
+const PACING: &str = "
+CREATE TABLE IF NOT EXISTS pacing (
+    provider   TEXT PRIMARY KEY,
+    next_slot  INTEGER NOT NULL    -- unix milliseconds
+);
+";
+
+/// A claimed slot further ahead than this means the clock went back (or a
+/// process misbehaved): start afresh rather than wait.
+const MAX_AHEAD: Duration = Duration::from_secs(300);
 
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
@@ -125,6 +139,14 @@ pub trait Cache: Send + Sync {
     ) -> Result<()>;
 }
 
+/// Request slots shared between processes, so parallel agents (and any
+/// other process using the same file) keep to one rate limit per provider.
+pub trait Pacing: Send + Sync {
+    /// Claims the next start time for a request to `provider`: `now` if
+    /// free, else `interval` after the latest slot anyone claimed.
+    fn claim_slot(&self, provider: &str, interval: Duration, now: Timestamp) -> Result<Timestamp>;
+}
+
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct Stats {
@@ -159,7 +181,7 @@ impl SqliteCache {
             // Disposable: drop whatever is there (older or newer) and rebuild.
             let tx = conn.transaction()?;
             let tables: Vec<String> = tx
-                .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'")?
+                .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' AND name != 'pacing'")?
                 .query_map([], |r| r.get(0))?
                 .collect::<rusqlite::Result<_>>()?;
             for table in tables {
@@ -169,6 +191,7 @@ impl SqliteCache {
             tx.pragma_update(None, "user_version", SCHEMA_VERSION)?;
             tx.commit()?;
         }
+        conn.execute_batch(PACING)?;
         Ok(SqliteCache {
             conn: Mutex::new(conn),
         })
@@ -206,6 +229,33 @@ impl SqliteCache {
 
 fn timestamp(seconds: i64) -> Timestamp {
     Timestamp::from_second(seconds).unwrap_or(Timestamp::UNIX_EPOCH)
+}
+
+impl Pacing for SqliteCache {
+    fn claim_slot(&self, provider: &str, interval: Duration, now: Timestamp) -> Result<Timestamp> {
+        let mut conn = self.conn();
+        // Take the write lock up front, so claims never interleave.
+        let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+        let now_ms = now.as_millisecond();
+        let next: Option<i64> = tx
+            .query_row(
+                "SELECT next_slot FROM pacing WHERE provider = ?1",
+                params![provider],
+                |r| r.get(0),
+            )
+            .optional()?;
+        let ahead = MAX_AHEAD.as_millis() as i64;
+        let slot = next
+            .filter(|n| *n - now_ms <= ahead)
+            .map_or(now_ms, |n| n.max(now_ms));
+        tx.execute(
+            "INSERT INTO pacing (provider, next_slot) VALUES (?1, ?2)
+             ON CONFLICT (provider) DO UPDATE SET next_slot = excluded.next_slot",
+            params![provider, slot + interval.as_millis() as i64],
+        )?;
+        tx.commit()?;
+        Ok(Timestamp::from_millisecond(slot).unwrap_or(now))
+    }
 }
 
 impl Cache for SqliteCache {

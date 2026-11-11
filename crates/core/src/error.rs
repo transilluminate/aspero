@@ -98,6 +98,52 @@ pub enum ErrorCategory {
     Protocol,
 }
 
+/// Exactly what went wrong, for front ends that word or localise it
+/// themselves. Finer than [`ErrorCategory`]; new kinds may be added.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
+pub enum ErrorKind {
+    RateLimited,
+    /// The provider's usage budget is spent until it resets.
+    BudgetSpent,
+    Network,
+    Timeout,
+    /// The provider answered with a server error.
+    Server,
+    /// Offline, and not in the cache.
+    NotCached,
+    /// Skipped after repeated failures, for a cooldown.
+    CircuitOpen,
+    /// The API key (or other credential) was rejected.
+    KeyRejected,
+    NotFound,
+    BadRequest,
+    Unsupported,
+    /// The answer couldn't be understood.
+    Decode,
+    InvalidId,
+}
+
+impl ErrorKind {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            ErrorKind::RateLimited => "rate_limited",
+            ErrorKind::BudgetSpent => "budget_spent",
+            ErrorKind::Network => "network",
+            ErrorKind::Timeout => "timeout",
+            ErrorKind::Server => "server",
+            ErrorKind::NotCached => "not_cached",
+            ErrorKind::CircuitOpen => "circuit_open",
+            ErrorKind::KeyRejected => "key_rejected",
+            ErrorKind::NotFound => "not_found",
+            ErrorKind::BadRequest => "bad_request",
+            ErrorKind::Unsupported => "unsupported",
+            ErrorKind::Decode => "decode",
+            ErrorKind::InvalidId => "invalid_id",
+        }
+    }
+}
+
 impl Error {
     pub fn network(e: impl std::error::Error + Send + Sync + 'static) -> Self {
         Error::Network(Arc::new(e))
@@ -123,6 +169,24 @@ impl Error {
             self,
             Error::Network(_) | Error::Timeout | Error::Server { .. }
         )
+    }
+
+    pub fn kind(&self) -> ErrorKind {
+        match self {
+            Error::RateLimited { .. } => ErrorKind::RateLimited,
+            Error::QuotaExhausted { .. } => ErrorKind::BudgetSpent,
+            Error::Network(_) => ErrorKind::Network,
+            Error::Timeout => ErrorKind::Timeout,
+            Error::Server { .. } => ErrorKind::Server,
+            Error::Offline => ErrorKind::NotCached,
+            Error::CircuitOpen { .. } => ErrorKind::CircuitOpen,
+            Error::AuthRejected { .. } => ErrorKind::KeyRejected,
+            Error::NotFound => ErrorKind::NotFound,
+            Error::BadRequest(_) => ErrorKind::BadRequest,
+            Error::Unsupported(_) => ErrorKind::Unsupported,
+            Error::Decode(_) => ErrorKind::Decode,
+            Error::InvalidId(_) => ErrorKind::InvalidId,
+        }
     }
 
     pub fn category(&self) -> ErrorCategory {

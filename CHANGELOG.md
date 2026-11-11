@@ -1,5 +1,28 @@
 # Changelog
 
+## Unreleased
+
+Breaking:
+
+- A lookup that is offline and not in the cache has status `not_cached`
+  (it was `failed`).
+- `Verification` is `#[non_exhaustive]` and gains `why` and `notes`.
+
+Added:
+
+- Verdicts say why as data as well as in English: `Verification::why`
+  (a `Reason`, with the fields that differ and their values) and `notes`
+  (retraction, newer version). JSON adds `why: {code, differs, cited}`.
+- Errors have a fine-grained `ErrorKind` (`rate_limited`,
+  `budget_spent`, `key_rejected`, `not_cached`, …) beside their category.
+  JSON adds `kind` to failed attempts and `error_kinds` to
+  verifications.
+
+Fixed:
+
+- Labelled identifiers glued to a colon (`ISBN-13:979…`, `PMID:123`)
+  are found by `scan` and parse as `scan` finds them.
+
 ## 0.4.1
 
 - Blank claims (`""`, whitespace, or JSON with only blank fields) are

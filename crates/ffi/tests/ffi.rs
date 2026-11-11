@@ -57,7 +57,7 @@ fn offline_lookups_answer_without_the_network() {
     ))
     .unwrap();
     let doc: Value = serde_json::from_str(&json).unwrap();
-    assert_eq!(doc["results"][0]["status"], "failed");
+    assert_eq!(doc["results"][0]["status"], "not_cached");
     assert!(
         doc["results"][0]["attempts"][0]["error"]
             .as_str()

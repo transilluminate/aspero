@@ -25,7 +25,7 @@ pub mod work;
 #[cfg(feature = "testing")]
 pub mod testing;
 
-pub use error::{Error, ErrorCategory, Result};
+pub use error::{Error, ErrorCategory, ErrorKind, Result};
 pub use http::{HttpClient, HttpRequest, HttpResponse};
 pub use id::{
     ArxivId, CorpusId, Doi, IdError, IdKind, Isbn, Nbk, OpenAlexId, Pmcid, Pmid, S2PaperId, WorkId,

@@ -117,6 +117,7 @@ fn exit_for(result: &LookupResult) -> Exit {
         Status::Found => Exit::Ok,
         Status::Unsupported => Exit::Unsupported,
         Status::Failed(category) => Exit::from_category(category),
+        Status::NotCached => Exit::Unavailable,
         _ => Exit::NotFound,
     }
 }

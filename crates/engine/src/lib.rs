@@ -64,13 +64,13 @@ pub use standard::OpenAlexConfig;
 #[cfg(feature = "openlibrary")]
 pub use standard::OpenLibraryConfig;
 pub use standard::{StandardConfig, standard};
-pub use verdict::{Verdict, Verification, describe_update};
+pub use verdict::{CitedField, Difference, Reason, Verdict, Verification, describe_update};
 pub use versions::VersionsReport;
 
 use std::sync::Arc;
 use std::time::Duration;
 
-use aspero_core::{Error, ErrorCategory, Provider, ProviderId, ResiliencePolicy, Usage};
+use aspero_core::{Error, ErrorCategory, ErrorKind, Provider, ProviderId, ResiliencePolicy, Usage};
 pub use aspero_store::{Cache, Pacing, SqliteCache, Stats as CacheStats, StoreError};
 pub use inputs::{Extras, InputLookup, InputsReport, Looked};
 use jiff::Timestamp;
@@ -230,6 +230,14 @@ impl EngineError {
             EngineError::UnknownProvider(_) => ErrorCategory::Usage,
             EngineError::NoCapableProvider(_) => ErrorCategory::Unsupported,
             EngineError::Provider { error, .. } => error.category(),
+        }
+    }
+
+    pub fn kind(&self) -> ErrorKind {
+        match self {
+            EngineError::UnknownProvider(_) => ErrorKind::BadRequest,
+            EngineError::NoCapableProvider(_) => ErrorKind::Unsupported,
+            EngineError::Provider { error, .. } => error.kind(),
         }
     }
 }

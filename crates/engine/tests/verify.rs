@@ -10,7 +10,7 @@ use aspero_core::{
     Agreement, Capabilities, Claim, Error, Page, Provider, ProviderId, ResiliencePolicy, Response,
     Result, SearchMode, SearchQuery, WorkId,
 };
-use aspero_engine::{Engine, Verdict, Via};
+use aspero_engine::{CitedField, Engine, Reason, Verdict, Via};
 use async_trait::async_trait;
 use common::*;
 
@@ -114,12 +114,14 @@ async fn an_invented_doi_is_a_mismatch_pointing_at_the_real_work() {
     assert_eq!(v.verdict, Verdict::Mismatch, "{}", v.reason);
     assert!(v.reason.contains("does not exist"), "{}", v.reason);
     assert!(v.reason.contains("10.1038/nature14539"), "{}", v.reason);
+    assert_eq!(v.why, Reason::IdMissingElsewhere);
 
     // With no matching work anywhere, it's simply not found.
     let nothing =
         Claim::from_text("Smith J. A paper that was never written. 2019. doi:10.9999/nope");
     let v = engine.verify(&nothing, 5).await;
     assert_eq!(v.verdict, Verdict::NotFound, "{}", v.reason);
+    assert_eq!(v.why, Reason::IdMissing);
 }
 
 #[tokio::test]
@@ -138,6 +140,13 @@ async fn a_real_doi_attached_to_the_wrong_citation_is_a_mismatch() {
     let v = engine.verify(&claim, 5).await;
     assert_eq!(v.verdict, Verdict::Mismatch, "{}", v.reason);
     assert!(v.reason.contains("Deep learning for AI"), "{}", v.reason);
+    let Reason::IdElsewhere { cited } = v.why else {
+        panic!("{:?}", v.why)
+    };
+    assert_eq!(
+        v.report.candidates[cited].record.work.title.as_deref(),
+        Some("Deep learning for AI")
+    );
     let best = &v.report.candidates[v.best.unwrap()];
     assert_eq!(
         best.record.ids,
@@ -153,6 +162,8 @@ async fn the_right_paper_with_the_wrong_year_is_a_mismatch_not_a_miss() {
     let v = engine.verify(&claim, 5).await;
     assert_eq!(v.verdict, Verdict::Mismatch, "{}", v.reason);
     assert!(v.reason.contains("year (2017)"), "{}", v.reason);
+    let year = v.why.differs().iter().find(|d| d.field == CitedField::Year);
+    assert_eq!(year.unwrap().actual.as_deref(), Some("2017"));
     let best = &v.report.candidates[v.best.unwrap()];
     assert!(best.ids.contains(&"arXiv:1706.03762".parse().unwrap()));
 }
@@ -166,6 +177,7 @@ async fn identifier_only_claims_check_existence_without_searching() {
     let v = engine.verify(&claim, 5).await;
     assert_eq!(v.verdict, Verdict::Verified, "{}", v.reason);
     assert!(v.reason.contains("exists"));
+    assert_eq!(v.why, Reason::IdExists);
     assert!(openalex.queries().is_empty() && crossref.queries().is_empty());
 }
 
@@ -218,7 +230,12 @@ async fn provider_failures_make_an_empty_result_unverifiable() {
         .verify(&Claim::from_text("Anything at all, 2020"), 5)
         .await;
     assert_eq!(v.verdict, Verdict::Unverifiable, "{}", v.reason);
+    assert_eq!(v.why, Reason::ProvidersFailed);
     assert_eq!(v.report.errors.len(), 1);
+    assert_eq!(
+        v.report.errors[0].kind(),
+        aspero_core::ErrorKind::KeyRejected
+    );
 }
 
 #[tokio::test]

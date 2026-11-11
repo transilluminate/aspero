@@ -33,6 +33,37 @@ pub struct Mention {
     pub span: Range<usize>,
 }
 
+impl Mention {
+    /// For a DOI broken across lines at a hyphen, the DOI without that
+    /// hyphen: typesetters rarely add one inside a link, but some do, so
+    /// it's worth a lookup if the DOI as printed doesn't exist. `text` is
+    /// the text scanned.
+    pub fn alternative(&self, text: &str) -> Option<WorkId> {
+        let written = crate::fold::Folded::new(text.get(self.span.clone())?).text;
+        let mut joined = String::new();
+        let mut broken = false;
+        let mut rest = written.as_str();
+        while let Some(at) = rest.find('-') {
+            let after = &rest[at + 1..];
+            let gap = after.len() - after.trim_start().len();
+            let at_break = after[..gap].contains('\n');
+            joined.push_str(&rest[..at + usize::from(!at_break)]);
+            broken |= at_break;
+            rest = &after[if at_break { gap } else { 0 }..];
+        }
+        joined.push_str(rest);
+        if !broken || self.id.kind() != IdKind::Doi {
+            return None;
+        }
+        let joined: String = joined.split_whitespace().collect::<Vec<_>>().join(" ");
+        let id: WorkId = scan_clean(&joined)
+            .into_iter()
+            .find(|m| m.span.start == 0)?
+            .id;
+        (id != self.id && id.kind() == IdKind::Doi).then_some(id)
+    }
+}
+
 /// Every identifier mentioned in `text`, in order, repeats included. Text
 /// from PDFs is cleaned first (ligatures, invisible characters, look-alike
 /// dashes and quotes); spans point into `text` as given.
@@ -271,6 +302,20 @@ mod tests {
             "doi:10.1038/s41586\u{2013}020\u{AD}-2649-2"
         );
         assert_eq!(m.column, 9);
+    }
+
+    #[test]
+    fn dois_broken_at_a_hyphen_have_an_alternative() {
+        let text = "see https://doi.org/10.1038/nat-\n   ure14539 and doi:10.1/x";
+        let m = &scan(text)[0];
+        assert_eq!(m.id.to_string(), "doi:10.1038/nat-ure14539");
+        assert_eq!(
+            m.alternative(text).map(|id| id.to_string()).as_deref(),
+            Some("doi:10.1038/nature14539")
+        );
+        // Not broken at a hyphen, or not broken at all: none.
+        let text = "doi:10.1016/j.cell.\n2020.01.001 doi:10.1038/s41586-020-2649-2";
+        assert!(scan(text).iter().all(|m| m.alternative(text).is_none()));
     }
 
     #[test]

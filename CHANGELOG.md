@@ -9,6 +9,12 @@ Added:
   zero-width characters dropped (a soft hyphen at a line end marks a
   broken word), Unicode hyphens, dashes, quotes and spaces folded to
   ASCII. Spans still point into the text as given.
+- A DOI broken across lines at a hyphen is kept as printed, and its
+  reading without the hyphen is tried if the printed one doesn't exist:
+  `Claim::alternatives`, `Reference::alternatives`,
+  `Mention::alternative` (JSON `scan`: `alternative`; FFI:
+  `alternativeIds` on `Claim` and `Reference`, `alternativeId` on
+  `Mention`). `verify --split` passes them on.
 
 Fixed:
 

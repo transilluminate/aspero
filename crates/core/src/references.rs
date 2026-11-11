@@ -20,6 +20,8 @@
 
 use std::ops::Range;
 
+use crate::Alternative;
+
 /// One reference found in a list.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
@@ -29,6 +31,9 @@ pub struct Reference {
     /// Byte range in the list: from after the marker to the end of its
     /// last line.
     pub span: Range<usize>,
+    /// DOIs broken across lines at a hyphen, read without it: to try if
+    /// the DOI as printed doesn't exist.
+    pub alternatives: Vec<Alternative>,
 }
 
 /// The references in `text`, in order. Text from PDFs is cleaned first
@@ -38,9 +43,18 @@ pub fn split_references(text: &str) -> Vec<Reference> {
     let folded = crate::fold::Folded::new(text);
     split_clean(&folded.text)
         .into_iter()
-        .map(|r| Reference {
-            span: folded.original(&r.span),
-            ..r
+        .map(|r| {
+            let span = folded.original(&r.span);
+            let written = &text[span.clone()];
+            let alternatives = crate::id::scan(written)
+                .iter()
+                .filter_map(|m| Some(Alternative::new(m.id.clone(), m.alternative(written)?)))
+                .collect();
+            Reference {
+                span,
+                alternatives,
+                ..r
+            }
         })
         .collect()
 }
@@ -65,6 +79,7 @@ fn split_clean(text: &str) -> Vec<Reference> {
         .map(|g| Reference {
             text: list.join(&g),
             span: g[0].start..g[g.len() - 1].end,
+            alternatives: Vec::new(),
         })
         .filter(|r| !is_heading(&r.text))
         .collect()
@@ -466,6 +481,16 @@ mod tests {
         );
         assert!(list[refs[0].span.clone()].starts_with("Smith J. Neuro\u{AD}"));
         assert!(list[refs[0].span.clone()].ends_with("\u{2010}020-2649-2"));
+    }
+
+    #[test]
+    fn dois_broken_at_a_hyphen_carry_the_reading_without_it() {
+        let refs = split_references("1. Smith J. doi:10.1038/nat-\nure14539\n2. Jones K. 2021.");
+        assert_eq!(refs[0].text, "Smith J. doi:10.1038/nat-ure14539");
+        let alt = &refs[0].alternatives[0];
+        assert_eq!(alt.claimed.to_string(), "doi:10.1038/nat-ure14539");
+        assert_eq!(alt.alternative.to_string(), "doi:10.1038/nature14539");
+        assert!(refs[1].alternatives.is_empty());
     }
 
     #[test]

@@ -8,7 +8,7 @@ const CONTEXT: usize = 60;
 
 /// One mention: where it is, the identifier, and how it was written.
 pub fn mention(file: &str, text: &str, m: &Mention) -> Value {
-    json!({
+    let mut out = json!({
         "file": file,
         "line": m.line,
         "column": m.column,
@@ -16,7 +16,12 @@ pub fn mention(file: &str, text: &str, m: &Mention) -> Value {
         "kind": m.id.kind().prefix(),
         "text": &text[m.span.clone()],
         "context": context(text, m),
-    })
+    });
+    // A DOI broken at a hyphen, read without it: to try if it isn't found.
+    if let Some(alternative) = m.alternative(text) {
+        out["alternative"] = json!(alternative);
+    }
+    out
 }
 
 /// The mention's line, trimmed, cut to a window around it when long.

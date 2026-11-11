@@ -20,7 +20,13 @@ pub fn claims(
         };
         return Ok(aspero_core::split_references(&list)
             .into_iter()
-            .map(|r| InputClaim::from_line(&r.text))
+            .map(|r| {
+                let mut claim = InputClaim::from_line(&r.text);
+                if let Ok(c) = &mut claim.claim {
+                    c.alternatives = r.alternatives;
+                }
+                claim
+            })
             .collect());
     }
     if text.as_deref() == Some("-") {

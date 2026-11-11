@@ -162,9 +162,55 @@ impl Engine {
     /// Decides whether `claim` refers to a real work, stopping early once it
     /// does.
     pub async fn verify(&self, claim: &Claim, limit: u32) -> Verification {
-        let mut report = self.gather(claim, limit, true).await;
+        let (claim, usage) = self.with_alternatives(claim).await;
+        let mut report = self.gather(&claim, limit, true).await;
+        for (p, u) in usage {
+            add_usage(&mut report.usage, &p, u);
+        }
         self.detail_notices(&mut report).await;
-        judge(claim, report)
+        judge(&claim, report)
+    }
+
+    /// The claim with each claimed identifier that doesn't exist replaced
+    /// by an alternative reading that does (the claim's `alternatives`),
+    /// and the usage of finding out. Claims without alternatives cost
+    /// nothing; the lookups are cached for verifying.
+    async fn with_alternatives(&self, claim: &Claim) -> (Claim, Vec<(ProviderId, Usage)>) {
+        let mut claim = claim.clone();
+        if claim.alternatives.is_empty() {
+            return (claim, Vec::new());
+        }
+        let mut usage = Vec::new();
+        let claimed = self.lookup(&claim.ids, FieldSet::DEFAULT).await;
+        usage.extend(claimed.usage);
+        let missing: Vec<&WorkId> = claimed
+            .results
+            .iter()
+            .filter(|r| r.is_not_found())
+            .map(|r| &r.id)
+            .collect();
+        let tries: Vec<(WorkId, WorkId)> = claim
+            .alternatives
+            .iter()
+            .filter(|a| missing.contains(&&a.claimed))
+            .map(|a| (a.claimed.clone(), a.alternative.clone()))
+            .collect();
+        if tries.is_empty() {
+            return (claim, usage);
+        }
+        let ids: Vec<WorkId> = tries.iter().map(|(_, alt)| alt.clone()).collect();
+        let found = self.lookup(&ids, FieldSet::DEFAULT).await;
+        for (p, u) in found.usage {
+            add_usage(&mut usage, &p, u);
+        }
+        for ((claimed, alt), result) in tries.into_iter().zip(found.results) {
+            if result.record.is_some() {
+                for id in claim.ids.iter_mut().filter(|id| **id == claimed) {
+                    *id = alt.clone();
+                }
+            }
+        }
+        (claim, usage)
     }
 
     /// Verifies many claims, several at a time (each provider's pacing

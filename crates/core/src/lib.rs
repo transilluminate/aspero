@@ -34,7 +34,7 @@ pub use id::{
     ArxivId, CorpusId, Doi, IdError, IdKind, Isbn, Nbk, OpenAlexId, Pmcid, Pmid, S2PaperId, WorkId,
     canonical,
 };
-pub use matching::{Agreement, Assessment, Claim, FieldCheck};
+pub use matching::{Agreement, Alternative, Assessment, Claim, FieldCheck};
 pub use provider::{
     Capabilities, Cursor, Filter, Hit, Lookup, Page, PageReq, Provider, ProviderId, Response,
     SearchMode, SearchQuery, Usage, YearRange,

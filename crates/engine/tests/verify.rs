@@ -125,6 +125,26 @@ async fn an_invented_doi_is_a_mismatch_pointing_at_the_real_work() {
 }
 
 #[tokio::test]
+async fn a_doi_broken_at_a_hyphen_is_tried_without_it() {
+    let (engine, _, _) = live_like();
+    let mut claim = Claim::from_text(
+        "LeCun Y, Bengio Y, Hinton G. Deep learning. Nature. 2015. doi:10.1038/nat-ure14539",
+    );
+    claim.alternatives = vec![aspero_core::Alternative::new(
+        "10.1038/nat-ure14539".parse().unwrap(),
+        "10.1038/nature14539".parse().unwrap(),
+    )];
+
+    let v = engine.verify(&claim, 5).await;
+    assert_eq!(v.verdict, Verdict::Verified, "{}", v.reason);
+    assert!(
+        v.reason.starts_with("doi:10.1038/nature14539"),
+        "{}",
+        v.reason
+    );
+}
+
+#[tokio::test]
 async fn a_real_doi_attached_to_the_wrong_citation_is_a_mismatch() {
     let crossref = Arc::new(
         Scripted::new("crossref")

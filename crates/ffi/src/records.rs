@@ -489,6 +489,27 @@ pub struct Claim {
     /// The app's own reference, echoed back.
     #[uniffi(default = None)]
     pub key: Option<String>,
+    /// Other readings of claimed identifiers (a `Reference`'s), tried only
+    /// if the claimed one doesn't exist.
+    #[uniffi(default = [])]
+    pub alternative_ids: Vec<IdAlternative>,
+}
+
+/// Another reading of a claimed identifier: a DOI broken across lines at
+/// a hyphen, without the hyphen.
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct IdAlternative {
+    pub claimed: String,
+    pub alternative: String,
+}
+
+impl From<&aspero_core::Alternative> for IdAlternative {
+    fn from(a: &aspero_core::Alternative) -> Self {
+        IdAlternative {
+            claimed: a.claimed.to_string(),
+            alternative: a.alternative.to_string(),
+        }
+    }
 }
 
 impl Claim {
@@ -505,10 +526,23 @@ impl Claim {
             ..Default::default()
         };
         let input = fields.text.clone().unwrap_or_else(|| fields.describe());
+        let alternatives: Vec<aspero_core::Alternative> = self
+            .alternative_ids
+            .iter()
+            .filter_map(|a| {
+                Some(aspero_core::Alternative::new(
+                    a.claimed.parse().ok()?,
+                    a.alternative.parse().ok()?,
+                ))
+            })
+            .collect();
         InputClaim {
             input,
             key: self.key.map(serde_json::Value::String),
-            claim: fields.into_claim(),
+            claim: fields.into_claim().map(|mut c| {
+                c.alternatives = alternatives;
+                c
+            }),
         }
     }
 }
@@ -813,6 +847,9 @@ pub struct Mention {
     /// 1-based, in characters.
     pub column: u64,
     pub utf16: Utf16Range,
+    /// For a DOI broken across lines at a hyphen, the DOI without it: look
+    /// it up if `id` isn't found.
+    pub alternative_id: Option<String>,
 }
 
 impl Mention {
@@ -824,6 +861,7 @@ impl Mention {
             line: m.line as u64,
             column: m.column as u64,
             utf16: utf16_range(text, &m.span),
+            alternative_id: m.alternative(text).map(|id| id.to_string()),
         }
     }
 }
@@ -835,6 +873,9 @@ pub struct Reference {
     pub text: String,
     /// Where it is in the list, marker excluded.
     pub utf16: Utf16Range,
+    /// DOIs broken at a hyphen, read without it: pass them on as the
+    /// claim's `alternativeIds`.
+    pub alternative_ids: Vec<IdAlternative>,
 }
 
 impl Reference {
@@ -842,6 +883,7 @@ impl Reference {
         Reference {
             text: r.text.clone(),
             utf16: utf16_range(list, &r.span),
+            alternative_ids: r.alternatives.iter().map(Into::into).collect(),
         }
     }
 }

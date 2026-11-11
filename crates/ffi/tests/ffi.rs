@@ -62,6 +62,22 @@ fn pasted_lists_split_into_references() {
 }
 
 #[test]
+fn dois_broken_at_a_hyphen_carry_an_alternative() {
+    let text = "1. Smith J. doi:10.1038/nat-\n   ure14539\n2. Jones K. Two. 2021.";
+    let handle = aspero(None);
+    let refs = handle.split_references(text.into());
+    assert_eq!(
+        refs[0].alternative_ids[0].alternative,
+        "doi:10.1038/nature14539"
+    );
+    let found = handle.scan(text.into());
+    assert_eq!(
+        found[0].alternative_id.as_deref(),
+        Some("doi:10.1038/nature14539")
+    );
+}
+
+#[test]
 fn offline_lookups_answer_without_the_network() {
     let dir = std::env::temp_dir().join(format!("aspero-ffi-{}", std::process::id()));
     let handle = aspero(Some(dir.display().to_string()));

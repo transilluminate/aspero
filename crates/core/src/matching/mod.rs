@@ -88,6 +88,27 @@ pub struct Claim {
     /// The first page (or a range, of which the first page counts).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub page: Option<String>,
+    /// Other readings of claimed identifiers (a DOI without the hyphen at
+    /// a line break), to try only if the claimed one doesn't exist.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub alternatives: Vec<Alternative>,
+}
+
+/// Another reading of a claimed identifier.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[non_exhaustive]
+pub struct Alternative {
+    pub claimed: WorkId,
+    pub alternative: WorkId,
+}
+
+impl Alternative {
+    pub fn new(claimed: WorkId, alternative: WorkId) -> Self {
+        Alternative {
+            claimed,
+            alternative,
+        }
+    }
 }
 
 impl Claim {

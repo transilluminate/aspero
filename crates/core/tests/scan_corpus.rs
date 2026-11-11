@@ -37,3 +37,10 @@ fn reference_list_corpora() {
         assert_finds_all(seed, 64 * 1024, Density::References);
     }
 }
+
+#[test]
+fn corpora_without_identifiers() {
+    for seed in 0..20 {
+        assert_finds_all(seed, 64 * 1024, Density::None);
+    }
+}

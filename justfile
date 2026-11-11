@@ -19,6 +19,10 @@ fix:
 bench:
     cargo run -q -p aspero-engine --example verify_bench -- bench/citations.jsonl
 
+# Throughput of `scan` on generated documents, or the cases matching a filter.
+scan-bench filter="":
+    cargo bench -q -p aspero-core --bench scan -- {{filter}}
+
 # Re-record a provider's fixtures, or just one: `just record europepmc lookup_nbk`.
 record provider name="":
     ONLY={{name}} scripts/record-{{provider}}.sh

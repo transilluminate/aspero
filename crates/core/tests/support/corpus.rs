@@ -19,6 +19,8 @@ pub enum Density {
     Prose,
     /// A reference list: one or two per reference.
     References,
+    /// Prose without any, only decoys.
+    None,
 }
 
 /// A document of about `bytes` bytes.
@@ -32,7 +34,7 @@ pub fn generate(seed: u64, bytes: usize, density: Density) -> Corpus {
     let mut n = 1;
     while g.text.len() < bytes {
         match density {
-            Density::Prose => g.paragraph(),
+            Density::Prose | Density::None => g.paragraph(density),
             Density::References => {
                 g.reference(n);
                 n += 1;
@@ -260,22 +262,22 @@ struct Gen {
 }
 
 impl Gen {
-    fn paragraph(&mut self) {
+    fn paragraph(&mut self, density: Density) {
         let sentences = 3 + self.rng.below(6);
         for _ in 0..sentences {
-            self.sentence();
+            self.sentence(!matches!(density, Density::None));
         }
         self.text.push_str("\n\n");
         self.column = 0;
     }
 
-    fn sentence(&mut self) {
+    fn sentence(&mut self, identifiers: bool) {
         let words = 8 + self.rng.below(18);
         for i in 0..words {
             if self.rng.chance(4) {
                 let decoy = self.rng.pick(DECOYS);
                 self.word(decoy);
-            } else if self.rng.chance(1) {
+            } else if self.rng.chance(1) && identifiers {
                 self.identifier();
             } else {
                 let w = self.rng.pick(WORDS);

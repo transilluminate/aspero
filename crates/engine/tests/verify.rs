@@ -278,6 +278,23 @@ async fn the_right_paper_with_the_wrong_year_is_a_mismatch_not_a_miss() {
 }
 
 #[tokio::test]
+async fn the_cited_doi_with_the_wrong_year_partly_matches() {
+    let (engine, _, _) = live_like();
+    let claim = Claim::from_text(
+        "LeCun Y, Bengio Y, Hinton G. Deep learning. Nature. 2011. doi:10.1038/nature14539",
+    );
+
+    let v = engine.verify(&claim, 5).await;
+    assert_eq!(v.verdict, Verdict::Plausible, "{}", v.reason);
+    let Reason::IdPartlyMatches { differs } = &v.why else {
+        panic!("{:?}", v.why)
+    };
+    assert_eq!(differs.len(), 1, "{differs:?}");
+    assert_eq!(differs[0].field, CitedField::Year);
+    assert_eq!(differs[0].actual.as_deref(), Some("2015"));
+}
+
+#[tokio::test]
 async fn identifier_only_claims_check_existence_without_searching() {
     let (engine, openalex, crossref) = live_like();
     let mut claim = Claim::default();

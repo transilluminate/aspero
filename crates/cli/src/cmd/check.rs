@@ -133,8 +133,12 @@ impl<'a> Report<'a> {
             .map(|note| Line {
                 kind: "entry",
                 severity: Severity::Warning,
-                message: note.clone(),
-                detail: Value::Null,
+                message: note.to_string(),
+                detail: json!({
+                    "field": note.field,
+                    "value": note.value,
+                    "problem": note.problem.as_str(),
+                }),
             })
             .collect();
         match checked {

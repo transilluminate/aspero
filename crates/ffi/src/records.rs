@@ -1118,7 +1118,7 @@ pub struct BibEntry {
     /// `jour` (RIS), `article-journal` (CSL-JSON).
     pub entry_type: String,
     /// Problems with the entry's own fields: a `doi` that isn't a DOI.
-    pub notes: Vec<String>,
+    pub notes: Vec<BibNote>,
     /// Whether there is anything to verify: a title or an identifier.
     pub checkable: bool,
 }
@@ -1141,8 +1141,76 @@ impl From<aspero_bib::BibEntry> for BibEntry {
                 alternative_ids: Vec::new(),
             },
             entry_type: e.entry_type,
-            notes: e.notes,
+            notes: e.notes.iter().map(Into::into).collect(),
             checkable,
+        }
+    }
+}
+
+/// A problem with one of an entry's own fields.
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct BibNote {
+    /// The field as the file names it: `doi`, `eprint`, `DO`, `ISBN`.
+    pub field: String,
+    pub value: String,
+    pub problem: BibProblem,
+    /// In English, for logs.
+    pub message: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Enum)]
+pub enum BibProblem {
+    NotADoi,
+    NotAnArxivId,
+    NotAnIsbn,
+    NotAPmid,
+}
+
+impl From<&aspero_bib::Note> for BibNote {
+    fn from(n: &aspero_bib::Note) -> Self {
+        use aspero_bib::Problem;
+        BibNote {
+            field: n.field.clone(),
+            value: n.value.clone(),
+            problem: match n.problem {
+                Problem::NotADoi => BibProblem::NotADoi,
+                Problem::NotAnArxivId => BibProblem::NotAnArxivId,
+                Problem::NotAPmid => BibProblem::NotAPmid,
+                _ => BibProblem::NotAnIsbn,
+            },
+            message: n.to_string(),
+        }
+    }
+}
+
+/// Why text couldn't be read as a bibliography file.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error, uniffi::Error)]
+pub enum ReadError {
+    /// Not BibTeX, RIS or CSL-JSON.
+    #[error("not BibTeX, RIS or CSL-JSON")]
+    Unrecognised,
+    /// The format was recognised, but the file is broken at `line`.
+    #[error("{message} (line {line})")]
+    Invalid {
+        format: BibFormat,
+        line: u64,
+        message: String,
+    },
+}
+
+impl From<aspero_bib::ReadError> for ReadError {
+    fn from(e: aspero_bib::ReadError) -> Self {
+        match e {
+            aspero_bib::ReadError::Invalid {
+                format,
+                line,
+                message,
+            } => ReadError::Invalid {
+                format: format.into(),
+                line: line as u64,
+                message,
+            },
+            _ => ReadError::Unrecognised,
         }
     }
 }
@@ -1169,7 +1237,11 @@ impl Work {
                     .map(|a| aspero_core::Person::literal(&a.name))
                     .collect()
             });
-        w.issued = self.issued.as_deref().and_then(|d| d.parse().ok());
+        w.issued = self
+            .issued
+            .as_deref()
+            .and_then(|d| d.parse().ok())
+            .or_else(|| self.year.map(aspero_core::PartialDate::from_year));
         w.work_type = self
             .work_type
             .as_deref()

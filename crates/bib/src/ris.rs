@@ -111,7 +111,7 @@ impl Record {
 
         let mut ids = Ids::default();
         for doi in self.all(&["DO"]) {
-            ids.doi(doi);
+            ids.doi("DO", doi);
         }
         // `SN` holds ISBNs for books and ISSNs for journals.
         let book = matches!(
@@ -119,7 +119,7 @@ impl Record {
             "book" | "chap" | "ebook" | "echap" | "edbook"
         );
         for sn in self.all(&["SN"]) {
-            ids.isbns(sn, book);
+            ids.isbns("SN", sn, book);
         }
         for url in self.all(&["UR", "L1", "L2"]) {
             ids.urls(url);
@@ -185,7 +185,10 @@ UR - https://arxiv.org/abs/1706.03762\r
 
         let book = &entries[1];
         assert_eq!(book.claim.ids[0].to_string(), "isbn:9780262035613");
-        assert_eq!(book.notes, ["doi field \"not-a-doi\" is not a valid DOI"]);
+        assert_eq!(
+            book.notes[0].to_string(),
+            "DO field \"not-a-doi\" is not a valid DOI"
+        );
 
         let preprint = &entries[2];
         assert_eq!(preprint.claim.ids[0].to_string(), "arxiv:1706.03762");

@@ -64,7 +64,7 @@ pub struct BibEntry {
     pub entry_type: String,
     pub claim: Claim,
     /// Problems with the entry's own fields.
-    pub notes: Vec<String>,
+    pub notes: Vec<Note>,
 }
 
 impl BibEntry {
@@ -169,20 +169,22 @@ fn entry(e: &biblatex::Entry) -> BibEntry {
     claim.page = field("pages");
 
     if let Some(doi) = field("doi") {
-        ids.doi(&doi);
+        ids.doi("doi", &doi);
     }
     let eprint_type = field("eprinttype").or_else(|| field("archiveprefix"));
     match (field("eprint"), eprint_type.as_deref()) {
-        (Some(eprint), None) => ids.arxiv(&eprint, false),
-        (Some(eprint), Some(t)) if t.eq_ignore_ascii_case("arxiv") => ids.arxiv(&eprint, true),
-        (Some(eprint), Some(t)) if t.eq_ignore_ascii_case("pubmed") => ids.pmid(&eprint),
+        (Some(eprint), None) => ids.arxiv("eprint", &eprint, false),
+        (Some(eprint), Some(t)) if t.eq_ignore_ascii_case("arxiv") => {
+            ids.arxiv("eprint", &eprint, true)
+        }
+        (Some(eprint), Some(t)) if t.eq_ignore_ascii_case("pubmed") => ids.pmid("eprint", &eprint),
         _ => {}
     }
     if let Some(pmid) = field("pmid") {
-        ids.pmid(&pmid);
+        ids.pmid("pmid", &pmid);
     }
     if let Some(isbns) = field("isbn") {
-        ids.isbns(&isbns, true);
+        ids.isbns("isbn", &isbns, true);
     }
     if let Some(url) = field("url") {
         ids.urls(&url);
@@ -197,11 +199,57 @@ fn entry(e: &biblatex::Entry) -> BibEntry {
     }
 }
 
+/// A problem with one of an entry's own fields.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct Note {
+    /// The field as the file names it: `doi`, `eprint`, `DO`, `ISBN`.
+    pub field: String,
+    pub value: String,
+    pub problem: Problem,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum Problem {
+    NotADoi,
+    NotAnArxivId,
+    NotAnIsbn,
+    NotAPmid,
+}
+
+impl Problem {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Problem::NotADoi => "not_a_doi",
+            Problem::NotAnArxivId => "not_an_arxiv_id",
+            Problem::NotAnIsbn => "not_an_isbn",
+            Problem::NotAPmid => "not_a_pmid",
+        }
+    }
+}
+
+impl fmt::Display for Note {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let what = match self.problem {
+            Problem::NotADoi => "DOI",
+            Problem::NotAnArxivId => "arXiv ID",
+            Problem::NotAnIsbn => "ISBN",
+            Problem::NotAPmid => "PMID",
+        };
+        write!(
+            f,
+            "{} field {:?} is not a valid {what}",
+            self.field, self.value
+        )
+    }
+}
+
 /// Identifiers gathered from an entry's fields, and problems with them.
 #[derive(Default)]
 struct Ids {
     ids: Vec<WorkId>,
-    notes: Vec<String>,
+    notes: Vec<Note>,
 }
 
 impl Ids {
@@ -211,37 +259,41 @@ impl Ids {
         }
     }
 
-    fn doi(&mut self, raw: &str) {
+    fn note(&mut self, field: &str, value: &str, problem: Problem) {
+        self.notes.push(Note {
+            field: field.into(),
+            value: value.into(),
+            problem,
+        });
+    }
+
+    fn doi(&mut self, field: &str, raw: &str) {
         match raw.parse::<Doi>() {
             Ok(d) => self.push(WorkId::Doi(d)),
-            Err(_) => self
-                .notes
-                .push(format!("doi field {raw:?} is not a valid DOI")),
+            Err(_) => self.note(field, raw, Problem::NotADoi),
         }
     }
 
     /// An arXiv ID; `stated` when the entry says it is one, so a bad one
     /// is worth noting.
-    fn arxiv(&mut self, raw: &str, stated: bool) {
+    fn arxiv(&mut self, field: &str, raw: &str, stated: bool) {
         match raw.parse::<ArxivId>() {
             Ok(a) => self.push(WorkId::Arxiv(a)),
-            Err(_) if stated => self
-                .notes
-                .push(format!("eprint {raw:?} is not a valid arXiv ID")),
+            Err(_) if stated => self.note(field, raw, Problem::NotAnArxivId),
             Err(_) => {}
         }
     }
 
-    fn pmid(&mut self, raw: &str) {
+    fn pmid(&mut self, field: &str, raw: &str) {
         match format!("pmid:{}", raw.trim()).parse::<WorkId>() {
             Ok(id) => self.push(id),
-            Err(_) => self.notes.push(format!("pmid {raw:?} is not a valid PMID")),
+            Err(_) => self.note(field, raw, Problem::NotAPmid),
         }
     }
 
     /// ISBNs, separated by commas or semicolons. `noted`: whether a bad
     /// one is worth a note (RIS uses the same field for ISSNs).
-    fn isbns(&mut self, raw: &str, noted: bool) {
+    fn isbns(&mut self, field: &str, raw: &str, noted: bool) {
         for raw in raw
             .split([',', ';'])
             .map(str::trim)
@@ -249,7 +301,7 @@ impl Ids {
         {
             match raw.parse::<aspero_core::Isbn>() {
                 Ok(isbn) => self.push(WorkId::Isbn(isbn)),
-                Err(_) if noted => self.notes.push(format!("isbn {raw:?} is not a valid ISBN")),
+                Err(_) if noted => self.note(field, raw, Problem::NotAnIsbn),
                 Err(_) => {}
             }
         }
@@ -328,8 +380,11 @@ mod tests {
         let book = &entries[3];
         assert_eq!(book.claim.ids[0].to_string(), "isbn:9780262035613");
         assert_eq!(
-            book.notes,
-            ["isbn \"0262035619\" is not a valid ISBN"],
+            book.notes
+                .iter()
+                .map(ToString::to_string)
+                .collect::<Vec<_>>(),
+            ["isbn field \"0262035619\" is not a valid ISBN"],
             "bad checksum noted"
         );
 
@@ -354,7 +409,16 @@ mod tests {
     fn field_problems_are_noted_and_urls_yield_ids() {
         let entries = parse(BIB).unwrap();
         let broken = &entries[2];
-        assert_eq!(broken.notes, ["doi field \"not-a-doi\" is not a valid DOI"]);
+        let note = &broken.notes[0];
+        assert_eq!(
+            (note.field.as_str(), note.value.as_str()),
+            ("doi", "not-a-doi")
+        );
+        assert_eq!(note.problem, Problem::NotADoi);
+        assert_eq!(
+            note.to_string(),
+            "doi field \"not-a-doi\" is not a valid DOI"
+        );
         assert_eq!(broken.claim.ids[0].to_string(), "arxiv:1412.6980v9");
         assert!(!entries[4].is_checkable());
     }

@@ -47,16 +47,16 @@ fn entry(item: &CslItem, position: usize) -> BibEntry {
 
     let mut ids = Ids::default();
     if let Some(doi) = &item.doi {
-        ids.doi(doi);
+        ids.doi("DOI", doi);
     }
     if let Some(pmid) = &item.pmid {
-        ids.pmid(&pmid.text());
+        ids.pmid("PMID", &pmid.text());
     }
     if let Some(pmcid) = &item.pmcid {
         ids.urls(&format!("PMCID: {pmcid}"));
     }
     if let Some(isbn) = &item.isbn {
-        ids.isbns(isbn, true);
+        ids.isbns("ISBN", isbn, true);
     }
     if let Some(url) = &item.url {
         ids.urls(url);

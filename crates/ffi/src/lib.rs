@@ -30,8 +30,8 @@ pub mod records;
 
 use records::{
     Bibliography, Budget, CacheStats, Claim as ClaimRecord, ExportFormat, KeyCheck, KeyStatus,
-    Line, LineReference, Lookup, Lookups, Mention, ProviderUsage, Reference, SearchRequest,
-    SearchResults, Unavailable, Verification, Verifications, Work,
+    Line, LineReference, Lookup, Lookups, Mention, ProviderUsage, ReadError, Reference,
+    SearchRequest, SearchResults, Unavailable, Verification, Verifications, Work,
 };
 
 uniffi::setup_scaffolding!();
@@ -79,10 +79,6 @@ pub enum AsperoError {
     /// The cache file couldn't be read or written.
     #[error("cache error: {0}")]
     Cache(String),
-    /// Text that isn't a bibliography file, or a broken one; the message
-    /// names the line.
-    #[error("{0}")]
-    Unreadable(String),
 }
 
 /// Receives each verification as it finishes.
@@ -307,9 +303,8 @@ impl Aspero {
 
     /// A BibTeX/BibLaTeX, RIS or CSL-JSON file's entries, each a claim to
     /// verify; the format is told from the contents. Offline.
-    pub fn read_references(&self, text: String) -> Result<Bibliography, AsperoError> {
-        let (format, entries) =
-            aspero_bib::read(&text).map_err(|e| AsperoError::Unreadable(e.to_string()))?;
+    pub fn read_references(&self, text: String) -> Result<Bibliography, ReadError> {
+        let (format, entries) = aspero_bib::read(&text)?;
         Ok(Bibliography {
             format: format.into(),
             entries: entries.into_iter().map(Into::into).collect(),

@@ -73,7 +73,8 @@ pub enum Reason {
     IdExists,
     /// The identifiers exist and the citation agrees. (Verified)
     IdAgrees,
-    /// The identifiers exist and the citation partly matches. (Plausible)
+    /// The identifiers exist and the citation partly matches, or shares
+    /// the title with an error such as a wrong year. (Plausible)
     IdPartlyMatches { differs: Vec<Difference> },
     /// The identifiers are another work (candidate `cited`); the citation
     /// matches the work. (Mismatch)
@@ -312,8 +313,17 @@ fn decide(claim: &Claim, report: &ResolveReport) -> (Verdict, Reason, Option<usi
             },
             Some(i),
         ),
-        Some((i, _)) => match elsewhere(Some(i)) {
+        Some((i, c)) => match elsewhere(Some(i)) {
             Some(j) => (Verdict::Mismatch, Reason::IdElsewhere { cited: i }, Some(j)),
+            // The identifiers' work, cited with an error (a wrong year):
+            // the same title, and matching authors or year.
+            None if near_miss(c) => (
+                Verdict::Plausible,
+                Reason::IdPartlyMatches {
+                    differs: differences(c, true),
+                },
+                Some(i),
+            ),
             None => (Verdict::Mismatch, Reason::IdDisagrees, Some(i)),
         },
         None if failed => (Verdict::Unverifiable, Reason::ProvidersFailed, None),

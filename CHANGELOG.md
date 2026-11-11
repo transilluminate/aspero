@@ -13,18 +13,29 @@ Added:
   refers to (verified, or found under other identifiers than those
   cited) and names the rest on stderr. Whole names ("Yann LeCun") are
   split into family and given names; organisations stay whole.
+- `check`'s findings about an entry's own fields carry `field`, `value`
+  and `problem` (`not_a_doi`, `not_an_arxiv_id`, `not_an_isbn`,
+  `not_a_pmid`).
 - FFI: `readReferences(text)` reads a BibTeX, RIS or CSL-JSON file into
   `Bibliography { format, entries }`, each entry's `claim` ready to
-  verify with `key` set to the entry key; `export(works, format)` writes
+  verify with `key` set to the entry key, and its `notes` as `BibNote {
+  field, value, problem, message }`; it throws `ReadError.unrecognised`
+  or `.invalid(format, line, message)`. `export(works, format)` writes
   works as BibTeX or RIS.
+
+Changed:
+
+- A citation whose identifier is the right work, with the same title and
+  matching authors but a wrong year, is `plausible` /
+  `id_partly_matches` naming the year, not `mismatch` / `id_disagrees`.
+  `check` still reports a year off by more than one as an error.
 
 Changed (breaking):
 
 - `aspero-bib`: `BibError` is now `ReadError` (`Unrecognised`, or
   `Invalid { format, line, message }`); new `read`, `detect`,
   `parse_ris`, `parse_csl_json`, `bibtex`, `ris`, `cite_key`, `Keys`.
-- FFI: `AsperoError.unreadable(message)` for text that isn't a
-  bibliography file, or a broken one.
+  `BibEntry::notes` are `Note { field, value, problem }`.
 
 ## 0.5.2
 

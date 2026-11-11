@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.4.1
 
 - Blank claims (`""`, whitespace, or JSON with only blank fields) are
   `invalid` instead of being searched for.

@@ -113,7 +113,7 @@ dependencies = [
 
 [[package]]
 name = "aspero"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "aspero-bib",
  "aspero-core",
@@ -132,7 +132,7 @@ dependencies = [
 
 [[package]]
 name = "aspero-bib"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "aspero-core",
  "biblatex",
@@ -141,7 +141,7 @@ dependencies = [
 
 [[package]]
 name = "aspero-core"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "async-trait",
  "jiff",
@@ -155,7 +155,7 @@ dependencies = [
 
 [[package]]
 name = "aspero-crossref"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "aspero-core",
  "async-trait",
@@ -167,7 +167,7 @@ dependencies = [
 
 [[package]]
 name = "aspero-datacite"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "aspero-core",
  "async-trait",
@@ -180,7 +180,7 @@ dependencies = [
 
 [[package]]
 name = "aspero-doi"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "aspero-core",
  "async-trait",
@@ -189,7 +189,7 @@ dependencies = [
 
 [[package]]
 name = "aspero-engine"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "aspero-core",
  "aspero-crossref",
@@ -214,7 +214,7 @@ dependencies = [
 
 [[package]]
 name = "aspero-europepmc"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "aspero-core",
  "async-trait",
@@ -226,7 +226,7 @@ dependencies = [
 
 [[package]]
 name = "aspero-ffi"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "aspero-core",
  "aspero-engine",
@@ -240,7 +240,7 @@ dependencies = [
 
 [[package]]
 name = "aspero-json"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "aspero-core",
  "aspero-engine",
@@ -251,7 +251,7 @@ dependencies = [
 
 [[package]]
 name = "aspero-openalex"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "aspero-core",
  "async-trait",
@@ -264,7 +264,7 @@ dependencies = [
 
 [[package]]
 name = "aspero-openlibrary"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "aspero-core",
  "async-trait",
@@ -276,7 +276,7 @@ dependencies = [
 
 [[package]]
 name = "aspero-store"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "aspero-core",
  "jiff",

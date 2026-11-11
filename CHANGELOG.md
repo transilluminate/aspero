@@ -12,6 +12,10 @@ Fixed:
   titled with a URL. A URL is no title, and a link's words (`https`,
   `doi`, `org`, …) no evidence of one; a year or journal agreeing alone
   no longer makes a work plausible either (#33).
+- `split_references` gave up splitting references numbered inline when
+  one of them had no year ("Defense Health Board … Falls Church, VA,
+  n.d."). `n.d.`, "Accessed …" and "[cited …]" now count as a date, and
+  one undated piece among four or more no longer stops the split (#35).
 - Words inside a title no longer mark it a reply or correction
   ("differential response to corticosteroids", "Correction of
   hyponatraemia"): "response to", "comment on" and "correction" count

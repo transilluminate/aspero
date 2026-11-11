@@ -60,7 +60,7 @@ fn scan_line(line: &str) -> Vec<(WorkId, Range<usize>)> {
         }
         let start = offset(line, cleaned);
         let span = start..start + cleaned.len();
-        if let Some(kind) = label_kind(cleaned) {
+        if let Some(kind) = IdKind::from_label(cleaned) {
             label = Some((kind, start));
             continue;
         }
@@ -96,27 +96,13 @@ fn pieces(line: &str) -> Vec<Range<usize>> {
     out
 }
 
-/// A standalone label such as `PMID:`, `ISBN-13` or `doi:`.
-fn label_kind(piece: &str) -> Option<IdKind> {
-    let word = piece.trim_end_matches(':').to_ascii_lowercase();
-    match word.as_str() {
-        "pmid" => Some(IdKind::Pmid),
-        "pmcid" => Some(IdKind::Pmcid),
-        "doi" => Some(IdKind::Doi),
-        "arxiv" => Some(IdKind::Arxiv),
-        "nbk" => Some(IdKind::Nbk),
-        "isbn" | "isbn-13" | "isbn-10" | "isbn13" | "isbn10" => Some(IdKind::Isbn),
-        _ => None,
-    }
-}
-
 /// An identifier written without a separate label: any kind when prefixed
 /// or a URL; otherwise only kinds whose shape can't be mistaken.
 fn unlabelled(piece: &str) -> Option<WorkId> {
     let explicit = Url::parse(piece).is_some()
-        || piece
-            .split_once(':')
-            .is_some_and(|(head, _)| IdKind::from_prefix(head).is_some());
+        || piece.split_once(':').is_some_and(|(head, _)| {
+            IdKind::from_prefix(head).is_some() || IdKind::from_label(head).is_some()
+        });
     match piece.parse::<WorkId>() {
         Ok(id) if explicit || matches!(id.kind(), IdKind::Doi | IdKind::Pmcid | IdKind::Nbk) => {
             Some(id)

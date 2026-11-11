@@ -2,6 +2,7 @@
 //! surface forms normalise to one canonical value, and canonical output
 //! re-parses to itself.
 
+use aspero_core::id::scan;
 use aspero_core::{ArxivId, Doi, IdError, IdKind, Pmid, WorkId};
 use percent_encoding::{NON_ALPHANUMERIC, utf8_percent_encode};
 use proptest::prelude::*;
@@ -146,6 +147,39 @@ proptest! {
         }
     }
 
+    /// Whatever `scan` finds, lookup's parser reads the same way: each
+    /// mention as written parses to its identifier.
+    #[test]
+    fn scanned_mentions_parse_as_found(text in "\\PC{0,80}") {
+        assert_mentions_parse(&text)?;
+    }
+
+    #[test]
+    fn labelled_mentions_parse_as_found(
+        n in 1u64..100_000_000,
+        doi in canonical_doi(),
+        arxiv in canonical_arxiv(),
+        form in 0..9usize,
+        gap in prop::sample::select(vec![" ", ": ", ":", "  ", "\t"]),
+        before in "[a-z ,(]{0,12}",
+        after in "[a-z .,)]{0,12}",
+    ) {
+        let (label, value) = match form {
+            0 => ("PMID", n.to_string()),
+            1 => ("pmid", n.to_string()),
+            2 => ("PMCID", format!("PMC{n}")),
+            3 => ("ISBN", isbn13("978", n % 1_000_000_000)),
+            4 => ("ISBN-13", isbn13("979", n % 1_000_000_000)),
+            5 => ("doi", doi),
+            6 => ("DOI", doi.to_uppercase()),
+            7 => ("arXiv", arxiv),
+            _ => ("NBK", format!("NBK{n}")),
+        };
+        let text = format!("{before} {label}{gap}{value} {after}");
+        prop_assert!(!scan(&text).is_empty(), "{text:?}");
+        assert_mentions_parse(&text)?;
+    }
+
     #[test]
     fn generated_ids_round_trip(
         doi in canonical_doi(),
@@ -190,5 +224,19 @@ fn assert_round_trips(id: &WorkId) -> Result<(), TestCaseError> {
 
     let json = serde_json::to_string(id).unwrap();
     prop_assert_eq!(&serde_json::from_str::<WorkId>(&json).unwrap(), id);
+    Ok(())
+}
+
+fn assert_mentions_parse(text: &str) -> Result<(), TestCaseError> {
+    for m in scan(text) {
+        let written = &text[m.span.clone()];
+        prop_assert_eq!(
+            &written.parse::<WorkId>(),
+            &Ok(m.id.clone()),
+            "{:?} in {:?}",
+            written,
+            text
+        );
+    }
     Ok(())
 }

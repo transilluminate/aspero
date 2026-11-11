@@ -90,6 +90,20 @@ impl IdKind {
             .copied()
             .find(|k| k.prefix().eq_ignore_ascii_case(s))
     }
+
+    /// The kind a label written before an identifier names: `PMID`,
+    /// `PMID:`, `ISBN-13`, `doi:`, …
+    pub fn from_label(label: &str) -> Option<Self> {
+        match label.trim_end_matches(':').to_ascii_lowercase().as_str() {
+            "pmid" => Some(IdKind::Pmid),
+            "pmcid" => Some(IdKind::Pmcid),
+            "doi" => Some(IdKind::Doi),
+            "arxiv" => Some(IdKind::Arxiv),
+            "nbk" => Some(IdKind::Nbk),
+            "isbn" | "isbn-13" | "isbn-10" | "isbn13" | "isbn10" => Some(IdKind::Isbn),
+            _ => None,
+        }
+    }
 }
 
 impl fmt::Display for IdKind {
@@ -269,8 +283,9 @@ pub fn canonical(ids: &[WorkId]) -> Option<&WorkId> {
 impl FromStr for WorkId {
     type Err = IdError;
 
-    /// Detects the kind: URL host first, then an explicit `kind:` prefix, then
-    /// the shape of a bare value. Bare all-digit input is ambiguous (PMID or
+    /// Detects the kind: URL host first, then an explicit `kind:` prefix or
+    /// a label (`PMID 123`, `ISBN 978-…`, as [`scan`] finds them), then the
+    /// shape of a bare value. Bare all-digit input is ambiguous (PMID or
     /// S2 CorpusId) and is rejected rather than guessed.
     fn from_str(input: &str) -> Result<Self, IdError> {
         let s = syntax::clean_pasted(input);
@@ -284,6 +299,16 @@ impl FromStr for WorkId {
             && let Some(kind) = IdKind::from_prefix(head.trim())
         {
             return Self::parse_as(kind, input);
+        }
+        if let Some((head, rest)) = s.split_once(':')
+            && let Some(kind) = IdKind::from_label(head.trim())
+        {
+            return Self::parse_as(kind, rest.trim());
+        }
+        if let Some((head, rest)) = s.split_once(char::is_whitespace)
+            && let Some(kind) = IdKind::from_label(head)
+        {
+            return Self::parse_as(kind, rest.trim());
         }
         Self::detect_bare(s, input)
     }

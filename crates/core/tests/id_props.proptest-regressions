@@ -6,3 +6,4 @@
 # everyone who runs the test benefits from these saved cases.
 cc 1b633e363853d62adb22979eef9a925fee0771e4fe1d26ee31836a9c93732493 # shrinks to doi = "10.0000/a", arxiv = "hep-th/9101000", n = 1, kind = Isbn
 cc b9f6cccb7ef7410a2572f71ca4a8019f235823786690b8c735d054c8abfa31ea # shrinks to (surface, canonical) = ("10.0000/>", "10.0000/>")
+cc a3172274fb16ed1f6f38fb4fc7da1d3f836d95e2c950638b73960bef0a80d3ab # shrinks to n = 1, doi = "10.0000/a", arxiv = "hep-th/9101000", form = 4, gap = ":", before = "", after = ""

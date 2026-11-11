@@ -72,6 +72,16 @@ pub struct Global {
     /// `abstract_source`.
     #[arg(long = "abstract", global = true)]
     pub abstracts: bool,
+
+    /// For `--format cite` (which it implies): a bundled style (`aspero
+    /// styles` lists them) or a `.csl` file.
+    #[arg(long, global = true, value_name = "ID|FILE")]
+    pub style: Option<String>,
+
+    /// The language of a style's terms ("et al."): `en-US` or `en-GB`. By
+    /// default, the style's own.
+    #[arg(long, global = true)]
+    pub locale: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
@@ -88,6 +98,9 @@ pub enum Format {
     Bibtex,
     /// The works found as RIS records (lookup, search, verify).
     Ris,
+    /// The works found as a reference list in `--style` (lookup, search,
+    /// verify).
+    Cite,
 }
 
 impl Format {
@@ -98,7 +111,7 @@ impl Format {
 
     /// The works found, for a reference manager.
     pub fn is_export(self) -> bool {
-        matches!(self, Format::Bibtex | Format::Ris)
+        matches!(self, Format::Bibtex | Format::Ris | Format::Cite)
     }
 }
 
@@ -297,6 +310,23 @@ Examples:
     Cache {
         #[command(subcommand)]
         action: CacheAction,
+    },
+
+    /// List the bundled citation styles for `--format cite`.
+    #[command(after_help = "\
+Any independent CSL style also works: pass its .csl file to --style. Styles
+from https://github.com/citation-style-language/styles are licensed under
+CC BY-SA 3.0; --credits lists the bundled ones' authors.
+
+Examples:
+  aspero styles
+  aspero lookup --style vancouver 10.1038/nature14539
+  aspero verify --style apa --format cite - < citations.txt
+  aspero lookup --style ~/styles/the-lancet.csl 10.1038/nature14539")]
+    Styles {
+        /// Print the bundled styles' license and authors.
+        #[arg(long)]
+        credits: bool,
     },
 }
 

@@ -3,8 +3,8 @@
 
 use aspero_ffi::records::ReadError;
 use aspero_ffi::records::{
-    Author, BibFormat, BibProblem, Claim, ErrorKind, ExportFormat, KeyStatus, LookupStatus, Reason,
-    SearchRequest, Verdict, Work,
+    Author, BibFormat, BibProblem, CiteFormat, Claim, ErrorKind, ExportFormat, KeyStatus,
+    LookupStatus, Reason, SearchRequest, StyleError, StyleSource, Verdict, Work,
 };
 use aspero_ffi::{Aspero, AsperoError, CallToken, Config, Patience};
 
@@ -178,6 +178,83 @@ fn works_export_as_bibtex_and_ris() {
         back.entries[0].claim.title.as_deref(),
         Some("Deep learning")
     );
+}
+
+fn work(title: &str, author: &str, year: i16) -> Work {
+    Work {
+        source: "test".into(),
+        ids: Vec::new(),
+        canonical: None,
+        title: Some(title.into()),
+        authors: vec![Author {
+            name: author.into(),
+            orcid: None,
+        }],
+        issued: None,
+        year: Some(year),
+        work_type: Some("article-journal".into()),
+        container: Some("Nature".into()),
+        volume: Some("521".into()),
+        issue: None,
+        page: Some("436-444".into()),
+        publisher: None,
+        url: None,
+        abstract_text: None,
+        notices: Vec::new(),
+        notice_for: Vec::new(),
+        open_access: None,
+        fetched_at: std::time::SystemTime::UNIX_EPOCH,
+        json: "{}".into(),
+    }
+}
+
+#[test]
+fn works_cite_in_a_style() {
+    let handle = aspero(None);
+    let styles = handle.citation_styles();
+    assert_eq!(styles.len(), 8);
+    assert!(styles.iter().any(|s| s.id == "vancouver"));
+
+    let works = vec![
+        work("Zebra stripes", "Ann Zed", 2020),
+        work("Deep learning", "Yann LeCun", 2015),
+    ];
+    let vancouver = StyleSource::Bundled {
+        id: "vancouver".into(),
+    };
+    let cited = handle
+        .cite(works.clone(), vancouver, CiteFormat::Text, None)
+        .unwrap();
+    assert_eq!(cited[0].index, 0, "as cited");
+    assert_eq!(cited[0].label.as_deref(), Some("1."));
+    assert_eq!(
+        cited[1].text,
+        "LeCun Y. Deep learning. Nature. 2015;521:436–44."
+    );
+
+    let apa = StyleSource::Bundled { id: "apa".into() };
+    let cited = handle
+        .cite(works, apa, CiteFormat::Html, Some("en-GB".into()))
+        .unwrap();
+    assert_eq!(cited[0].index, 1, "alphabetical");
+    assert_eq!(cited[0].in_text, "(LeCun, 2015)");
+    assert!(
+        cited[0].text.contains("font-style: italic"),
+        "{}",
+        cited[0].text
+    );
+
+    let unknown = StyleSource::Bundled { id: "nope".into() };
+    assert_eq!(
+        handle.cite(Vec::new(), unknown, CiteFormat::Text, None),
+        Err(StyleError::UnknownStyle { id: "nope".into() })
+    );
+    let broken = StyleSource::Csl { xml: "<p/>".into() };
+    assert!(matches!(
+        handle.cite(Vec::new(), broken, CiteFormat::Text, None),
+        Err(StyleError::Invalid { .. })
+    ));
+    assert!(handle.style_credits().contains("Attribution-ShareAlike"));
 }
 
 #[test]

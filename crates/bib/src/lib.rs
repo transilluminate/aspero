@@ -10,6 +10,8 @@
 //!   isn't a DOI, are reported rather than dropped.
 //! - [`bibtex`] and [`ris`] write a work as an entry.
 
+#[cfg(feature = "styles")]
+pub mod cite;
 mod csl;
 mod ris;
 mod write;

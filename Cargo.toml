@@ -34,6 +34,7 @@ aspero-openlibrary = { path = "crates/providers/openlibrary", version = "0.6.0" 
 
 async-trait = "0.1.92"
 biblatex = "0.12.0"
+hayagriva = { version = "0.10.1", default-features = false, features = ["csl-json"] }
 clap = { version = "4.6.7", features = ["derive", "env"] }
 comfy-table = "8.0.1"
 directories = "6.0.0"

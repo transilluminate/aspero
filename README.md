@@ -55,9 +55,10 @@ aspero verify - < citations.txt        # one claim per line, text or JSON
 aspero check refs.bib
 aspero check --fail-on warning --format json thesis.ris
 
-# Write what's found as BibTeX or RIS, for a reference manager
+# Write what's found as BibTeX or RIS, or as a reference list in a style
 aspero lookup --format bibtex 10.1038/nature14539 arXiv:1706.03762
 aspero verify --format ris - < citations.txt
+aspero verify --style vancouver - < citations.txt   # `aspero styles` lists them
 
 # Look up identifiers: DOIs, arXiv IDs, PMIDs, PMCIDs, NBK IDs, ISBNs, URLs
 aspero lookup 10.1038/nature14539 arXiv:1706.03762 "ISBN 978-0-262-03561-3"
@@ -77,7 +78,8 @@ aspero verify -v "Bishop CM. Pattern Recognition and Machine Learning. 2006"
 On a terminal, results are tables (a single `verify` is a short report);
 piped, they're JSON. Pick explicitly with `--format table|text|json|jsonl`:
 `text` is a detailed report per result. `lookup`, `search` and `verify`
-also take `--format bibtex|ris`. Every command's `--help` has
+also take `--format bibtex|ris`, and `--style apa|vancouver|…` or a `.csl`
+file for a formatted reference list. Every command's `--help` has
 examples and the exit codes.
 
 What `verify` and `check` catch: invented papers, real DOIs attached to the
@@ -112,3 +114,7 @@ the live benchmark, fixture recording, a release dry run.
 ## Licence
 
 MIT OR Apache-2.0, at your option.
+
+The bundled citation styles and locales are from the Citation Style
+Language project, under CC BY-SA 3.0; see `crates/bib/styles/NOTICE.md`
+and `aspero styles --credits`.

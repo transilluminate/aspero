@@ -57,7 +57,7 @@ const STOP: [&str; 9] = ["a", "an", "the", "on", "of", "in", "and", "for", "to"]
 
 /// A name as BibTeX and RIS want it: family and given names apart, or
 /// whole (an organisation).
-enum Name {
+pub(crate) enum Name {
     Person {
         family: String,
         given: Option<String>,
@@ -114,7 +114,7 @@ const BODIES: [&str; 40] = [
     "college",
 ];
 
-fn name(p: &Person) -> Name {
+pub(crate) fn name(p: &Person) -> Name {
     match (&p.family, &p.literal) {
         (Some(family), _) => Name::Person {
             family: family.clone(),

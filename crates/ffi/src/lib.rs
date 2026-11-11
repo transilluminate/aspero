@@ -29,9 +29,10 @@ use tokio::task::JoinHandle;
 pub mod records;
 
 use records::{
-    Bibliography, Budget, CacheStats, Claim as ClaimRecord, ExportFormat, KeyCheck, KeyStatus,
-    Line, LineReference, Lookup, Lookups, Mention, ProviderUsage, ReadError, Reference,
-    SearchRequest, SearchResults, Unavailable, Verification, Verifications, Work,
+    Bibliography, Budget, CacheStats, CitationStyle, CiteFormat, CitedEntry, Claim as ClaimRecord,
+    ExportFormat, KeyCheck, KeyStatus, Line, LineReference, Lookup, Lookups, Mention,
+    ProviderUsage, ReadError, Reference, SearchRequest, SearchResults, StyleError, StyleSource,
+    Unavailable, Verification, Verifications, Work,
 };
 
 uniffi::setup_scaffolding!();
@@ -326,6 +327,58 @@ impl Aspero {
             })
             .collect();
         entries.join("\n")
+    }
+
+    /// The bundled citation styles: APA, Vancouver, Harvard, Chicago,
+    /// IEEE, Nature, AMA, MLA.
+    pub fn citation_styles(&self) -> Vec<CitationStyle> {
+        aspero_bib::cite::BUNDLED
+            .iter()
+            .map(|b| CitationStyle {
+                id: b.id.into(),
+                title: b.title.into(),
+            })
+            .collect()
+    }
+
+    /// Works as a reference list in `style`, one entry each, in the
+    /// style's order (alphabetical, or as given). `locale` (`en-GB`) sets
+    /// the language of terms like "et al."; by default, the style's own.
+    /// Offline.
+    #[uniffi::method(default(locale = None))]
+    pub fn cite(
+        &self,
+        works: Vec<Work>,
+        style: StyleSource,
+        format: CiteFormat,
+        locale: Option<String>,
+    ) -> Result<Vec<CitedEntry>, StyleError> {
+        use aspero_bib::cite;
+        let style = match style {
+            StyleSource::Bundled { id } => cite::Style::bundled(&id)?,
+            StyleSource::Csl { xml } => cite::Style::from_xml(&xml)?,
+        };
+        let core: Vec<_> = works.iter().map(Work::to_core).collect();
+        let pairs: Vec<_> = core.iter().map(|(w, ids)| (w, &ids[..])).collect();
+        let markup = match format {
+            CiteFormat::Text => cite::Markup::Text,
+            CiteFormat::Html => cite::Markup::Html,
+        };
+        Ok(cite::cite(&pairs, &style, locale.as_deref(), markup)
+            .into_iter()
+            .map(|c| CitedEntry {
+                index: c.index as u32,
+                label: c.label,
+                text: c.text,
+                in_text: c.in_text,
+            })
+            .collect())
+    }
+
+    /// The bundled styles' and locales' license (CC BY-SA 3.0) and
+    /// authors, to show with formatted references.
+    pub fn style_credits(&self) -> String {
+        aspero_bib::cite::credits()
     }
 
     /// Each provider's budget as its last response reported it, without

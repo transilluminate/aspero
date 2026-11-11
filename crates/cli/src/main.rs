@@ -29,6 +29,7 @@ async fn main() -> ExitCode {
     let cli = Cli::parse();
     init_logging(cli.global.verbose);
     let format = match cli.global.format {
+        Format::Auto if cli.global.style.is_some() => Format::Cite,
         Format::Auto if std::io::stdout().is_terminal() => Format::Table,
         Format::Auto => Format::Json,
         f => f,
@@ -37,6 +38,8 @@ async fn main() -> ExitCode {
         format,
         full: cli.global.full,
         abstracts: cli.global.abstracts,
+        style: cli.global.style.clone(),
+        locale: cli.global.locale.clone(),
     };
     let exports = matches!(
         cli.command,
@@ -44,9 +47,9 @@ async fn main() -> ExitCode {
     );
     let result = match format.is_export() && !exports {
         true => Err(Failure::usage(
-            "--format bibtex and ris are for lookup, search and verify",
+            "--format bibtex, ris and cite are for lookup, search and verify",
         )),
-        false => run(cli, out).await,
+        false => run(cli, out.clone()).await,
     };
     match result {
         Ok(exit) => exit.code(),
@@ -149,6 +152,7 @@ async fn run(cli: Cli, out: Out) -> Result<Exit, Failure> {
     match cli.command {
         Command::Cache { action } => return cmd::cache::run(cache_path()?, action, out),
         Command::Scan { files } => return cmd::scan::run(files, out),
+        Command::Styles { credits } => return cmd::styles::run(credits, out),
         _ => {}
     }
     let engine = engine(open_cache(), cli.global.no_cache)?;
@@ -162,6 +166,8 @@ async fn run(cli: Cli, out: Out) -> Result<Exit, Failure> {
             fail_on,
             limit,
         } => cmd::check::run(&engine, path, fail_on, limit, out).await,
-        Command::Cache { .. } | Command::Scan { .. } => unreachable!("handled above"),
+        Command::Cache { .. } | Command::Scan { .. } | Command::Styles { .. } => {
+            unreachable!("handled above")
+        }
     }
 }

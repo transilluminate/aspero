@@ -28,7 +28,7 @@ required-features = ["bindgen"]
 bindgen = ["uniffi/cli"]
 
 [dependencies]
-aspero-bib.workspace = true
+aspero-bib = { workspace = true, features = ["styles"] }
 aspero-core.workspace = true
 aspero-engine.workspace = true
 aspero-json.workspace = true

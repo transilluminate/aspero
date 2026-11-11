@@ -5,6 +5,11 @@ use serde_json::{Value, json};
 
 use crate::{merged, work};
 
+/// A claim that couldn't be read, after its echo.
+pub fn invalid_claim(echo: Value, reason: &str) -> Value {
+    merged(echo, json!({"verdict": "invalid", "reason": reason}))
+}
+
 /// One verification, after the claim's echo (input, key, claim).
 pub fn verification(echo: Value, v: &Verification, full: bool) -> Value {
     let mut item = merged(

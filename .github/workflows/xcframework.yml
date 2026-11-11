@@ -1,0 +1,42 @@
+# Attaches the macOS app framework (AsperoFFI.xcframework.zip) and its
+# Swift bindings to each release, once dist's Release workflow has made it.
+name: xcframework
+
+on:
+  workflow_run:
+    workflows: [Release]
+    types: [completed]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Release tag to attach to (e.g. v0.4.0)
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    # Releases come from tag pushes; Release also runs (planning only) on PRs.
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.event == 'push')
+    runs-on: macos-latest
+    env:
+      TAG: ${{ inputs.tag || github.event.workflow_run.head_branch }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TAG }}
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin, x86_64-apple-darwin
+      - uses: Swatinem/rust-cache@v2
+      - run: scripts/xcframework.sh
+      - run: >-
+          gh release upload "$TAG" --clobber
+          target/xcframework/AsperoFFI.xcframework.zip
+          target/xcframework/aspero_ffi.swift
+        env:
+          GH_TOKEN: ${{ github.token }}

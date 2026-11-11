@@ -47,6 +47,7 @@ crates/
   json/        the JSON contract (works, lookups, verdicts, claims), shared
                by every front end
   cli/         clap front end: arguments, stdin, tables and text
+  ffi/         UniFFI bindings for apps (Swift), shipped as an .xcframework
 bench/         verify benchmark data (known-answer citations)
 scripts/       fixture recorders, one per provider
 ```
@@ -275,20 +276,24 @@ fixture recorded with different parameters once hid a ranking bug.
 - **Semantic Scholar** (not built; key pending). Keyless requests mostly
   429 from an AWS gateway with no `Retry-After`; a fake key gets 403.
 
-## Next: 0.4, the engine as a long-lived service
+## Apps (FFI)
 
-A GUI (a macOS app over FFI) and parallel agents hold one engine for a
-long time and ask many things at once. In order, each step tested on its
-own:
-
-1. **`aspero-ffi`**: UniFFI, async calls, config passed in (the app owns
-   the Keychain), an `.xcframework` attached to releases.
+`aspero-ffi` (UniFFI) gives apps one `Aspero` handle: `lookup`, `verify`,
+`verify_each` (a callback per result as it finishes), `scan` and
+`unavailable`, all answering in the JSON contract, with a `Patience` per
+call (batch, interactive, offline). The app passes everything in: contact
+address, keys (it keeps them in the Keychain), cache directory; nothing is
+read from the environment. Calls run on the handle's own Tokio runtime,
+so any executor can await them, and a dropped call is aborted. Hold one
+handle per app. `just xcframework` builds `AsperoFFI.xcframework` (arm64 +
+x86_64, static) and the Swift bindings; a workflow attaches both to each
+release. Not published to crates.io.
 
 Not until needed: priority lanes in the pacer, a daemon, a SQLite
 connection pool, and CLI keys anywhere but the environment (agents run
-headless, where a Keychain prompt after an upgrade would hang them; the
-app keeps its own keys in the Keychain and passes them in). One cache per process family: the app and CLI don't
-share one (schema versions would rebuild each other's).
+headless, where a Keychain prompt after an upgrade would hang them).
+The app and the CLI keep separate caches (the sandbox puts the app's in
+its container; different schema versions would rebuild each other's).
 
 ## Future
 

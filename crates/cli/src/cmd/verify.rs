@@ -10,7 +10,7 @@ use futures::StreamExt;
 use serde_json::{Value, json};
 
 use super::claim::claims;
-use super::{Failure, Out, merge_usage, merged, print, print_line};
+use super::{Failure, Out, merge_usage, print, print_line};
 use crate::args::{ClaimArgs, Format};
 use crate::exit::Exit;
 use crate::output::{self, Level};
@@ -42,7 +42,7 @@ pub async fn run(engine: &Engine, args: ClaimArgs, out: Out) -> Result<Exit, Fai
     let mut results = Results::new(out.format, total, show_progress);
     for (i, claim) in claims.iter().enumerate() {
         if let Err(e) = &claim.claim {
-            let item = merged(claim.echo(), json!({"verdict": "invalid", "reason": e}));
+            let item = aspero_json::invalid_claim(claim.echo(), e);
             let text = format!("INVALID  {}\n  {e}\n", claim.input);
             results.add(i, item, text, Exit::Usage);
         }

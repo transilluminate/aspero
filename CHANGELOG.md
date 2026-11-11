@@ -20,6 +20,11 @@ Added:
   and why.
 - Parallel aspero processes (agents) share each provider's rate limit
   through the cache file, even with `--no-cache`.
+- `aspero-ffi`: Swift bindings (UniFFI) for apps, answering in the same
+  JSON, with results streamed as they finish; `AsperoFFI.xcframework.zip`
+  and `aspero_ffi.swift` are attached to each release.
+- `Engine::lookup_inputs`: identifiers as written, with `Extras`, so every
+  front end answers as `aspero lookup` does.
 - Help: where notice dates come from, and why they can differ from a plain
   lookup of the notice DOI.
 

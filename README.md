@@ -94,8 +94,10 @@ Lookalike re-deposits of famous papers are told apart by year and authors.
 ## Library
 
 The CLI is a thin adapter over `aspero-engine`, with its JSON shapes in
-`aspero-json`; providers are separate crates behind features. See [DESIGN.md](DESIGN.md) for the architecture,
-scoring rules, provider gotchas and plans.
+`aspero-json`; providers are separate crates behind features. Apps use
+`aspero-ffi`: Swift bindings and an `.xcframework` attached to each
+release (`just xcframework` builds them). See [DESIGN.md](DESIGN.md) for
+the architecture, scoring rules, provider gotchas and plans.
 
 ## Development
 

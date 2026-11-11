@@ -6,6 +6,7 @@ members = [
     "crates/store",
     "crates/engine",
     "crates/json",
+    "crates/ffi",
     "crates/cli",
     "crates/providers/*",
 ]

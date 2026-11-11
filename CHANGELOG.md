@@ -7,6 +7,10 @@ Breaking:
 - A lookup that is offline and not in the cache has status `not_cached`
   (it was `failed`).
 - `Verification` is `#[non_exhaustive]` and gains `why` and `notes`.
+- FFI calls return typed records instead of JSON strings: `lookup` →
+  `Lookups`, `verify` → `Verifications`, `verify_each` hands the listener
+  a `Verification` (with its claim's `index`) and returns usage, `scan` →
+  `[Mention]`, `unavailable` → `[Unavailable]`.
 
 Added:
 
@@ -17,6 +21,8 @@ Added:
   `budget_spent`, `key_rejected`, `not_cached`, …) beside their category.
   JSON adds `kind` to failed attempts and `error_kinds` to
   verifications.
+- A verification's `errors` include failed lookups of its identifiers, not
+  only failed searches.
 
 Fixed:
 

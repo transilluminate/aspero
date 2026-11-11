@@ -23,10 +23,11 @@ pub fn verification(echo: Value, v: &Verification, full: bool) -> Value {
     if let Some(best) = v.best {
         item["match"] = work::candidate(&v.report.candidates[best], full);
     }
-    if !v.report.errors.is_empty() {
-        let errors: Vec<String> = v.report.errors.iter().map(ToString::to_string).collect();
+    let failures = v.report.failures();
+    if !failures.is_empty() {
+        let errors: Vec<String> = failures.iter().map(ToString::to_string).collect();
         item["errors"] = json!(errors);
-        let kinds: Vec<&str> = v.report.errors.iter().map(|e| e.kind().as_str()).collect();
+        let kinds: Vec<&str> = failures.iter().map(|e| e.kind().as_str()).collect();
         item["error_kinds"] = json!(kinds);
     }
     if full {

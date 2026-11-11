@@ -25,7 +25,7 @@ use aspero_core::{
 };
 
 use futures::future::{Either, join_all, select};
-use futures::stream::{self, Stream, StreamExt};
+use futures::stream::{self, FuturesUnordered, Stream, StreamExt};
 
 use crate::verdict::{Verification, judge};
 use crate::{Engine, EngineError, LookupResult, SearchReport, add_usage};
@@ -338,13 +338,27 @@ impl Engine {
                 jobs.push((provider.clone(), query(title, false), Via::TitleSearch));
             }
         }
-        let results = join_all(
-            jobs.iter()
-                .map(|(p, q, _)| self.search(Some(p.as_str()), q)),
-        )
-        .await;
-        for ((provider, _, via), result) in jobs.iter().zip(results) {
-            acc.add_search(provider, *via, result);
+        // Each answer is added as it arrives, so a verified claim stops
+        // waiting for slower providers. The report is rebuilt in job order
+        // each time, so what's kept doesn't depend on who answered first.
+        let mut pending: FuturesUnordered<_> = jobs
+            .iter()
+            .enumerate()
+            .map(|(i, (p, q, _))| async move { (i, self.search(Some(p.as_str()), q).await) })
+            .collect();
+        let before = acc.report.clone();
+        let mut answers: Vec<Option<Result<SearchReport, EngineError>>> = vec![None; jobs.len()];
+        while let Some((i, result)) = pending.next().await {
+            answers[i] = Some(result);
+            acc.report = before.clone();
+            for ((provider, _, via), answer) in jobs.iter().zip(&answers) {
+                if let Some(result) = answer {
+                    acc.add_search(provider, *via, result.clone());
+                }
+            }
+            if done(&acc) {
+                break;
+            }
         }
         acc.finish()
     }
@@ -473,15 +487,21 @@ impl Accumulator<'_> {
     /// A candidate so clearly right that searching further can't improve
     /// on it: decisive, and either the identifiers the claim asserted or two
     /// providers vouch for it. A digest or reprint of a paper can match the
-    /// claim exactly while only a later search finds the original.
+    /// claim exactly while only a later search finds the original. Two
+    /// providers also settle a claim whose identifier names another work,
+    /// but not one whose identifiers the candidate can't yet be compared
+    /// with: a later provider may add the claimed PMID.
     fn verified(&self) -> bool {
         self.report.candidates.iter().any(|c| {
-            let corroborated = match self.claim.ids.is_empty() {
-                true => c
-                    .sightings
+            let vouched = || {
+                c.sightings
                     .iter()
-                    .any(|s| s.provider != c.sightings[0].provider),
-                false => c.assessment.ids == Agreement::Match,
+                    .any(|s| s.provider != c.sightings[0].provider)
+            };
+            let corroborated = match c.assessment.ids {
+                Agreement::Match => true,
+                Agreement::Mismatch => vouched(),
+                _ => self.claim.ids.is_empty() && vouched(),
             };
             c.assessment.confidence >= DECISIVE && corroborated
         })

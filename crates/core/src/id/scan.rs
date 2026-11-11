@@ -261,12 +261,18 @@ struct Broken {
     label: Option<IdKind>,
 }
 
-/// The identifier a [`Broken`] piece ending its line makes with the start
-/// of the next, and its span.
+/// The identifier a [`Broken`] piece makes with what follows it: the
+/// start of the next line when it ends its line, or the pieces after it
+/// when a copy spaced the link out at its punctuation (`https:// doi.
+/// org/ 10. 1183/ 23120 541. 00489- 2021`, as Preview copies PDFs).
 fn mend(text: &str, broken: &Broken) -> Option<(WorkId, Range<usize>)> {
     let bytes = text.as_bytes();
-    let line_end = broken.cleaned.end + memchr(b'\n', &bytes[broken.cleaned.end..])?;
-    if !text[broken.cleaned.end..line_end].trim().is_empty() {
+    let end = broken.cleaned.end;
+    let line_end = memchr(b'\n', &bytes[end..]).map_or(text.len(), |i| end + i);
+    if !text[end..line_end].trim().is_empty() {
+        return mend_spaced(text, broken, line_end);
+    }
+    if line_end == text.len() {
         return None;
     }
     let next_start = line_end + 1;
@@ -278,8 +284,67 @@ fn mend(text: &str, broken: &Broken) -> Option<(WorkId, Range<usize>)> {
     }
     let indent = next.len() - next.trim_start().len();
     let joined = format!("{raw}{}", next.split_whitespace().next()?);
-    let cleaned = clean_pasted(&joined);
-    if offset(&joined, cleaned) != 0 || cleaned.len() <= raw.len() {
+    let (id, len) = parse_mended(broken, &joined, raw.len())?;
+    Some((id, broken.from..next_start + indent + len - raw.len()))
+}
+
+/// [`mend`] of a link spaced out within its line: each piece joins the
+/// last after `/`, `-`, `_` or `:`, after `.` if it starts in lower case
+/// or a digit, and after a piece of digits if digits; the longest join
+/// ending in a piece with a digit that is an identifier wins.
+fn mend_spaced(text: &str, broken: &Broken, line_end: usize) -> Option<(WorkId, Range<usize>)> {
+    let raw = &text[broken.cleaned.clone()];
+    let starts = |p: &str| {
+        raw.get(..p.len())
+            .is_some_and(|h| h.eq_ignore_ascii_case(p))
+    };
+    if !(["http", "doi", "dx.", "www."].iter().any(|p| starts(p)) || raw.starts_with("10.")) {
+        return None;
+    }
+    let mut joined = raw.to_owned();
+    // Per piece joined that has a digit (as an identifier's end does, and
+    // a word after a link doesn't): the joined length and where it ends in
+    // `text`.
+    let mut ends: Vec<(usize, usize)> = Vec::new();
+    let mut at = broken.cleaned.end;
+    let mut last = raw;
+    loop {
+        let rest = &text[at..line_end];
+        let token = rest.trim_start();
+        if rest.len() - token.len() != 1 {
+            break;
+        }
+        let token = token.split_whitespace().next().unwrap_or_default();
+        let Some(first) = token.chars().next() else {
+            break;
+        };
+        let digits = |s: &str| !s.is_empty() && s.bytes().all(|b| b.is_ascii_digit());
+        let joins = match last.chars().next_back() {
+            Some('/' | '-' | '_' | ':') => first.is_alphanumeric(),
+            Some('.') => first.is_lowercase() || first.is_ascii_digit(),
+            _ => digits(last) && first.is_ascii_digit(),
+        };
+        if !joins {
+            break;
+        }
+        joined.push_str(token);
+        at += 1 + token.len();
+        if token.bytes().any(|b| b.is_ascii_digit()) {
+            ends.push((joined.len(), at));
+        }
+        last = token;
+    }
+    ends.into_iter().rev().find_map(|(len, end)| {
+        let (id, cleaned) = parse_mended(broken, &joined[..len], raw.len())?;
+        Some((id, broken.from..end - (len - cleaned)))
+    })
+}
+
+/// The identifier in a mended link and its length once cleaned, if
+/// cleaning leaves its start and adds to the broken piece.
+fn parse_mended(broken: &Broken, joined: &str, raw: usize) -> Option<(WorkId, usize)> {
+    let cleaned = clean_pasted(joined);
+    if offset(joined, cleaned) != 0 || cleaned.len() <= raw {
         return None;
     }
     let id = match broken.label {
@@ -287,10 +352,7 @@ fn mend(text: &str, broken: &Broken) -> Option<(WorkId, Range<usize>)> {
         None if could_be_unlabelled(cleaned) => unlabelled(cleaned)?,
         None => return None,
     };
-    Some((
-        id,
-        broken.from..next_start + indent + cleaned.len() - raw.len(),
-    ))
+    Some((id, cleaned.len()))
 }
 
 /// The label the piece starting at `start` follows, if any: the last
@@ -709,6 +771,33 @@ mod tests {
         // Not at the end of its line, or nothing to mend it with: nothing.
         assert!(found("https://doi.org/10.1017/ and S1049023X15004653").is_empty());
         assert!(found("https://doi.org/10.1017/\n\nS1049023X15004653").is_empty());
+    }
+
+    #[test]
+    fn links_spaced_out_at_their_punctuation_are_mended() {
+        // Dogfood: Preview's copy of a PDF's DOI link.
+        let text =
+            "Eur Respir J. 2021. https:// doi. org/ 10. 1183/ 23120 541. 00489- 2021. Accessed";
+        assert_eq!(
+            found(text),
+            [(
+                "doi:10.1183/23120541.00489-2021".into(),
+                "https:// doi. org/ 10. 1183/ 23120 541. 00489- 2021"
+            )]
+        );
+        assert_eq!(
+            found("see https:// dx. doi. org/ 10. 1056/ NEJMoa1302097 and 2019"),
+            [(
+                "doi:10.1056/nejmoa1302097".into(),
+                "https:// dx. doi. org/ 10. 1056/ NEJMoa1302097"
+            )]
+        );
+        // Prose with a slash, or a link whole: as before.
+        assert!(found("and/ or 10 people").is_empty());
+        assert_eq!(
+            found("https://doi.org/10.1056/NEJMoa1302097 2019")[0].1,
+            "https://doi.org/10.1056/NEJMoa1302097"
+        );
     }
 
     #[test]

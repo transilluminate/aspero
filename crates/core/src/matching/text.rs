@@ -68,12 +68,17 @@ pub(super) const STOPWORDS: &[&str] = &[
     "are", "as", "via", "into", "its",
 ];
 
-/// A title's distinct words, without stopwords (unless that leaves none).
+/// The words of a link written out (`https:// doi. org/ …`), which are no
+/// evidence of a title.
+const LINK_WORDS: &[&str] = &["http", "https", "www", "doi", "dx", "org", "com"];
+
+/// A title's distinct words, without stopwords or link words (unless that
+/// leaves none).
 pub(super) fn content_words(title: &str) -> Vec<String> {
     let all = dedup(words(title));
     let content: Vec<String> = all
         .iter()
-        .filter(|w| !STOPWORDS.contains(&w.as_str()))
+        .filter(|w| !STOPWORDS.contains(&w.as_str()) && !LINK_WORDS.contains(&w.as_str()))
         .cloned()
         .collect();
     if content.is_empty() { all } else { content }

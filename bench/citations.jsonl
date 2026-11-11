@@ -35,3 +35,4 @@
 {"why": "Vancouver without a title: journal, volume and first page place it", "claim": "Daum RS et al. N Engl J Med 2017;376:2545", "expect": ["verified"], "ids": ["doi:10.1056/nejmoa1607033"]}
 {"why": "Vancouver with a wrong first page: the paper, flagged", "claim": "Daum RS et al. N Engl J Med 2017;376:2440", "expect": ["plausible"]}
 {"why": "full Vancouver reference: title, journal abbreviation, volume, pages", "claim": "Meyer G, Vicaut E, Danays T, et al. Fibrinolysis for patients with intermediate-risk pulmonary embolism. N Engl J Med. 2014;370(15):1402-11.", "expect": ["verified"], "ids": ["doi:10.1056/nejmoa1302097"]}
+{"why": "dogfood: a DOI link Preview spaced out at its punctuation (#33)", "claim": "https:// doi. org/ 10. 1183/ 23120 541. 00489- 2021", "expect": ["verified"], "ids": ["doi:10.1183/23120541.00489-2021"]}

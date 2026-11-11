@@ -204,6 +204,10 @@ fn input_is_an_identifier_or_a_reference() {
     assert!(id_only.text.is_none() && id_only.ids.len() == 1);
     let reference = Claim::from_input("Deep learning. Nature 2015. doi:10.1038/nature14539");
     assert!(reference.text.is_some() && reference.ids.len() == 1);
+    // A link a copy spaced out is still the whole input.
+    let spaced = Claim::from_input("https:// doi. org/ 10. 1183/ 23120 541. 00489- 2021");
+    assert!(spaced.text.is_none(), "{spaced:?}");
+    assert_eq!(spaced.ids[0].to_string(), "doi:10.1183/23120541.00489-2021");
 }
 
 #[test]
@@ -338,6 +342,27 @@ fn citing_the_exact_place_corroborates_like_authors() {
 }
 
 #[test]
+fn a_url_is_not_a_title() {
+    // Dogfood: a Crossref placeholder titled with a notice page's URL,
+    // against a citation whose DOI link Preview spaced out.
+    let claim =
+        Claim::from_text("Eur Respir J. 2021. https:// doi. org/ 10. 1183/ 23120 541. 00489- 2021");
+    let placeholder = record(
+        &[],
+        "https://www.ejhbe.com/notification-about-the-doi",
+        &[],
+        2021,
+    );
+    let a = assess(&claim, &placeholder);
+    assert_eq!(a.title.agreement, Agreement::Unknown, "{a:?}");
+    assert!(a.confidence < PLAUSIBLE, "{a:?}");
+    // Nor are a link's words a title's.
+    let notice = record(&[], "DOI notice", &[], 2021);
+    let a = assess(&claim, &notice);
+    assert_ne!(a.title.agreement, Agreement::Match, "{a:?}");
+}
+
+#[test]
 fn a_short_title_inside_text_is_not_enough() {
     // Dogfood: a one-word encyclopedia entry inside a chat message.
     let entry = record(&[], "Aspero", &[], 2012);
@@ -414,6 +439,16 @@ fn replies_and_corrections_are_not_the_original() {
     assert!(!is_derivative(
         "Age-Adjusted D-Dimer Cutoff Levels to Rule Out Pulmonary Embolism"
     ));
+    assert!(is_derivative("Correction: Deep learning"));
+    assert!(is_derivative("In response to: Fibrinolysis for PE"));
+    // The words inside a title are not markers.
+    for title in [
+        "Community-acquired pneumonia subgroups and differential response to corticosteroids",
+        "Correction of hyponatraemia: a systematic review",
+        "Rapid correction of acidosis",
+    ] {
+        assert!(!is_derivative(title), "{title}");
+    }
 
     let claim = Claim {
         title: Some("Age-adjusted D-dimer cutoff levels to rule out pulmonary embolism".into()),

@@ -1,5 +1,22 @@
 # Changelog
 
+## Unreleased
+
+Fixed:
+
+- `scan` found nothing in a DOI link that macOS Preview copies with
+  spaces after its punctuation (`https:// doi. org/ 10. 1183/ 23120 541.
+  00489- 2021`); such a link is now mended, and `verify` of it alone
+  checks the DOI (#33).
+- `verify` of that link was a mismatch against a placeholder record
+  titled with a URL. A URL is no title, and a link's words (`https`,
+  `doi`, `org`, …) no evidence of one; a year or journal agreeing alone
+  no longer makes a work plausible either (#33).
+- Words inside a title no longer mark it a reply or correction
+  ("differential response to corticosteroids", "Correction of
+  hyponatraemia"): "response to", "comment on" and "correction" count
+  only where a title starts with them.
+
 ## 0.6.6
 
 Fixed:

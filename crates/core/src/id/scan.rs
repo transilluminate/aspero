@@ -28,12 +28,33 @@ pub struct Mention {
     /// 1-based column of the mention's start, in characters.
     pub column: usize,
     /// Byte range of the mention as written, label included (`PMID:
-    /// 123`), wrappers and trailing punctuation not.
+    /// 123`), wrappers and trailing punctuation not. A link broken across
+    /// lines spans both, line break included.
     pub span: Range<usize>,
 }
 
-/// Every identifier mentioned in `text`, in order, repeats included.
+/// Every identifier mentioned in `text`, in order, repeats included. Text
+/// from PDFs is cleaned first (ligatures, invisible characters, look-alike
+/// dashes and quotes); spans point into `text` as given.
 pub fn scan(text: &str) -> Vec<Mention> {
+    let folded = crate::fold::Folded::new(text);
+    scan_clean(&folded.text)
+        .into_iter()
+        .map(|m| {
+            let span = folded.original(&m.span);
+            let line_start = text[..span.start].rfind('\n').map_or(0, |i| i + 1);
+            Mention {
+                line: m.line,
+                column: text[line_start..span.start].chars().count() + 1,
+                span,
+                ..m
+            }
+        })
+        .collect()
+}
+
+/// [`scan`] of text already cleaned.
+fn scan_clean(text: &str) -> Vec<Mention> {
     let mut lines: Vec<(usize, &str)> = Vec::new();
     let mut at = 0;
     for line in text.split('\n') {
@@ -238,6 +259,18 @@ mod tests {
                 ("pmid:30252312".into(), "PMID: 30252312"),
             ]
         );
+    }
+
+    #[test]
+    fn pdf_look_alikes_are_cleaned_but_spans_are_as_written() {
+        let text = "ﬁnding: doi:10.1038/s41586\u{2013}020\u{AD}-2649-2";
+        let m = &scan(text)[0];
+        assert_eq!(m.id.to_string(), "doi:10.1038/s41586-020-2649-2");
+        assert_eq!(
+            &text[m.span.clone()],
+            "doi:10.1038/s41586\u{2013}020\u{AD}-2649-2"
+        );
+        assert_eq!(m.column, 9);
     }
 
     #[test]

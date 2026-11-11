@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+Added:
+
+- `scan`, `split_references` and identifier parsing clean text from PDFs
+  and word processors first: ligatures (`ﬁ`) expanded, soft hyphens and
+  zero-width characters dropped (a soft hyphen at a line end marks a
+  broken word), Unicode hyphens, dashes, quotes and spaces folded to
+  ASCII. Spans still point into the text as given.
+
 Fixed:
 
 - `scan` rejoins a DOI or URL broken across lines (as in text from PDFs)

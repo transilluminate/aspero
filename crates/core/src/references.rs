@@ -31,8 +31,21 @@ pub struct Reference {
     pub span: Range<usize>,
 }
 
-/// The references in `text`, in order.
+/// The references in `text`, in order. Text from PDFs is cleaned first
+/// (ligatures, invisible characters, look-alike dashes and quotes); spans
+/// point into `text` as given.
 pub fn split_references(text: &str) -> Vec<Reference> {
+    let folded = crate::fold::Folded::new(text);
+    split_clean(&folded.text)
+        .into_iter()
+        .map(|r| Reference {
+            span: folded.original(&r.span),
+            ..r
+        })
+        .collect()
+}
+
+fn split_clean(text: &str) -> Vec<Reference> {
     let list = List::new(text);
     let groups = list.numbered().unwrap_or_else(|| {
         let paragraphs: Vec<Vec<Range<usize>>> = list
@@ -440,6 +453,19 @@ mod tests {
             texts("[1]\nSmith J. One. 2020.\n[2]\nJones K. Two. 2021.\n[3] "),
             ["Smith J. One. 2020.", "Jones K. Two. 2021."]
         );
+    }
+
+    #[test]
+    fn pdf_text_is_cleaned_and_spans_point_into_it() {
+        let list = "1. Smith J. Neuro\u{AD}\nlogical ﬁndings. doi:10.1038/s41586\u{2010}020-2649-2\n\
+            2. Jones K. Two. 2021.";
+        let refs = split_references(list);
+        assert_eq!(
+            refs[0].text,
+            "Smith J. Neurological findings. doi:10.1038/s41586-020-2649-2"
+        );
+        assert!(list[refs[0].span.clone()].starts_with("Smith J. Neuro\u{AD}"));
+        assert!(list[refs[0].span.clone()].ends_with("\u{2010}020-2649-2"));
     }
 
     #[test]

@@ -14,6 +14,7 @@
 
 pub mod csl;
 pub mod error;
+mod fold;
 pub mod http;
 pub mod id;
 pub mod matching;

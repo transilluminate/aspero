@@ -338,6 +338,30 @@ fn citing_the_exact_place_corroborates_like_authors() {
 }
 
 #[test]
+fn a_short_title_inside_text_is_not_enough() {
+    // Dogfood: a one-word encyclopedia entry inside a chat message.
+    let entry = record(&[], "Aspero", &[], 2012);
+    for text in ["aspero 0.6.5 is in", "Aspero 2012"] {
+        let a = assess(&Claim::from_text(text), &entry);
+        assert_eq!(a.title.agreement, Agreement::Match);
+        assert!(a.confidence < PLAUSIBLE, "{text}: {a:?}");
+    }
+    // With the authors, a short title is a match.
+    let deep = record(&[], "Deep learning", &["LeCun", "Bengio", "Hinton"], 2015);
+    let a = assess(
+        &Claim::from_text("LeCun Y, Bengio Y, Hinton G. Deep learning. 2015"),
+        &deep,
+    );
+    assert!(a.confidence >= PLAUSIBLE, "{a:?}");
+    // As the claim's title, it is what was asked for.
+    let claim = Claim {
+        title: Some("Aspero".into()),
+        ..Claim::default()
+    };
+    assert!(assess(&claim, &entry).confidence >= PLAUSIBLE);
+}
+
+#[test]
 fn title_and_year_alone_cannot_verify() {
     // Dogfood: a generic title contained in the reference, no authors.
     let claim = Claim::from_text(

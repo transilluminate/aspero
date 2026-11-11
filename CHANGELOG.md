@@ -14,6 +14,10 @@ Breaking:
 
 Added:
 
+- `aspero verify --split` (and `resolve`) takes a pasted reference list
+  (numbered, bulleted, one per paragraph or line, wrapped lines rejoined)
+  and checks each reference; `split_references` in `aspero-core`, and
+  `splitReferences` over FFI with UTF-16 ranges.
 - Verdicts say why as data as well as in English: `Verification::why`
   (a `Reason`, with the fields that differ and their values) and `notes`
   (retraction, newer version). JSON adds `why: {code, differs, cited}`.

@@ -17,8 +17,9 @@ use crate::output::{self, Level};
 
 pub async fn run(engine: &Engine, args: ClaimArgs, out: Out) -> Result<Exit, Failure> {
     let limit = args.limit;
+    let split_list = args.split;
     let (text, fields) = split(args);
-    let claims = claims(text, fields)?;
+    let claims = claims(text, fields, split_list)?;
     if claims.is_empty() {
         return Err(Failure::usage("no claims given"));
     }

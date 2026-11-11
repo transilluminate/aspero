@@ -5,8 +5,24 @@ use aspero_json::{ClaimInput, InputClaim};
 use super::{Failure, read_stdin};
 
 /// The claims to process: `text` plus flags as one claim, or one per stdin
-/// line when `text` is `-` (blank lines and `#` comments skipped).
-pub fn claims(text: Option<String>, fields: ClaimInput) -> Result<Vec<InputClaim>, Failure> {
+/// line when `text` is `-` (blank lines and `#` comments skipped). With
+/// `split`, the text or stdin is a reference list, split into references.
+pub fn claims(
+    text: Option<String>,
+    fields: ClaimInput,
+    split: bool,
+) -> Result<Vec<InputClaim>, Failure> {
+    if split {
+        let list = match text.as_deref() {
+            Some("-") => read_stdin()?,
+            Some(text) => text.to_owned(),
+            None => return Err(Failure::usage("--split needs text or `-`")),
+        };
+        return Ok(aspero_core::split_references(&list)
+            .into_iter()
+            .map(|r| InputClaim::from_line(&r.text))
+            .collect());
+    }
     if text.as_deref() == Some("-") {
         let input = read_stdin()?;
         return Ok(input

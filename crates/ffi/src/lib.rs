@@ -25,7 +25,9 @@ use tokio::task::JoinHandle;
 
 pub mod records;
 
-use records::{Lookup, Lookups, Mention, ProviderUsage, Unavailable, Verification, Verifications};
+use records::{
+    Lookup, Lookups, Mention, ProviderUsage, Reference, Unavailable, Verification, Verifications,
+};
 
 uniffi::setup_scaffolding!();
 
@@ -238,6 +240,16 @@ impl Aspero {
         aspero_core::id::scan(&text)
             .iter()
             .map(|m| Mention::new(&text, m))
+            .collect()
+    }
+
+    /// The references in a pasted list (numbered, bulleted, one per
+    /// paragraph or line; wrapped lines rejoined), each ready to verify.
+    /// Offline.
+    pub fn split_references(&self, text: String) -> Vec<Reference> {
+        aspero_core::split_references(&text)
+            .iter()
+            .map(|r| Reference::new(&text, r))
             .collect()
     }
 

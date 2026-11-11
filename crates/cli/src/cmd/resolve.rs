@@ -13,11 +13,12 @@ use crate::output;
 
 pub async fn run(engine: &Engine, args: ClaimArgs, out: Out) -> Result<Exit, Failure> {
     let limit = args.limit;
+    let split_list = args.split;
     let (text, fields) = split(args);
     let mut exit = Exit::Ok;
     let mut docs = Vec::new();
 
-    for item in claims(text, fields)? {
+    for item in claims(text, fields, split_list)? {
         let echo = item.echo();
         let input = item.input;
         let claim = match item.claim {

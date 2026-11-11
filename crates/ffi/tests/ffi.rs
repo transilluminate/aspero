@@ -43,6 +43,16 @@ fn mentions_carry_utf16_ranges() {
 }
 
 #[test]
+fn pasted_lists_split_into_references() {
+    let list = "1. Smith J. One.\n   2020.\n2. Jones K. Two. 2021.";
+    let refs = aspero(None).split_references(list.into());
+    assert_eq!(refs[0].text, "Smith J. One. 2020.");
+    let utf16: Vec<u16> = list.encode_utf16().collect();
+    let second = refs[1].utf16.start as usize..refs[1].utf16.end as usize;
+    assert_eq!(String::from_utf16(&utf16[second]).unwrap(), refs[1].text);
+}
+
+#[test]
 fn offline_lookups_answer_without_the_network() {
     let dir = std::env::temp_dir().join(format!("aspero-ffi-{}", std::process::id()));
     let handle = aspero(Some(dir.display().to_string()));

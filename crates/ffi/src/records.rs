@@ -765,18 +765,40 @@ pub struct Mention {
 
 impl Mention {
     pub(crate) fn new(text: &str, m: &aspero_core::id::Mention) -> Self {
-        let utf16 = |byte: usize| text[..byte].encode_utf16().count() as u64;
         Mention {
             id: m.id.to_string(),
             kind: m.id.kind().prefix().to_owned(),
             text: text[m.span.clone()].to_owned(),
             line: m.line as u64,
             column: m.column as u64,
-            utf16: Utf16Range {
-                start: utf16(m.span.start),
-                end: utf16(m.span.end),
-            },
+            utf16: utf16_range(text, &m.span),
         }
+    }
+}
+
+/// One reference from a pasted list.
+#[derive(Debug, Clone, uniffi::Record)]
+pub struct Reference {
+    /// On one line, without its number or bullet: a claim for `verify`.
+    pub text: String,
+    /// Where it is in the list, marker excluded.
+    pub utf16: Utf16Range,
+}
+
+impl Reference {
+    pub(crate) fn new(list: &str, r: &aspero_core::Reference) -> Self {
+        Reference {
+            text: r.text.clone(),
+            utf16: utf16_range(list, &r.span),
+        }
+    }
+}
+
+fn utf16_range(text: &str, span: &std::ops::Range<usize>) -> Utf16Range {
+    let utf16 = |byte: usize| text[..byte].encode_utf16().count() as u64;
+    Utf16Range {
+        start: utf16(span.start),
+        end: utf16(span.end),
     }
 }
 

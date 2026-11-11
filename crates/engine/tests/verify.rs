@@ -404,3 +404,158 @@ async fn abstracts_are_filled_from_other_providers_with_provenance() {
         ]
     );
 }
+
+#[tokio::test]
+async fn a_reference_without_a_title_is_found_by_where_it_appeared() {
+    // #23: a running header, nothing but journal, volume, year and pages.
+    let mut laan = work(
+        "openalex",
+        &["doi:10.1016/j.injury.2015.11.045"],
+        "Chest wall thickness and decompression failure",
+        &["Laan"],
+        2016,
+    );
+    laan.work.container_title = Some("Injury".into());
+    laan.work.volume = Some("47".into());
+    laan.work.page = Some("797-804".into());
+    let openalex = Arc::new(Scripted::new("openalex").placer().with(vec![laan]));
+    let engine = engine(vec![openalex.clone()]);
+    let v = engine
+        .verify(
+            &Claim::from_text("Injury, Int. J. Care Injured 47 (2016) 797\u{2013}804"),
+            5,
+        )
+        .await;
+    assert_eq!(v.verdict, Verdict::Verified, "{}", v.reason);
+    let found = &v.report.candidates[v.best.unwrap()];
+    assert!(found.sightings.iter().any(|s| s.via == Via::PlaceSearch));
+    let placed: Vec<_> = openalex
+        .sent()
+        .into_iter()
+        .filter(|q| q.place.is_some())
+        .collect();
+    let [q] = &placed[..] else {
+        panic!("{placed:?}")
+    };
+    let place = q.place.as_ref().unwrap();
+    assert_eq!(
+        (place.volume.as_str(), place.first_page.as_str()),
+        ("47", "797")
+    );
+    let years = q.years.unwrap();
+    assert_eq!((years.from, years.to), (Some(2015), Some(2017)));
+}
+
+#[tokio::test]
+async fn agreeing_without_corroboration_is_unconfirmed() {
+    // A title and year that agree, with nothing to corroborate them.
+    let paper = work(
+        "crossref",
+        &["10.1234/x"],
+        "Fibrinolysis for patients with intermediate-risk pulmonary embolism",
+        &[],
+        2014,
+    );
+    let crossref = Arc::new(Scripted::new("crossref").matcher(vec![paper]));
+    let v = engine(vec![crossref])
+        .verify(
+            &Claim::from_text(
+                "Fibrinolysis for patients with intermediate-risk pulmonary embolism. 2014",
+            ),
+            5,
+        )
+        .await;
+    assert_eq!(v.verdict, Verdict::Plausible, "{}", v.reason);
+    assert_eq!(v.why, Reason::Unconfirmed);
+    assert_eq!(v.why.as_str(), "unconfirmed");
+}
+
+#[tokio::test]
+async fn a_reply_with_the_cited_title_is_named_as_one() {
+    let reply = work(
+        "crossref",
+        &["10.1038/nature14539-reply"],
+        "Deep learning\u{2014}Reply",
+        &LECUN,
+        2015,
+    );
+    let crossref = Arc::new(Scripted::new("crossref").matcher(vec![reply]));
+    let v = engine(vec![crossref])
+        .verify(
+            &Claim::from_text("LeCun Y, Bengio Y, Hinton G. Deep learning. 2015"),
+            5,
+        )
+        .await;
+    let kind = v.why.differs().iter().find(|d| d.field == CitedField::Kind);
+    assert_eq!(
+        kind.and_then(|d| d.actual.as_deref()),
+        Some("reply"),
+        "{:?}: {}",
+        v.why,
+        v.reason
+    );
+}
+
+#[tokio::test]
+async fn reasons_that_list_differences_always_list_one() {
+    // Every pairing of a claim shape with a candidate: whatever the verdict,
+    // a reason with differences names at least one.
+    let candidates = [
+        deep_learning(),
+        work(
+            "crossref",
+            &["10.1234/c"],
+            "Correction: Deep learning",
+            &LECUN,
+            2015,
+        ),
+        work(
+            "crossref",
+            &["10.1234/r"],
+            "Deep learning—Reply",
+            &LECUN,
+            2016,
+        ),
+        work("crossref", &["10.1234/n"], "Deep learning", &[], 2015),
+        work("crossref", &["10.1234/s"], "Aspero", &[], 2012),
+    ];
+    let claims = [
+        "Deep learning",
+        "Deep learning. 2015",
+        "Deep learning. 2016",
+        "Deep learning. 2019",
+        "LeCun Y. Deep learning. 2015",
+        "LeCun Y. Deep learning. 2017",
+        "Smith J. Deep learning. 2015",
+        "Smith J. Deep learning. Nature 2015;521:436",
+        "LeCun Y. Nature 2015;521:436",
+        "Deep learning. doi:10.1038/nature14539",
+        "Deep learning. 2019. doi:10.1038/nature14539",
+        "Smith J. Shallow thoughts. 2015. doi:10.1038/nature14539",
+        "aspero 2012",
+    ];
+    for candidate in &candidates {
+        for text in claims {
+            let crossref = Arc::new(
+                Scripted::new("crossref")
+                    .matcher(vec![candidate.clone()])
+                    .with(vec![deep_learning(), candidate.clone()]),
+            );
+            let v = engine(vec![crossref])
+                .verify(&Claim::from_text(text), 5)
+                .await;
+            let listing = matches!(
+                v.why,
+                Reason::PartlyMatches { .. }
+                    | Reason::Closest { .. }
+                    | Reason::IdPartlyMatches { .. }
+            );
+            assert!(
+                !listing || !v.why.differs().is_empty(),
+                "{text:?} against {:?}: {:?}",
+                candidate.work.title,
+                v.why
+            );
+        }
+    }
+}

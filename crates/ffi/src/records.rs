@@ -582,6 +582,9 @@ pub enum CitedField {
     Journal,
     Volume,
     FirstPage,
+    /// The work is a reply, correction or commentary on the one cited;
+    /// `actual` says which ("correction", "reply", "comment", …).
+    Kind,
 }
 
 /// A cited field the work disagrees with, and the work's value when worth
@@ -600,6 +603,7 @@ impl From<&engine::Difference> for Difference {
             engine::CitedField::Year => CitedField::Year,
             engine::CitedField::Journal => CitedField::Journal,
             engine::CitedField::Volume => CitedField::Volume,
+            engine::CitedField::Kind => CitedField::Kind,
             _ => CitedField::FirstPage,
         };
         Difference {
@@ -617,10 +621,15 @@ impl From<&engine::Difference> for Difference {
 pub enum Reason {
     /// The citation matches the work.
     Matches,
+    /// Never empty.
     PartlyMatches {
         differs: Vec<Difference>,
     },
+    /// The citation agrees with the work as far as it goes, but gives too
+    /// little to confirm it.
+    Unconfirmed,
     /// The closest work shares the title, but other details differ.
+    /// Never empty.
     Closest {
         differs: Vec<Difference>,
     },
@@ -629,6 +638,7 @@ pub enum Reason {
     IdExists,
     /// The identifiers exist and the citation agrees.
     IdAgrees,
+    /// Never empty.
     IdPartlyMatches {
         differs: Vec<Difference>,
     },
@@ -655,6 +665,7 @@ impl Reason {
         match &v.why {
             engine::Reason::Matches => Reason::Matches,
             engine::Reason::PartlyMatches { .. } => Reason::PartlyMatches { differs: differs() },
+            engine::Reason::Unconfirmed => Reason::Unconfirmed,
             engine::Reason::Closest { .. } => Reason::Closest { differs: differs() },
             engine::Reason::NoMatch => Reason::NoMatch,
             engine::Reason::IdExists => Reason::IdExists,

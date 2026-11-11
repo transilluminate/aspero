@@ -59,6 +59,19 @@ impl Scripted {
         self
     }
 
+    /// Searches by volume and first page too (`SearchQuery::place`).
+    pub fn placer(mut self) -> Self {
+        self.caps.search = true;
+        self.caps
+            .search_filters
+            .extend([aspero_core::Filter::Years, aspero_core::Filter::Place]);
+        self
+    }
+
+    pub fn sent(&self) -> Vec<SearchQuery> {
+        self.queries.lock().unwrap().clone()
+    }
+
     pub fn with(mut self, works: Vec<SourceRecord>) -> Self {
         self.works = works
             .into_iter()
@@ -100,8 +113,23 @@ impl Provider for Scripted {
     async fn search(&self, query: &SearchQuery) -> Result<Response<Page>> {
         self.queries.lock().unwrap().push(query.clone());
         tokio::time::sleep(self.search_delay).await;
-        let records: Vec<SourceRecord> = match query.mode {
-            SearchMode::Citation => self.matcher_hits.clone(),
+        let first_page = |w: &SourceRecord| {
+            w.work
+                .page
+                .as_deref()
+                .map(|p| aspero_core::publication::first_page(p).to_owned())
+        };
+        let records: Vec<SourceRecord> = match (query.mode, &query.place) {
+            (SearchMode::Citation, _) => self.matcher_hits.clone(),
+            (_, Some(place)) => self
+                .works
+                .iter()
+                .filter(|w| {
+                    w.work.volume.as_deref() == Some(place.volume.as_str())
+                        && first_page(w).as_deref() == Some(place.first_page.as_str())
+                })
+                .cloned()
+                .collect(),
             _ => self
                 .works
                 .iter()

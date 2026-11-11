@@ -124,6 +124,25 @@ pub enum Filter {
     Years,
     WorkType,
     OpenAccess,
+    /// Volume and first page ([`SearchQuery::place`]).
+    Place,
+}
+
+/// Where a work appeared, to search by: volume and first page.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[non_exhaustive]
+pub struct Place {
+    pub volume: String,
+    pub first_page: String,
+}
+
+impl Place {
+    pub fn new(volume: impl Into<String>, first_page: impl Into<String>) -> Self {
+        Place {
+            volume: volume.into(),
+            first_page: first_page.into(),
+        }
+    }
 }
 
 /// Inclusive publication-year range; either end may be open.
@@ -187,6 +206,8 @@ pub struct SearchQuery {
     pub years: Option<YearRange>,
     pub work_type: Option<WorkType>,
     pub open_access: Option<bool>,
+    /// Volume and first page, for citations that give no title.
+    pub place: Option<Place>,
     pub fields: FieldSet,
     pub page: PageReq,
     /// Provider-specific parameters, passed through by name.
@@ -216,6 +237,7 @@ impl SearchQuery {
             self.years.map(|_| Filter::Years),
             self.work_type.as_ref().map(|_| Filter::WorkType),
             self.open_access.map(|_| Filter::OpenAccess),
+            self.place.as_ref().map(|_| Filter::Place),
         ]
         .into_iter()
         .flatten()

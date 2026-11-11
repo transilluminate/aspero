@@ -341,6 +341,93 @@ fn citing_the_exact_place_corroborates_like_authors() {
     assert!(assess(&claim, &peitho()).confidence < VERIFIED);
 }
 
+/// A record with where it appeared.
+fn placed(
+    ids: &[&str],
+    title: &str,
+    authors: &[&str],
+    year: i16,
+    at: (&str, &str, &str),
+) -> SourceRecord {
+    let mut r = record(ids, title, authors, year);
+    r.work.container_title = Some(at.0.into());
+    r.work.volume = Some(at.1.into());
+    r.work.page = Some(at.2.into());
+    r
+}
+
+#[test]
+fn journal_volume_and_first_page_name_a_work_without_a_title() {
+    // #23: running headers and short forms.
+    let laan = placed(
+        &["doi:10.1016/j.injury.2015.11.045"],
+        "Chest wall thickness and decompression failure: A systematic review and meta-analysis",
+        &["Laan", "Vu", "Thiels"],
+        2016,
+        ("Injury", "47", "797-804"),
+    );
+    for text in [
+        "Injury, Int. J. Care Injured 47 (2016) 797\u{2013}804",
+        "Injury. 2016;47(4):797-804.",
+        "Laan DV, et al. Injury 2016;47:797.",
+    ] {
+        let a = assess(&Claim::from_text(text), &laan);
+        assert!(a.confidence >= VERIFIED, "{text}: {a:?}");
+    }
+    let lecun = placed(
+        &[],
+        "Deep learning",
+        &["LeCun", "Bengio", "Hinton"],
+        2015,
+        ("Nature", "521", "436-444"),
+    );
+    let a = assess(
+        &Claim::from_text("Nature 521, 436\u{2013}444 (2015)"),
+        &lecun,
+    );
+    assert!(a.confidence >= VERIFIED, "{a:?}");
+    // Online first, in print the next year: plausible.
+    let a = assess(&Claim::from_text("Injury. 2017;47(4):797-804."), &laan);
+    assert!((PLAUSIBLE..VERIFIED).contains(&a.confidence), "{a:?}");
+    // Another page, or other authors: not this work.
+    for text in [
+        "Injury, Int. J. Care Injured 47 (2016) 805\u{2013}812",
+        "Smith J, et al. Injury 2016;47:797.",
+    ] {
+        let a = assess(&Claim::from_text(text), &laan);
+        assert!(a.confidence < PLAUSIBLE, "{text}: {a:?}");
+    }
+}
+
+#[test]
+fn a_reference_without_a_title_is_not_a_different_title() {
+    // Dogfood (#33): authors, journal, year and the DOI, no title.
+    let doi = "doi:10.1183/23120541.00489-2021";
+    let work = placed(
+        &[doi],
+        "Community-acquired pneumonia subgroups and differential response to corticosteroids",
+        &["Wittermans", "Vestjens", "Blum"],
+        2021,
+        ("ERJ Open Research", "8", "00489-2021"),
+    );
+    let claim = Claim::from_text(format!("Wittermans E, et al. ERJ Open Res. 2022. {doi}"));
+    let a = assess(&claim, &work);
+    assert_eq!(a.title.agreement, Agreement::Unknown, "{a:?}");
+    assert!(a.confidence >= PLAUSIBLE, "{a:?}");
+    // Without an identifier or a place, authors, journal and year fit too
+    // many works.
+    let a = assess(
+        &Claim::from_text("Wittermans E, et al. ERJ Open Res. 2021."),
+        &work,
+    );
+    assert!(a.confidence < PLAUSIBLE, "{a:?}");
+    // A reference that does give a title still disagrees.
+    let claim = Claim::from_text(format!(
+        "Wittermans E, et al. Steroids in asthma. ERJ Open Res. 2021. {doi}"
+    ));
+    assert_eq!(assess(&claim, &work).title.agreement, Agreement::Mismatch);
+}
+
 #[test]
 fn a_url_is_not_a_title() {
     // Dogfood: a Crossref placeholder titled with a notice page's URL,

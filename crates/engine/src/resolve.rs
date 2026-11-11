@@ -20,8 +20,8 @@
 
 use aspero_core::matching::{self, id_agreement, same_work_id};
 use aspero_core::{
-    Agreement, Assessment, Claim, FieldSet, ProviderId, SearchQuery, SourceRecord, Update, Usage,
-    WorkId,
+    Agreement, Assessment, Claim, FieldSet, Filter, ProviderId, SearchQuery, SourceRecord, Update,
+    Usage, WorkId, YearRange,
 };
 
 use futures::future::{Either, join_all, select};
@@ -42,6 +42,9 @@ const DECISIVE: f64 = 0.95;
 /// and it keeps a batch from queueing so many requests that a caller
 /// sharing the engine (someone waiting) is stuck behind them.
 const CLAIM_CONCURRENCY: usize = 4;
+/// Results per search by volume and first page: those of every journal
+/// that year, from which the journal picks.
+const PLACE_LIMIT: u32 = 25;
 
 /// How a candidate was found.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -51,6 +54,8 @@ pub enum Via {
     CitationMatch,
     TitleSearch,
     KeywordSearch,
+    /// A search by volume and first page.
+    PlaceSearch,
 }
 
 impl Via {
@@ -60,6 +65,7 @@ impl Via {
             Via::CitationMatch => "citation_match",
             Via::TitleSearch => "title_search",
             Via::KeywordSearch => "keyword_search",
+            Via::PlaceSearch => "place_search",
         }
     }
 }
@@ -338,6 +344,26 @@ impl Engine {
                 jobs.push((provider.clone(), query(title, false), Via::TitleSearch));
             }
         }
+        // A reference without a title ("Injury 47 (2016) 797–804") is
+        // found by where it appeared, in the years it cites (and either
+        // side: online first, then in print).
+        if let Some(place) = claim.place() {
+            let years = claim.cited_years();
+            for provider in self.placers() {
+                let mut q = query("", false);
+                q.page.limit = PLACE_LIMIT;
+                q.place = Some(place.clone());
+                q.years = years
+                    .iter()
+                    .min()
+                    .zip(years.iter().max())
+                    .map(|(&a, &b)| YearRange {
+                        from: Some(a - 1),
+                        to: Some(b + 1),
+                    });
+                jobs.push((provider, q, Via::PlaceSearch));
+            }
+        }
         // Each answer is added as it arrives, so a verified claim stops
         // waiting for slower providers. The report is rebuilt in job order
         // each time, so what's kept doesn't depend on who answered first.
@@ -361,6 +387,17 @@ impl Engine {
             }
         }
         acc.finish()
+    }
+
+    /// Keyword engines that can search by volume and first page.
+    fn placers(&self) -> Vec<ProviderId> {
+        self.providers()
+            .filter(|p| {
+                let caps = p.capabilities();
+                caps.search && !caps.citation_search && caps.search_filters.contains(&Filter::Place)
+            })
+            .map(|p| p.id())
+            .collect()
     }
 
     /// Providers that search, either citation matchers or keyword engines.

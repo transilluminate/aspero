@@ -5,8 +5,8 @@ use std::time::Duration;
 
 use aspero_core::testing::{FIXTURE_TIME, ReplayClient, block_on, fixture, response};
 use aspero_core::{
-    Error, FieldSet, HttpResponse, Page, Provider, SearchQuery, SourceRecord, WorkId, WorkType,
-    YearRange,
+    Error, FieldSet, HttpResponse, Page, Place, Provider, SearchQuery, SourceRecord, WorkId,
+    WorkType, YearRange,
 };
 use aspero_openalex::{OpenAlex, OpenAlexConfig};
 use secrecy::SecretString;
@@ -265,6 +265,25 @@ fn search_applies_every_declared_filter_and_pages_by_cursor() {
             .iter()
             .all(|h| h.record.work.work_type == Some(WorkType::Preprint))
     );
+}
+
+#[test]
+fn search_by_place_filters_volume_and_first_page() {
+    let (oa, http) = provider([recorded("works_search_filtered")]);
+    let mut q = SearchQuery::new("");
+    q.place = Some(Place::new("47", "797"));
+    q.years = Some(YearRange {
+        from: Some(2015),
+        to: Some(2017),
+    });
+    block_on(oa.search(&q)).unwrap();
+    let params = query(&http, 0);
+    assert!(params.contains(&(
+        "filter".into(),
+        "from_publication_date:2015-01-01,to_publication_date:2017-12-31,biblio.volume:47,biblio.first_page:797"
+            .into()
+    )));
+    assert!(!params.iter().any(|(k, _)| k == "search"), "{params:?}");
 }
 
 #[test]

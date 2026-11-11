@@ -29,6 +29,12 @@ const LEADING_MARKERS: &[&str] = &["comment on", "response to", "in response", "
 /// Whether a title marks a derivative record: "…—Reply", "Correction to:
 /// …", "Comment on “…”", "Faculty Opinions recommendation of …".
 pub fn is_derivative(title: &str) -> bool {
+    derivative_kind(title).is_some()
+}
+
+/// What a derivative record is, by its title: "reply", "correction",
+/// "comment", "retraction", "expression of concern" or "recommendation".
+pub fn derivative_kind(title: &str) -> Option<&'static str> {
     let norm = normalise(title);
     let words = format!(" {norm} ");
     let leading = |m: &str| match m {
@@ -42,17 +48,25 @@ pub fn is_derivative(title: &str) -> bool {
         }
         _ => words.starts_with(&format!(" {m} ")),
     };
-    DERIVATIVE_MARKERS
+    let marker = DERIVATIVE_MARKERS
         .iter()
-        .any(|m| match LEADING_MARKERS.contains(m) {
+        .find(|m| match LEADING_MARKERS.contains(m) {
             true => leading(m),
             false => words.contains(&format!(" {m} ")),
-        })
+        })?;
+    Some(match *marker {
+        "reply" | "response to" | "in response" => "reply",
+        "erratum" | "errata" | "corrigendum" | "correction" => "correction",
+        "comment on" => "comment",
+        "retraction of" => "retraction",
+        "expression of concern" => "expression of concern",
+        _ => "recommendation",
+    })
 }
 
 /// Whether the claim itself cites a derivative (its text or title uses a
 /// marker), in which case derivatives are fair matches.
-pub(super) fn claim_mentions_derivative(claim: &Claim) -> bool {
+pub fn claim_mentions_derivative(claim: &Claim) -> bool {
     [claim.text.as_deref(), claim.title.as_deref()]
         .into_iter()
         .flatten()

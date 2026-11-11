@@ -22,12 +22,12 @@ mod text;
 use serde::{Deserialize, Serialize};
 
 use crate::id::WorkId;
+use crate::provider::Place;
 use crate::publication::{self, first_page, journal_in, same_journal};
 use crate::record::SourceRecord;
 
 use authors::{author_overlap, family_name};
-use derivative::claim_mentions_derivative;
-pub use derivative::is_derivative;
+pub use derivative::{claim_mentions_derivative, derivative_kind, is_derivative};
 use text::{Normalised, content_words};
 pub use text::{normalise, search_terms, shared_title, title_similarity, unmarked};
 
@@ -49,6 +49,12 @@ const UNCORROBORATED_CAP: f64 = 0.8;
 /// Author score that corroborates a match: the first author present
 /// (0.75 for structured claims, 0.9 in free text).
 const CORROBORATING_AUTHORS: f64 = 0.75;
+/// Confidence when the journal, volume and first page all agree and
+/// nothing contradicts them: verified.
+const PLACED: f64 = 0.9;
+/// The same with the year off by one (online first, then in print):
+/// plausible.
+const PLACED_YEAR_OFF: f64 = 0.8;
 /// Confidence ceiling, below plausible, without evidence of which work is
 /// cited: only a year or journal agreeing, or a short title found inside
 /// free text.
@@ -146,6 +152,28 @@ impl Claim {
                 ..Claim::default()
             },
             None => Claim::from_text(input),
+        }
+    }
+
+    /// Where the claim says the work appeared, volume and first page: from
+    /// its fields, else from its text ("Injury 47 (2016) 797–804").
+    pub fn place(&self) -> Option<Place> {
+        let (volume, page) = match (&self.volume, &self.page) {
+            (Some(v), Some(p)) => (Some(v.clone()), Some(first_page(p).to_owned())),
+            _ => {
+                let found = publication::locator(self.text.as_deref()?);
+                (found.volume, found.page)
+            }
+        };
+        Some(Place::new(volume?, page?))
+    }
+
+    /// The years the claim cites: its year, else those in its text.
+    pub fn cited_years(&self) -> Vec<i16> {
+        match (self.year, &self.text) {
+            (Some(year), _) => vec![year],
+            (None, Some(text)) => Normalised::new(text).years(),
+            _ => Vec::new(),
         }
     }
 
@@ -264,19 +292,33 @@ pub fn assess(claim: &Claim, record: &SourceRecord) -> Assessment {
     // notice page): no title at all.
     let work_title = work.title.clone().filter(|t| !is_url(t));
 
+    let families: Vec<String> = work.authors.iter().filter_map(family_name).collect();
+    // A reference that gives no title ("Wittermans E, et al. ERJ Open Res.
+    // 2022") doesn't give a different one.
+    let untitled = claim.title.is_none()
+        && text
+            .as_ref()
+            .is_some_and(|t| t.untitled(&families, work.container_title.as_deref()));
+
     let title = match (&claim.title, &work_title, &text) {
         (Some(claimed), Some(actual), _) => FieldCheck::scored(title_similarity(claimed, actual)),
-        (None, Some(actual), Some(text)) => FieldCheck::scored(text.title_coverage(actual)),
+        (None, Some(actual), Some(text)) if !untitled => {
+            FieldCheck::scored(text.title_coverage(actual))
+        }
         _ => FieldCheck::UNKNOWN,
     };
 
-    let families: Vec<String> = work.authors.iter().filter_map(family_name).collect();
     let authors = if families.is_empty() {
         FieldCheck::UNKNOWN
     } else if !claim.authors.is_empty() {
         FieldCheck::scored(author_overlap(&claim.authors, &families))
     } else if let Some(text) = &text {
-        FieldCheck::scored(text.author_coverage(&families))
+        // A reference that names no one ("Injury 47 (2016) 797–804", a
+        // pasted title) doesn't name others.
+        match text.author_coverage(&families) {
+            0.0 if !claim.text.as_deref().is_some_and(authors::names_given) => FieldCheck::UNKNOWN,
+            coverage => FieldCheck::scored(coverage),
+        }
     } else {
         FieldCheck::UNKNOWN
     };
@@ -385,6 +427,29 @@ pub fn assess(claim: &Claim, record: &SourceRecord) -> Assessment {
         matches!(title.agreement, Agreement::Match | Agreement::Partial) || corroborated;
     if !id_only && !identified {
         confidence = confidence.min(NO_EVIDENCE_CAP);
+    }
+    // Without a title, authors, a year and a journal fit many works: it
+    // takes an identifier, the place, or the journal, volume and authors.
+    let pinned = ids == Agreement::Match
+        || located
+        || (placed && authors.score.is_some_and(|s| s >= CORROBORATING_AUTHORS));
+    if untitled && !pinned {
+        confidence = confidence.min(NO_EVIDENCE_CAP);
+    }
+    // Journal, volume and first page together name one work, title or no
+    // title ("Injury 47 (2016) 797–804"), unless something contradicts
+    // it.
+    if located
+        && container.agreement == Agreement::Match
+        && title.agreement != Agreement::Mismatch
+        && authors.agreement != Agreement::Mismatch
+    {
+        let floor = match year.agreement {
+            Agreement::Match | Agreement::Unknown => PLACED,
+            Agreement::Partial => PLACED_YEAR_OFF,
+            Agreement::Mismatch => 0.0,
+        };
+        confidence = confidence.max(floor);
     }
     // A wrong volume or page is an error in the citation, and tells an
     // original from the letters and corrections in the same journal.

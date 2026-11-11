@@ -109,6 +109,8 @@ fn scan_clean(text: &str) -> Vec<Mention> {
                 && let Some(&(next_start, next)) = lines.get(n + 1)
                 && let Some((joined, end)) =
                     rejoin(text, &span, start + line.len(), next_start, next)
+                && joined != id
+                && joined.kind() == id.kind()
             {
                 id = joined;
                 span.end = end;
@@ -327,6 +329,35 @@ mod tests {
                 ("pmcid:PMC6716493".into(), "PMC6716493"),
             ]
         );
+        assert_eq!(
+            found("https://doi.org/10.1234/x.y-z\narXiv:1706.03762 https://pubmed.ncbi.nlm.nih.gov/31452104/").len(),
+            3,
+            "a link starting the next line is another"
+        );
+        assert_eq!(
+            found("DOI: 10.1056/NEJMoa1302097.\n18. Smith A")[0].1,
+            "DOI: 10.1056/NEJMoa1302097",
+            "the next reference's number doesn't continue it"
+        );
+        assert_eq!(
+            found("https://pubmed.ncbi.nlm.nih.gov/31452104/\nincidence")[0].1,
+            "https://pubmed.ncbi.nlm.nih.gov/31452104/",
+            "a word that leaves the id as it was doesn't continue it"
+        );
+        assert_eq!(
+            found("https://pubmed.ncbi.nlm.nih.gov/31452104/\n10.1001/jama.2014.2135").len(),
+            2,
+            "a continuation that turns one kind into another is another mention"
+        );
+        for next in [
+            "meta-analysis",
+            "10.1001/jama.2014.2135",
+            "10.5 mg",
+            "www.example.com",
+        ] {
+            let text = format!("doi:10.1016/S0140-6736(10)60835-5\n{next}");
+            assert_eq!(found(&text)[0].1, "doi:10.1016/S0140-6736(10)60835-5");
+        }
         for next in ["2015 was a good year", "2015. A good year"] {
             let text = format!("doi:10.1038/nature14539\n{next}");
             assert_eq!(found(&text)[0].1, "doi:10.1038/nature14539");

@@ -5,9 +5,11 @@
 //! The app passes everything in ([`Config`]): nothing is read from the
 //! environment, so the app keeps keys where it likes (the Keychain). Calls
 //! run on the handle's own runtime, so they can be awaited from any
-//! executor; one dropped by its caller (a cancelled Swift `Task`) is
-//! cancelled. Hold one handle for the app's life: calls through it share
-//! the cache, pacing and requests in flight.
+//! executor. To cancel one, pass a [`CallToken`] and cancel it: UniFFI's
+//! Swift bindings don't pass a `Task`'s cancellation to Rust, so the app
+//! calls `cancel()` from `withTaskCancellationHandler`. Hold one handle for
+//! the app's life: calls through it share the cache, pacing and requests
+//! in flight.
 
 use std::sync::Arc;
 
@@ -19,6 +21,7 @@ use aspero_engine::{
 use aspero_json::InputClaim;
 use futures::StreamExt;
 use serde_json::{Value, json};
+use tokio::sync::watch;
 use tokio::task::JoinHandle;
 
 uniffi::setup_scaffolding!();
@@ -54,6 +57,9 @@ pub enum Patience {
 pub enum AsperoError {
     #[error("could not set up: {0}")]
     Setup(String),
+    /// Its [`CallToken`] was cancelled.
+    #[error("cancelled")]
+    Cancelled,
     /// A bug: the call panicked or its task was lost.
     #[error("internal error: {0}")]
     Internal(String),
@@ -64,6 +70,38 @@ pub enum AsperoError {
 pub trait VerifyListener: Send + Sync {
     /// One result: the same object as an item of `verify`'s `results`.
     fn on_result(&self, json: String);
+}
+
+/// Cancels the calls it's passed. One token may cancel several calls; a
+/// call given a token already cancelled ends at once. Cancelled calls stop
+/// their requests and throw [`AsperoError::Cancelled`].
+#[derive(uniffi::Object)]
+pub struct CallToken {
+    cancelled: watch::Sender<bool>,
+}
+
+#[uniffi::export]
+impl CallToken {
+    #[uniffi::constructor]
+    pub fn new() -> Arc<Self> {
+        Arc::new(CallToken {
+            cancelled: watch::Sender::new(false),
+        })
+    }
+
+    pub fn cancel(&self) {
+        self.cancelled.send_replace(true);
+    }
+
+    pub fn is_cancelled(&self) -> bool {
+        *self.cancelled.borrow()
+    }
+}
+
+impl CallToken {
+    async fn cancelled(&self) {
+        let _ = self.cancelled.subscribe().wait_for(|c| *c).await;
+    }
 }
 
 #[derive(uniffi::Object)]
@@ -114,73 +152,96 @@ impl Aspero {
     /// Looks up identifiers as written (DOIs, URLs, PMIDs, arXiv IDs, …):
     /// `{"results": [...], "usage": {...}}`, as `aspero lookup --format
     /// json [--full]`.
+    #[uniffi::method(default(cancel = None))]
     pub async fn lookup(
         &self,
         ids: Vec<String>,
         full: bool,
         patience: Patience,
+        cancel: Option<Arc<CallToken>>,
     ) -> Result<String, AsperoError> {
         let engine = self.engine(patience);
-        self.run(async move {
-            let mut extras = Extras::default();
-            extras.full = full;
-            let report = engine.lookup_inputs(&ids, extras).await;
-            let results: Vec<Value> = ids
-                .iter()
-                .zip(&report.items)
-                .map(|(input, item)| aspero_json::input_lookup(input, item, full))
-                .collect();
-            json!({"results": results, "usage": aspero_json::usage(&report.usage)}).to_string()
-        })
+        self.run(
+            async move {
+                let mut extras = Extras::default();
+                extras.full = full;
+                let report = engine.lookup_inputs(&ids, extras).await;
+                let results: Vec<Value> = ids
+                    .iter()
+                    .zip(&report.items)
+                    .map(|(input, item)| aspero_json::input_lookup(input, item, full))
+                    .collect();
+                json!({"results": results, "usage": aspero_json::usage(&report.usage)}).to_string()
+            },
+            cancel,
+        )
         .await
     }
 
     /// Verifies citations, each free text or a JSON object of fields (as
     /// `aspero verify -` reads lines): `{"results": [...], "usage":
     /// {...}}` in claim order.
+    #[uniffi::method(default(cancel = None))]
     pub async fn verify(
         &self,
         claims: Vec<String>,
         full: bool,
         patience: Patience,
+        cancel: Option<Arc<CallToken>>,
     ) -> Result<String, AsperoError> {
         let engine = self.engine(patience);
-        self.run(async move {
-            let mut results: Vec<Option<Value>> = vec![None; claims.len()];
-            let usage = verify_all(&engine, &claims, full, |i, item| results[i] = Some(item)).await;
-            let results: Vec<Value> = results.into_iter().flatten().collect();
-            json!({"results": results, "usage": aspero_json::usage(&usage)}).to_string()
-        })
+        self.run(
+            async move {
+                let mut results: Vec<Option<Value>> = vec![None; claims.len()];
+                let usage =
+                    verify_all(&engine, &claims, full, |i, item| results[i] = Some(item)).await;
+                let results: Vec<Value> = results.into_iter().flatten().collect();
+                json!({"results": results, "usage": aspero_json::usage(&usage)}).to_string()
+            },
+            cancel,
+        )
         .await
     }
 
     /// As [`verify`](Self::verify), handing each result to `listener` as
     /// soon as it finishes, in any order (each echoes its `input` and
     /// `key`). Returns the usage.
+    #[uniffi::method(default(cancel = None))]
     pub async fn verify_each(
         &self,
         claims: Vec<String>,
         full: bool,
         patience: Patience,
         listener: Arc<dyn VerifyListener>,
+        cancel: Option<Arc<CallToken>>,
     ) -> Result<String, AsperoError> {
         let engine = self.engine(patience);
-        self.run(async move {
-            let usage = verify_all(&engine, &claims, full, |_, item| {
-                listener.on_result(item.to_string())
-            })
-            .await;
-            aspero_json::usage(&usage).to_string()
-        })
+        self.run(
+            async move {
+                let usage = verify_all(&engine, &claims, full, |_, item| {
+                    listener.on_result(item.to_string())
+                })
+                .await;
+                aspero_json::usage(&usage).to_string()
+            },
+            cancel,
+        )
         .await
     }
 
     /// The identifiers mentioned in `text`, where and as written:
-    /// `{"mentions": [...]}`, as `aspero scan --format json`. Offline.
+    /// `{"mentions": [...]}`, as `aspero scan --format json`, each also
+    /// with its `utf16` range (`{"start", "end"}`) for `NSString` and
+    /// `NSTextView`. Offline.
     pub fn scan(&self, text: String) -> String {
         let mentions: Vec<Value> = aspero_core::id::scan(&text)
             .iter()
-            .map(|m| aspero_json::mention("-", &text, m))
+            .map(|m| {
+                let mut mention = aspero_json::mention("-", &text, m);
+                let utf16 = |byte: usize| text[..byte].encode_utf16().count();
+                mention["utf16"] = json!({"start": utf16(m.span.start), "end": utf16(m.span.end)});
+                mention
+            })
             .collect();
         json!({"mentions": mentions}).to_string()
     }
@@ -213,16 +274,29 @@ impl Aspero {
         })
     }
 
-    /// Runs `work` on the handle's runtime; dropping the returned future
-    /// cancels it.
+    /// Runs `work` on the handle's runtime until it finishes or `cancel`
+    /// is cancelled; dropping the returned future (where the caller's
+    /// executor does) also cancels it.
     async fn run<T: Send + 'static>(
         &self,
         work: impl Future<Output = T> + Send + 'static,
+        cancel: Option<Arc<CallToken>>,
     ) -> Result<T, AsperoError> {
+        if cancel.as_ref().is_some_and(|c| c.is_cancelled()) {
+            return Err(AsperoError::Cancelled);
+        }
         let mut task = Abortable(self.runtime.spawn(work));
-        (&mut task.0)
-            .await
-            .map_err(|e| AsperoError::Internal(e.to_string()))
+        let cancelled = async {
+            match &cancel {
+                Some(token) => token.cancelled().await,
+                None => std::future::pending().await,
+            }
+        };
+        tokio::select! {
+            biased;
+            () = cancelled => Err(AsperoError::Cancelled),
+            done = &mut task.0 => done.map_err(|e| AsperoError::Internal(e.to_string())),
+        }
     }
 }
 

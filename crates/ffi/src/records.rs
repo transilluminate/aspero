@@ -888,6 +888,45 @@ impl Reference {
     }
 }
 
+/// A line of a reference list as laid out: its text and its distance from
+/// the left edge (PDFKit's x-offset, in any unit).
+#[derive(Debug, Clone, uniffi::Record)]
+pub struct Line {
+    pub text: String,
+    pub indent: f64,
+}
+
+/// Line indices, `end` exclusive.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Record)]
+pub struct LineRange {
+    pub start: u64,
+    pub end: u64,
+}
+
+/// One reference from laid-out lines.
+#[derive(Debug, Clone, uniffi::Record)]
+pub struct LineReference {
+    /// On one line, without its number or bullet: a claim for `verify`.
+    pub text: String,
+    /// The lines it spans.
+    pub lines: LineRange,
+    /// Pass on as the claim's `alternativeIds`.
+    pub alternative_ids: Vec<IdAlternative>,
+}
+
+impl From<&aspero_core::LineReference> for LineReference {
+    fn from(r: &aspero_core::LineReference) -> Self {
+        LineReference {
+            text: r.text.clone(),
+            lines: LineRange {
+                start: r.lines.start as u64,
+                end: r.lines.end as u64,
+            },
+            alternative_ids: r.alternatives.iter().map(Into::into).collect(),
+        }
+    }
+}
+
 fn utf16_range(text: &str, span: &std::ops::Range<usize>) -> Utf16Range {
     let utf16 = |byte: usize| text[..byte].encode_utf16().count() as u64;
     Utf16Range {

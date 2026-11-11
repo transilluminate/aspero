@@ -21,6 +21,7 @@
 use std::ops::Range;
 
 use crate::Alternative;
+use crate::fold::Folded;
 
 /// One reference found in a list.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -40,46 +41,130 @@ pub struct Reference {
 /// (ligatures, invisible characters, look-alike dashes and quotes); spans
 /// point into `text` as given.
 pub fn split_references(text: &str) -> Vec<Reference> {
-    let folded = crate::fold::Folded::new(text);
-    split_clean(&folded.text)
+    let folded = Folded::new(text);
+    let list = List::new(&folded.text);
+    let groups = list.groups();
+    references(text, &folded, &list, groups)
+}
+
+/// A line of a reference list as laid out, with its distance from the
+/// left edge (any unit, such as PDF points).
+#[derive(Debug, Clone, PartialEq)]
+#[non_exhaustive]
+pub struct IndentedLine {
+    pub text: String,
+    pub indent: f64,
+}
+
+impl IndentedLine {
+    pub fn new(text: impl Into<String>, indent: f64) -> Self {
+        IndentedLine {
+            text: text.into(),
+            indent,
+        }
+    }
+}
+
+/// One reference found in laid-out lines.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct LineReference {
+    /// On one line, without its number or bullet.
+    pub text: String,
+    /// Indices of the lines it spans.
+    pub lines: Range<usize>,
+    pub alternatives: Vec<Alternative>,
+}
+
+/// The references in laid-out lines (as from a PDF), using the layout
+/// plain text loses: with a hanging indent, references start at the
+/// margin; with a first-line indent, indented. Numbered lists, and lines
+/// all at one indent, are split by the text rules of [`split_references`].
+pub fn split_lines(lines: &[IndentedLine]) -> Vec<LineReference> {
+    let text = lines
+        .iter()
+        .map(|l| l.text.replace(['\r', '\n'], " "))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let folded = Folded::new(&text);
+    let list = List::new(&folded.text);
+    let groups = match starts_by_indent(lines) {
+        Some(starts) if list.numbered().is_none() => {
+            let mut groups: Vec<Vec<Range<usize>>> = Vec::new();
+            for (i, line) in list.lines.iter().enumerate() {
+                let Some(line) = line else { continue };
+                match groups.last_mut() {
+                    Some(group) if !starts[i] => group.push(line.clone()),
+                    _ => groups.push(vec![line.clone()]),
+                }
+            }
+            groups
+        }
+        _ => list.groups(),
+    };
+    let line_starts: Vec<usize> = std::iter::once(0)
+        .chain(text.match_indices('\n').map(|(i, _)| i + 1))
+        .collect();
+    let line_of = |byte: usize| line_starts.partition_point(|&s| s <= byte) - 1;
+    references(&text, &folded, &list, groups)
         .into_iter()
-        .map(|r| {
-            let span = folded.original(&r.span);
+        .map(|r| LineReference {
+            lines: line_of(r.span.start)..line_of(r.span.end.saturating_sub(1)) + 1,
+            text: r.text,
+            alternatives: r.alternatives,
+        })
+        .collect()
+}
+
+/// Which lines start a reference, by indent: `None` if the lines don't
+/// differ enough to tell. Indents within half the gap to the next level
+/// count as the same, so jitter in a PDF's positions doesn't matter.
+fn starts_by_indent(lines: &[IndentedLine]) -> Option<Vec<bool>> {
+    let content: Vec<&IndentedLine> = lines.iter().filter(|l| !l.text.trim().is_empty()).collect();
+    let margin = content
+        .iter()
+        .map(|l| l.indent)
+        .fold(f64::INFINITY, f64::min);
+    let next = content
+        .iter()
+        .map(|l| l.indent)
+        .filter(|&i| i > margin + 1.0)
+        .fold(f64::INFINITY, f64::min);
+    if !next.is_finite() {
+        return None;
+    }
+    let at_margin = |l: &IndentedLine| l.indent - margin < (next - margin) / 2.0;
+    let first = content.iter().find(|l| !is_heading(l.text.trim()))?;
+    let starting = at_margin(first);
+    Some(
+        lines
+            .iter()
+            .map(|l| !l.text.trim().is_empty() && at_margin(l) == starting)
+            .collect(),
+    )
+}
+
+/// Groups of lines (ranges in `folded`) as references in `text`.
+fn references(
+    text: &str,
+    folded: &Folded,
+    list: &List,
+    groups: Vec<Vec<Range<usize>>>,
+) -> Vec<Reference> {
+    groups
+        .into_iter()
+        .map(|g| {
+            let span = folded.original(&(g[0].start..g[g.len() - 1].end));
             let written = &text[span.clone()];
             let alternatives = crate::id::scan(written)
                 .iter()
                 .filter_map(|m| Some(Alternative::new(m.id.clone(), m.alternative(written)?)))
                 .collect();
             Reference {
+                text: list.join(&g),
                 span,
                 alternatives,
-                ..r
             }
-        })
-        .collect()
-}
-
-fn split_clean(text: &str) -> Vec<Reference> {
-    let list = List::new(text);
-    let groups = list.numbered().unwrap_or_else(|| {
-        let paragraphs: Vec<Vec<Range<usize>>> = list
-            .lines
-            .split(Option::is_none)
-            .filter(|p| !p.is_empty())
-            .map(|p| p.iter().flatten().cloned().collect())
-            .collect();
-        let alone = paragraphs.len() == 1;
-        paragraphs
-            .into_iter()
-            .flat_map(|p| list.unnumbered(p, alone))
-            .collect()
-    });
-    groups
-        .into_iter()
-        .map(|g| Reference {
-            text: list.join(&g),
-            span: g[0].start..g[g.len() - 1].end,
-            alternatives: Vec::new(),
         })
         .filter(|r| !is_heading(&r.text))
         .collect()
@@ -104,6 +189,24 @@ impl<'a> List<'a> {
             at += raw.len();
         }
         List { text, lines }
+    }
+
+    /// Groups by the text rules: numbers or bullets, else paragraphs, else
+    /// lines.
+    fn groups(&self) -> Vec<Vec<Range<usize>>> {
+        self.numbered().unwrap_or_else(|| {
+            let paragraphs: Vec<Vec<Range<usize>>> = self
+                .lines
+                .split(Option::is_none)
+                .filter(|p| !p.is_empty())
+                .map(|p| p.iter().flatten().cloned().collect())
+                .collect();
+            let alone = paragraphs.len() == 1;
+            paragraphs
+                .into_iter()
+                .flat_map(|p| self.unnumbered(p, alone))
+                .collect()
+        })
     }
 
     fn line(&self, r: &Range<usize>) -> &'a str {
@@ -491,6 +594,47 @@ mod tests {
         assert_eq!(alt.claimed.to_string(), "doi:10.1038/nat-ure14539");
         assert_eq!(alt.alternative.to_string(), "doi:10.1038/nature14539");
         assert!(refs[1].alternatives.is_empty());
+    }
+
+    #[test]
+    fn hanging_indents_mark_starts_that_text_cannot() {
+        // Each line ends a sentence and the next starts with a capital,
+        // so the text alone reads three references.
+        let lines = [
+            IndentedLine::new("References", 72.4),
+            IndentedLine::new("World Health Organization. Global report.", 72.0),
+            IndentedLine::new("Geneva: WHO; 2020.", 90.2),
+            IndentedLine::new("Smith J. A study. Nature. 2021.", 71.8),
+        ];
+        let refs = split_lines(&lines);
+        assert_eq!(
+            refs.iter().map(|r| r.text.as_str()).collect::<Vec<_>>(),
+            [
+                "World Health Organization. Global report. Geneva: WHO; 2020.",
+                "Smith J. A study. Nature. 2021.",
+            ]
+        );
+        assert_eq!(refs[0].lines, 1..3);
+        assert_eq!(refs[1].lines, 3..4);
+    }
+
+    #[test]
+    fn first_line_indents_and_flat_lists() {
+        let lines = [
+            IndentedLine::new("Smith J. A study of", 90.0),
+            IndentedLine::new("Things. Nature. 2021.", 72.0),
+            IndentedLine::new("Jones K. Another. 2022.", 90.0),
+        ];
+        assert_eq!(split_lines(&lines).len(), 2);
+        // One indent throughout: the text rules decide.
+        let flat = [
+            IndentedLine::new("1. Smith J. One.", 72.0),
+            IndentedLine::new("2020.", 72.0),
+            IndentedLine::new("2. Jones K. Two. 2021.", 72.0),
+        ];
+        let refs = split_lines(&flat);
+        assert_eq!(refs[0].text, "Smith J. One. 2020.");
+        assert_eq!(refs[1].lines, 2..3);
     }
 
     #[test]

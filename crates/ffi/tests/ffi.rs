@@ -78,6 +78,21 @@ fn dois_broken_at_a_hyphen_carry_an_alternative() {
 }
 
 #[test]
+fn laid_out_lines_split_by_indent() {
+    let line = |text: &str, indent| aspero_ffi::records::Line {
+        text: text.into(),
+        indent,
+    };
+    let refs = aspero(None).split_lines(vec![
+        line("World Health Organization. Global report.", 72.0),
+        line("Geneva: WHO; 2020.", 90.0),
+        line("Smith J. A study. Nature. 2021.", 72.0),
+    ]);
+    assert_eq!(refs.len(), 2);
+    assert_eq!((refs[0].lines.start, refs[0].lines.end), (0, 2));
+}
+
+#[test]
 fn offline_lookups_answer_without_the_network() {
     let dir = std::env::temp_dir().join(format!("aspero-ffi-{}", std::process::id()));
     let handle = aspero(Some(dir.display().to_string()));

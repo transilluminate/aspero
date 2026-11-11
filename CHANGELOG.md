@@ -15,6 +15,9 @@ Added:
   `Mention::alternative` (JSON `scan`: `alternative`; FFI:
   `alternativeIds` on `Claim` and `Reference`, `alternativeId` on
   `Mention`). `verify --split` passes them on.
+- `split_lines` (FFI `splitLines`): splits a reference list's lines as
+  laid out, using their indents (hanging or first-line) where the text
+  alone can't tell; each reference gives its range of line indices.
 
 Fixed:
 

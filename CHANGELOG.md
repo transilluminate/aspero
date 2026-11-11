@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+Fixed:
+
+- `scan` rejoins a DOI or URL broken across lines (as in text from PDFs)
+  by the rules `split_references` uses; the mention spans both lines.
+  A link split mid-word is rejoined only before more of a link, never
+  before a word or a year.
+
 ## 0.5.0
 
 Breaking:

@@ -256,10 +256,11 @@ fn hyphenated_word(text: &str) -> bool {
 /// `next` continues a DOI or URL that `text` ends with, broken where PDFs
 /// break them: after `/`, `-` or `_` (`10.1038/s41586-` + `020-2649-2`),
 /// after a dot before a digit or lower case (`j.cell.` + `2020.01.001`),
-/// or mid-word before more of the link (`j.ce` + `ll.2020.01.001`).
+/// or mid-word before more of the link (`j.ce` + `ll.2020.01.001`, not
+/// `2015` or `2015.`).
 /// Hyphens are kept as printed: DOIs have real ones, and typesetters
 /// rarely add their own inside a link.
-fn link_continues(text: &str, next: &str) -> bool {
+pub(crate) fn link_continues(text: &str, next: &str) -> bool {
     let token = next.split_whitespace().next().unwrap_or_default();
     let Some(first) = token.chars().next() else {
         return false;
@@ -273,13 +274,16 @@ fn link_continues(text: &str, next: &str) -> bool {
     } else if text.ends_with('.') {
         lower_or_digit
     } else {
-        lower_or_digit && token.contains(|c: char| c.is_ascii_digit() || "./-_".contains(c))
+        // Mid-word: only before more of a link, never a word or a year.
+        let inner = token.trim_end_matches(|c: char| !c.is_alphanumeric());
+        lower_or_digit && inner.contains(|c: char| "./-_".contains(c))
     }
 }
 
 /// `text` ends inside a DOI or URL.
 fn in_link(text: &str) -> bool {
     let word = text.rsplit(char::is_whitespace).next().unwrap_or_default();
+    let word = word.to_ascii_lowercase();
     word.starts_with("http") || word.starts_with("doi:") || word.starts_with("10.")
 }
 

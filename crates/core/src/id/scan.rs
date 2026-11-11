@@ -39,10 +39,11 @@ impl Mention {
     /// it's worth a lookup if the DOI as printed doesn't exist. `text` is
     /// the text scanned.
     pub fn alternative(&self, text: &str) -> Option<WorkId> {
-        let written = crate::fold::Folded::new(text.get(self.span.clone())?).text;
+        let folded = crate::fold::Folded::new(text.get(self.span.clone())?);
+        let written: &str = &folded.text;
         let mut joined = String::new();
         let mut broken = false;
-        let mut rest = written.as_str();
+        let mut rest = written;
         while let Some(at) = rest.find('-') {
             let after = &rest[at + 1..];
             let gap = after.len() - after.trim_start().len();
@@ -69,11 +70,15 @@ impl Mention {
 /// dashes and quotes); spans point into `text` as given.
 pub fn scan(text: &str) -> Vec<Mention> {
     let folded = crate::fold::Folded::new(text);
-    scan_clean(&folded.text)
+    located(&folded.text)
         .into_iter()
-        .map(|m| {
+        .map(|(m, line_start)| {
             let span = folded.original(&m.span);
-            let line_start = text[..span.start].rfind('\n').map_or(0, |i| i + 1);
+            // After the line break, which is never cleaned.
+            let line_start = match line_start {
+                0 => 0,
+                at => folded.original(&(at - 1..at)).end,
+            };
             Mention {
                 line: m.line,
                 column: text[line_start..span.start].chars().count() + 1,
@@ -86,43 +91,67 @@ pub fn scan(text: &str) -> Vec<Mention> {
 
 /// [`scan`] of text already cleaned.
 fn scan_clean(text: &str) -> Vec<Mention> {
-    let mut lines: Vec<(usize, &str)> = Vec::new();
-    let mut at = 0;
-    for line in text.split('\n') {
-        lines.push((at, line));
-        at += line.len() + 1;
-    }
-    let mut found = Vec::new();
+    located(text)
+        .into_iter()
+        .map(|(m, line_start)| Mention {
+            column: text[line_start..m.span.start].chars().count() + 1,
+            ..m
+        })
+        .collect()
+}
+
+/// [`scan_clean`], each mention with where its line starts and its
+/// column not yet counted.
+fn located(text: &str) -> Vec<(Mention, usize)> {
+    let bytes = text.as_bytes();
+    let mut raw = Vec::new();
+    find(text, &mut raw);
+    let starts: Vec<usize> = raw.iter().map(|(_, span)| span.start).collect();
+    let mut found = Vec::with_capacity(raw.len());
     // Where a mention continued onto the next line ends: nothing before it
     // there is scanned again.
     let mut resume = 0;
-    for (n, &(start, line)) in lines.iter().enumerate() {
-        let mentions = scan_line(line);
-        let last = mentions.len().saturating_sub(1);
-        for (i, (id, span)) in mentions.into_iter().enumerate() {
-            let mut span = start + span.start..start + span.end;
-            if span.start < resume {
-                continue;
-            }
-            let mut id = id;
-            if i == last
-                && let Some(&(next_start, next)) = lines.get(n + 1)
-                && let Some((joined, end)) =
-                    rejoin(text, &span, start + line.len(), next_start, next)
-                && joined != id
+    // The line at `counted` and where it starts.
+    let (mut line, mut line_start, mut counted) = (1, 0, 0);
+    for (k, (mut id, mut span)) in raw.into_iter().enumerate() {
+        if span.start < resume {
+            continue;
+        }
+        let gap = &bytes[counted..span.start];
+        if let Some(i) = memrchr(b'\n', gap) {
+            line += newlines(gap);
+            line_start = counted + i + 1;
+        }
+        counted = span.start;
+        let line_end = memchr(b'\n', &bytes[span.end..]).map_or(text.len(), |i| span.end + i);
+        let last = starts.get(k + 1).is_none_or(|&next| next > line_end);
+        if last && line_end < text.len() {
+            let next_start = line_end + 1;
+            let next_end =
+                memchr(b'\n', &bytes[next_start..]).map_or(text.len(), |i| next_start + i);
+            if let Some((joined, end)) = rejoin(
+                text,
+                &span,
+                line_end,
+                next_start,
+                &text[next_start..next_end],
+            ) && joined != id
                 && joined.kind() == id.kind()
             {
                 id = joined;
                 span.end = end;
                 resume = end;
             }
-            found.push(Mention {
-                id,
-                line: n + 1,
-                column: text[start..span.start].chars().count() + 1,
-                span,
-            });
         }
+        found.push((
+            Mention {
+                id,
+                line,
+                column: 0,
+                span,
+            },
+            line_start,
+        ));
     }
     found
 }
@@ -150,58 +179,275 @@ fn rejoin(
     let indent = next.len() - next.trim_start().len();
     let token = next.split_whitespace().next()?;
     let joined = format!("{raw}{token}");
-    let (id, within) = scan_line(&joined)
+    let mut mentions = Vec::new();
+    find(&joined, &mut mentions);
+    let (id, within) = mentions
         .into_iter()
         .find(|(_, s)| s.start == 0 && s.end > raw.len())?;
     Some((id, next_start + indent + within.end - raw.len()))
 }
 
-/// Identifiers in one line, with byte ranges within it.
-fn scan_line(line: &str) -> Vec<(WorkId, Range<usize>)> {
-    let mut found = Vec::new();
-    // A label ("PMID:", "ISBN") waiting for its value: kind and start.
-    let mut label: Option<(IdKind, usize)> = None;
-    for piece in pieces(line) {
-        let cleaned = clean_pasted(&line[piece.clone()]);
-        if cleaned.is_empty() {
+/// Identifiers in `text`, with byte ranges, line by line: a label
+/// before a line break doesn't apply after it.
+///
+/// Most pieces of a text are words, which can't be identifiers: only a
+/// piece with a digit, `/` or `:` (bytes `/` to `:`, found a chunk at a
+/// time) is parsed, and the piece before it is read as a label only then.
+fn find(text: &str, found: &mut Vec<(WorkId, Range<usize>)>) {
+    let bytes = text.as_bytes();
+    // The last piece parsed: where it ends, and the label it was.
+    let mut last: Option<(usize, Option<(IdKind, usize)>)> = None;
+    let mut at = 0;
+    while let Some(hit) = next_hit(bytes, at) {
+        let start = piece_start(text, hit + 1);
+        let Some((piece, class)) = (Pieces { text, at: start }).next() else {
+            break;
+        };
+        at = piece.end;
+        if class & SOLID == 0 {
+            // Punctuation only: nothing if it cleans away, else neither a
+            // label nor an identifier.
+            if !clean_pasted(&text[piece.clone()]).is_empty() {
+                last = Some((piece.end, None));
+            }
             continue;
         }
-        let start = offset(line, cleaned);
+        let label = label_before(text, start, last);
+        // A number: neither a label nor, unlabelled, an identifier.
+        if label.is_none() && class & (LINK | ALPHA) == 0 {
+            last = Some((piece.end, None));
+            continue;
+        }
+        let cleaned = clean_pasted(&text[piece.clone()]);
+        let start = offset(text, cleaned);
         let span = start..start + cleaned.len();
         if let Some(kind) = IdKind::from_label(cleaned) {
-            label = Some((kind, start));
+            last = Some((piece.end, Some((kind, start))));
             continue;
         }
-        let labelled = label
-            .take()
-            .and_then(|(kind, at)| Some((WorkId::parse_as(kind, cleaned).ok()?, at)));
+        last = Some((piece.end, None));
+        let labelled =
+            label.and_then(|(kind, at)| Some((WorkId::parse_as(kind, cleaned).ok()?, at)));
         if let Some((id, at)) = labelled {
             found.push((id, at..span.end));
-        } else if let Some(id) = unlabelled(cleaned) {
+        } else if could_be_unlabelled(cleaned)
+            && let Some(id) = unlabelled(cleaned)
+        {
             found.push((id, span));
         }
     }
-    found
 }
 
-/// Whitespace-separated pieces of a line, also split at Markdown table
-/// bars and between a link's text and its target (`[text](url)`).
-fn pieces(line: &str) -> Vec<Range<usize>> {
-    let mut out = Vec::new();
-    let mut start: Option<usize> = None;
-    let mut chars = line.char_indices().peekable();
-    while let Some((i, c)) = chars.next() {
-        let link = c == ']' && chars.peek().is_some_and(|&(_, next)| next == '(');
-        if c.is_whitespace() || c == '|' || link {
-            // A link's text keeps its `]`, so its brackets stay balanced.
-            let end = if link { i + 1 } else { i };
-            out.extend(start.take().map(|s| s..end));
-        } else {
-            start.get_or_insert(i);
+/// The label the piece starting at `start` follows, if any: the last
+/// piece before it on its line that doesn't clean away, if a label. `last`
+/// is the last piece parsed, which every piece with a hit was.
+fn label_before(
+    text: &str,
+    start: usize,
+    last: Option<(usize, Option<(IdKind, usize)>)>,
+) -> Option<(IdKind, usize)> {
+    let bytes = text.as_bytes();
+    let mut end = start;
+    loop {
+        // Back over what separates pieces, not past the line's start.
+        while end > 0 {
+            let (c, len) = char_before(text, end);
+            if c == '\n' {
+                return None;
+            }
+            let space = if c.is_ascii() {
+                CLASSES[c as usize] & SPACE != 0
+            } else {
+                c.is_whitespace()
+            };
+            if !space {
+                break;
+            }
+            end -= len;
         }
+        if end == 0 {
+            return None;
+        }
+        if let Some((last_end, label)) = last
+            && last_end == end
+        {
+            return label;
+        }
+        let start = piece_start(text, end);
+        let class = bytes[start..end].iter().fold(0, |class, &b| {
+            class | if b < 0x80 { CLASSES[b as usize] } else { SOLID }
+        });
+        let cleaned = clean_pasted(&text[start..end]);
+        if class & SOLID == 0 {
+            if cleaned.is_empty() {
+                end = start;
+                continue;
+            }
+            return None;
+        }
+        return IdKind::from_label(cleaned).map(|kind| (kind, offset(text, cleaned)));
     }
-    out.extend(start.map(|s| s..line.len()));
-    out
+}
+
+/// Where the piece with its last byte before `end` starts.
+fn piece_start(text: &str, end: usize) -> usize {
+    let bytes = text.as_bytes();
+    let mut at = end;
+    while at > 0 {
+        // A link's text ends at its `]`, before the target's `(`.
+        if at < end && bytes[at] == b'(' && bytes[at - 1] == b']' {
+            break;
+        }
+        let (c, len) = char_before(text, at);
+        let space = if c.is_ascii() {
+            CLASSES[c as usize] & SPACE != 0
+        } else {
+            c.is_whitespace()
+        };
+        if space {
+            break;
+        }
+        at -= len;
+    }
+    at
+}
+
+/// The character ending at byte `at`, and its length.
+fn char_before(text: &str, at: usize) -> (char, usize) {
+    let c = text[..at].chars().next_back().unwrap_or_default();
+    (c, c.len_utf8())
+}
+
+/// The first byte at or after `from` from `/` to `:`: a digit, `/` or `:`.
+fn next_hit(bytes: &[u8], from: usize) -> Option<usize> {
+    const CHUNK: usize = 32;
+    let hit = |b: u8| b.wrapping_sub(b'/') <= b':' - b'/';
+    let mut at = from;
+    while let Some(chunk) = bytes.get(at..at + CHUNK) {
+        // No early exit within a chunk, so it vectorises.
+        if chunk.iter().fold(0, |any, &b| any | u8::from(hit(b))) != 0 {
+            break;
+        }
+        at += CHUNK;
+    }
+    bytes
+        .get(at..)?
+        .iter()
+        .position(|&b| hit(b))
+        .map(|i| at + i)
+}
+
+fn newlines(bytes: &[u8]) -> usize {
+    bytes.iter().filter(|&&b| b == b'\n').count()
+}
+
+fn memchr(needle: u8, bytes: &[u8]) -> Option<usize> {
+    bytes.iter().position(|&b| b == needle)
+}
+
+fn memrchr(needle: u8, bytes: &[u8]) -> Option<usize> {
+    bytes.iter().rposition(|&b| b == needle)
+}
+
+/// Byte classes of a piece.
+const DIGIT: u8 = 1;
+/// `/` or `:`, in every URL, DOI and prefixed identifier.
+const LINK: u8 = 2;
+const ALPHA: u8 = 4;
+/// Not what [`clean_pasted`] can strip: the piece won't clean away.
+const SOLID: u8 = 8;
+/// Separates pieces.
+const SPACE: u8 = 16;
+/// `]`, which ends a piece before `(`.
+const CLOSE: u8 = 32;
+
+/// [`SPACE`], [`DIGIT`], … per ASCII byte.
+const CLASSES: [u8; 128] = {
+    let mut classes = [SOLID; 128];
+    let strippable = b"([{<*_\"'`>.,;:)]}";
+    let mut i = 0;
+    while i < strippable.len() {
+        classes[strippable[i] as usize] = 0;
+        i += 1;
+    }
+    let mut b = 0;
+    while b < 128 {
+        let c = b as u8;
+        if c.is_ascii_digit() {
+            classes[b] |= DIGIT;
+        } else if c.is_ascii_alphabetic() {
+            classes[b] |= ALPHA;
+        } else if c == b'/' || c == b':' {
+            classes[b] |= LINK;
+        } else if c == b'|' || matches!(c, b'\t' | b'\n' | 0x0B | 0x0C | b'\r' | b' ') {
+            classes[b] = SPACE;
+        } else if c == b']' {
+            classes[b] |= CLOSE;
+        }
+        b += 1;
+    }
+    classes
+};
+
+/// Whitespace-separated pieces of a text from `at`, also split at
+/// Markdown table bars and between a link's text and its target
+/// (`[text](url)`), each with the classes of its bytes.
+struct Pieces<'a> {
+    text: &'a str,
+    at: usize,
+}
+
+impl Iterator for Pieces<'_> {
+    type Item = (Range<usize>, u8);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let bytes = self.text.as_bytes();
+        let mut start = None;
+        let mut class = 0;
+        while let Some(&b) = bytes.get(self.at) {
+            let i = self.at;
+            let (len, c) = if b < 0x80 {
+                (1, CLASSES[b as usize])
+            } else {
+                let c = self.text[i..].chars().next().unwrap_or_default();
+                let solid = if c.is_whitespace() { SPACE } else { SOLID };
+                (c.len_utf8(), solid)
+            };
+            self.at += len;
+            if c & (SPACE | CLOSE) == 0 {
+                start.get_or_insert(i);
+                class |= c;
+                continue;
+            }
+            // A link's text keeps its `]`, so its brackets stay balanced.
+            let link = c & CLOSE != 0 && bytes.get(i + 1) == Some(&b'(');
+            if c & SPACE != 0 || link {
+                let end = if link { i + 1 } else { i };
+                if let Some(start) = start {
+                    return Some((start..end, class));
+                }
+            } else {
+                start.get_or_insert(i);
+                class |= c;
+            }
+        }
+        start.map(|start| (start..bytes.len(), class))
+    }
+}
+
+/// Whether [`unlabelled`] could find an identifier in a cleaned piece:
+/// URLs and DOIs have a `/`, prefixed identifiers a known prefix before a
+/// `:`, and of the rest only PMCIDs and Bookshelf IDs are recognised.
+fn could_be_unlabelled(piece: &str) -> bool {
+    piece.contains('/')
+        || piece.split_once(':').is_some_and(|(head, _)| {
+            IdKind::from_prefix(head).is_some() || IdKind::from_label(head).is_some()
+        })
+        || ["pmc", "nbk"].iter().any(|p| {
+            piece
+                .get(..3)
+                .is_some_and(|head| head.eq_ignore_ascii_case(p))
+        })
 }
 
 /// An identifier written without a separate label: any kind when prefixed
@@ -237,6 +483,83 @@ fn offset(whole: &str, part: &str) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The first implementation of `scan_line`, for comparison.
+    fn reference_scan_line(line: &str) -> Vec<(WorkId, Range<usize>)> {
+        let mut found = Vec::new();
+        let mut label: Option<(IdKind, usize)> = None;
+        for piece in reference_pieces(line) {
+            let cleaned = clean_pasted(&line[piece.clone()]);
+            if cleaned.is_empty() {
+                continue;
+            }
+            let start = offset(line, cleaned);
+            let span = start..start + cleaned.len();
+            if let Some(kind) = IdKind::from_label(cleaned) {
+                label = Some((kind, start));
+                continue;
+            }
+            let labelled = label
+                .take()
+                .and_then(|(kind, at)| Some((WorkId::parse_as(kind, cleaned).ok()?, at)));
+            if let Some((id, at)) = labelled {
+                found.push((id, at..span.end));
+            } else if let Some(id) = unlabelled(cleaned) {
+                found.push((id, span));
+            }
+        }
+        found
+    }
+
+    fn reference_pieces(line: &str) -> Vec<Range<usize>> {
+        let mut out = Vec::new();
+        let mut start: Option<usize> = None;
+        let mut chars = line.char_indices().peekable();
+        while let Some((i, c)) = chars.next() {
+            let link = c == ']' && chars.peek().is_some_and(|&(_, next)| next == '(');
+            if c.is_whitespace() || c == '|' || link {
+                let end = if link { i + 1 } else { i };
+                out.extend(start.take().map(|s| s..end));
+            } else {
+                start.get_or_insert(i);
+            }
+        }
+        out.extend(start.map(|s| s..line.len()));
+        out
+    }
+
+    proptest::proptest! {
+        #![proptest_config(proptest::prelude::ProptestConfig::with_cases(4000))]
+
+        #[test]
+        fn texts_scan_as_the_reference_does(
+            parts in proptest::collection::vec(proptest::sample::select(vec![
+                " ", "  ", "\t", "\n", "\r\n", "|", "](", "]", "(", ")", "[", "*", "_", "\"", "'", "`",
+                ".", ",", ";", ":", "/", "-", "<", ">", "{", "}", "\u{85}", "\u{2028}",
+                "é", "\u{1F600}", "0", "1", "9", "10.", "10.1056/NEJMoa1302097",
+                "1234", "a", "x", "W", "PMID", "pmid", "PMCID", "PMC", "NBK", "doi",
+                "DOI", "arXiv", "ISBN", "ISBN-13", "isbn10", "978-0-262-03561-3",
+                "1706.03762", "https://", "http://", "doi.org/", "www.", "arxiv.org/abs/",
+                "pubmed.ncbi.nlm.nih.gov/", "s2:", "corpusid:", "openalex:", "info:doi/",
+                "hep-th/9901001", "0123456789abcdef0123456789abcdef01234567",
+            ]), 0..40),
+        ) {
+            let text = parts.concat();
+            let mut found = Vec::new();
+            find(&text, &mut found);
+            let mut want = Vec::new();
+            let mut at = 0;
+            for line in text.split('\n') {
+                want.extend(
+                    reference_scan_line(line)
+                        .into_iter()
+                        .map(|(id, span)| (id, at + span.start..at + span.end)),
+                );
+                at += line.len() + 1;
+            }
+            proptest::prop_assert_eq!(found, want, "{:?}", text);
+        }
+    }
 
     /// (id, text as written) per mention.
     fn found(text: &str) -> Vec<(String, &str)> {

@@ -447,8 +447,11 @@ fn is_number(token: &str) -> bool {
 /// `text` ends inside a DOI or URL.
 fn in_link(text: &str) -> bool {
     let word = text.rsplit(char::is_whitespace).next().unwrap_or_default();
-    let word = word.to_ascii_lowercase();
-    word.starts_with("http") || word.starts_with("doi:") || word.starts_with("10.")
+    let starts = |p: &str| {
+        word.get(..p.len())
+            .is_some_and(|h| h.eq_ignore_ascii_case(p))
+    };
+    starts("http") || starts("doi:") || word.starts_with("10.")
 }
 
 fn is_heading(text: &str) -> bool {

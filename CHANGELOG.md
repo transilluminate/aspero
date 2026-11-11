@@ -1,5 +1,22 @@
 # Changelog
 
+## Unreleased
+
+Changed:
+
+- `scan` is about 100× faster: ~1 GB/s on prose, ~200 MB/s on dense
+  reference lists (was ~5.5 MB/s), with the same results, and no longer
+  needs 16 bytes of memory per byte scanned. `split_references`, and
+  parsing identifiers, are faster too.
+
+Fixed:
+
+- `scan` joined a link ending a line to the start of the next line
+  when that was another link (`https://…`, `www.…`, `arXiv:…`, a DOI),
+  the next reference's number (`18.`), a hyphenated word or a number.
+  A link continues onto the next line only if that keeps it the same
+  kind of identifier and changes it.
+
 ## 0.6.2
 
 Added:

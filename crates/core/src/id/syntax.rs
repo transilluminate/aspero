@@ -57,29 +57,51 @@ pub(crate) fn finish<T: IdSyntax>(
 /// trailing sentence punctuation. A closing bracket goes only when it is
 /// unbalanced, so DOIs like `10.1016/S0140-6736(10)60835-5` stay whole.
 pub(crate) fn clean_pasted(input: &str) -> &str {
-    const LEADING: &[char] = &[
-        '(', '[', '{', '<', '*', '_', '"', '\'', '`', '\u{201c}', '\u{2018}',
-    ];
-    const TRAILING: &[char] = &[
-        '*', '_', '"', '\'', '`', '>', '\u{201d}', '\u{2019}', '.', ',', ';', ':',
-    ];
-    let unbalanced = |s: &str, open: char, close: char| {
-        s.ends_with(close) && s.matches(open).count() < s.matches(close).count()
-    };
+    const LEADING: &[u8] = b"([{<*_\"'`";
+    const TRAILING: &[u8] = b"*_\"'`>.,;:";
+    let count = |s: &str, b: u8| s.bytes().filter(|&c| c == b).count();
     let mut s = input.trim();
     loop {
         let before = s.len();
-        s = s
-            .trim_start_matches(LEADING)
-            .trim_end_matches(TRAILING)
-            .trim();
-        for (open, close) in [('(', ')'), ('[', ']'), ('{', '}')] {
-            if unbalanced(s, open, close) {
-                s = &s[..s.len() - close.len_utf8()];
+        s = trim_start(s, LEADING, &['\u{201c}', '\u{2018}']);
+        s = trim_end(s, TRAILING, &['\u{201d}', '\u{2019}']).trim();
+        for (open, close) in [(b'(', b')'), (b'[', b']'), (b'{', b'}')] {
+            if s.as_bytes().last() == Some(&close) && count(s, open) < count(s, close) {
+                s = &s[..s.len() - 1];
             }
         }
         if s.len() == before {
             return s;
+        }
+    }
+}
+
+/// `s` without leading `ascii` bytes and `other` characters.
+fn trim_start<'a>(s: &'a str, ascii: &[u8], other: &[char]) -> &'a str {
+    let mut s = s;
+    loop {
+        match s.as_bytes().first() {
+            Some(b) if ascii.contains(b) => s = &s[1..],
+            Some(b) if !b.is_ascii() => match s.chars().next() {
+                Some(c) if other.contains(&c) => s = &s[c.len_utf8()..],
+                _ => return s,
+            },
+            _ => return s,
+        }
+    }
+}
+
+/// `s` without trailing `ascii` bytes and `other` characters.
+fn trim_end<'a>(s: &'a str, ascii: &[u8], other: &[char]) -> &'a str {
+    let mut s = s;
+    loop {
+        match s.as_bytes().last() {
+            Some(b) if ascii.contains(b) => s = &s[..s.len() - 1],
+            Some(b) if !b.is_ascii() => match s.chars().next_back() {
+                Some(c) if other.contains(&c) => s = &s[..s.len() - c.len_utf8()],
+                _ => return s,
+            },
+            _ => return s,
         }
     }
 }
@@ -149,6 +171,50 @@ pub(crate) use {impl_id_traits, impl_string_serde};
 #[cfg(test)]
 mod tests {
     use super::*;
+    use proptest::prelude::*;
+
+    /// The first implementation of `clean_pasted`, for comparison.
+    fn reference_clean_pasted(input: &str) -> &str {
+        const LEADING: &[char] = &[
+            '(', '[', '{', '<', '*', '_', '"', '\'', '`', '\u{201c}', '\u{2018}',
+        ];
+        const TRAILING: &[char] = &[
+            '*', '_', '"', '\'', '`', '>', '\u{201d}', '\u{2019}', '.', ',', ';', ':',
+        ];
+        let unbalanced = |s: &str, open: char, close: char| {
+            s.ends_with(close) && s.matches(open).count() < s.matches(close).count()
+        };
+        let mut s = input.trim();
+        loop {
+            let before = s.len();
+            s = s
+                .trim_start_matches(LEADING)
+                .trim_end_matches(TRAILING)
+                .trim();
+            for (open, close) in [('(', ')'), ('[', ']'), ('{', '}')] {
+                if unbalanced(s, open, close) {
+                    s = &s[..s.len() - close.len_utf8()];
+                }
+            }
+            if s.len() == before {
+                return s;
+            }
+        }
+    }
+
+    proptest! {
+        #[test]
+        fn cleans_as_the_reference_does(
+            parts in prop::collection::vec(prop::sample::select(vec![
+                "(", ")", "[", "]", "{", "}", "<", ">", "*", "_", "\"", "'", "`", ".", ",",
+                ";", ":", " ", "\u{2003}", "\u{201c}", "\u{201d}", "\u{2018}", "\u{2019}",
+                "a", "1", "/", "é", "10.1016/S0140-6736(10)60835-5",
+            ]), 0..16),
+        ) {
+            let input = parts.concat();
+            prop_assert_eq!(clean_pasted(&input), reference_clean_pasted(&input));
+        }
+    }
 
     #[test]
     fn pasted_wrappers_come_off_but_balanced_brackets_stay() {

@@ -1,6 +1,8 @@
 //! Just enough URL handling to recognise identifier URLs. Not a general URL
 //! parser: no ports, userinfo or IDNA.
 
+use std::borrow::Cow;
+
 use super::syntax::strip_prefix_ci;
 
 /// Hosts accepted without a scheme (`arxiv.org/abs/…`). With a scheme, any
@@ -22,7 +24,7 @@ const SCHEMELESS_HOSTS: &[&str] = &[
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct Url<'a> {
     /// Lowercased, with any leading `www.` removed.
-    pub host: String,
+    pub host: Cow<'a, str>,
     /// Raw (still percent-encoded) path without the leading `/`, query or
     /// fragment.
     pub path: &'a str,
@@ -36,9 +38,13 @@ impl<'a> Url<'a> {
                 None => (s, false),
             };
         let (host, path) = rest.split_once('/').unwrap_or((rest, ""));
-        let host = host.to_ascii_lowercase();
-        let host = host.strip_prefix("www.").map(str::to_owned).unwrap_or(host);
-        if host.is_empty() || (!had_scheme && !SCHEMELESS_HOSTS.contains(&host.as_str())) {
+        let host = strip_prefix_ci(host, "www.").unwrap_or(host);
+        let host = if host.bytes().any(|b| b.is_ascii_uppercase()) {
+            Cow::Owned(host.to_ascii_lowercase())
+        } else {
+            Cow::Borrowed(host)
+        };
+        if host.is_empty() || (!had_scheme && !SCHEMELESS_HOSTS.contains(&&*host)) {
             return None;
         }
         let path = path.split(['?', '#']).next().unwrap_or_default();
@@ -46,7 +52,7 @@ impl<'a> Url<'a> {
     }
 
     pub fn is_host(&self, hosts: &[&str]) -> bool {
-        hosts.contains(&self.host.as_str())
+        hosts.contains(&&*self.host)
     }
 
     pub fn segments(&self) -> impl Iterator<Item = &'a str> {

@@ -101,7 +101,12 @@ scripts/       fixture recorders, one per provider
   mentioned in a document, with its position and text as written; which
   mentions matter is the caller's call. Shapes that prose imitates (bare
   digits, `W1`, `1706.03762`) count only when labelled, prefixed or URLs.
-  Claims and BibTeX URLs use the same scanner.
+  Claims and BibTeX URLs use the same scanner. It parses only pieces
+  holding a byte from `/` to `:` (digits, `/`, `:`), found a chunk at a
+  time, and reads the piece before as a label only then: ~1 GB/s on
+  prose without identifiers, ~600 MB/s with some, ~200 MB/s on reference
+  lists (`just scan-bench`, on seeded generated documents whose every
+  identifier is known; `tests/scan_corpus.rs` checks the same corpora).
 - **DOIs** drop trailing `.,;:` (prose punctuation). The spec allows such a
   DOI, so `lookup` retries not-found ones with the punctuation kept.
 - **ISBNs** canonicalise to ISBN-13 (ISBN-10s converted, checksums checked).

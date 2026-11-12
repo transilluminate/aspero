@@ -16,14 +16,49 @@ pub(super) fn family_name(p: &Person) -> Option<String> {
 }
 
 /// The family name in a claimed author string: "Vaswani, A." → "vaswani",
-/// "Ashish Vaswani" → "vaswani", "A. Vaswani" → "vaswani".
+/// "Ashish Vaswani" → "vaswani", "A. Vaswani" → "vaswani", "Daum RS" →
+/// "daum", "A. van der Berg" → "van der berg".
 pub(super) fn claimed_family(name: &str) -> Option<String> {
     let family = match name.split_once(',') {
         Some((before, _)) => normalise(before),
-        // The last word that isn't an initial.
-        None => words(name).into_iter().rfind(|w| w.chars().count() > 1)?,
+        None => {
+            // Vancouver initials after the name ("Daum RS") go first.
+            let mut tokens: Vec<&str> = name.split_whitespace().collect();
+            while tokens.len() > 1 && tokens.last().is_some_and(|t| is_initials(t)) {
+                tokens.pop();
+            }
+            let name = tokens.join(" ");
+            let literal = Person {
+                literal: Some(name.clone()),
+                ..Person::default()
+            };
+            match literal.parts() {
+                Some((family, _)) => normalise(&family),
+                // The last word that isn't an initial.
+                None => words(&name).into_iter().rfind(|w| w.chars().count() > 1)?,
+            }
+        }
     };
     (!family.is_empty()).then_some(family)
+}
+
+/// Initials as Vancouver writes them: "RS", "J", "T.D.N.".
+fn is_initials(token: &str) -> bool {
+    let letters: Vec<char> = token
+        .trim_end_matches([',', ';'])
+        .chars()
+        .filter(|c| *c != '.')
+        .collect();
+    (1..=3).contains(&letters.len()) && letters.iter().all(|c| c.is_uppercase())
+}
+
+/// The same family, give or take particles: "van der berg" and "berg".
+fn same_family(a: &str, b: &str) -> bool {
+    let ends = |long: &str, short: &str| {
+        long.strip_suffix(short)
+            .is_some_and(|rest| rest.ends_with(' '))
+    };
+    a == b || ends(a, b) || ends(b, a)
 }
 
 /// Claimed authors vs the record's family names: half for the first author
@@ -33,8 +68,11 @@ pub(super) fn author_overlap(claimed: &[String], families: &[String]) -> f64 {
     let Some(first) = claimed.first() else {
         return 0.0;
     };
-    let first_matches = families.first() == Some(first);
-    let found = claimed.iter().filter(|c| families.contains(c)).count();
+    let first_matches = families.first().is_some_and(|f| same_family(f, first));
+    let found = claimed
+        .iter()
+        .filter(|c| families.iter().any(|f| same_family(f, c)))
+        .count();
     0.5 * f64::from(u8::from(first_matches)) + 0.5 * found as f64 / claimed.len() as f64
 }
 
@@ -62,4 +100,33 @@ pub(super) fn names_given(text: &str) -> bool {
             && (1..=3).contains(&initials.chars().count())
             && initials.chars().all(|c| c.is_uppercase())
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn claimed_families() {
+        for (name, family) in [
+            ("Vaswani, A.", "vaswani"),
+            ("Ashish Vaswani", "vaswani"),
+            ("A. Vaswani", "vaswani"),
+            ("Daum RS", "daum"),
+            ("Daum R.S.", "daum"),
+            ("LeCun Y", "lecun"),
+            ("A. van der Berg", "van der berg"),
+            ("van der Berg, A.", "van der berg"),
+        ] {
+            assert_eq!(claimed_family(name).as_deref(), Some(family), "{name}");
+        }
+    }
+
+    #[test]
+    fn particles_dont_part_families() {
+        let families = ["berg".to_owned(), "smith".to_owned()];
+        let claimed = ["A. van der Berg".to_owned(), "Smith J".to_owned()];
+        assert_eq!(author_overlap(&claimed, &families), 1.0);
+        assert!(!same_family("goldsmith", "smith"));
+    }
 }

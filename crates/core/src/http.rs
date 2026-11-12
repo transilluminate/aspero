@@ -10,6 +10,7 @@
 //! to [`Error`]s is provider knowledge.
 
 use std::fmt;
+use std::time::Duration;
 
 use async_trait::async_trait;
 use jiff::Timestamp;
@@ -115,6 +116,13 @@ impl HttpResponse {
             .map(|(_, v)| v.as_str())
     }
 
+    /// A `Retry-After` given in seconds. The HTTP-date form isn't read.
+    pub fn retry_after(&self) -> Option<Duration> {
+        self.header("retry-after")
+            .and_then(|v| v.trim().parse().ok())
+            .map(Duration::from_secs)
+    }
+
     pub fn is_success(&self) -> bool {
         (200..300).contains(&self.status)
     }
@@ -205,5 +213,19 @@ mod tests {
             Timestamp::UNIX_EPOCH,
         );
         assert_eq!(resp.header("x-ratelimit-cost-usd"), Some("0.001"));
+    }
+
+    #[test]
+    fn retry_after_reads_seconds() {
+        let resp = |v: &str| {
+            let headers = vec![("Retry-After".into(), v.into())];
+            HttpResponse::new(429, headers, Vec::new(), Timestamp::UNIX_EPOCH)
+        };
+        assert_eq!(resp(" 7 ").retry_after(), Some(Duration::from_secs(7)));
+        assert_eq!(
+            resp("18446744073709551615").retry_after(),
+            Some(Duration::from_secs(u64::MAX))
+        );
+        assert_eq!(resp("Wed, 21 Oct 2015 07:28:00 GMT").retry_after(), None);
     }
 }

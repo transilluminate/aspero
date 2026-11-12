@@ -154,10 +154,7 @@ fn check(resp: &HttpResponse) -> Result<()> {
         401 | 403 => Error::AuthRejected { message },
         404 => Error::NotFound,
         429 => Error::RateLimited {
-            retry_after: resp
-                .header("retry-after")
-                .and_then(|v| v.trim().parse().ok())
-                .map(Duration::from_secs),
+            retry_after: resp.retry_after(),
         },
         status => Error::Server { status, message },
     })

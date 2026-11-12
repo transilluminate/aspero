@@ -38,10 +38,7 @@ pub(crate) fn check(resp: &HttpResponse) -> Result<(), Error> {
             resets_at: usage(resp).resets_at,
         },
         429 => Error::RateLimited {
-            retry_after: resp
-                .header("retry-after")
-                .and_then(|v| v.trim().parse().ok())
-                .map(Duration::from_secs),
+            retry_after: resp.retry_after(),
         },
         status => Error::Server { status, message },
     })

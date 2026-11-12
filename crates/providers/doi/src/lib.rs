@@ -130,10 +130,7 @@ fn check(resp: &HttpResponse) -> Result<()> {
         // The DOI exists, but its agency offers no CSL-JSON.
         406 => Error::Unsupported("CSL-JSON from this DOI's registration agency"),
         429 => Error::RateLimited {
-            retry_after: resp
-                .header("retry-after")
-                .and_then(|v| v.trim().parse().ok())
-                .map(Duration::from_secs),
+            retry_after: resp.retry_after(),
         },
         status => Error::Server {
             status,

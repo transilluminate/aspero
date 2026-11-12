@@ -93,16 +93,44 @@ pub fn derivative_work_kind(title: &str) -> Option<WorkKind> {
     })
 }
 
-/// Whether the claim itself cites a derivative (its text or title uses a
-/// marker), in which case derivatives are fair matches.
+/// Whether the claim itself cites a derivative, by the same rule as
+/// records: its title, or a sentence of its text ("Smith J. Correction to:
+/// …"), marks one. Then derivatives are fair matches.
 pub fn claim_mentions_derivative(claim: &Claim) -> bool {
-    [claim.text.as_deref(), claim.title.as_deref()]
-        .into_iter()
-        .flatten()
-        .any(|text| {
-            let words = format!(" {} ", normalise(text));
-            DERIVATIVE_MARKERS
-                .iter()
-                .any(|m| words.contains(&format!(" {m} ")))
-        })
+    claim.title.as_deref().is_some_and(is_derivative)
+        || claim
+            .text
+            .as_deref()
+            .is_some_and(|text| text.split(['.', '?', '!']).any(is_derivative))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn text(t: &str) -> Claim {
+        Claim {
+            text: Some(t.into()),
+            ..Claim::default()
+        }
+    }
+
+    #[test]
+    fn claims_mention_derivatives_as_records_do() {
+        assert!(claim_mentions_derivative(&text(
+            "Smith J. Correction to: Deep learning. Nature. 2016."
+        )));
+        assert!(claim_mentions_derivative(&text(
+            "LeCun Y. Deep learning—Reply. Nature."
+        )));
+        // Ordinary words in a title, not markers.
+        assert!(!claim_mentions_derivative(&text(
+            "Smith J. Differential response to corticosteroids. Thorax. 2019."
+        )));
+        let title = Claim {
+            title: Some("Correction of hyponatraemia".into()),
+            ..Claim::default()
+        };
+        assert!(!claim_mentions_derivative(&title));
+    }
 }

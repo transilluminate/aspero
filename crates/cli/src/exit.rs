@@ -58,6 +58,22 @@ impl Exit {
     pub fn code(self) -> ExitCode {
         ExitCode::from(self as u8)
     }
+
+    /// The `category` of a JSON error. Agents match on these: keep them.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Exit::Ok => "ok",
+            Exit::Internal => "internal",
+            Exit::Usage => "usage",
+            Exit::NotFound => "notfound",
+            Exit::Unavailable => "unavailable",
+            Exit::Throttled => "throttled",
+            Exit::Auth => "auth",
+            Exit::Unsupported => "unsupported",
+            Exit::Protocol => "protocol",
+            Exit::Unverified => "unverified",
+        }
+    }
 }
 
 #[cfg(test)]
@@ -69,5 +85,25 @@ mod tests {
         assert_eq!(Exit::Ok.worst(Exit::NotFound), Exit::NotFound);
         assert_eq!(Exit::NotFound.worst(Exit::Throttled), Exit::Throttled);
         assert_eq!(Exit::Usage.worst(Exit::Unavailable), Exit::Usage);
+    }
+
+    /// The names came from `Debug`, lowercased; they stay as they were.
+    #[test]
+    fn names_are_as_they_were() {
+        let all = [
+            Exit::Ok,
+            Exit::Internal,
+            Exit::Usage,
+            Exit::NotFound,
+            Exit::Unavailable,
+            Exit::Throttled,
+            Exit::Auth,
+            Exit::Unsupported,
+            Exit::Protocol,
+            Exit::Unverified,
+        ];
+        for exit in all {
+            assert_eq!(exit.as_str(), format!("{exit:?}").to_lowercase());
+        }
     }
 }

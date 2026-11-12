@@ -55,7 +55,7 @@ async fn main() -> ExitCode {
             if format.is_human() || format.is_export() {
                 eprintln!("error: {}", failure.message);
             } else {
-                let category = format!("{:?}", failure.exit).to_lowercase();
+                let category = failure.exit.as_str();
                 eprintln!(
                     "{}",
                     json!({"error": {"category": category, "message": failure.message}})

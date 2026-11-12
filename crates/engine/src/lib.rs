@@ -33,6 +33,7 @@ mod budget;
 mod check;
 mod enrich;
 mod health;
+mod identify;
 mod inflight;
 mod inputs;
 mod lookup;
@@ -49,6 +50,7 @@ mod versions;
 pub use abstracts::{Abstract, AbstractsReport};
 pub use budget::Budget;
 pub use check::{Checked, Finding, Severity, duplicates, findings};
+pub use identify::{Decision, Identified, MAX_IDENTIFIERS};
 pub use registry::{Disagreement, disagreements};
 pub use resolve::{Candidate, ResolveReport, Sighting, Via};
 /// Re-exported for credentials in provider configs.

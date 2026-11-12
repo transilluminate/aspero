@@ -205,6 +205,16 @@ requiring a specific match or retraction flag), run live by
 `target/bench-cache`: the first run costs ~$0.035, re-runs are free. Add a
 case for every new failure mode found in the wild.
 
+**Identify** names the work a document is from its first page: none of
+the page's identifiers is taken on trust (pages print related articles,
+data and the first references too). Each one, header and footer first (at
+most six), is looked up in one batch, and its work must be confirmed: its
+title matching the title given (the app's largest type on the page, or
+title metadata unless junk), or its title and first author on the page
+(the earliest-placed title wins). Otherwise the top of the page is
+verified as a citation; a given title not on the page (a banner, "PLOS
+ONE") only joins the text. `decided_by` says which.
+
 ## Storage
 
 Two SQLite stores, split by whether data can be refetched:

@@ -161,6 +161,11 @@ async fn run(cli: Cli, out: Out) -> Result<Exit, Failure> {
         Command::Search { query, options } => cmd::search::run(&engine, query, options, out).await,
         Command::Resolve { claim } => cmd::resolve::run(&engine, claim, out).await,
         Command::Verify { claim } => cmd::verify::run(&engine, claim, out).await,
+        Command::Identify {
+            file,
+            title,
+            title_hint,
+        } => cmd::identify::run(&engine, file, title, title_hint, out).await,
         Command::Check {
             path,
             fail_on,

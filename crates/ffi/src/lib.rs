@@ -30,9 +30,9 @@ pub mod records;
 
 use records::{
     Bibliography, Budget, CacheStats, CitationStyle, CiteFormat, CitedEntry, Claim as ClaimRecord,
-    DocxReferences, ExportFormat, KeyCheck, KeyStatus, Line, LineReference, Lookup, Lookups,
-    Mention, ProviderUsage, ReadError, Reference, SearchRequest, SearchResults, StyleError,
-    StyleSource, Unavailable, Verification, Verifications, Work,
+    DocxReferences, ExportFormat, Identification, KeyCheck, KeyStatus, Line, LineReference, Lookup,
+    Lookups, Mention, ProviderUsage, ReadError, Reference, SearchRequest, SearchResults,
+    StyleError, StyleSource, Unavailable, Verification, Verifications, Work,
 };
 
 uniffi::setup_scaffolding!();
@@ -199,6 +199,43 @@ impl Aspero {
                         .collect(),
                     usage: records::usage(&report.usage),
                 }
+            },
+            cancel,
+        )
+        .await
+    }
+
+    /// The work a document is, from its first page's text: not the works
+    /// it cites or links to. `title_hint` is the largest type at the top of
+    /// the page, `title` the file's title metadata (ignored when junk).
+    /// Each identifier on the page (header and footer first, at most six)
+    /// must be confirmed by the title or the page; with none, the title
+    /// and top of the page are searched. `None` when nothing is sure
+    /// enough.
+    #[uniffi::method(default(title = None, title_hint = None, cancel = None))]
+    pub async fn identify(
+        &self,
+        first_page: String,
+        title: Option<String>,
+        title_hint: Option<String>,
+        patience: Patience,
+        cancel: Option<Arc<CallToken>>,
+    ) -> Result<Option<Identification>, AsperoError> {
+        let engine = self.engine(patience);
+        self.run(
+            async move {
+                let found = engine
+                    .identify(&first_page, title.as_deref(), title_hint.as_deref())
+                    .await?;
+                let claim = InputClaim {
+                    input: found.input(),
+                    key: None,
+                    claim: Ok(found.claim.clone()),
+                };
+                Some(Identification {
+                    decided_by: found.decided_by.into(),
+                    verification: Verification::new(0, &claim, &found.verification, false),
+                })
             },
             cancel,
         )

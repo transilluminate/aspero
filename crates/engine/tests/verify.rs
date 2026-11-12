@@ -560,3 +560,36 @@ async fn reasons_that_list_differences_always_list_one() {
         }
     }
 }
+
+#[tokio::test]
+async fn a_doi_cut_short_at_a_line_break_is_the_work_whose_doi_it_starts() {
+    // #39: the cited DOI stops where the PDF wrapped it; the work found by
+    // the citation's text has it in full.
+    let full = work(
+        "crossref",
+        &["10.1097/hjh.0b013e3282f35c67"],
+        "Reduced incidence of new-onset atrial fibrillation with angiotensin II receptor blockade",
+        &["Schmieder"],
+        2008,
+    );
+    let crossref = Arc::new(
+        Scripted::new("crossref")
+            .matcher(vec![full.clone()])
+            .with(vec![full]),
+    );
+    let v = engine(vec![crossref])
+        .verify(
+            &Claim::from_text(
+                "Schmieder RE, et al. Reduced incidence of new-onset atrial fibrillation with \
+                 angiotensin II receptor blockade. J Hypertens 2008. https://doi.org/10.1097/HJH.0b013e",
+            ),
+            5,
+        )
+        .await;
+    assert_eq!(v.verdict, Verdict::Verified, "{:?}: {}", v.why, v.reason);
+    let best = &v.report.candidates[v.best.unwrap()];
+    assert!(
+        best.ids
+            .contains(&"doi:10.1097/hjh.0b013e3282f35c67".parse().unwrap())
+    );
+}

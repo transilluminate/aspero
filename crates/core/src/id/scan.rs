@@ -34,10 +34,12 @@ pub struct Mention {
 }
 
 impl Mention {
-    /// For a DOI broken across lines at a hyphen, the DOI without that
-    /// hyphen: typesetters rarely add one inside a link, but some do, so
-    /// it's worth a lookup if the DOI as printed doesn't exist. `text` is
-    /// the text scanned.
+    /// Another reading of a DOI broken across lines, worth a lookup if the
+    /// DOI as printed doesn't exist: broken at a hyphen, the DOI without it
+    /// (typesetters rarely add one inside a link, but some do); ending its
+    /// line, the DOI continued by the next line's first word, as a PDF
+    /// wraps a suffix anywhere (`…/HJH.0b013e` then `3282f35c67`), which
+    /// reads as the DOI ending there too. `text` is the text scanned.
     pub fn alternative(&self, text: &str) -> Option<WorkId> {
         let folded = crate::fold::Folded::new(text.get(self.span.clone())?);
         let written: &str = &folded.text;
@@ -53,8 +55,11 @@ impl Mention {
             rest = &after[if at_break { gap } else { 0 }..];
         }
         joined.push_str(rest);
-        if !broken || self.id.kind() != IdKind::Doi {
+        if self.id.kind() != IdKind::Doi {
             return None;
+        }
+        if !broken {
+            return self.continued(text, written);
         }
         let joined: String = joined.split_whitespace().collect::<Vec<_>>().join(" ");
         let id: WorkId = scan_clean(&joined)
@@ -62,6 +67,35 @@ impl Mention {
             .find(|m| m.span.start == 0)?
             .id;
         (id != self.id && id.kind() == IdKind::Doi).then_some(id)
+    }
+}
+
+impl Mention {
+    /// The DOI `written` continued by the start of the next line, if it
+    /// ends its line and that line starts with what a DOI suffix holds.
+    fn continued(&self, text: &str, written: &str) -> Option<WorkId> {
+        let after = text.get(self.span.end..)?;
+        let (rest_of_line, next) = after.split_once('\n')?;
+        if !rest_of_line.trim().chars().all(|c| ".,;".contains(c)) {
+            return None;
+        }
+        let word = next.split_whitespace().next()?;
+        let token = clean_pasted(word);
+        let suffix = |c: char| c.is_ascii_alphanumeric() || "._;()/:-<>".contains(c);
+        // The next reference's number ("21.").
+        let marker = word
+            .strip_suffix('.')
+            .is_some_and(|n| n.bytes().all(|b| b.is_ascii_digit()));
+        if !token.starts_with(|c: char| c.is_ascii_alphanumeric())
+            || !token.chars().all(suffix)
+            || marker
+            || token.contains("://")
+        {
+            return None;
+        }
+        let joined = format!("{}{token}", written.trim_end_matches(['.', ',', ';']));
+        let id = WorkId::parse_as(IdKind::Doi, &joined).ok()?;
+        (id != self.id).then_some(id)
     }
 }
 
@@ -797,6 +831,27 @@ mod tests {
         assert_eq!(
             found("https://doi.org/10.1056/NEJMoa1302097 2019")[0].1,
             "https://doi.org/10.1056/NEJMoa1302097"
+        );
+    }
+
+    #[test]
+    fn dois_wrapped_mid_suffix_have_the_joined_alternative() {
+        // #39: Vancouver lists from journal PDFs.
+        let text = "J Hypertens 2008;26:403-11. https://doi.org/10.1097/HJH.0b013e\n3282f35c67\n\
+            19. Next. Circulation 2019;139:e56-528. https://doi.org/10.1161/CIR.000000000\n0000659\n\
+            20. Last. doi:10.1038/nature14539.\n21. Smith J.";
+        let alternatives: Vec<_> = scan(text)
+            .iter()
+            .map(|m| m.alternative(text).map(|a| a.to_string()))
+            .collect();
+        assert_eq!(
+            alternatives,
+            [
+                Some("doi:10.1097/hjh.0b013e3282f35c67".into()),
+                Some("doi:10.1161/cir.0000000000000659".into()),
+                // The next reference's number doesn't continue it.
+                None,
+            ]
         );
     }
 

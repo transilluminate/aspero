@@ -41,6 +41,9 @@ impl Mention {
     /// wraps a suffix anywhere (`…/HJH.0b013e` then `3282f35c67`), which
     /// reads as the DOI ending there too. `text` is the text scanned.
     pub fn alternative(&self, text: &str) -> Option<WorkId> {
+        if self.id.kind() != IdKind::Doi {
+            return None;
+        }
         let folded = crate::fold::Folded::new(text.get(self.span.clone())?);
         let written: &str = &folded.text;
         let mut joined = String::new();
@@ -55,9 +58,6 @@ impl Mention {
             rest = &after[if at_break { gap } else { 0 }..];
         }
         joined.push_str(rest);
-        if self.id.kind() != IdKind::Doi {
-            return None;
-        }
         if !broken {
             return self.continued(text, written);
         }

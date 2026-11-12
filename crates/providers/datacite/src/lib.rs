@@ -164,6 +164,7 @@ fn check(resp: &HttpResponse) -> Result<()> {
     let message = message(resp);
     Err(match resp.status {
         400 | 422 => Error::BadRequest(message.unwrap_or_else(|| "rejected by DataCite".into())),
+        401 | 403 => Error::AuthRejected { message },
         _ => status_error(resp, message),
     })
 }

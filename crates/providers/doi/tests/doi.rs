@@ -102,8 +102,6 @@ fn failures_map_to_errors() {
         response(406, &[], ""),
         response(429, &[("retry-after", "4")], ""),
         response(503, &[], ""),
-        response(401, &[], ""),
-        response(403, &[], ""),
     ]);
     let ask = |d: &DoiOrg| block_on(d.lookup(&[id("10.1000/x")], FieldSet::DEFAULT));
     assert!(matches!(ask(&doi), Err(Error::Unsupported(_))));
@@ -114,10 +112,6 @@ fn failures_map_to_errors() {
         })
     ));
     assert!(matches!(ask(&doi), Err(Error::Server { status: 503, .. })));
-    // A refusal is final, not a server failure to retry.
-    for _ in 0..2 {
-        assert!(matches!(ask(&doi), Err(Error::AuthRejected { .. })));
-    }
 }
 
 #[test]

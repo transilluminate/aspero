@@ -36,6 +36,7 @@ pub(crate) fn check(resp: &HttpResponse) -> Result<(), Error> {
         429 if quota_exhausted(resp) => Error::QuotaExhausted {
             resets_at: usage(resp).resets_at,
         },
+        401 | 403 => Error::AuthRejected { message },
         _ => status_error(resp, message),
     })
 }

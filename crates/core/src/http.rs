@@ -133,12 +133,11 @@ impl HttpResponse {
     }
 }
 
-/// The error for a non-2xx status a provider doesn't map itself: 401 and 403
-/// are refused credentials, 404 is not found, 429 is slow down, and anything
-/// else a server failure.
+/// The error for a non-2xx status a provider doesn't map itself: 404 is not
+/// found, 429 is slow down, and anything else a server failure. Whether 401
+/// and 403 refuse the provider's credentials is the provider's to say.
 pub fn status_error(resp: &HttpResponse, message: Option<String>) -> Error {
     match resp.status {
-        401 | 403 => Error::AuthRejected { message },
         404 => Error::NotFound,
         429 => Error::RateLimited {
             retry_after: resp.retry_after(),

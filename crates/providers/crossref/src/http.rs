@@ -17,6 +17,7 @@ pub(crate) fn check(resp: &HttpResponse) -> Result<(), Error> {
     let message = message(resp);
     Err(match resp.status {
         400 => Error::BadRequest(message.unwrap_or_else(|| "rejected by Crossref".into())),
+        401 | 403 => Error::AuthRejected { message },
         _ => status_error(resp, message),
     })
 }

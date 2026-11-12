@@ -114,10 +114,16 @@ pub(crate) fn strip_kind_prefix<'a>(s: &'a str, prefix: &str) -> &'a str {
     }
 }
 
+/// Whether `s` starts with `prefix`, ignoring ASCII case.
+pub(crate) fn starts_with_ci(s: &str, prefix: &str) -> bool {
+    s.as_bytes()
+        .get(..prefix.len())
+        .is_some_and(|head| head.eq_ignore_ascii_case(prefix.as_bytes()))
+}
+
+/// `s` without `prefix`, ignoring ASCII case.
 pub(crate) fn strip_prefix_ci<'a>(s: &'a str, prefix: &str) -> Option<&'a str> {
-    let head = s.get(..prefix.len())?;
-    head.eq_ignore_ascii_case(prefix)
-        .then(|| &s[prefix.len()..])
+    starts_with_ci(s, prefix).then(|| &s[prefix.len()..])
 }
 
 /// Whether `s` is one or more ASCII digits.

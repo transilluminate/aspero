@@ -36,7 +36,7 @@ pub use s2::S2PaperId;
 pub use scan::{Mention, scan};
 
 use syntax::IdSyntax;
-pub(crate) use syntax::is_digits;
+pub(crate) use syntax::{is_digits, starts_with_ci};
 use url::Url;
 
 /// The kinds of work identifier aspero understands.
@@ -225,13 +225,13 @@ impl WorkId {
             return WorkId::parse_as(IdKind::Doi, input);
         }
         // "ISBN 978-…" / "ISBN-13 …": a label followed by a space.
-        if s.get(..4).is_some_and(|p| p.eq_ignore_ascii_case("isbn")) {
+        if starts_with_ci(s, "isbn") {
             return WorkId::parse_as(IdKind::Isbn, input);
         }
-        if s.get(..3).is_some_and(|p| p.eq_ignore_ascii_case("pmc")) && is_digits(&s[3..]) {
+        if starts_with_ci(s, "pmc") && is_digits(&s[3..]) {
             return WorkId::parse_as(IdKind::Pmcid, input);
         }
-        if s.get(..3).is_some_and(|p| p.eq_ignore_ascii_case("nbk")) && is_digits(&s[3..]) {
+        if starts_with_ci(s, "nbk") && is_digits(&s[3..]) {
             return WorkId::parse_as(IdKind::Nbk, input);
         }
         if s.starts_with(['W', 'w']) && is_digits(&s[1..]) {

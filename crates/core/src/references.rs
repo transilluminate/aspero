@@ -22,7 +22,7 @@ use std::ops::Range;
 
 use crate::Alternative;
 use crate::fold::Folded;
-use crate::id::is_digits;
+use crate::id::{is_digits, starts_with_ci};
 use crate::work::PLAUSIBLE_YEARS;
 
 /// One reference found in a list.
@@ -617,10 +617,9 @@ fn plain_number(token: &str) -> bool {
 
 /// `token` is a link of its own, not the rest of one.
 fn starts_link(token: &str) -> bool {
-    let lower = token.get(..8).unwrap_or(token).to_ascii_lowercase();
     ["http://", "https://", "www."]
         .iter()
-        .any(|p| lower.starts_with(p))
+        .any(|p| starts_with_ci(token, p))
         || token
             .split_once(':')
             .is_some_and(|(head, _)| crate::id::IdKind::from_prefix(head).is_some())
@@ -634,11 +633,7 @@ fn is_number(token: &str) -> bool {
 /// `text` ends inside a DOI or URL.
 fn in_link(text: &str) -> bool {
     let word = text.rsplit(char::is_whitespace).next().unwrap_or_default();
-    let starts = |p: &str| {
-        word.get(..p.len())
-            .is_some_and(|h| h.eq_ignore_ascii_case(p))
-    };
-    starts("http") || starts("doi:") || word.starts_with("10.")
+    starts_with_ci(word, "http") || starts_with_ci(word, "doi:") || word.starts_with("10.")
 }
 
 fn is_heading(text: &str) -> bool {

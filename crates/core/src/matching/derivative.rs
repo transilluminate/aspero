@@ -3,6 +3,7 @@
 
 use super::Claim;
 use super::text::normalise;
+use crate::id::starts_with_ci;
 
 /// Words marking a record as *about* another work rather than the work
 /// itself: replies, corrections, errata, commentaries.
@@ -72,10 +73,7 @@ pub fn derivative_work_kind(title: &str) -> Option<WorkKind> {
         "correction" => {
             norm == "correction"
                 || norm.starts_with("correction to ")
-                || title
-                    .trim_start()
-                    .get(..11)
-                    .is_some_and(|h| h.eq_ignore_ascii_case("correction:"))
+                || starts_with_ci(title.trim_start(), "correction:")
         }
         _ => words.starts_with(&format!(" {m} ")),
     };

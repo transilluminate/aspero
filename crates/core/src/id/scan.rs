@@ -15,7 +15,7 @@
 
 use std::ops::Range;
 
-use super::syntax::{clean_pasted, is_digits};
+use super::syntax::{clean_pasted, is_digits, starts_with_ci};
 use super::url::Url;
 use super::{IdKind, WorkId};
 
@@ -329,11 +329,11 @@ fn mend(text: &str, broken: &Broken) -> Option<(WorkId, Range<usize>)> {
 /// ending in a piece with a digit that is an identifier wins.
 fn mend_spaced(text: &str, broken: &Broken, line_end: usize) -> Option<(WorkId, Range<usize>)> {
     let raw = &text[broken.cleaned.clone()];
-    let starts = |p: &str| {
-        raw.get(..p.len())
-            .is_some_and(|h| h.eq_ignore_ascii_case(p))
-    };
-    if !(["http", "doi", "dx.", "www."].iter().any(|p| starts(p)) || raw.starts_with("10.")) {
+    if !(["http", "doi", "dx.", "www."]
+        .iter()
+        .any(|p| starts_with_ci(raw, p))
+        || raw.starts_with("10."))
+    {
         return None;
     }
     let mut joined = raw.to_owned();
@@ -594,11 +594,7 @@ fn could_be_unlabelled(piece: &str) -> bool {
         || piece.split_once(':').is_some_and(|(head, _)| {
             IdKind::from_prefix(head).is_some() || IdKind::from_label(head).is_some()
         })
-        || ["pmc", "nbk"].iter().any(|p| {
-            piece
-                .get(..3)
-                .is_some_and(|head| head.eq_ignore_ascii_case(p))
-        })
+        || ["pmc", "nbk"].iter().any(|p| starts_with_ci(piece, p))
 }
 
 /// An identifier written without a separate label: any kind when prefixed

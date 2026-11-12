@@ -328,7 +328,7 @@ fn tag(s: &str) -> Option<(usize, bool)> {
 
 /// The entity `s` starts with, if it is one: its length and character.
 fn entity(s: &str) -> Option<(usize, char)> {
-    let end = s.get(..12).unwrap_or(s).find(';')?;
+    let end = s.bytes().take(12).position(|b| b == b';')?;
     let name = &s[1..end];
     let c = if let Some(hex) = name.strip_prefix("#x").or_else(|| name.strip_prefix("#X")) {
         char::from_u32(u32::from_str_radix(hex, 16).ok()?)?

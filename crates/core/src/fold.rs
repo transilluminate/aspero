@@ -96,6 +96,10 @@ impl<'a> Folded<'a> {
     }
 }
 
+/// What ends a line in text as given: cleaning makes each `\n` (but for
+/// the `\r` of `\r\n`, which trimming the line drops).
+pub(crate) const LINE_BREAKS: [char; 5] = ['\n', '\r', '\u{85}', '\u{2028}', '\u{2029}'];
+
 /// What `c` becomes, if it changes; `rest` is the text after it.
 fn fold(c: char, rest: &str) -> Option<&'static str> {
     Some(match c {
@@ -113,8 +117,8 @@ fn fold(c: char, rest: &str) -> Option<&'static str> {
         '\u{A0}' | '\u{2000}'..='\u{200A}' | '\u{202F}' | '\u{205F}' | '\u{3000}' => " ",
         // Line breaks as some copies write them: classic Mac's lone `\r`,
         // Unicode's line and paragraph separators, NEL.
-        '\r' if !rest.starts_with('\n') => "\n",
-        '\u{2028}' | '\u{2029}' | '\u{85}' => "\n",
+        '\r' if rest.starts_with('\n') => return None,
+        c if c != '\n' && LINE_BREAKS.contains(&c) => "\n",
         '\u{FB00}' => "ff",
         '\u{FB01}' => "fi",
         '\u{FB02}' => "fl",

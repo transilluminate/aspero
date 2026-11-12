@@ -108,7 +108,8 @@ pub fn scan(text: &str) -> Vec<Mention> {
         .into_iter()
         .map(|(m, line_start)| {
             let span = folded.original(&m.span);
-            // After the line break, which is never cleaned.
+            // After the line break as written, which cleaning may have
+            // made `\n` from another.
             let line_start = match line_start {
                 0 => 0,
                 at => folded.original(&(at - 1..at)).end,

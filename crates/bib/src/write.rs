@@ -187,11 +187,7 @@ pub fn bibtex(work: &Work, ids: &[WorkId], key: &str) -> String {
 
 fn bibtex_name(p: &Person) -> Option<String> {
     match name(p) {
-        Name::Person {
-            family,
-            given: Some(given),
-        } => Some(format!("{}, {}", escape(&family), escape(&given))),
-        Name::Person { family, .. } => Some(escape(&family)),
+        Name::Person { .. } => p.inverted().map(|n| escape(&n)),
         Name::Whole(whole) if whole.is_empty() => None,
         // Braced, so an organisation stays one name.
         Name::Whole(whole) => Some(format!("{{{}}}", escape(&whole))),
@@ -235,16 +231,9 @@ pub fn ris(work: &Work, ids: &[WorkId]) -> String {
         let _ = writeln!(out, "{tag}  - {value}");
     };
     line("TY", ty);
-    for p in &work.authors {
-        match name(p) {
-            Name::Person {
-                family,
-                given: Some(given),
-            } => line("AU", &format!("{family}, {given}")),
-            Name::Person { family: name, .. } | Name::Whole(name) if !name.is_empty() => {
-                line("AU", &name)
-            }
-            _ => {}
+    for name in work.authors.iter().filter_map(Person::inverted) {
+        if !name.is_empty() {
+            line("AU", &name);
         }
     }
     if let Some(title) = &work.title {
@@ -380,10 +369,7 @@ ER  -\x20
 
     #[test]
     fn whole_names_are_split_unless_an_organisation() {
-        let split = |s: &str| match name(&Person::literal(s)) {
-            Name::Person { family, given } => format!("{family}, {}", given.unwrap_or_default()),
-            Name::Whole(whole) => format!("{{{whole}}}"),
-        };
+        let split = |s: &str| bibtex_name(&Person::literal(s)).unwrap();
         assert_eq!(split("Yann LeCun"), "LeCun, Yann");
         assert_eq!(split("Geoffrey E. Hinton"), "Hinton, Geoffrey E.");
         assert_eq!(split("Vincent van Gogh"), "van Gogh, Vincent");

@@ -305,6 +305,16 @@ impl Person {
         }
     }
 
+    /// The name as BibTeX and RIS write it: "LeCun, Yann"; an organisation
+    /// as written.
+    pub fn inverted(&self) -> Option<String> {
+        match self.parts() {
+            Some((family, Some(given))) => Some(format!("{family}, {given}")),
+            Some((family, None)) => Some(family),
+            None => self.display_name(),
+        }
+    }
+
     /// The best single-string name: "Given Family", or the literal.
     pub fn display_name(&self) -> Option<String> {
         match (&self.given, &self.family, &self.literal) {
@@ -614,6 +624,29 @@ mod tests {
             Some(("van Gogh".into(), Some("Vincent".into())))
         );
         assert_eq!(Person::literal("World Health Organization").parts(), None);
+    }
+
+    #[test]
+    fn names_invert_family_first() {
+        let inverted = |p: Person| p.inverted();
+        assert_eq!(
+            inverted(Person::new("Ada", "Lovelace")).as_deref(),
+            Some("Lovelace, Ada")
+        );
+        assert_eq!(
+            inverted(Person::literal("Vincent van Gogh")).as_deref(),
+            Some("van Gogh, Vincent")
+        );
+        let family_only = Person {
+            family: Some("Plato".into()),
+            ..Person::default()
+        };
+        assert_eq!(inverted(family_only).as_deref(), Some("Plato"));
+        assert_eq!(
+            inverted(Person::literal("World Health Organization")).as_deref(),
+            Some("World Health Organization")
+        );
+        assert_eq!(inverted(Person::default()), None);
     }
 
     #[test]

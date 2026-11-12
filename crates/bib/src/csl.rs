@@ -2,8 +2,8 @@
 //! of items, or a single item. Read with the lenient [`CslItem`] used for
 //! doi.org's responses.
 
-use aspero_core::Claim;
 use aspero_core::csl::CslItem;
+use aspero_core::{Claim, Person};
 
 use crate::{BibEntry, Format, Ids, ReadError};
 
@@ -29,21 +29,17 @@ pub fn parse_csl_json(src: &str) -> Result<Vec<BibEntry>, ReadError> {
 pub(crate) fn entry(item: &CslItem, position: usize) -> BibEntry {
     let work = item.to_work();
     let mut claim = Claim::default();
-    claim.title = work.title.clone();
+    claim.title = work.title;
     claim.authors = work
         .authors
         .iter()
-        .map(|p| match (&p.family, &p.given, &p.literal) {
-            (Some(family), Some(given), _) => format!("{family}, {given}"),
-            (Some(name), None, _) | (None, _, Some(name)) => name.clone(),
-            _ => String::new(),
-        })
+        .filter_map(Person::inverted)
         .filter(|a| !a.is_empty())
         .collect();
     claim.year = work.issued.map(|d| d.year());
-    claim.container = work.container_title.clone();
-    claim.volume = work.volume.clone();
-    claim.page = work.page.clone();
+    claim.container = work.container_title;
+    claim.volume = work.volume;
+    claim.page = work.page;
 
     let mut ids = Ids::default();
     if let Some(doi) = &item.doi {
@@ -82,7 +78,8 @@ mod tests {
     fn items_become_claims() {
         let src = r#"[
           {"id": "lecun2015", "type": "article-journal", "title": "Deep learning",
-           "author": [{"family": "LeCun", "given": "Yann"}, {"literal": "WHO"}],
+           "author": [{"family": "LeCun", "given": "Yann"}, {"literal": "WHO"},
+                      {"literal": "Geoffrey Hinton"}],
            "container-title": "Nature", "volume": 521, "page": "436-444",
            "issued": {"date-parts": [["2015", 5]]}, "DOI": "10.1038/nature14539",
            "PMID": 26017442},
@@ -92,7 +89,10 @@ mod tests {
         let lecun = &entries[0];
         assert_eq!(lecun.key, "lecun2015");
         assert_eq!(lecun.entry_type, "article-journal");
-        assert_eq!(lecun.claim.authors, ["LeCun, Yann", "WHO"]);
+        assert_eq!(
+            lecun.claim.authors,
+            ["LeCun, Yann", "WHO", "Hinton, Geoffrey"]
+        );
         assert_eq!(lecun.claim.year, Some(2015));
         assert_eq!(lecun.claim.volume.as_deref(), Some("521"));
         let ids: Vec<String> = lecun.claim.ids.iter().map(ToString::to_string).collect();

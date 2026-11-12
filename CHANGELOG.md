@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+Fixed:
+
+- An unnumbered reference whose authors fill its first line (ending
+  "et al.") was split from its title line when that started like an
+  author ("National, regional, and global trends…"). A surname's comma
+  now needs a capital after it, and a reference so far without a year or
+  identifier doesn't end there (#44).
+
 ## 0.8.3
 
 Added:

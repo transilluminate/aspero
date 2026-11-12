@@ -108,6 +108,10 @@ impl<T> Entry<T> {
 /// cached "not found".
 pub type CachedLookup = Entry<Option<SourceRecord>>;
 
+/// One ID's stored rows: its record (JSON, stored_at) and its miss
+/// (stored_at).
+type LookupRow = (Option<(String, i64)>, Option<i64>);
+
 /// What the engine needs from a cache; it depends on this, not on SQLite.
 pub trait Cache: Send + Sync {
     /// The cached answer for each of `ids` at `provider`, in order; `None`
@@ -226,6 +230,30 @@ impl SqliteCache {
         self.conn.lock().unwrap_or_else(|e| e.into_inner())
     }
 
+    /// The stored rows for each of `ids`, unparsed.
+    fn lookup_rows(&self, provider: &ProviderId, ids: &[WorkId]) -> Result<Vec<LookupRow>> {
+        let mut conn = self.conn();
+        // One read transaction: a consistent snapshot, one lock.
+        let tx = conn.transaction()?;
+        let mut found = tx.prepare_cached(
+            "SELECT r.record, r.stored_at FROM record_id i
+             JOIN record r ON r.provider = i.provider AND r.native_id = i.native_id
+             WHERE i.provider = ?1 AND i.work_id = ?2",
+        )?;
+        let mut missed =
+            tx.prepare_cached("SELECT stored_at FROM miss WHERE provider = ?1 AND work_id = ?2")?;
+        let mut rows = Vec::with_capacity(ids.len());
+        for id in ids {
+            let key = params![provider.as_str(), id.to_string()];
+            let record = found
+                .query_row(key, |r| Ok((r.get(0)?, r.get(1)?)))
+                .optional()?;
+            let miss = missed.query_row(key, |r| r.get(0)).optional()?;
+            rows.push((record, miss));
+        }
+        Ok(rows)
+    }
+
     pub fn stats(&self) -> Result<Stats> {
         let conn = self.conn();
         let count = |table: &str| -> Result<u64> {
@@ -295,24 +323,10 @@ impl Cache for SqliteCache {
         provider: &ProviderId,
         ids: &[WorkId],
     ) -> Result<Vec<Option<CachedLookup>>> {
-        let mut conn = self.conn();
-        // One read transaction: a consistent snapshot, one lock.
-        let tx = conn.transaction()?;
-        let mut found = tx.prepare_cached(
-            "SELECT r.record, r.stored_at FROM record_id i
-             JOIN record r ON r.provider = i.provider AND r.native_id = i.native_id
-             WHERE i.provider = ?1 AND i.work_id = ?2",
-        )?;
-        let mut missed =
-            tx.prepare_cached("SELECT stored_at FROM miss WHERE provider = ?1 AND work_id = ?2")?;
-
+        let rows = self.lookup_rows(provider, ids)?;
+        // Parsed after the lock is released.
         let mut out = Vec::with_capacity(ids.len());
-        for id in ids {
-            let key = params![provider.as_str(), id.to_string()];
-            let record: Option<(String, i64)> = found
-                .query_row(key, |r| Ok((r.get(0)?, r.get(1)?)))
-                .optional()?;
-            let miss: Option<i64> = missed.query_row(key, |r| r.get(0)).optional()?;
+        for (record, miss) in rows {
             let not_found = |at: i64| Entry {
                 value: None,
                 stored_at: timestamp(at),

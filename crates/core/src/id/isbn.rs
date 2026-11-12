@@ -66,10 +66,11 @@ impl IdSyntax for Isbn {
                 {
                     return Err("ISBN-10 must be 9 digits and a digit or X");
                 }
+                // Weighted 10 down to 2, then the check digit 1.
                 let sum: u32 = body
                     .iter()
-                    .enumerate()
-                    .map(|(i, &c)| digit(c) * (10 - i as u32))
+                    .zip((2..=10).rev())
+                    .map(|(&c, weight)| digit(c) * weight)
                     .sum::<u32>()
                     + if check[0] == b'X' {
                         10

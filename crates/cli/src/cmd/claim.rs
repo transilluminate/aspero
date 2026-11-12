@@ -2,7 +2,7 @@
 
 use aspero_json::{ClaimInput, InputClaim};
 
-use super::{Failure, read_stdin};
+use super::{Failure, lines, read_stdin};
 
 /// The claims to process: `text` plus flags as one claim, or one per stdin
 /// line when `text` is `-` (blank lines and `#` comments skipped). With
@@ -30,13 +30,7 @@ pub fn claims(
             .collect());
     }
     if text.as_deref() == Some("-") {
-        let input = read_stdin()?;
-        return Ok(input
-            .lines()
-            .map(str::trim)
-            .filter(|l| !l.is_empty() && !l.starts_with('#'))
-            .map(InputClaim::from_line)
-            .collect());
+        return Ok(lines(&read_stdin()?).map(InputClaim::from_line).collect());
     }
     let label = text.clone().unwrap_or_else(|| fields.describe());
     let input = ClaimInput { text, ..fields };

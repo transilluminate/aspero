@@ -6,7 +6,7 @@ use aspero_engine::{Engine, Extras, InputLookup, Looked, LookupResult, describe_
 use aspero_json::Status;
 use serde_json::Value;
 
-use super::{Failure, Out, print, print_line, read_stdin};
+use super::{Failure, Out, lines, print, print_line, read_stdin};
 use crate::args::Format;
 use crate::exit::Exit;
 use crate::output::{self, Level};
@@ -112,10 +112,7 @@ fn inputs(ids: Vec<String>) -> Result<(Vec<String>, Vec<Option<Value>>), Failure
             "no identifiers given (pass them, or pipe one per line)",
         ));
     }
-    Ok(read_stdin()?
-        .lines()
-        .map(str::trim)
-        .filter(|l| !l.is_empty() && !l.starts_with('#'))
+    Ok(lines(&read_stdin()?)
         .map(|line| match serde_json::from_str::<Value>(line) {
             Ok(object @ Value::Object(_)) => {
                 let id = object["id"].as_str().unwrap_or(line).to_owned();

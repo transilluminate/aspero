@@ -68,6 +68,14 @@ pub fn read_stdin() -> Result<String, Failure> {
     Ok(buf)
 }
 
+/// The lines of `text` worth reading, trimmed: blank lines and `#`
+/// comments skipped.
+pub fn lines(text: &str) -> impl Iterator<Item = &str> {
+    text.lines()
+        .map(str::trim)
+        .filter(|l| !l.is_empty() && !l.starts_with('#'))
+}
+
 /// Quotes `s` for a POSIX shell, leaving plain words as they are.
 pub fn shell_quote(s: &str) -> String {
     let plain = |c: char| c.is_ascii_alphanumeric() || "-_./:=+,@%".contains(c);

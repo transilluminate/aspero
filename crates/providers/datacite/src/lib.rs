@@ -125,11 +125,24 @@ impl Datacite {
         let hits = list
             .data
             .iter()
-            .map(|v| wire::to_record(v, resp.received_at).map(|r| Hit::new(r, None)))
-            .collect::<serde_json::Result<_>>()
-            .map_err(Error::decode)?;
+            .filter_map(|v| or_skip(wire::to_record(v, resp.received_at)))
+            .map(|r| Hit::new(r, None))
+            .collect();
         Ok((hits, list.meta))
     }
+}
+
+/// The record, or `None` with a warning when it doesn't decode: one bad
+/// record shouldn't cost the rest of the page.
+fn or_skip(record: serde_json::Result<SourceRecord>) -> Option<SourceRecord> {
+    record
+        .inspect_err(|e| {
+            tracing::warn!(
+                target: "aspero::decode",
+                provider = %ID, error = %e, "skipped a record that doesn't decode"
+            );
+        })
+        .ok()
 }
 
 #[derive(Debug, thiserror::Error)]

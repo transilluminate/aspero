@@ -127,14 +127,27 @@ impl OpenAlex {
         let hits = list
             .results
             .iter()
-            .map(|v| {
+            .filter_map(|v| {
                 let score = v.get("relevance_score").and_then(serde_json::Value::as_f64);
-                wire::to_record(v, Raw::json(v), resp.received_at).map(|r| Hit::new(r, score))
+                let record = wire::to_record(v, Raw::json(v), resp.received_at);
+                or_skip(record).map(|r| Hit::new(r, score))
             })
-            .collect::<serde_json::Result<_>>()
-            .map_err(Error::decode)?;
+            .collect();
         Ok((hits, list, usage))
     }
+}
+
+/// The record, or `None` with a warning when it doesn't decode: one bad
+/// record shouldn't cost the rest of the page.
+fn or_skip(record: serde_json::Result<SourceRecord>) -> Option<SourceRecord> {
+    record
+        .inspect_err(|e| {
+            tracing::warn!(
+                target: "aspero::decode",
+                provider = %ID, error = %e, "skipped a record that doesn't decode"
+            );
+        })
+        .ok()
 }
 
 /// How a requested ID is addressed at OpenAlex.

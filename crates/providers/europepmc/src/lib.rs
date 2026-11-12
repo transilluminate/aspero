@@ -261,6 +261,19 @@ impl Author {
     }
 }
 
+/// The record, or `None` with a warning when it doesn't decode: one bad
+/// record shouldn't cost the rest of the page.
+fn or_skip(record: serde_json::Result<SourceRecord>) -> Option<SourceRecord> {
+    record
+        .inspect_err(|e| {
+            tracing::warn!(
+                target: "aspero::decode",
+                provider = %ID, error = %e, "skipped a record that doesn't decode"
+            );
+        })
+        .ok()
+}
+
 fn to_record(value: &serde_json::Value, at: Timestamp) -> serde_json::Result<SourceRecord> {
     let r = WireRecord::deserialize(value)?;
     let open_access = r.open_access();
@@ -408,9 +421,8 @@ impl Provider for EuropePmc {
                 ("pageSize", chunk.len().to_string()),
             ];
             let (results, at) = self.search_raw(&params).await?;
-            for v in &results.result_list.result {
-                found.push(to_record(v, at).map_err(Error::decode)?);
-            }
+            let records = results.result_list.result.iter();
+            found.extend(records.filter_map(|v| or_skip(to_record(v, at))));
         }
         let lookups = ids
             .iter()
@@ -465,9 +477,9 @@ impl Provider for EuropePmc {
             .result_list
             .result
             .iter()
-            .map(|v| to_record(v, at).map(|r| Hit::new(r, None)))
-            .collect::<serde_json::Result<_>>()
-            .map_err(Error::decode)?;
+            .filter_map(|v| or_skip(to_record(v, at)))
+            .map(|r| Hit::new(r, None))
+            .collect();
         // The last page repeats its cursor; an empty page is also the end.
         let next = results
             .next_cursor_mark

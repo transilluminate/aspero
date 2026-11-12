@@ -207,6 +207,19 @@ fn year_in(date: &str) -> Option<i16> {
         .and_then(|w| std::str::from_utf8(w).ok()?.parse().ok())
 }
 
+/// The record, or `None` with a warning when it doesn't decode: one bad
+/// record shouldn't cost the rest of the page.
+fn or_skip(record: serde_json::Result<SourceRecord>) -> Option<SourceRecord> {
+    record
+        .inspect_err(|e| {
+            tracing::warn!(
+                target: "aspero::decode",
+                provider = %ID, error = %e, "skipped a record that doesn't decode"
+            );
+        })
+        .ok()
+}
+
 fn edition_record(
     requested: &Isbn,
     value: &serde_json::Value,
@@ -305,9 +318,7 @@ impl Provider for OpenLibrary {
             for ((id, isbn), key) in chunk_ids.iter().zip(chunk).zip(&keys) {
                 let record = body
                     .get(key)
-                    .map(|v| edition_record(isbn, v, resp.received_at))
-                    .transpose()
-                    .map_err(Error::decode)?;
+                    .and_then(|v| or_skip(edition_record(isbn, v, resp.received_at)));
                 lookups.push(Lookup {
                     id: id.clone(),
                     record,
@@ -358,9 +369,9 @@ impl Provider for OpenLibrary {
         let hits: Vec<Hit> = results
             .docs
             .iter()
-            .map(|v| search_record(base, v, resp.received_at).map(|r| Hit::new(r, None)))
-            .collect::<serde_json::Result<_>>()
-            .map_err(Error::decode)?;
+            .filter_map(|v| or_skip(search_record(base, v, resp.received_at)))
+            .map(|r| Hit::new(r, None))
+            .collect();
         let seen = u64::from(page_number) * u64::from(limit);
         let more = !hits.is_empty() && results.num_found.is_some_and(|n| n > seen);
         let next = more.then(|| Cursor((page_number + 1).to_string()));

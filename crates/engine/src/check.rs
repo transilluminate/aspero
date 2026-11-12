@@ -11,9 +11,6 @@ use futures::StreamExt;
 
 use crate::{Candidate, Engine, Verdict, Verification};
 
-/// arXiv's DataCite prefix; a publisher DOI is preferred over it.
-const ARXIV_DOI_PREFIX: &str = "10.48550";
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 #[non_exhaustive]
 pub enum Severity {
@@ -212,25 +209,14 @@ pub fn findings(claim: &Claim, v: &Verification) -> Vec<Finding> {
 /// a published version's DOI.
 fn arxiv_of(id: &WorkId) -> Option<WorkId> {
     let WorkId::Doi(doi) = id else { return None };
-    (doi.prefix() == ARXIV_DOI_PREFIX)
-        .then(|| {
-            doi.suffix()
-                .strip_prefix("arxiv.")?
-                .parse()
-                .ok()
-                .map(WorkId::Arxiv)
-        })
-        .flatten()
+    doi.arxiv().map(WorkId::Arxiv)
 }
 
 /// A publisher DOI if the work has one, else its arXiv DOI.
 fn preferred_doi(ids: &[WorkId]) -> Option<&WorkId> {
     let dois = || ids.iter().filter(|id| id.kind() == IdKind::Doi);
     dois()
-        .find(|id| {
-            !id.to_string()
-                .starts_with(&format!("doi:{ARXIV_DOI_PREFIX}/"))
-        })
+        .find(|id| !matches!(id, WorkId::Doi(d) if d.is_arxiv()))
         .or_else(|| dois().next())
 }
 

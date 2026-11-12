@@ -16,9 +16,6 @@ use serde::Deserialize;
 
 use crate::ID;
 
-/// The DataCite prefix arXiv uses for its DOIs (`10.48550/arxiv.<id>`).
-pub(crate) const ARXIV_DOI_PREFIX: &str = "10.48550";
-
 #[derive(Debug, Default, Deserialize)]
 #[serde(default)]
 pub(crate) struct WireWork {
@@ -161,7 +158,7 @@ impl WireWork {
         }
         let doi = self.ids.doi.as_ref().or(self.doi.as_ref());
         if let Some(doi) = doi.and_then(|s| s.parse::<Doi>().ok()) {
-            if let Some(arxiv) = arxiv_from_doi(&doi) {
+            if let Some(arxiv) = doi.arxiv() {
                 push(arxiv.into());
             }
             push(doi.into());
@@ -275,13 +272,6 @@ impl WireAuthorship {
     }
 }
 
-pub(crate) fn arxiv_from_doi(doi: &Doi) -> Option<ArxivId> {
-    if doi.prefix() != ARXIV_DOI_PREFIX {
-        return None;
-    }
-    doi.suffix().strip_prefix("arxiv.")?.parse().ok()
-}
-
 /// OpenAlex types to CSL. Conference papers have their own type
 /// (`conference-paper`, seen 2026-11), but older records may still be an
 /// `article` in a conference source. OpenAlex's `review` means a review
@@ -349,13 +339,5 @@ mod tests {
             work_type("paratext", None),
             WorkType::Other("paratext".into())
         );
-    }
-
-    #[test]
-    fn arxiv_doi_maps_to_arxiv_id() {
-        let doi: Doi = "10.48550/arXiv.1706.03762".parse().unwrap();
-        assert_eq!(arxiv_from_doi(&doi).unwrap().to_string(), "1706.03762");
-        let other: Doi = "10.1038/nature14539".parse().unwrap();
-        assert_eq!(arxiv_from_doi(&other), None);
     }
 }

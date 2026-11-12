@@ -22,7 +22,7 @@ use aspero_core::{
 use async_trait::async_trait;
 use secrecy::{ExposeSecret, SecretString};
 
-use crate::wire::{ARXIV_DOI_PREFIX, WireList};
+use crate::wire::WireList;
 
 pub const ID: ProviderId = ProviderId::from_static("openalex");
 
@@ -165,10 +165,7 @@ impl Key {
         Ok(match id {
             WorkId::Doi(doi) => Key::doi(doi.clone()),
             // arXiv works are indexed under their DataCite DOI.
-            WorkId::Arxiv(arxiv) => {
-                let doi = format!("{ARXIV_DOI_PREFIX}/arxiv.{}", arxiv.id());
-                Key::doi(doi.parse::<Doi>()?)
-            }
+            WorkId::Arxiv(arxiv) => Key::doi(arxiv.doi()),
             WorkId::Pmid(pmid) => Key {
                 filter: "pmid",
                 value: pmid.to_string(),

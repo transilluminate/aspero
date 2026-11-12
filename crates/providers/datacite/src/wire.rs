@@ -11,7 +11,7 @@ use aspero_core::{
 use jiff::Timestamp;
 use serde::Deserialize;
 
-use crate::{ARXIV_DOI_PREFIX, ID};
+use crate::ID;
 
 #[derive(Debug, Default, Deserialize)]
 #[serde(default)]
@@ -144,11 +144,7 @@ fn ids(doi: Option<Doi>, identifiers: &[Identifier]) -> Vec<WorkId> {
             ids.push(id);
         }
     };
-    let arxiv_from_doi = doi.as_ref().and_then(|d| {
-        (d.prefix() == ARXIV_DOI_PREFIX)
-            .then(|| d.suffix().strip_prefix("arxiv.")?.parse::<ArxivId>().ok())
-            .flatten()
-    });
+    let arxiv_from_doi = doi.as_ref().and_then(Doi::arxiv);
     if let Some(doi) = doi {
         push(WorkId::Doi(doi));
     }

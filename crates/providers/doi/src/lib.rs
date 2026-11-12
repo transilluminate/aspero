@@ -15,7 +15,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use aspero_core::csl::CslItem;
-use aspero_core::http::path_segment;
+use aspero_core::http::{path_segment, status_error};
 use aspero_core::{
     Capabilities, Doi, Error, Field, FieldSet, HttpClient, HttpRequest, HttpResponse, IdKind,
     Lookup, ProviderId, Raw, ResiliencePolicy, Response, Result, SourceRecord, WorkId,
@@ -126,16 +126,9 @@ fn check(resp: &HttpResponse) -> Result<()> {
         return Ok(());
     }
     Err(match resp.status {
-        404 => Error::NotFound,
         // The DOI exists, but its agency offers no CSL-JSON.
         406 => Error::Unsupported("CSL-JSON from this DOI's registration agency"),
-        429 => Error::RateLimited {
-            retry_after: resp.retry_after(),
-        },
-        status => Error::Server {
-            status,
-            message: None,
-        },
+        _ => status_error(resp, None),
     })
 }
 

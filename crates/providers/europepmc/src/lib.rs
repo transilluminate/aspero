@@ -14,7 +14,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use aspero_core::csl::{plain_text, strip_markup};
-use aspero_core::http::escape_lucene;
+use aspero_core::http::{escape_lucene, status_error};
 use aspero_core::{
     Capabilities, Cursor, Doi, Error, FieldSet, Filter, Hit, HttpClient, HttpRequest, HttpResponse,
     IdKind, Lookup, Nbk, OpenAccess, Page, PartialDate, Person, Pmcid, Pmid, Provider, ProviderId,
@@ -96,14 +96,7 @@ fn check(resp: &HttpResponse) -> Result<()> {
     }
     Err(match resp.status {
         400 => Error::BadRequest("rejected by Europe PMC".into()),
-        404 => Error::NotFound,
-        429 => Error::RateLimited {
-            retry_after: resp.retry_after(),
-        },
-        status => Error::Server {
-            status,
-            message: None,
-        },
+        _ => status_error(resp, None),
     })
 }
 

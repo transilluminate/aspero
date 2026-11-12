@@ -133,6 +133,20 @@ impl HttpResponse {
     }
 }
 
+/// The error for a non-2xx status a provider doesn't map itself: 401 and 403
+/// are refused credentials, 404 is not found, 429 is slow down, and anything
+/// else a server failure.
+pub fn status_error(resp: &HttpResponse, message: Option<String>) -> Error {
+    match resp.status {
+        401 | 403 => Error::AuthRejected { message },
+        404 => Error::NotFound,
+        429 => Error::RateLimited {
+            retry_after: resp.retry_after(),
+        },
+        status => Error::Server { status, message },
+    }
+}
+
 /// Characters escaped by [`path_segment`].
 const PATH_ESCAPES: &percent_encoding::AsciiSet = &percent_encoding::CONTROLS
     .add(b' ')

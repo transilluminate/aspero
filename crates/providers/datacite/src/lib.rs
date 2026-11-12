@@ -17,7 +17,7 @@ mod wire;
 use std::sync::Arc;
 use std::time::Duration;
 
-use aspero_core::http::{escape_lucene, path_segment};
+use aspero_core::http::{escape_lucene, path_segment, status_error};
 use aspero_core::{
     Capabilities, Cursor, Doi, Error, Field, FieldSet, Filter, Hit, HttpClient, HttpRequest,
     HttpResponse, IdKind, Lookup, Page, Provider, ProviderId, ResiliencePolicy, Response, Result,
@@ -151,12 +151,7 @@ fn check(resp: &HttpResponse) -> Result<()> {
     let message = message(resp);
     Err(match resp.status {
         400 | 422 => Error::BadRequest(message.unwrap_or_else(|| "rejected by DataCite".into())),
-        401 | 403 => Error::AuthRejected { message },
-        404 => Error::NotFound,
-        429 => Error::RateLimited {
-            retry_after: resp.retry_after(),
-        },
-        status => Error::Server { status, message },
+        _ => status_error(resp, message),
     })
 }
 

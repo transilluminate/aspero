@@ -15,7 +15,7 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use aspero_core::http::escape_lucene;
+use aspero_core::http::{escape_lucene, status_error};
 use aspero_core::{
     Capabilities, Cursor, Error, FieldSet, Filter, Hit, HttpClient, HttpRequest, HttpResponse,
     IdKind, Isbn, Lookup, Page, PartialDate, Person, Provider, ProviderId, Raw, ResiliencePolicy,
@@ -110,14 +110,7 @@ fn check(resp: &HttpResponse) -> Result<()> {
     }
     Err(match resp.status {
         400 | 422 => Error::BadRequest("rejected by Open Library".into()),
-        404 => Error::NotFound,
-        429 => Error::RateLimited {
-            retry_after: resp.retry_after(),
-        },
-        status => Error::Server {
-            status,
-            message: None,
-        },
+        _ => status_error(resp, None),
     })
 }
 

@@ -591,19 +591,14 @@ impl Iterator for Pieces<'_> {
 /// `:`, and of the rest only PMCIDs and Bookshelf IDs are recognised.
 fn could_be_unlabelled(piece: &str) -> bool {
     piece.contains('/')
-        || piece.split_once(':').is_some_and(|(head, _)| {
-            IdKind::from_prefix(head).is_some() || IdKind::from_label(head).is_some()
-        })
+        || prefixed(piece)
         || ["pmc", "nbk"].iter().any(|p| starts_with_ci(piece, p))
 }
 
 /// An identifier written without a separate label: any kind when prefixed
 /// or a URL; otherwise only kinds whose shape can't be mistaken.
 fn unlabelled(piece: &str) -> Option<WorkId> {
-    let explicit = Url::parse(piece).is_some()
-        || piece.split_once(':').is_some_and(|(head, _)| {
-            IdKind::from_prefix(head).is_some() || IdKind::from_label(head).is_some()
-        });
+    let explicit = Url::parse(piece).is_some() || prefixed(piece);
     match piece.parse::<WorkId>() {
         Ok(id) if explicit || matches!(id.kind(), IdKind::Doi | IdKind::Pmcid | IdKind::Nbk) => {
             Some(id)
@@ -620,6 +615,13 @@ fn unlabelled(piece: &str) -> Option<WorkId> {
             WorkId::parse_as(IdKind::Doi, &piece[at..]).ok()
         }
     }
+}
+
+/// Whether a piece starts with a kind's prefix or label before a `:`.
+fn prefixed(piece: &str) -> bool {
+    piece.split_once(':').is_some_and(|(head, _)| {
+        IdKind::from_prefix(head).is_some() || IdKind::from_label(head).is_some()
+    })
 }
 
 /// Byte offset of `part`, a subslice of `whole`.

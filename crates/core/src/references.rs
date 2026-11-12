@@ -371,7 +371,13 @@ impl<'a> List<'a> {
         for line in lines {
             let text = self.line(&line);
             match groups.last_mut() {
-                Some(group) if !(ends_sentence(&self.join(group)) && starts_with_author(text)) => {
+                // A reference so far without a year or identifier (an author
+                // line ending "et al.") still needs its title and the rest.
+                Some(group)
+                    if !(ends_sentence(&self.join(group))
+                        && dated(&self.join(group))
+                        && starts_with_author(text)) =>
+                {
                     group.push(line)
                 }
                 _ => groups.push(vec![line]),
@@ -485,8 +491,10 @@ fn starts_with_author(line: &str) -> bool {
         return false;
     }
     let rest = &line[surname_len..];
-    if rest.starts_with(',') {
-        return true;
+    // "Smith, J." or "Smith, John": a capital after the comma, never a
+    // word in lower case ("National, regional, and global trends").
+    if let Some(after) = rest.strip_prefix(',') {
+        return after.trim_start().starts_with(char::is_uppercase);
     }
     // Initials: one to three capitals, maybe dotted, then a break.
     let Some(rest) = rest.strip_prefix(' ') else {
@@ -873,6 +881,26 @@ mod tests {
             "{found:?}"
         );
         assert!(found[1].contains("(the SAVE trial)."), "{found:?}");
+    }
+
+    #[test]
+    fn an_author_line_is_not_a_reference_of_its_own() {
+        // #44: the authors on a line of their own, ending "et al.", then a
+        // title starting "National, regional, …".
+        let reference = "Finucane MM, Stevens GA, Cowan MJ, Danaei G, Lin JK, Paciorek CJ, et al.\n\
+            National, regional, and global trends in body-mass index since 1980: system-\n\
+            atic analysis of health examination surveys and epidemiological studies with\n\
+            960 country-years and 9 1 million participants. Lancet 2011;377:557\u{2013}67.\n\
+            http://dx.doi.org/10.1016/S0140-6736(10)62037-5.";
+        for text in [reference.to_owned(), reference.replacen('F', "", 1)] {
+            let found = texts(&text);
+            assert_eq!(found.len(), 1, "{found:?}");
+            assert!(found[0].contains("et al. National, regional"), "{found:?}");
+        }
+        // A list of such references still splits.
+        let two =
+            format!("{reference}\nSmith J, Jones K, et al.\nA second title. BMJ 2019;365:l123.");
+        assert_eq!(texts(&two).len(), 2, "{:?}", texts(&two));
     }
 
     #[test]

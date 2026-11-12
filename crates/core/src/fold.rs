@@ -111,6 +111,10 @@ fn fold(c: char, rest: &str) -> Option<&'static str> {
         '\u{2018}' | '\u{2019}' | '\u{201A}' | '\u{2032}' => "'",
         '\u{201C}' | '\u{201D}' | '\u{201E}' | '\u{2033}' => "\"",
         '\u{A0}' | '\u{2000}'..='\u{200A}' | '\u{202F}' | '\u{205F}' | '\u{3000}' => " ",
+        // Line breaks as some copies write them: classic Mac's lone `\r`,
+        // Unicode's line and paragraph separators, NEL.
+        '\r' if !rest.starts_with('\n') => "\n",
+        '\u{2028}' | '\u{2029}' | '\u{85}' => "\n",
         '\u{FB00}' => "ff",
         '\u{FB01}' => "fi",
         '\u{FB02}' => "fl",
@@ -122,12 +126,12 @@ fn fold(c: char, rest: &str) -> Option<&'static str> {
 }
 
 /// The first byte at or after `from` that may start a character [`fold`]
-/// changes, or the end: every one is U+00A0 to U+00FF (lead byte `C2`),
-/// U+2000 to U+2FFF (`E2`), U+3000 to U+3FFF (`E3`) or U+F000 to U+FFFF
-/// (`EF`).
+/// changes, or the end: every one is `\r`, U+0080 to U+00FF (lead byte
+/// `C2`), U+2000 to U+2FFF (`E2`), U+3000 to U+3FFF (`E3`) or U+F000 to
+/// U+FFFF (`EF`).
 fn next_foldable(bytes: &[u8], from: usize) -> usize {
     const CHUNK: usize = 32;
-    let lead = |b: u8| matches!(b, 0xC2 | 0xE2 | 0xE3 | 0xEF);
+    let lead = |b: u8| matches!(b, b'\r' | 0xC2 | 0xE2 | 0xE3 | 0xEF);
     let mut at = from;
     while let Some(chunk) = bytes.get(at..at + CHUNK) {
         // No early exit within a chunk, so it vectorises.
@@ -177,7 +181,8 @@ mod tests {
             parts in prop::collection::vec(prop::sample::select(vec![
                 "a", "1", " ", "\n", "\t", "/", "é", "\u{AD}", "\u{AD}\n", "\u{200B}",
                 "\u{FEFF}", "\u{2013}", "\u{201C}", "\u{2019}", "\u{A0}", "\u{3000}",
-                "\u{FB03}", "\u{FB01}", "\u{1F600}", "\u{2028}", "abcdefghij",
+                "\u{FB03}", "\u{FB01}", "\u{1F600}", "\u{2028}", "\u{2029}", "\u{85}", "\r",
+                "\r\n", "abcdefghij",
             ]), 0..40),
         ) {
             let original = parts.concat();
@@ -208,6 +213,16 @@ mod tests {
             "10.1038/s41586\u{2010}020\u{200B}-2649-2"
         );
         assert_eq!(&original[folded.original(&(0..1))], "ﬁ");
+    }
+
+    #[test]
+    fn line_breaks_however_written_are_newlines() {
+        assert_eq!(
+            Folded::new("a\rb\u{2028}c\u{2029}d\u{85}e").text,
+            "a\nb\nc\nd\ne"
+        );
+        // A Windows line ending is one break, not two.
+        assert_eq!(Folded::new("a\r\nb").text, "a\r\nb");
     }
 
     #[test]

@@ -308,6 +308,28 @@ async fn identifier_only_claims_check_existence_without_searching() {
 }
 
 #[tokio::test]
+async fn an_identifier_with_a_wrong_year_is_plausible() {
+    let (engine, _, _) = live_like();
+    let mut claim = Claim::default();
+    claim.ids = vec!["10.1038/nature14539".parse().unwrap()];
+    claim.year = Some(1999);
+
+    let v = engine.verify(&claim, 5).await;
+    assert_eq!(v.verdict, Verdict::Plausible, "{}", v.reason);
+    let Reason::IdPartlyMatches { differs } = &v.why else {
+        panic!("{:?}", v.why);
+    };
+    assert_eq!(differs.len(), 1);
+    assert_eq!(differs[0].field, CitedField::Year);
+    assert_eq!(differs[0].cited.as_deref(), Some("1999"));
+
+    claim.year = Some(2015);
+    let v = engine.verify(&claim, 5).await;
+    assert_eq!(v.verdict, Verdict::Verified, "{}", v.reason);
+    assert_eq!(v.why, Reason::IdExists);
+}
+
+#[tokio::test]
 async fn records_sharing_an_identifier_merge_into_one_candidate() {
     let openalex = Arc::new(
         Scripted::new("openalex")

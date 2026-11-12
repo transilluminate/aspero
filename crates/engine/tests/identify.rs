@@ -113,3 +113,46 @@ async fn nothing_sure_enough_is_none() {
             .is_none()
     );
 }
+
+#[tokio::test]
+async fn on_a_title_tie_the_header_identifier_wins() {
+    let mut page = String::from("https://doi.org/10.1101/2015.01.01.000001\nDeep learning\n");
+    for i in 0..6 {
+        page.push_str(&format!("representations of data {i}.\n"));
+    }
+    page.push_str("as published (doi:10.1038/nature14539).\n");
+    for i in 0..6 {
+        page.push_str(&format!("more layers {i}.\n"));
+    }
+    let works = vec![
+        work(
+            "crossref",
+            &["10.1101/2015.01.01.000001"],
+            "Deep learning",
+            &["LeCun"],
+            2015,
+        ),
+        work(
+            "crossref",
+            &["10.1038/nature14539"],
+            "Deep learning",
+            &["LeCun"],
+            2015,
+        ),
+    ];
+    let crossref = Arc::new(Scripted::new("crossref").with(works));
+    let engine = engine(vec![crossref]);
+    let found = engine
+        .identify(&page, None, Some("Deep learning"))
+        .await
+        .expect("identified");
+    assert_eq!(found.decided_by, Decision::IdentifierAndTitle);
+    let v = &found.verification;
+    let best = &v.report.candidates[v.best.unwrap()];
+    assert!(
+        best.ids
+            .contains(&"doi:10.1101/2015.01.01.000001".parse().unwrap()),
+        "{:?}",
+        best.ids
+    );
+}

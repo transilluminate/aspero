@@ -23,6 +23,7 @@ use std::ops::Range;
 use crate::Alternative;
 use crate::fold::Folded;
 use crate::id::is_digits;
+use crate::work::PLAUSIBLE_YEARS;
 
 /// One reference found in a list.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -496,11 +497,11 @@ fn ends_sentence(line: &str) -> bool {
     line.ends_with(['.', '?', '!']) || in_link(line) && !line.ends_with(['/', '-'])
 }
 
-/// Has a year (1600 to 2099) or an identifier, as a whole reference does.
+/// Has a year (1600 to 2100) or an identifier, as a whole reference does.
 fn dated(line: &str) -> bool {
     let year = line
         .split(|c: char| !c.is_ascii_digit())
-        .any(|n| n.len() == 4 && ("1600".."2100").contains(&n));
+        .any(|n| n.len() == 4 && n.parse().is_ok_and(|y| PLAUSIBLE_YEARS.contains(&y)));
     // What styles write for a work without a year, or a web page's date.
     let lower = line.to_lowercase();
     let undated = [

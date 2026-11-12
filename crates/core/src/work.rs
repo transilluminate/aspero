@@ -408,6 +408,10 @@ pub fn tidy_abstract(text: &str) -> String {
     text.to_owned()
 }
 
+/// Years a work could have been published in: a four-digit number in
+/// text is read as a year only within these.
+pub(crate) const PLAUSIBLE_YEARS: std::ops::RangeInclusive<i16> = 1600..=2100;
+
 /// A date known to year, month or day precision. Serialises as `2017`,
 /// `2017-06` or `2017-06-12`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]

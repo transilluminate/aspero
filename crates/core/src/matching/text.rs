@@ -4,6 +4,7 @@
 use unicode_normalization::UnicodeNormalization;
 
 use super::AUTHORS_COMPARED;
+use crate::work::PLAUSIBLE_YEARS;
 
 /// Lowercase ASCII-folded words: accents dropped, punctuation as spaces.
 pub fn normalise(s: &str) -> String {
@@ -228,7 +229,7 @@ impl Normalised {
             .iter()
             .filter(|w| w.len() == 4)
             .filter_map(|w| w.parse::<i16>().ok())
-            .filter(|y| (1600..=2100).contains(y))
+            .filter(|y| PLAUSIBLE_YEARS.contains(y))
             .collect()
     }
 }

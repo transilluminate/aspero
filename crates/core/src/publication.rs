@@ -10,6 +10,7 @@
 
 use crate::id::is_digits;
 use crate::matching::normalise;
+use crate::work::PLAUSIBLE_YEARS;
 
 /// Words a journal abbreviation leaves out.
 const JOURNAL_STOPWORDS: &[&str] = &[
@@ -188,8 +189,8 @@ pub(crate) fn locator(text: &str) -> Locator {
 /// "2016)": a year, its bracket closed.
 fn bracketed_year(s: &str) -> bool {
     s.strip_suffix(')')
-        .and_then(|y| y.parse::<u16>().ok())
-        .is_some_and(|y| (1600..=2100).contains(&y))
+        .and_then(|y| y.parse().ok())
+        .is_some_and(|y| PLAUSIBLE_YEARS.contains(&y))
 }
 
 /// A page range: "797–804".

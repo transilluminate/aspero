@@ -212,6 +212,7 @@ impl Normalised {
             "isbn",
         ];
         let author_words: Vec<&str> = families.iter().flat_map(|f| f.split(' ')).collect();
+        let journal = journal.map(crate::publication::significant);
         self.words.iter().filter(|w| !w.is_empty()).all(|w| {
             w.chars().count() <= 2
                 || w.bytes().any(|b| b.is_ascii_digit())
@@ -219,7 +220,9 @@ impl Normalised {
                 || LINK_WORDS.contains(&w.as_str())
                 || FURNITURE.contains(&w.as_str())
                 || author_words.contains(&w.as_str())
-                || journal.is_some_and(|j| crate::publication::journal_word(w, j))
+                || journal
+                    .as_ref()
+                    .is_some_and(|j| crate::publication::journal_word(w, j))
         })
     }
 

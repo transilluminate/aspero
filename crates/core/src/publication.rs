@@ -41,15 +41,15 @@ pub(crate) fn journal_in(words: &[String], journal: &str) -> bool {
         || (full.len() > 1 && text.iter().any(|w| is_initials(w, &full)))
 }
 
-/// Whether `word` (normalised) is one of `journal`'s significant words,
-/// or abbreviates one, or is its initials ("res" or "erj" in "ERJ Open
-/// Research").
-pub(crate) fn journal_word(word: &str, journal: &str) -> bool {
-    let full = significant(journal);
-    full.iter().any(|f| abbreviates_word(word, f)) || (full.len() > 1 && is_initials(word, &full))
+/// Whether `word` (normalised) is one of a journal's significant words
+/// (from [`significant`]), or abbreviates one, or is its initials ("res"
+/// or "erj" in "ERJ Open Research").
+pub(crate) fn journal_word(word: &str, full: &[String]) -> bool {
+    full.iter().any(|f| abbreviates_word(word, f)) || (full.len() > 1 && is_initials(word, full))
 }
 
-fn significant(name: &str) -> Vec<String> {
+/// A journal name's words that tell it apart, normalised.
+pub(crate) fn significant(name: &str) -> Vec<String> {
     normalise(name)
         .split(' ')
         .filter(|w| !w.is_empty() && !JOURNAL_STOPWORDS.contains(w))

@@ -125,12 +125,9 @@ pub fn candidate(c: &Candidate, full: bool) -> Value {
         .iter()
         .map(|s| json!({"provider": s.provider, "via": s.via.as_str(), "rank": s.rank, "score": s.score}))
         .collect();
-    let mut work = work(&c.record, full);
-    work["ids"] = json!(c.ids);
+    let mut work = work(&c.merged_record(), full);
+    // Always there, null without identifiers.
     work["canonical"] = json!(aspero_core::canonical(&c.ids));
-    if !c.updates.is_empty() {
-        work["updates"] = json!(c.updates);
-    }
     json!({
         "confidence": (a.confidence * 100.0).round() / 100.0,
         "checks": checks,

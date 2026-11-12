@@ -108,13 +108,7 @@ impl Work {
     /// A candidate's work, with every identifier and notice its merged
     /// records gave.
     fn from_candidate(c: &CoreCandidate) -> Self {
-        let mut work = Work::from_record(&c.record);
-        work.ids = c.ids.iter().map(ToString::to_string).collect();
-        work.canonical = aspero_core::canonical(&c.ids).map(|id| id.to_string());
-        if !c.updates.is_empty() {
-            work.notices = c.updates.iter().map(Notice::from).collect();
-        }
-        work
+        Work::from_record(&c.merged_record())
     }
 }
 

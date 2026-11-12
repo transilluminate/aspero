@@ -196,15 +196,12 @@ pub fn candidate_text(c: &Candidate, indent: &str) -> String {
         .iter()
         .map(|s| format!("{} {}", s.provider, s.via.as_str().replace('_', " ")))
         .collect();
-    let mut record = c.record.clone();
-    record.ids = c.ids.clone();
-    record.work.updates = c.updates.clone();
     format!(
         "{indent}{:.2}  {}  (via {})\n{}",
         a.confidence,
         checks.join(" · "),
         via.join(", "),
-        work_text(&record, indent)
+        work_text(&c.merged_record(), indent)
     )
 }
 

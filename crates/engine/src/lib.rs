@@ -78,7 +78,8 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use aspero_core::{
-    Error, ErrorCategory, ErrorKind, Provider, ProviderId, ResiliencePolicy, Response, Usage,
+    Error, ErrorCategory, ErrorKind, Provider, ProviderId, ResiliencePolicy, Response,
+    SourceRecord, Usage,
 };
 pub use aspero_store::{Cache, Pacing, SqliteCache, Stats as CacheStats, StoreError};
 pub use inputs::{Extras, InputLookup, InputsReport, Looked};
@@ -317,6 +318,17 @@ impl Engine {
     /// Registered providers, in priority order.
     pub fn providers(&self) -> impl Iterator<Item = &Arc<dyn Provider>> {
         self.entries.iter().map(|e| &e.provider)
+    }
+}
+
+impl Candidate {
+    /// Its best record with every identifier and notice the merged records
+    /// gave.
+    pub fn merged_record(&self) -> SourceRecord {
+        let mut record = self.record.clone();
+        record.ids = self.ids.clone();
+        record.work.updates = self.updates.clone();
+        record
     }
 }
 

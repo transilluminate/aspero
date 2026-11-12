@@ -62,9 +62,7 @@ pub async fn run(engine: &Engine, args: ClaimArgs, out: Out) -> Result<Exit, Fai
             && let Some(best) = v.best.map(|i| &v.report.candidates[i])
         {
             // Search under every identifier merged into the match.
-            let mut record = best.record.clone();
-            record.ids = best.ids.clone();
-            let fetched = engine.abstracts(&[&record]).await;
+            let fetched = engine.abstracts(&[&best.merged_record()]).await;
             verified.add_usage(&fetched.usage);
             let found = fetched.found.into_iter().next().flatten();
             aspero_json::set_abstract(&mut item["match"]["work"], found.as_ref());

@@ -1,7 +1,7 @@
 //! `aspero resolve`: every candidate work for a citation, scored.
 
 use aspero_core::SourceRecord;
-use aspero_engine::{Engine, add_usage};
+use aspero_engine::{Candidate, Engine, add_usage};
 use serde_json::{Value, json};
 
 use super::claim::claims;
@@ -38,11 +38,7 @@ pub async fn run(engine: &Engine, args: ClaimArgs, out: Out) -> Result<Exit, Fai
             let records: Vec<SourceRecord> = report
                 .candidates
                 .iter()
-                .map(|c| {
-                    let mut r = c.record.clone();
-                    r.ids = c.ids.clone();
-                    r
-                })
+                .map(Candidate::merged_record)
                 .collect();
             let fetched = engine.abstracts(&records.iter().collect::<Vec<_>>()).await;
             for (p, u) in &fetched.usage {

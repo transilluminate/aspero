@@ -26,6 +26,7 @@ use crate::exit::Exit;
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> ExitCode {
+    reset_sigpipe();
     let cli = Cli::parse();
     init_logging(cli.global.verbose);
     let format = match cli.global.format {
@@ -67,6 +68,21 @@ async fn main() -> ExitCode {
         }
     }
 }
+
+/// Dies quietly on a closed stdout (`aspero scan big.txt | head -1`), as
+/// other Unix tools do, instead of panicking in `println!`. Rust ignores
+/// SIGPIPE by default.
+#[cfg(unix)]
+#[allow(unsafe_code)]
+fn reset_sigpipe() {
+    // SAFETY: called first thing in `main`, before any other threads exist.
+    unsafe {
+        libc::signal(libc::SIGPIPE, libc::SIG_DFL);
+    }
+}
+
+#[cfg(not(unix))]
+fn reset_sigpipe() {}
 
 /// `-v`: aspero's own events (requests, cache, retries) at info; `-vv`:
 /// everything at debug, including the HTTP stack. Always to stderr, so

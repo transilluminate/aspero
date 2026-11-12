@@ -15,6 +15,7 @@
 use std::sync::Arc;
 use std::time::Duration;
 
+use aspero_core::csl::null_default;
 use aspero_core::http::{escape_lucene, status_error};
 use aspero_core::{
     Capabilities, Cursor, Error, FieldSet, Filter, Hit, HttpClient, HttpRequest, HttpResponse,
@@ -120,9 +121,12 @@ fn check(resp: &HttpResponse) -> Result<()> {
 struct Edition {
     title: Option<String>,
     subtitle: Option<String>,
+    #[serde(deserialize_with = "null_default")]
     authors: Vec<Named>,
     publish_date: Option<String>,
+    #[serde(deserialize_with = "null_default")]
     publishers: Vec<Named>,
+    #[serde(deserialize_with = "null_default")]
     identifiers: Identifiers,
     url: Option<String>,
 }
@@ -136,7 +140,9 @@ struct Named {
 #[derive(Debug, Default, Deserialize)]
 #[serde(default)]
 struct Identifiers {
+    #[serde(deserialize_with = "null_default")]
     isbn_13: Vec<String>,
+    #[serde(deserialize_with = "null_default")]
     isbn_10: Vec<String>,
 }
 
@@ -147,11 +153,15 @@ struct SearchDoc {
     key: Option<String>,
     title: Option<String>,
     subtitle: Option<String>,
+    #[serde(deserialize_with = "null_default")]
     author_name: Vec<String>,
     first_publish_year: Option<i16>,
     /// Every edition's year.
+    #[serde(deserialize_with = "null_default")]
     publish_year: Vec<i16>,
+    #[serde(deserialize_with = "null_default")]
     isbn: Vec<String>,
+    #[serde(deserialize_with = "null_default")]
     publisher: Vec<String>,
 }
 
@@ -159,6 +169,7 @@ struct SearchDoc {
 #[serde(default, rename_all = "camelCase")]
 struct SearchResults {
     num_found: Option<u64>,
+    #[serde(deserialize_with = "null_default")]
     docs: Vec<serde_json::Value>,
 }
 

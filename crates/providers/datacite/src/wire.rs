@@ -3,7 +3,7 @@
 //! Lenient: every field defaults; unknown fields are ignored (the whole
 //! record is kept in `Raw`).
 
-use aspero_core::csl::{self, plain_text, strip_markup};
+use aspero_core::csl::{self, null_default, plain_text, strip_markup};
 use aspero_core::{
     ArxivId, Doi, FieldSet, PartialDate, Person, Raw, SourceRecord, Work, WorkId, WorkType,
     tidy_abstract,
@@ -16,7 +16,9 @@ use crate::{ARXIV_DOI_PREFIX, ID};
 #[derive(Debug, Default, Deserialize)]
 #[serde(default)]
 pub(crate) struct WireList {
+    #[serde(deserialize_with = "null_default")]
     pub data: Vec<serde_json::Value>,
+    #[serde(deserialize_with = "null_default")]
     pub meta: WireMeta,
 }
 
@@ -31,6 +33,7 @@ pub(crate) struct WireMeta {
 #[serde(default)]
 struct WireDoi {
     id: Option<String>,
+    #[serde(deserialize_with = "null_default")]
     attributes: Attributes,
 }
 
@@ -38,13 +41,19 @@ struct WireDoi {
 #[serde(default, rename_all = "camelCase")]
 struct Attributes {
     doi: Option<String>,
+    #[serde(deserialize_with = "null_default")]
     titles: Vec<Title>,
+    #[serde(deserialize_with = "null_default")]
     creators: Vec<Creator>,
     publication_year: Option<serde_json::Value>,
     publisher: Option<serde_json::Value>,
+    #[serde(deserialize_with = "null_default")]
     container: Container,
+    #[serde(deserialize_with = "null_default")]
     types: Types,
+    #[serde(deserialize_with = "null_default")]
     descriptions: Vec<Description>,
+    #[serde(deserialize_with = "null_default")]
     identifiers: Vec<Identifier>,
     url: Option<String>,
     citation_count: Option<u64>,
@@ -64,6 +73,7 @@ struct Creator {
     name: Option<String>,
     given_name: Option<String>,
     family_name: Option<String>,
+    #[serde(deserialize_with = "null_default")]
     name_identifiers: Vec<NameIdentifier>,
 }
 

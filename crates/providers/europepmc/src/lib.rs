@@ -13,7 +13,7 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use aspero_core::csl::{plain_text, strip_markup};
+use aspero_core::csl::{null_default, plain_text, strip_markup};
 use aspero_core::http::{escape_lucene, status_error};
 use aspero_core::{
     Capabilities, Cursor, Doi, Error, FieldSet, Filter, Hit, HttpClient, HttpRequest, HttpResponse,
@@ -105,12 +105,14 @@ fn check(resp: &HttpResponse) -> Result<()> {
 struct WireResults {
     hit_count: Option<u64>,
     next_cursor_mark: Option<String>,
+    #[serde(deserialize_with = "null_default")]
     result_list: ResultList,
 }
 
 #[derive(Debug, Default, Deserialize)]
 #[serde(default)]
 struct ResultList {
+    #[serde(deserialize_with = "null_default")]
     result: Vec<serde_json::Value>,
 }
 
@@ -123,19 +125,24 @@ struct WireRecord {
     pmcid: Option<String>,
     doi: Option<String>,
     title: Option<String>,
+    #[serde(deserialize_with = "null_default")]
     author_list: AuthorList,
     pub_year: Option<String>,
     first_publication_date: Option<String>,
+    #[serde(deserialize_with = "null_default")]
     journal_info: JournalInfo,
     page_info: Option<String>,
     abstract_text: Option<String>,
+    #[serde(deserialize_with = "null_default")]
     pub_type_list: PubTypes,
     cited_by_count: Option<u64>,
     is_open_access: Option<String>,
     license: Option<String>,
+    #[serde(deserialize_with = "null_default")]
     full_text_url_list: FullTextUrls,
     /// NCBI Bookshelf ID, for books and chapters (StatPearls).
     bookid: Option<String>,
+    #[serde(deserialize_with = "null_default")]
     book_or_report_details: BookDetails,
 }
 
@@ -151,6 +158,7 @@ struct BookDetails {
 #[serde(default)]
 struct FullTextUrls {
     #[serde(rename = "fullTextUrl")]
+    #[serde(deserialize_with = "null_default")]
     full_text_url: Vec<FullTextUrl>,
 }
 
@@ -199,6 +207,7 @@ impl WireRecord {
 #[derive(Debug, Default, Deserialize)]
 #[serde(default)]
 struct AuthorList {
+    #[serde(deserialize_with = "null_default")]
     author: Vec<Author>,
 }
 
@@ -227,6 +236,7 @@ struct JournalInfo {
     year_of_publication: Option<i16>,
     volume: Option<String>,
     issue: Option<String>,
+    #[serde(deserialize_with = "null_default")]
     journal: Journal,
 }
 
@@ -239,6 +249,7 @@ struct Journal {
 #[derive(Debug, Default, Deserialize)]
 #[serde(default, rename_all = "camelCase")]
 struct PubTypes {
+    #[serde(deserialize_with = "null_default")]
     pub_type: Vec<String>,
 }
 

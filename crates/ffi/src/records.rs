@@ -593,6 +593,34 @@ pub enum CitedField {
 pub struct Difference {
     pub field: CitedField,
     pub actual: Option<String>,
+    /// For `CitedField.kind`: what the work is, as a value (`actual` in
+    /// English).
+    pub kind: Option<WorkKind>,
+}
+
+/// What a reply, correction or commentary is.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Enum)]
+pub enum WorkKind {
+    Reply,
+    Correction,
+    Comment,
+    Retraction,
+    ExpressionOfConcern,
+    Recommendation,
+}
+
+impl From<aspero_core::matching::WorkKind> for WorkKind {
+    fn from(k: aspero_core::matching::WorkKind) -> Self {
+        use aspero_core::matching::WorkKind as K;
+        match k {
+            K::Reply => WorkKind::Reply,
+            K::Correction => WorkKind::Correction,
+            K::Comment => WorkKind::Comment,
+            K::Retraction => WorkKind::Retraction,
+            K::ExpressionOfConcern => WorkKind::ExpressionOfConcern,
+            _ => WorkKind::Recommendation,
+        }
+    }
 }
 
 impl From<&engine::Difference> for Difference {
@@ -609,6 +637,7 @@ impl From<&engine::Difference> for Difference {
         Difference {
             field,
             actual: d.actual.clone(),
+            kind: d.kind.map(Into::into),
         }
     }
 }

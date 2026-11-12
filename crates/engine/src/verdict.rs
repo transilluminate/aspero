@@ -1,7 +1,7 @@
 //! Turning scored candidates into a verdict, why ([`Reason`]), and a
 //! one-sentence reason in English.
 
-use aspero_core::matching::{self, PLAUSIBLE, VERIFIED};
+use aspero_core::matching::{self, PLAUSIBLE, VERIFIED, WorkKind};
 use aspero_core::publication::first_page;
 use aspero_core::{Agreement, Claim, Update, UpdateKind};
 
@@ -136,6 +136,8 @@ impl Reason {
 pub struct Difference {
     pub field: CitedField,
     pub actual: Option<String>,
+    /// For [`CitedField::Kind`]: what the work is (`actual` as a value).
+    pub kind: Option<WorkKind>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -197,7 +199,11 @@ fn differences(claim: &Claim, c: &Candidate, known_only: bool) -> Vec<Difference
         true => matches!(check.agreement, Agreement::Mismatch | Agreement::Partial),
         false => check.agreement != Agreement::Match,
     };
-    let diff = |field, actual: Option<String>| Difference { field, actual };
+    let diff = |field, actual: Option<String>| Difference {
+        field,
+        actual,
+        kind: None,
+    };
     [
         off(&a.title).then(|| diff(CitedField::Title, None)),
         off(&a.authors).then(|| diff(CitedField::Authors, None)),
@@ -213,9 +219,12 @@ fn differences(claim: &Claim, c: &Candidate, known_only: bool) -> Vec<Difference
         }),
         w.title
             .as_deref()
-            .and_then(matching::derivative_kind)
+            .and_then(matching::derivative_work_kind)
             .filter(|_| !matching::claim_mentions_derivative(claim))
-            .map(|kind| diff(CitedField::Kind, Some(kind.to_owned()))),
+            .map(|kind| Difference {
+                kind: Some(kind),
+                ..diff(CitedField::Kind, Some(kind.as_str().to_owned()))
+            }),
     ]
     .into_iter()
     .flatten()

@@ -10,7 +10,7 @@ use aspero_core::{
     Agreement, Capabilities, Claim, Error, Page, Provider, ProviderId, ResiliencePolicy, Response,
     Result, SearchMode, SearchQuery, WorkId,
 };
-use aspero_engine::{CitedField, Engine, Reason, Verdict, Via};
+use aspero_engine::{CitedField, Engine, Reason, Verdict, Via, WorkKind};
 use async_trait::async_trait;
 use common::*;
 
@@ -494,6 +494,7 @@ async fn a_reply_with_the_cited_title_is_named_as_one() {
         v.why,
         v.reason
     );
+    assert_eq!(kind.and_then(|d| d.kind), Some(WorkKind::Reply));
 }
 
 #[tokio::test]

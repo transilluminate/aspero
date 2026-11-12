@@ -27,7 +27,9 @@ use crate::publication::{self, first_page, journal_in, same_journal};
 use crate::record::SourceRecord;
 
 use authors::{author_overlap, family_name};
-pub use derivative::{claim_mentions_derivative, derivative_kind, is_derivative};
+pub use derivative::{
+    WorkKind, claim_mentions_derivative, derivative_kind, derivative_work_kind, is_derivative,
+};
 use text::{Normalised, content_words};
 pub use text::{normalise, search_terms, shared_title, title_similarity, unmarked};
 

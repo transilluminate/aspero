@@ -48,6 +48,7 @@ mod verdict;
 mod versions;
 
 pub use abstracts::{Abstract, AbstractsReport};
+pub use aspero_core::matching::WorkKind;
 pub use budget::Budget;
 pub use check::{Checked, Finding, Severity, duplicates, findings};
 pub use identify::{Decision, Identified, MAX_IDENTIFIERS};

@@ -524,6 +524,22 @@ impl From<&aspero_core::Alternative> for IdAlternative {
 }
 
 impl Claim {
+    /// A claim as aspero read it, for `Verification.read`.
+    pub(crate) fn read(c: &aspero_core::Claim, key: Option<String>) -> Self {
+        Claim {
+            text: c.text.clone(),
+            title: c.title.clone(),
+            authors: c.authors.clone(),
+            year: c.year,
+            container: c.container.clone(),
+            volume: c.volume.clone(),
+            page: c.page.clone(),
+            ids: c.ids.iter().map(ToString::to_string).collect(),
+            key,
+            alternative_ids: c.alternatives.iter().map(Into::into).collect(),
+        }
+    }
+
     pub(crate) fn into_input(self) -> InputClaim {
         let fields = aspero_json::ClaimInput {
             text: self.text,
@@ -604,6 +620,10 @@ pub enum CitedField {
 pub struct Difference {
     pub field: CitedField,
     pub actual: Option<String>,
+    /// The citation's value, as compared: the year, volume or first page
+    /// read from it, or the title, authors or journal given. `nil` when
+    /// free text was searched for the work's own.
+    pub cited: Option<String>,
     /// For `CitedField.kind`: what the work is, as a value (`actual` in
     /// English).
     pub kind: Option<WorkKind>,
@@ -648,6 +668,7 @@ impl From<&engine::Difference> for Difference {
         Difference {
             field,
             actual: d.actual.clone(),
+            cited: d.cited.clone(),
             kind: d.kind.map(Into::into),
         }
     }
@@ -810,6 +831,10 @@ pub struct Verification {
     /// About `best`, whatever the verdict: its retraction or withdrawal,
     /// and its newer version.
     pub notes: Vec<Notice>,
+    /// The claim as read: identifiers as written (with the other readings
+    /// tried in `alternativeIds`), and from free text the year, volume and
+    /// first page. `nil` for an invalid claim.
+    pub read: Option<Claim>,
     /// The work the verdict is about: the match, or the best guess.
     pub best: Option<Candidate>,
     /// With `full`: every candidate, most confident first.
@@ -834,6 +859,7 @@ impl Verification {
             why: Reason::new(v),
             reason: v.reason.clone(),
             notes: v.notes.iter().map(Notice::from).collect(),
+            read: Some(Claim::read(&v.read, key(claim))),
             best: v.best.map(|i| Candidate::from(&v.report.candidates[i])),
             candidates: match full {
                 true => v.report.candidates.iter().map(Candidate::from).collect(),
@@ -854,6 +880,7 @@ impl Verification {
             },
             reason: why.to_owned(),
             notes: Vec::new(),
+            read: None,
             best: None,
             candidates: Vec::new(),
             failures: Vec::new(),

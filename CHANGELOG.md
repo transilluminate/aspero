@@ -1,5 +1,28 @@
 # Changelog
 
+## Unreleased
+
+Added:
+
+- `identify`: which work a document is, from its first page's text, not
+  the works it cites or links to. Each identifier on the page (header and
+  footer first, at most six) is looked up and must be confirmed by the
+  title given (the largest type on the page, or title metadata unless
+  junk such as "Microsoft Word - draft3.docx") or by its own title and
+  first author appearing on the page; with none confirmed, the top of the
+  page is verified as a citation. It answers with the verification and
+  `decided_by`: `identifier_and_title`, `identifier_and_page`,
+  `only_identifier` or `title_search` (#24).
+  - FFI: `identify(firstPage:, title:, titleHint:, patience:)` →
+    `Identification? { decidedBy: IdentifiedBy, verification }`.
+  - CLI: `aspero identify page.txt --title … --title-hint …` (exits 3
+    when nothing is sure enough).
+
+Fixed:
+
+- `aspero scan --help` no longer says a DOI broken across lines isn't
+  found.
+
 ## 0.7.0
 
 Added:

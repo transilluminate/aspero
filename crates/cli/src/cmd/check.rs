@@ -19,6 +19,11 @@ pub async fn run(
     out: Out,
 ) -> Result<Exit, Failure> {
     let source = if path == "-" {
+        if std::io::stdin().is_terminal() {
+            return Err(Failure::usage(
+                "no file given (pass one, or pipe a .bib file)",
+            ));
+        }
         read_stdin()?.into_bytes()
     } else {
         std::fs::read(&path).map_err(|e| Failure::usage(format!("could not read {path}: {e}")))?

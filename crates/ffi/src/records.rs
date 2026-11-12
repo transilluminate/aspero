@@ -931,14 +931,14 @@ pub struct Mention {
 }
 
 impl Mention {
-    pub(crate) fn new(text: &str, m: &aspero_core::id::Mention) -> Self {
+    pub(crate) fn new(text: &str, m: &aspero_core::id::Mention, utf16: &mut Utf16Offsets) -> Self {
         Mention {
             id: m.id.to_string(),
             kind: m.id.kind().prefix().to_owned(),
             text: text[m.span.clone()].to_owned(),
             line: m.line as u64,
             column: m.column as u64,
-            utf16: utf16_range(text, &m.span),
+            utf16: utf16.range(&m.span),
             alternative_id: m.alternative(text).map(|id| id.to_string()),
         }
     }
@@ -957,10 +957,10 @@ pub struct Reference {
 }
 
 impl Reference {
-    pub(crate) fn new(list: &str, r: &aspero_core::Reference) -> Self {
+    pub(crate) fn new(r: &aspero_core::Reference, utf16: &mut Utf16Offsets) -> Self {
         Reference {
             text: r.text.clone(),
-            utf16: utf16_range(list, &r.span),
+            utf16: utf16.range(&r.span),
             alternative_ids: r.alternatives.iter().map(Into::into).collect(),
         }
     }
@@ -1005,11 +1005,38 @@ impl From<&aspero_core::LineReference> for LineReference {
     }
 }
 
-fn utf16_range(text: &str, span: &std::ops::Range<usize>) -> Utf16Range {
-    let utf16 = |byte: usize| text[..byte].encode_utf16().count() as u64;
-    Utf16Range {
-        start: utf16(span.start),
-        end: utf16(span.end),
+/// Byte offsets in a text as UTF-16 ones, counted on from the last one
+/// asked for: spans in order cost one pass over the text.
+pub(crate) struct Utf16Offsets<'a> {
+    text: &'a str,
+    byte: usize,
+    utf16: u64,
+}
+
+impl<'a> Utf16Offsets<'a> {
+    pub(crate) fn new(text: &'a str) -> Self {
+        Utf16Offsets {
+            text,
+            byte: 0,
+            utf16: 0,
+        }
+    }
+
+    fn at(&mut self, byte: usize) -> u64 {
+        if byte < self.byte {
+            // Out of order: count from the start again.
+            *self = Utf16Offsets::new(self.text);
+        }
+        self.utf16 += self.text[self.byte..byte].encode_utf16().count() as u64;
+        self.byte = byte;
+        self.utf16
+    }
+
+    fn range(&mut self, span: &std::ops::Range<usize>) -> Utf16Range {
+        Utf16Range {
+            start: self.at(span.start),
+            end: self.at(span.end),
+        }
     }
 }
 
@@ -1479,4 +1506,33 @@ pub struct Identification {
     pub decided_by: IdentifiedBy,
     /// The work as a verified citation (plausible when found by title).
     pub verification: Verification,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn utf16_offsets_match_counting_from_the_start() {
+        // "é" is one UTF-16 unit, "😀" and "𝔸" two, "👩‍⚕️" five.
+        let text = "é 😀 doi:10.1/x\n👩‍⚕️ PMID 1 𝔸 end";
+        let bytes: Vec<usize> = (0..=text.len())
+            .filter(|&b| text.is_char_boundary(b))
+            .collect();
+        let from_start = |b: usize| text[..b].encode_utf16().count() as u64;
+        let mut utf16 = Utf16Offsets::new(text);
+        // In order, then out of order.
+        for &b in bytes.iter().chain(bytes.iter().rev()) {
+            assert_eq!(utf16.at(b), from_start(b), "at byte {b}");
+        }
+        let mut utf16 = Utf16Offsets::new(text);
+        for pair in bytes.windows(2) {
+            let span = pair[0]..pair[1];
+            let expected = Utf16Range {
+                start: from_start(span.start),
+                end: from_start(span.end),
+            };
+            assert_eq!(utf16.range(&span), expected);
+        }
+    }
 }

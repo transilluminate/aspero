@@ -21,7 +21,7 @@ mod text;
 
 use serde::{Deserialize, Serialize};
 
-use crate::id::WorkId;
+use crate::id::{WorkId, starts_with_ci};
 use crate::provider::Place;
 use crate::publication::{self, first_page, journal_in, same_journal};
 use crate::record::SourceRecord;
@@ -314,8 +314,10 @@ pub struct Assessment {
 /// A title that is a URL.
 fn is_url(title: &str) -> bool {
     let t = title.trim();
-    let starts = |p: &str| t.get(..p.len()).is_some_and(|h| h.eq_ignore_ascii_case(p));
-    starts("http://") || starts("https://") || starts("www.") || t.contains("://")
+    ["http://", "https://", "www."]
+        .iter()
+        .any(|p| starts_with_ci(t, p))
+        || t.contains("://")
 }
 
 fn dedup_years(mut years: Vec<i16>) -> Vec<i16> {

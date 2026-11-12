@@ -180,6 +180,21 @@ proptest! {
         assert_mentions_parse(&text)?;
     }
 
+    /// A DOI broken across lines, at a hyphen or not, as PDFs break them.
+    #[test]
+    fn broken_dois_have_canonical_alternatives(
+        doi in canonical_doi(),
+        at in any::<prop::sample::Index>(),
+        hyphen in any::<bool>(),
+        next in "[a-z0-9]{0,6}",
+    ) {
+        let cut = at.index(doi.len() + 1);
+        let (head, tail) = doi.split_at(cut);
+        let hyphen = if hyphen { "-" } else { "" };
+        let text = format!("See doi:{head}{hyphen}\n   {tail} {next}.");
+        assert_alternatives_round_trip(&text)?;
+    }
+
     #[test]
     fn generated_ids_round_trip(
         doi in canonical_doi(),
@@ -237,6 +252,18 @@ fn assert_mentions_parse(text: &str) -> Result<(), TestCaseError> {
             written,
             text
         );
+    }
+    assert_alternatives_round_trip(text)
+}
+
+/// Each mention's other reading, if any, is another DOI, and canonical.
+fn assert_alternatives_round_trip(text: &str) -> Result<(), TestCaseError> {
+    for m in scan(text) {
+        if let Some(other) = m.alternative(text) {
+            prop_assert_eq!(other.kind(), IdKind::Doi, "{:?}", text);
+            prop_assert_ne!(&other, &m.id);
+            assert_round_trips(&other)?;
+        }
     }
     Ok(())
 }

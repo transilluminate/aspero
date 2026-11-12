@@ -2,7 +2,7 @@ use std::borrow::Cow;
 use std::fmt;
 
 use super::IdKind;
-use super::syntax::{IdSyntax, impl_id_traits, parse_positive};
+use super::syntax::{IdSyntax, impl_id_traits, is_digits, parse_positive};
 use super::url::Url;
 
 /// An arXiv identifier, optionally pinned to a version.
@@ -48,7 +48,7 @@ fn split_version(s: &str) -> Result<(&str, Option<u32>), &'static str> {
     };
     let (base, ver) = (&s[..pos], &s[pos + 1..]);
     let follows_digit = base.ends_with(|c: char| c.is_ascii_digit());
-    if !follows_digit || ver.is_empty() || !ver.bytes().all(|b| b.is_ascii_digit()) {
+    if !follows_digit || !is_digits(ver) {
         return Ok((s, None));
     }
     let n = parse_positive(ver).map_err(|_| "version must be v1 or later")?;
@@ -62,8 +62,8 @@ fn valid_month(yymm: &str) -> bool {
 
 fn parse_new_style(s: &str) -> Result<String, &'static str> {
     let (yymm, seq) = s.split_once('.').ok_or("unrecognised arXiv identifier")?;
-    let digits = |t: &str| t.bytes().all(|b| b.is_ascii_digit());
-    if yymm.len() != 4 || !digits(yymm) || !digits(seq) {
+    // No digits after the dot is the wrong number of them, below.
+    if yymm.len() != 4 || !is_digits(yymm) || !(seq.is_empty() || is_digits(seq)) {
         return Err("expected YYMM.NNNNN");
     }
     if !valid_month(yymm) {
@@ -87,7 +87,7 @@ fn parse_old_style(s: &str) -> Result<String, &'static str> {
     if archive.is_empty() || !archive.bytes().all(|b| b.is_ascii_lowercase() || b == b'-') {
         return Err("archive must be letters and '-', e.g. hep-th");
     }
-    if num.len() != 7 || !num.bytes().all(|b| b.is_ascii_digit()) {
+    if num.len() != 7 || !is_digits(num) {
         return Err("expected archive/YYMMNNN");
     }
     if !valid_month(&num[..4]) {

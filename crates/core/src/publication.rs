@@ -8,7 +8,9 @@
 //! "BMJ") are reported as different, so callers treat a journal mismatch as
 //! a hint, not proof. Volume and page are numbers and compare exactly.
 
+use crate::id::is_digits;
 use crate::matching::normalise;
+use crate::work::PLAUSIBLE_YEARS;
 
 /// Words a journal abbreviation leaves out.
 const JOURNAL_STOPWORDS: &[&str] = &[
@@ -39,15 +41,15 @@ pub(crate) fn journal_in(words: &[String], journal: &str) -> bool {
         || (full.len() > 1 && text.iter().any(|w| is_initials(w, &full)))
 }
 
-/// Whether `word` (normalised) is one of `journal`'s significant words,
-/// or abbreviates one, or is its initials ("res" or "erj" in "ERJ Open
-/// Research").
-pub(crate) fn journal_word(word: &str, journal: &str) -> bool {
-    let full = significant(journal);
-    full.iter().any(|f| abbreviates_word(word, f)) || (full.len() > 1 && is_initials(word, &full))
+/// Whether `word` (normalised) is one of a journal's significant words
+/// (from [`significant`]), or abbreviates one, or is its initials ("res"
+/// or "erj" in "ERJ Open Research").
+pub(crate) fn journal_word(word: &str, full: &[String]) -> bool {
+    full.iter().any(|f| abbreviates_word(word, f)) || (full.len() > 1 && is_initials(word, full))
 }
 
-fn significant(name: &str) -> Vec<String> {
+/// A journal name's words that tell it apart, normalised.
+pub(crate) fn significant(name: &str) -> Vec<String> {
     normalise(name)
         .split(' ')
         .filter(|w| !w.is_empty() && !JOURNAL_STOPWORDS.contains(w))
@@ -187,8 +189,8 @@ pub(crate) fn locator(text: &str) -> Locator {
 /// "2016)": a year, its bracket closed.
 fn bracketed_year(s: &str) -> bool {
     s.strip_suffix(')')
-        .and_then(|y| y.parse::<u16>().ok())
-        .is_some_and(|y| (1600..=2100).contains(&y))
+        .and_then(|y| y.parse().ok())
+        .is_some_and(|y| PLAUSIBLE_YEARS.contains(&y))
 }
 
 /// A page range: "797–804".
@@ -199,16 +201,14 @@ fn ranged(pages: &str) -> bool {
 /// "376" or "376(26)": the volume number.
 fn volume_number(s: &str) -> Option<String> {
     let volume = s.split('(').next().unwrap_or(s);
-    (!volume.is_empty() && volume.len() <= 6 && volume.bytes().all(|b| b.is_ascii_digit()))
-        .then(|| volume.to_owned())
+    (volume.len() <= 6 && is_digits(volume)).then(|| volume.to_owned())
 }
 
 /// "2545-55", "e1234" or "S12": the first page.
 fn page_number(s: &str) -> Option<String> {
     let page = first_page(s.trim_end_matches(['.', ',', ';']));
     let digits = page.trim_start_matches(['e', 'E', 's', 'S']);
-    (!digits.is_empty() && digits.len() <= 8 && digits.bytes().all(|b| b.is_ascii_digit()))
-        .then(|| page.to_ascii_lowercase())
+    (digits.len() <= 8 && is_digits(digits)).then(|| page.to_ascii_lowercase())
 }
 
 #[cfg(test)]

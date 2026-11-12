@@ -15,7 +15,7 @@
 
 use std::ops::Range;
 
-use super::syntax::clean_pasted;
+use super::syntax::{clean_pasted, is_digits, starts_with_ci};
 use super::url::Url;
 use super::{IdKind, WorkId};
 
@@ -41,6 +41,9 @@ impl Mention {
     /// wraps a suffix anywhere (`…/HJH.0b013e` then `3282f35c67`), which
     /// reads as the DOI ending there too. `text` is the text scanned.
     pub fn alternative(&self, text: &str) -> Option<WorkId> {
+        if self.id.kind() != IdKind::Doi {
+            return None;
+        }
         let folded = crate::fold::Folded::new(text.get(self.span.clone())?);
         let written: &str = &folded.text;
         let mut joined = String::new();
@@ -55,9 +58,6 @@ impl Mention {
             rest = &after[if at_break { gap } else { 0 }..];
         }
         joined.push_str(rest);
-        if self.id.kind() != IdKind::Doi {
-            return None;
-        }
         if !broken {
             return self.continued(text, written);
         }
@@ -108,7 +108,8 @@ pub fn scan(text: &str) -> Vec<Mention> {
         .into_iter()
         .map(|(m, line_start)| {
             let span = folded.original(&m.span);
-            // After the line break, which is never cleaned.
+            // After the line break as written, which cleaning may have
+            // made `\n` from another.
             let line_start = match line_start {
                 0 => 0,
                 at => folded.original(&(at - 1..at)).end,
@@ -328,11 +329,11 @@ fn mend(text: &str, broken: &Broken) -> Option<(WorkId, Range<usize>)> {
 /// ending in a piece with a digit that is an identifier wins.
 fn mend_spaced(text: &str, broken: &Broken, line_end: usize) -> Option<(WorkId, Range<usize>)> {
     let raw = &text[broken.cleaned.clone()];
-    let starts = |p: &str| {
-        raw.get(..p.len())
-            .is_some_and(|h| h.eq_ignore_ascii_case(p))
-    };
-    if !(["http", "doi", "dx.", "www."].iter().any(|p| starts(p)) || raw.starts_with("10.")) {
+    if !(["http", "doi", "dx.", "www."]
+        .iter()
+        .any(|p| starts_with_ci(raw, p))
+        || raw.starts_with("10."))
+    {
         return None;
     }
     let mut joined = raw.to_owned();
@@ -352,11 +353,10 @@ fn mend_spaced(text: &str, broken: &Broken, line_end: usize) -> Option<(WorkId, 
         let Some(first) = token.chars().next() else {
             break;
         };
-        let digits = |s: &str| !s.is_empty() && s.bytes().all(|b| b.is_ascii_digit());
         let joins = match last.chars().next_back() {
             Some('/' | '-' | '_' | ':') => first.is_alphanumeric(),
             Some('.') => first.is_lowercase() || first.is_ascii_digit(),
-            _ => digits(last) && first.is_ascii_digit(),
+            _ => is_digits(last) && first.is_ascii_digit(),
         };
         if !joins {
             break;
@@ -591,23 +591,14 @@ impl Iterator for Pieces<'_> {
 /// `:`, and of the rest only PMCIDs and Bookshelf IDs are recognised.
 fn could_be_unlabelled(piece: &str) -> bool {
     piece.contains('/')
-        || piece.split_once(':').is_some_and(|(head, _)| {
-            IdKind::from_prefix(head).is_some() || IdKind::from_label(head).is_some()
-        })
-        || ["pmc", "nbk"].iter().any(|p| {
-            piece
-                .get(..3)
-                .is_some_and(|head| head.eq_ignore_ascii_case(p))
-        })
+        || prefixed(piece)
+        || ["pmc", "nbk"].iter().any(|p| starts_with_ci(piece, p))
 }
 
 /// An identifier written without a separate label: any kind when prefixed
 /// or a URL; otherwise only kinds whose shape can't be mistaken.
 fn unlabelled(piece: &str) -> Option<WorkId> {
-    let explicit = Url::parse(piece).is_some()
-        || piece.split_once(':').is_some_and(|(head, _)| {
-            IdKind::from_prefix(head).is_some() || IdKind::from_label(head).is_some()
-        });
+    let explicit = Url::parse(piece).is_some() || prefixed(piece);
     match piece.parse::<WorkId>() {
         Ok(id) if explicit || matches!(id.kind(), IdKind::Doi | IdKind::Pmcid | IdKind::Nbk) => {
             Some(id)
@@ -624,6 +615,13 @@ fn unlabelled(piece: &str) -> Option<WorkId> {
             WorkId::parse_as(IdKind::Doi, &piece[at..]).ok()
         }
     }
+}
+
+/// Whether a piece starts with a kind's prefix or label before a `:`.
+fn prefixed(piece: &str) -> bool {
+    piece.split_once(':').is_some_and(|(head, _)| {
+        IdKind::from_prefix(head).is_some() || IdKind::from_label(head).is_some()
+    })
 }
 
 /// Byte offset of `part`, a subslice of `whole`.

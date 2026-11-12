@@ -4,6 +4,7 @@
 use unicode_normalization::UnicodeNormalization;
 
 use super::AUTHORS_COMPARED;
+use crate::work::PLAUSIBLE_YEARS;
 
 /// Lowercase ASCII-folded words: accents dropped, punctuation as spaces.
 pub fn normalise(s: &str) -> String {
@@ -211,6 +212,7 @@ impl Normalised {
             "isbn",
         ];
         let author_words: Vec<&str> = families.iter().flat_map(|f| f.split(' ')).collect();
+        let journal = journal.map(crate::publication::significant);
         self.words.iter().filter(|w| !w.is_empty()).all(|w| {
             w.chars().count() <= 2
                 || w.bytes().any(|b| b.is_ascii_digit())
@@ -218,7 +220,9 @@ impl Normalised {
                 || LINK_WORDS.contains(&w.as_str())
                 || FURNITURE.contains(&w.as_str())
                 || author_words.contains(&w.as_str())
-                || journal.is_some_and(|j| crate::publication::journal_word(w, j))
+                || journal
+                    .as_ref()
+                    .is_some_and(|j| crate::publication::journal_word(w, j))
         })
     }
 
@@ -228,7 +232,7 @@ impl Normalised {
             .iter()
             .filter(|w| w.len() == 4)
             .filter_map(|w| w.parse::<i16>().ok())
-            .filter(|y| (1600..=2100).contains(y))
+            .filter(|y| PLAUSIBLE_YEARS.contains(y))
             .collect()
     }
 }

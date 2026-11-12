@@ -92,6 +92,10 @@ use crate::health::Health;
 use crate::inflight::InFlight;
 use crate::retry::{Jitter, random_jitter, with_retries};
 
+/// Results per provider search when resolving, verifying or checking, unless
+/// the caller asks for another number.
+pub const SEARCH_LIMIT: u32 = 5;
+
 /// A clock, injectable so cache expiry is testable.
 pub type Clock = fn() -> Timestamp;
 

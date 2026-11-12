@@ -34,9 +34,6 @@ use records::{
 
 uniffi::setup_scaffolding!();
 
-/// Results per call at most from each provider search when verifying.
-const SEARCH_LIMIT: u32 = 5;
-
 /// A work every OpenAlex key can look up, free: for checking keys.
 const KNOWN_WORK: &str = "doi:10.1038/nature14539";
 
@@ -598,7 +595,7 @@ async fn verify_all(
             each(Verification::invalid(i, claim, e));
         }
     }
-    let mut verified = engine.verify_batch(&valid, SEARCH_LIMIT);
+    let mut verified = engine.verify_batch(&valid, aspero_engine::SEARCH_LIMIT);
     while let Some((k, v)) = verified.next().await {
         let i = positions[k];
         each(Verification::new(i, &claims[i], &v, full));

@@ -320,6 +320,16 @@ pub enum Freshness {
     Stale,
 }
 
+impl From<Served> for Freshness {
+    fn from(s: Served) -> Self {
+        match s {
+            Served::Cache => Freshness::Cache,
+            Served::Stale => Freshness::Stale,
+            _ => Freshness::Live,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Enum)]
 pub enum AttemptOutcome {
     Found,
@@ -407,15 +417,7 @@ impl Lookup {
             Status::Failed(_) => LookupStatus::Failed,
             _ => LookupStatus::NotFound,
         };
-        let freshness = result
-            .attempts
-            .iter()
-            .rfind(|a| matches!(a.outcome, Outcome::Found))
-            .map(|a| match a.served {
-                Served::Cache => Freshness::Cache,
-                Served::Stale => Freshness::Stale,
-                _ => Freshness::Live,
-            });
+        let freshness = result.served().map(Freshness::from);
         let attempts = result
             .attempts
             .iter()
@@ -444,12 +446,7 @@ impl Lookup {
             work,
             freshness,
             attempts,
-            error: (status == LookupStatus::Unsupported).then(|| {
-                format!(
-                    "no enabled provider looks up {} identifiers",
-                    result.id.kind()
-                )
-            }),
+            error: result.unsupported(),
             with_punctuation: looked.with_punctuation,
             latest: looked.latest.as_ref().map(Work::from_record),
             disagreements: looked.disagreements.iter().map(Into::into).collect(),
@@ -1168,11 +1165,7 @@ impl SearchResults {
                     .collect(),
                 total: report.page.total,
                 next: report.page.next.map(|c| c.0),
-                freshness: Some(match report.served {
-                    Served::Cache => Freshness::Cache,
-                    Served::Stale => Freshness::Stale,
-                    _ => Freshness::Live,
-                }),
+                freshness: Some(report.served.into()),
                 failure: None,
                 usage: report
                     .usage

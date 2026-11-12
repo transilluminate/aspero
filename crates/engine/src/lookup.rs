@@ -42,6 +42,25 @@ impl LookupResult {
                 .iter()
                 .any(|a| matches!(a.outcome, Outcome::NotFound))
     }
+
+    /// Where the record came from: the last attempt that found it.
+    pub fn served(&self) -> Option<Served> {
+        self.attempts
+            .iter()
+            .rfind(|a| matches!(a.outcome, Outcome::Found))
+            .map(|a| a.served)
+    }
+
+    /// Why nothing was asked, when no enabled provider accepts this kind
+    /// of identifier.
+    pub fn unsupported(&self) -> Option<String> {
+        (self.record.is_none() && self.attempts.is_empty()).then(|| {
+            format!(
+                "no enabled provider looks up {} identifiers",
+                self.id.kind()
+            )
+        })
+    }
 }
 
 #[derive(Debug, Clone)]

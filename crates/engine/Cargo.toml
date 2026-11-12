@@ -12,6 +12,7 @@ authors.workspace = true
 workspace = true
 
 [dependencies]
+aspero-bib.workspace = true
 aspero-core.workspace = true
 aspero-store.workspace = true
 aspero-openalex = { workspace = true, optional = true }

@@ -247,3 +247,35 @@ async fn usage_includes_the_prefetch() {
     assert_eq!(report.usage.len(), 1);
     assert_eq!(report.usage[0].1.cost, Some(0.75));
 }
+
+/// Entries add their own problems and those with nothing to check, and a
+/// duplicate names an entry, not a claim.
+#[tokio::test]
+async fn entries_are_checked_in_file_order() {
+    let engine = setup();
+    let (_, entries) = aspero_bib::read(
+        "@misc{empty, note = {Nothing to check}}\n\
+         @article{lecun, title = {Deep learning}, author = {LeCun, Yann}, year = {2015}}\n\
+         @article{malformed, title = {Deep learning}, author = {LeCun, Yann}, year = {2015},\n\
+           doi = {not a doi}}\n",
+    )
+    .unwrap();
+    let report = engine.check_entries(&entries, 5, |_| {}).await;
+
+    let empty = &report.entries[0];
+    assert!(empty.verification.is_none());
+    assert_eq!(empty.findings, [Finding::Skipped]);
+    assert_eq!(empty.severity(), Some(Severity::Warning));
+
+    let findings = &report.entries[2].findings;
+    assert!(matches!(findings[0], Finding::Entry { .. }), "{findings:?}");
+    assert!(findings.contains(&Finding::Duplicate { of: 1 }));
+    assert_eq!(
+        findings[0].message(&["empty", "lecun", "malformed"]),
+        "doi field \"not a doi\" is not a valid DOI"
+    );
+
+    let summary = report.summary();
+    assert_eq!((summary.entries, summary.skipped), (3, 1));
+    assert_eq!(summary.verified, 2);
+}

@@ -47,8 +47,8 @@ crates/
                Mendeley); works → BibTeX, RIS, and citation styles (`styles`
                feature: hayagriva, with the official CSL styles bundled)
   engine/      routing, caching, retries, pacing, resolve/verify/check
-  json/        the JSON contract (works, lookups, verdicts, claims), shared
-               by every front end
+  json/        the JSON contract (works, lookups, verdicts, claims, checks),
+               shared by every front end
   cli/         clap front end: arguments, stdin, tables and text
   ffi/         UniFFI bindings for apps (Swift), shipped as an .xcframework
 bench/         verify benchmark data (known-answer citations)

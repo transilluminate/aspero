@@ -6,6 +6,7 @@
 //! result echoes what it answers (`input`, a claim's `key`), so results can
 //! arrive in any order.
 
+pub mod check;
 mod claim;
 mod lookup;
 mod scan;

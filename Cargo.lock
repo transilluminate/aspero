@@ -200,6 +200,7 @@ dependencies = [
 name = "aspero-engine"
 version = "0.8.6"
 dependencies = [
+ "aspero-bib",
  "aspero-core",
  "aspero-crossref",
  "aspero-datacite",
@@ -255,6 +256,7 @@ dependencies = [
 name = "aspero-json"
 version = "0.8.6"
 dependencies = [
+ "aspero-bib",
  "aspero-core",
  "aspero-engine",
  "jiff",

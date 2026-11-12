@@ -13,7 +13,7 @@ use serde::Deserialize;
 
 use crate::id::{Doi, WorkId};
 use crate::work::{
-    PartialDate, Person, Update, UpdateKind, UpdateTo, Work, WorkType, tidy_abstract,
+    PartialDate, Person, Update, UpdateKind, UpdateTo, Work, WorkType, orcid, tidy_abstract,
 };
 
 /// For `#[serde(deserialize_with)]`: an explicit `null` reads as the
@@ -218,11 +218,7 @@ impl CslName {
             (None, Some(literal)) => person.literal = Some(literal.clone()),
             (None, None) => person.literal = Some(self.given.clone()?),
         }
-        person.orcid = self.orcid.as_deref().map(|o| {
-            o.trim_start_matches("https://orcid.org/")
-                .trim_start_matches("http://orcid.org/")
-                .to_owned()
-        });
+        person.orcid = self.orcid.as_deref().and_then(orcid);
         Some(person)
     }
 }

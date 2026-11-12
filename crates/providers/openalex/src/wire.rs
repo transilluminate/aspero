@@ -9,7 +9,7 @@ use std::collections::BTreeMap;
 use aspero_core::csl::{null_default, plain_text};
 use aspero_core::{
     ArxivId, Doi, FieldSet, OpenAccess, OpenAlexId, PartialDate, Person, Pmcid, Pmid, Raw,
-    SourceRecord, Update, UpdateKind, Work, WorkId, WorkType, tidy_abstract,
+    SourceRecord, Update, UpdateKind, Work, WorkId, WorkType, orcid, tidy_abstract,
 };
 use jiff::Timestamp;
 use serde::Deserialize;
@@ -263,11 +263,7 @@ impl WireAuthorship {
             .as_ref()
             .or(self.raw_author_name.as_ref())?;
         let mut person = Person::literal(name.clone());
-        person.orcid = self
-            .author
-            .orcid
-            .as_deref()
-            .map(|o| o.trim_start_matches("https://orcid.org/").to_owned());
+        person.orcid = self.author.orcid.as_deref().and_then(orcid);
         Some(person)
     }
 }

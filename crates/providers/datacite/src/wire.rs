@@ -5,7 +5,7 @@
 
 use aspero_core::csl::{self, null_default, plain_text, strip_markup};
 use aspero_core::{
-    ArxivId, Doi, FieldSet, PartialDate, Person, Raw, SourceRecord, Work, WorkId, WorkType,
+    ArxivId, Doi, FieldSet, PartialDate, Person, Raw, SourceRecord, Work, WorkId, WorkType, orcid,
     tidy_abstract,
 };
 use jiff::Timestamp;
@@ -221,7 +221,7 @@ impl Creator {
             .iter()
             .find(|n| n.name_identifier_scheme.as_deref() == Some("ORCID"))
             .and_then(|n| n.name_identifier.as_deref())
-            .map(|o| o.trim_start_matches("https://orcid.org/").to_owned());
+            .and_then(orcid);
         Some(person)
     }
 }

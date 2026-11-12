@@ -191,11 +191,7 @@ impl WireAuthor {
             (_, None, Some(name)) | (Some(name), None, None) => person.literal = Some(name),
             (None, None, None) => return None,
         }
-        person.orcid = self.orcid.map(|o| {
-            o.trim_start_matches("https://orcid.org/")
-                .trim_start_matches("http://orcid.org/")
-                .to_owned()
-        });
+        person.orcid = self.orcid.as_deref().and_then(aspero_core::orcid);
         Some(person)
     }
 }

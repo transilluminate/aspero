@@ -410,6 +410,16 @@ pub fn tidy_abstract(text: &str) -> String {
     text.to_owned()
 }
 
+/// A bare ORCID iD, as [`Person::orcid`] holds it, from one written bare
+/// or as an `orcid.org` URL. `None` if nothing is left.
+pub fn orcid(raw: &str) -> Option<String> {
+    let bare = ["https://orcid.org/", "http://orcid.org/"]
+        .iter()
+        .find_map(|p| raw.strip_prefix(p))
+        .unwrap_or(raw);
+    (!bare.is_empty()).then(|| bare.to_owned())
+}
+
 /// Years a work could have been published in: a four-digit number in
 /// text is read as a year only within these.
 pub(crate) const PLAUSIBLE_YEARS: std::ops::RangeInclusive<i16> = 1600..=2100;
@@ -669,6 +679,19 @@ mod tests {
             "Abstraction is useful"
         );
         assert_eq!(tidy_abstract("We show"), "We show");
+    }
+
+    #[test]
+    fn orcid_drops_the_url() {
+        for raw in [
+            "0000-0002-1825-0097",
+            "https://orcid.org/0000-0002-1825-0097",
+            "http://orcid.org/0000-0002-1825-0097",
+        ] {
+            assert_eq!(orcid(raw).as_deref(), Some("0000-0002-1825-0097"), "{raw}");
+        }
+        assert_eq!(orcid("https://orcid.org/"), None);
+        assert_eq!(orcid(""), None);
     }
 
     #[test]

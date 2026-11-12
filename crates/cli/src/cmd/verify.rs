@@ -4,13 +4,13 @@
 use std::io::IsTerminal;
 
 use aspero_core::{ProviderId, Usage};
-use aspero_engine::{Engine, Verdict, Verification};
+use aspero_engine::{Engine, Verdict, Verification, add_usage};
 use aspero_json::ClaimInput;
 use futures::StreamExt;
 use serde_json::{Value, json};
 
 use super::claim::claims;
-use super::{Failure, Out, merge_usage, print, print_line};
+use super::{Failure, Out, print, print_line};
 use crate::args::{ClaimArgs, Format};
 use crate::exit::Exit;
 use crate::output::{self, Level};
@@ -34,7 +34,7 @@ pub async fn run(engine: &Engine, args: ClaimArgs, out: Out) -> Result<Exit, Fai
         .unzip();
     if valid.len() > 1 {
         for (p, u) in engine.prefetch(&valid).await.usage {
-            merge_usage(&mut usage, &p, u);
+            add_usage(&mut usage, &p, u);
         }
     }
 
@@ -54,7 +54,7 @@ pub async fn run(engine: &Engine, args: ClaimArgs, out: Out) -> Result<Exit, Fai
         let i = positions[k];
         let claim = &claims[i];
         for (p, u) in &v.report.usage {
-            merge_usage(&mut usage, p, *u);
+            add_usage(&mut usage, p, *u);
         }
         let mut item = aspero_json::verification(claim.echo(), &v, out.full);
         if out.format.is_export() {
@@ -82,7 +82,7 @@ pub async fn run(engine: &Engine, args: ClaimArgs, out: Out) -> Result<Exit, Fai
             record.ids = best.ids.clone();
             let fetched = engine.abstracts(&[&record]).await;
             for (p, u) in &fetched.usage {
-                merge_usage(&mut usage, p, *u);
+                add_usage(&mut usage, p, *u);
             }
             let found = fetched.found.into_iter().next().flatten();
             aspero_json::set_abstract(&mut item["match"]["work"], found.as_ref());

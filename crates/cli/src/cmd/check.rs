@@ -4,7 +4,7 @@ use std::io::IsTerminal;
 
 use aspero_bib::BibEntry;
 use aspero_core::{ProviderId, Usage};
-use aspero_engine::{Checked, Engine, Finding, Severity, Verdict, describe_update};
+use aspero_engine::{Checked, Engine, Finding, Severity, Verdict, add_usage, describe_update};
 use serde_json::{Value, json};
 
 use super::{Failure, Out, print, print_line, read_stdin};
@@ -112,7 +112,7 @@ async fn check(
         .iter()
         .flat_map(|c| &c.verification.report.usage)
         .fold(Vec::new(), |mut acc, (p, u)| {
-            super::merge_usage(&mut acc, p, *u);
+            add_usage(&mut acc, p, *u);
             acc
         });
     (checked, usage)

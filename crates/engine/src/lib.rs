@@ -322,7 +322,8 @@ pub(crate) fn lock<T>(mutex: &std::sync::Mutex<T>) -> std::sync::MutexGuard<'_, 
         .unwrap_or_else(std::sync::PoisonError::into_inner)
 }
 
-fn add_usage(totals: &mut Vec<(ProviderId, Usage)>, provider: &ProviderId, usage: Usage) {
+/// Adds `usage` to a per-provider total.
+pub fn add_usage(totals: &mut Vec<(ProviderId, Usage)>, provider: &ProviderId, usage: Usage) {
     match totals.iter_mut().find(|(p, _)| p == provider) {
         Some((_, total)) => *total = total.then(usage),
         None => totals.push((provider.clone(), usage)),

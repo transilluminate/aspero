@@ -14,12 +14,12 @@
 use std::sync::Arc;
 
 use aspero_core::{
-    Claim, Cursor, Error, ErrorKind, FieldSet, ProviderId, SearchQuery, Usage, WorkId, WorkType,
-    YearRange,
+    Claim, Cursor, Error, ErrorKind, FieldSet, SearchQuery, WorkId, WorkType, YearRange,
 };
 use aspero_engine::{
     CallOptions, CrossrefConfig, DataciteConfig, DoiConfig, Engine, EuropePmcConfig, Extras,
-    OpenAlexConfig, OpenLibraryConfig, SecretString, SqliteCache, StandardConfig, standard,
+    OpenAlexConfig, OpenLibraryConfig, SecretString, SqliteCache, StandardConfig, add_usage,
+    standard,
 };
 use aspero_json::InputClaim;
 use futures::StreamExt;
@@ -630,11 +630,4 @@ async fn verify_all(
         each(Verification::new(i, &claims[i], &v, full));
     }
     records::usage(&usage)
-}
-
-fn add_usage(totals: &mut Vec<(ProviderId, Usage)>, provider: &ProviderId, usage: Usage) {
-    match totals.iter_mut().find(|(p, _)| p == provider) {
-        Some((_, total)) => *total = total.then(usage),
-        None => totals.push((provider.clone(), usage)),
-    }
 }

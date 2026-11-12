@@ -1,12 +1,12 @@
 //! `aspero resolve`: every candidate work for a citation, scored.
 
 use aspero_core::SourceRecord;
-use aspero_engine::Engine;
+use aspero_engine::{Engine, add_usage};
 use serde_json::{Value, json};
 
 use super::claim::claims;
 use super::verify::split;
-use super::{Failure, Out, merge_usage, merged, print, print_line};
+use super::{Failure, Out, merged, print, print_line};
 use crate::args::{ClaimArgs, Format};
 use crate::exit::Exit;
 use crate::output;
@@ -46,7 +46,7 @@ pub async fn run(engine: &Engine, args: ClaimArgs, out: Out) -> Result<Exit, Fai
                 .collect();
             let fetched = engine.abstracts(&records.iter().collect::<Vec<_>>()).await;
             for (p, u) in &fetched.usage {
-                merge_usage(&mut report.usage, p, *u);
+                add_usage(&mut report.usage, p, *u);
             }
             Some(fetched.found)
         } else {

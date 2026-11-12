@@ -161,12 +161,29 @@ pub struct SqliteCache {
 }
 
 impl SqliteCache {
-    /// Opens (creating if needed) the cache at `path`.
+    /// Opens (creating if needed) the cache at `path`. A file that isn't a
+    /// readable SQLite database is deleted and started afresh.
     pub fn open(path: &Path) -> Result<Self> {
         if let Some(dir) = path.parent() {
             std::fs::create_dir_all(dir)?;
         }
-        Self::init(Connection::open(path)?)
+        match Connection::open(path)
+            .map_err(StoreError::from)
+            .and_then(Self::init)
+        {
+            Err(StoreError::Sqlite(e)) if is_unreadable(&e) => {
+                for suffix in ["", "-wal", "-shm"] {
+                    let mut file = path.as_os_str().to_owned();
+                    file.push(suffix);
+                    match std::fs::remove_file(&file) {
+                        Err(e) if e.kind() != std::io::ErrorKind::NotFound => return Err(e.into()),
+                        _ => {}
+                    }
+                }
+                Self::init(Connection::open(path)?)
+            }
+            opened => opened,
+        }
     }
 
     pub fn open_in_memory() -> Result<Self> {
@@ -231,6 +248,14 @@ impl SqliteCache {
         )?;
         Ok(())
     }
+}
+
+/// Whether `e` says the file isn't a database, or is a damaged one.
+fn is_unreadable(e: &rusqlite::Error) -> bool {
+    matches!(
+        e.sqlite_error_code(),
+        Some(rusqlite::ErrorCode::NotADatabase | rusqlite::ErrorCode::DatabaseCorrupt)
+    )
 }
 
 fn timestamp(seconds: i64) -> Timestamp {

@@ -1,5 +1,22 @@
 # Changelog
 
+## Unreleased
+
+Fixed:
+
+- A DOI a PDF wrapped part-way through its suffix (`…/HJH.0b013e` then
+  `3282f35c67`) was looked up as printed and reported as not existing,
+  a red mismatch against the very work found. A DOI ending its line now
+  offers the next line's first word joined to it as an alternative
+  reading, `Claim::from_text` carries mentions' alternatives, and a cited
+  DOI that doesn't exist but starts the found work's DOI is that DOI cut
+  short (#39).
+- An unnumbered reference list whose lines break with a lone `\r` or
+  U+2028/U+2029 (as some PDF copies do) stayed one reference: those
+  breaks are now newlines. Laid-out lines (`split_lines`) no longer start
+  a reference at a line in lower case or closing a bracket, or after a
+  word broken at a hyphen (#40).
+
 ## 0.8.1
 
 Added:

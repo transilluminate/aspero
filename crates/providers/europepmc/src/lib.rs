@@ -425,11 +425,14 @@ impl Provider for EuropePmc {
         let clauses = ids.iter().map(clause).collect::<Result<Vec<_>>>()?;
         let mut found = Vec::new();
         for chunk in clauses.chunks(MAX_BATCH) {
+            // Room for clauses matching more than one record, so a requested
+            // one isn't pushed to a second page and taken as not found.
+            let page_size = (2 * chunk.len()).min(MAX_PAGE as usize);
             let params = [
                 ("query", chunk.join(" OR ")),
                 ("resultType", "core".to_owned()),
                 ("format", "json".to_owned()),
-                ("pageSize", chunk.len().to_string()),
+                ("pageSize", page_size.to_string()),
             ];
             let (results, at) = self.search_raw(&params).await?;
             let records = results.result_list.result.iter();

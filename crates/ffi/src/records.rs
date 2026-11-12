@@ -1074,6 +1074,16 @@ pub enum KeyStatus {
     Unreachable,
 }
 
+impl From<engine::KeyStatus> for KeyStatus {
+    fn from(s: engine::KeyStatus) -> Self {
+        match s {
+            engine::KeyStatus::Valid => KeyStatus::Valid,
+            engine::KeyStatus::Rejected => KeyStatus::Rejected,
+            _ => KeyStatus::Unreachable,
+        }
+    }
+}
+
 #[derive(Debug, Clone, uniffi::Record)]
 pub struct KeyCheck {
     pub status: KeyStatus,

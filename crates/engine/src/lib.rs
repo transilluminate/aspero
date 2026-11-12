@@ -37,6 +37,7 @@ mod health;
 mod identify;
 mod inflight;
 mod inputs;
+mod keys;
 mod lookup;
 mod options;
 mod registry;
@@ -57,6 +58,9 @@ pub use check::{
     bare_doi, duplicates, findings,
 };
 pub use identify::{Decision, Identified, MAX_IDENTIFIERS};
+#[cfg(feature = "openalex")]
+pub use keys::check_openalex_key;
+pub use keys::{KeyCheck, KeyStatus};
 pub use registry::{Disagreement, disagreements};
 pub use resolve::{Candidate, ResolveReport, Sighting, Via};
 /// Re-exported for credentials in provider configs.

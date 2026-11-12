@@ -13,10 +13,9 @@
 
 use std::sync::Arc;
 
-use aspero_core::{Cursor, Error, ErrorKind, FieldSet, SearchQuery, WorkId, WorkType, YearRange};
+use aspero_core::{Cursor, Error, SearchQuery, WorkType, YearRange};
 use aspero_engine::{
-    CallOptions, Engine, Extras, OpenAlexConfig, SecretString, SqliteCache, StandardConfig,
-    standard,
+    CallOptions, Engine, Extras, SecretString, SqliteCache, StandardConfig, standard,
 };
 use aspero_json::InputClaim;
 use futures::StreamExt;
@@ -27,15 +26,12 @@ pub mod records;
 
 use records::{
     Bibliography, Budget, CacheStats, CitationStyle, CiteFormat, CitedEntry, Claim as ClaimRecord,
-    DocxReferences, ExportFormat, Identification, KeyCheck, KeyStatus, Line, LineReference, Lookup,
-    Lookups, Mention, ProviderUsage, ReadError, Reference, SearchRequest, SearchResults,
-    StyleError, StyleSource, Unavailable, Utf16Offsets, Verification, Verifications, Work,
+    DocxReferences, ExportFormat, Identification, KeyCheck, Line, LineReference, Lookup, Lookups,
+    Mention, ProviderUsage, ReadError, Reference, SearchRequest, SearchResults, StyleError,
+    StyleSource, Unavailable, Utf16Offsets, Verification, Verifications, Work,
 };
 
 uniffi::setup_scaffolding!();
-
-/// A work every OpenAlex key can look up, free: for checking keys.
-const KNOWN_WORK: &str = "doi:10.1038/nature14539";
 
 #[derive(Debug, Clone, uniffi::Record)]
 pub struct Config {
@@ -431,49 +427,20 @@ impl Aspero {
         key: String,
         cancel: Option<Arc<CallToken>>,
     ) -> Result<KeyCheck, AsperoError> {
-        if key.trim().is_empty() {
-            return Ok(KeyCheck {
-                status: KeyStatus::Rejected,
-                message: Some("no key given".into()),
-                budget: None,
-            });
-        }
-        let mut config = StandardConfig::default();
-        config.mailto = self.mailto.clone();
-        config.pacing = self.cache.clone().map(|c| c as _);
-        let mut openalex = OpenAlexConfig::default();
-        openalex.api_key = Some(SecretString::from(key.trim().to_owned()));
-        config.openalex = Some(openalex);
-        let engine = standard(config)
-            .map_err(|e| AsperoError::Setup(e.to_string()))?
-            .with_options(CallOptions::interactive());
-        self.run(
-            async move {
-                let id: WorkId = KNOWN_WORK.parse().expect("a valid identifier");
-                let report = engine.lookup(&[id], FieldSet::DEFAULT).await;
-                let failure = report.results[0]
-                    .attempts
-                    .iter()
-                    .find_map(|a| match &a.outcome {
-                        aspero_engine::Outcome::Failed(e) => Some(e.clone()),
-                        _ => None,
-                    });
-                let status = match failure.as_ref().map(Error::kind) {
-                    None | Some(ErrorKind::BudgetSpent) => KeyStatus::Valid,
-                    Some(ErrorKind::KeyRejected) => KeyStatus::Rejected,
-                    Some(_) => KeyStatus::Unreachable,
-                };
-                KeyCheck {
-                    status,
-                    message: failure
-                        .filter(|_| status != KeyStatus::Valid)
-                        .map(|e| e.to_string()),
-                    budget: engine.budgets().first().map(|(p, b)| Budget::new(p, b)),
-                }
-            },
-            cancel,
-        )
-        .await
+        let mailto = self.mailto.clone();
+        let pacing = self.cache.clone().map(|c| c as _);
+        let checked = self
+            .run(
+                async move { aspero_engine::check_openalex_key(&key, mailto, pacing).await },
+                cancel,
+            )
+            .await?;
+        let check = checked.map_err(|e| AsperoError::Setup(e.to_string()))?;
+        Ok(KeyCheck {
+            status: check.status.into(),
+            message: check.message,
+            budget: check.budget.map(|(p, b)| Budget::new(&p, &b)),
+        })
     }
 
     /// What the cache holds; `None` without one.

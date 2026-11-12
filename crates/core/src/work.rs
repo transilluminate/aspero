@@ -267,6 +267,42 @@ impl Person {
         }
     }
 
+    /// Family and given names: as given, or split from a name written
+    /// whole ("Vincent van Gogh" → "van Gogh", "Vincent"). `None` for an
+    /// organisation, or a name that may be one ("WHO", "GBD 2019
+    /// Collaborators").
+    pub fn parts(&self) -> Option<(String, Option<String>)> {
+        match (&self.family, &self.literal) {
+            (Some(family), _) => Some((family.clone(), self.given.clone())),
+            (None, Some(literal)) => split_literal(literal),
+            (None, None) => None,
+        }
+    }
+
+    /// The given names' initials: "Dong Vu" → "DV", "Jean-Pierre" → "JP",
+    /// "T. D. N." → "TDN".
+    pub fn initials(&self) -> Option<String> {
+        let (_, given) = self.parts()?;
+        let initials: String = given?
+            .split(|c: char| c.is_whitespace() || c == '-' || c == '.')
+            .filter_map(|part| part.chars().find(|c| c.is_alphabetic()))
+            .flat_map(char::to_uppercase)
+            .collect();
+        (!initials.is_empty()).then_some(initials)
+    }
+
+    /// The name as Vancouver writes it: "Laan DV"; an organisation as
+    /// written.
+    pub fn short(&self) -> Option<String> {
+        match self.parts() {
+            Some((family, _)) => Some(match self.initials() {
+                Some(initials) => format!("{family} {initials}"),
+                None => family,
+            }),
+            None => self.display_name(),
+        }
+    }
+
     /// The best single-string name: "Given Family", or the literal.
     pub fn display_name(&self) -> Option<String> {
         match (&self.given, &self.family, &self.literal) {
@@ -277,6 +313,80 @@ impl Person {
             (None, None, None) => None,
         }
     }
+}
+
+/// Lowercase words that join a family name: "van Gogh", "de la Cruz".
+const PARTICLES: [&str; 14] = [
+    "van", "von", "de", "der", "den", "da", "di", "du", "la", "le", "del", "dos", "ten", "ter",
+];
+
+/// Words that make a name an organisation's.
+const BODIES: [&str; 40] = [
+    "university",
+    "institute",
+    "institution",
+    "group",
+    "team",
+    "organization",
+    "organisation",
+    "consortium",
+    "committee",
+    "association",
+    "society",
+    "collaboration",
+    "network",
+    "centre",
+    "center",
+    "foundation",
+    "agency",
+    "council",
+    "department",
+    "ministry",
+    "office",
+    "board",
+    "federation",
+    "alliance",
+    "project",
+    "initiative",
+    "commission",
+    "programme",
+    "program",
+    "inc",
+    "ltd",
+    "corporation",
+    "company",
+    "trust",
+    "investigators",
+    "study",
+    "panel",
+    "laboratory",
+    "hospital",
+    "college",
+];
+
+/// A personal name written whole ("Yann LeCun", "Vincent van Gogh"), as
+/// family and given names; `None` for anything that may be an
+/// organisation's.
+fn split_literal(literal: &str) -> Option<(String, Option<String>)> {
+    let words: Vec<&str> = literal.split_whitespace().collect();
+    let personal = (2..=5).contains(&words.len())
+        && words.iter().all(|w| {
+            let lower = w.trim_end_matches(['.', ',']).to_lowercase();
+            let capital = w.chars().next().is_some_and(char::is_uppercase);
+            let acronym = w.chars().count() > 2 && w.chars().all(|c| !c.is_lowercase());
+            (capital || PARTICLES.contains(&lower.as_str()))
+                && !acronym
+                && !BODIES.contains(&lower.as_str())
+                && !w.chars().any(|c| c.is_ascii_digit())
+        });
+    if !personal {
+        return None;
+    }
+    let mut start = words.len() - 1;
+    while start > 1 && PARTICLES.contains(&words[start - 1]) {
+        start -= 1;
+    }
+    Some((words[start..].join(" "), Some(words[..start].join(" "))))
 }
 
 /// Removes an "Abstract" heading that some sources leave at the start of
@@ -465,6 +575,26 @@ impl<'de> Deserialize<'de> for PartialDate {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn names_split_and_shorten_as_vancouver_writes_them() {
+        let short = |p: Person| p.short().unwrap();
+        assert_eq!(short(Person::new("Dong V.", "Laan")), "Laan DV");
+        assert_eq!(short(Person::new("Thi Diem Ngoc", "Vu")), "Vu TDN");
+        assert_eq!(short(Person::new("Jean-Pierre", "Dupont")), "Dupont JP");
+        assert_eq!(short(Person::literal("Yann LeCun")), "LeCun Y");
+        assert_eq!(short(Person::literal("Vincent van Gogh")), "van Gogh V");
+        assert_eq!(short(Person::literal("WHO")), "WHO");
+        assert_eq!(
+            short(Person::literal("GBD 2019 Collaborators")),
+            "GBD 2019 Collaborators"
+        );
+        assert_eq!(
+            Person::literal("Vincent van Gogh").parts(),
+            Some(("van Gogh".into(), Some("Vincent".into())))
+        );
+        assert_eq!(Person::literal("World Health Organization").parts(), None);
+    }
 
     #[test]
     fn partial_dates_parse_validate_and_round_trip() {

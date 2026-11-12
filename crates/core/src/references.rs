@@ -522,6 +522,20 @@ pub(crate) fn link_continues(text: &str, next: &str) -> bool {
     if !in_link(text) || !first.is_alphanumeric() || starts_link(token) || is_number(token) {
         return false;
     }
+    // A line that is one word of a DOI suffix's characters, digits among
+    // them, is the rest of the link, however the line broke: PDFs wrap a
+    // suffix anywhere (`…/HJH.0b013e` then `3282f35c67`). Not a number,
+    // nor an identifier of its own.
+    let suffix = |c: char| c.is_ascii_alphanumeric() || "._;()/:-<>".contains(c);
+    if next.trim() == token
+        && !text.ends_with('.')
+        && token.chars().all(suffix)
+        && token.bytes().any(|b| b.is_ascii_digit())
+        && !plain_number(token.trim_end_matches(|c: char| !c.is_alphanumeric()))
+        && crate::id::scan(token).is_empty()
+    {
+        return true;
+    }
     let lower_or_digit = first.is_lowercase() || first.is_ascii_digit();
     // A DOI of its own, unless the line broke right before it
     // (`https://doi.org/` then `10.…`).
@@ -539,6 +553,14 @@ pub(crate) fn link_continues(text: &str, next: &str) -> bool {
             && inner.parse::<f64>().is_err()
             && (inner.contains(['.', '/', '_']) || (first.is_ascii_digit() && inner.contains('-')))
     }
+}
+
+/// A number that reads as itself ("3.14", "2019", "797"), not a run of a
+/// DOI's digits ("0000659", "00489").
+fn plain_number(token: &str) -> bool {
+    let digits = token.bytes().all(|b| b.is_ascii_digit());
+    (token.contains('.') && token.parse::<f64>().is_ok())
+        || (digits && token.len() < 5 && !token.starts_with('0'))
 }
 
 /// `token` is a link of its own, not the rest of one.
@@ -790,6 +812,40 @@ mod tests {
                 "{found:?}"
             );
         }
+    }
+
+    #[test]
+    fn a_doi_wrapped_onto_a_line_of_its_own_ends_its_reference() {
+        // #40, as copied: each DOI's end alone on the next line.
+        let list = "Benjamin EJ, Muntner P, et al. Heart disease\n\
+            and stroke statistics-2019 update. Circulation\n\
+            2019;139:e56-528. https://doi.org/10.1161/CIR.000000000\n\
+            0000659\n\
+            Schmieder RE, Kjeldsen SE, et al. Reduced incidence\n\
+            of new-onset atrial fibrillation: the VALUE trial. J\n\
+            Hypertens 2008;26:403-11. https://doi.org/10.1097/HJH.0b013e\n\
+            3282f35c67";
+        let found = texts(list);
+        assert_eq!(found.len(), 2, "{found:?}");
+        assert!(
+            found[0].ends_with("https://doi.org/10.1161/CIR.0000000000000659"),
+            "{found:?}"
+        );
+        assert!(
+            found[1].ends_with("https://doi.org/10.1097/HJH.0b013e3282f35c67"),
+            "{found:?}"
+        );
+        let dois: Vec<String> = crate::id::scan(list)
+            .iter()
+            .map(|m| m.id.to_string())
+            .collect();
+        assert_eq!(
+            dois,
+            [
+                "doi:10.1161/cir.0000000000000659",
+                "doi:10.1097/hjh.0b013e3282f35c67"
+            ]
+        );
     }
 
     #[test]

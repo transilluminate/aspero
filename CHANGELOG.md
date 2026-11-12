@@ -1,5 +1,25 @@
 # Changelog
 
+## Unreleased
+
+Added:
+
+- `Person::parts` (family and given names, split from a name written
+  whole with the rules BibTeX export used, `None` for an organisation),
+  `Person::initials` ("DV") and `Person::short`, the Vancouver form
+  ("Laan DV"). FFI: `Author.family`, `Author.given` and `Author.short`;
+  an `Author` passed back to `export` or `cite` with a family name keeps
+  its parts (#41).
+
+Fixed:
+
+- A reference list stayed one reference when each DOI's end was wrapped
+  onto a line of its own (`…/CIR.000000000` then `0000659`). A line that
+  is one word of DOI-suffix characters with a digit, not a plain number
+  or an identifier of its own, continues the link that ended the line
+  before, so the reference ends in the whole DOI and `scan` reads it
+  whole (#40).
+
 ## 0.8.2
 
 Fixed:

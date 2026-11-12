@@ -147,6 +147,9 @@ fn works_export_as_bibtex_and_ris() {
         authors: vec![Author {
             name: "Yann LeCun".into(),
             orcid: None,
+            family: Some("LeCun".into()),
+            given: Some("Yann".into()),
+            short: "LeCun Y".into(),
         }],
         issued: None,
         year: Some(2015),
@@ -189,6 +192,9 @@ fn work(title: &str, author: &str, year: i16) -> Work {
         authors: vec![Author {
             name: author.into(),
             orcid: None,
+            family: None,
+            given: None,
+            short: author.into(),
         }],
         issued: None,
         year: Some(year),

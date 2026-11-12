@@ -837,8 +837,10 @@ mod tests {
     #[test]
     fn dois_wrapped_mid_suffix_have_the_joined_alternative() {
         // #39: Vancouver lists from journal PDFs.
-        let text = "J Hypertens 2008;26:403-11. https://doi.org/10.1097/HJH.0b013e\n3282f35c67\n\
-            19. Next. Circulation 2019;139:e56-528. https://doi.org/10.1161/CIR.000000000\n0000659\n\
+        // A continuation alone on its line is joined outright; followed by
+        // more words, it's an alternative reading.
+        let text = "J Hypertens 2008;26:403-11. https://doi.org/10.1097/HJH.0b013e\n3282f35c67 Epub\n\
+            19. Next. Circulation 2019;139:e56-528. https://doi.org/10.1161/CIR.000000000\n0000659 (2019)\n\
             20. Last. doi:10.1038/nature14539.\n21. Smith J.";
         let alternatives: Vec<_> = scan(text)
             .iter()

@@ -24,6 +24,13 @@ pub struct Author {
     pub name: String,
     /// The bare ORCID iD.
     pub orcid: Option<String>,
+    /// The family name: as the provider gave it, or split from `name`
+    /// ("van Gogh"). Absent for an organisation.
+    pub family: Option<String>,
+    /// The given names, where known.
+    pub given: Option<String>,
+    /// As Vancouver writes it: "Laan DV"; an organisation as `name`.
+    pub short: String,
 }
 
 #[derive(Debug, Clone, uniffi::Record)]
@@ -70,9 +77,13 @@ impl Work {
                 .authors
                 .iter()
                 .filter_map(|p| {
+                    let parts = p.parts();
                     Some(Author {
                         name: p.display_name()?,
                         orcid: p.orcid.clone(),
+                        family: parts.as_ref().map(|(f, _)| f.clone()),
+                        given: parts.and_then(|(_, g)| g),
+                        short: p.short()?,
                     })
                 })
                 .collect(),
@@ -1274,7 +1285,16 @@ impl Work {
             .unwrap_or_else(|| {
                 self.authors
                     .iter()
-                    .map(|a| aspero_core::Person::literal(&a.name))
+                    .map(|a| match &a.family {
+                        Some(family) => {
+                            let mut p = aspero_core::Person::default();
+                            p.family = Some(family.clone());
+                            p.given = a.given.clone();
+                            p.orcid = a.orcid.clone();
+                            p
+                        }
+                        None => aspero_core::Person::literal(&a.name),
+                    })
                     .collect()
             });
         w.issued = self

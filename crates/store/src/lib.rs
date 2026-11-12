@@ -24,7 +24,7 @@ use std::time::Duration;
 
 use aspero_core::{Page, ProviderId, SearchQuery, SourceRecord, WorkId};
 use jiff::Timestamp;
-use rusqlite::{Connection, OptionalExtension, params};
+use rusqlite::{Connection, OptionalExtension, TransactionBehavior, params};
 
 /// Bump on any schema change, *and* when cached records' shape or mapping
 /// changes (records are stored as mapped); older caches are dropped and
@@ -176,19 +176,25 @@ impl SqliteCache {
     fn init(mut conn: Connection) -> Result<Self> {
         conn.busy_timeout(Duration::from_secs(5))?;
         conn.pragma_update(None, "journal_mode", "WAL")?;
-        let version: i64 = conn.pragma_query_value(None, "user_version", |r| r.get(0))?;
-        if version != SCHEMA_VERSION {
-            // Disposable: drop whatever is there (older or newer) and rebuild.
-            let tx = conn.transaction()?;
-            let tables: Vec<String> = tx
-                .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' AND name != 'pacing'")?
-                .query_map([], |r| r.get(0))?
-                .collect::<rusqlite::Result<_>>()?;
-            for table in tables {
-                tx.execute_batch(&format!("DROP TABLE \"{}\";", table.replace('"', "\"\"")))?;
+        let version = |c: &Connection| -> rusqlite::Result<i64> {
+            c.pragma_query_value(None, "user_version", |r| r.get(0))
+        };
+        if version(&conn)? != SCHEMA_VERSION {
+            // Take the write lock, then check again: another process may
+            // have rebuilt it meanwhile.
+            let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+            if version(&tx)? != SCHEMA_VERSION {
+                // Disposable: drop whatever is there (older or newer) and rebuild.
+                let tables: Vec<String> = tx
+                    .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' AND name != 'pacing'")?
+                    .query_map([], |r| r.get(0))?
+                    .collect::<rusqlite::Result<_>>()?;
+                for table in tables {
+                    tx.execute_batch(&format!("DROP TABLE \"{}\";", table.replace('"', "\"\"")))?;
+                }
+                tx.execute_batch(SCHEMA)?;
+                tx.pragma_update(None, "user_version", SCHEMA_VERSION)?;
             }
-            tx.execute_batch(SCHEMA)?;
-            tx.pragma_update(None, "user_version", SCHEMA_VERSION)?;
             tx.commit()?;
         }
         conn.execute_batch(PACING)?;
@@ -235,7 +241,7 @@ impl Pacing for SqliteCache {
     fn claim_slot(&self, provider: &str, interval: Duration, now: Timestamp) -> Result<Timestamp> {
         let mut conn = self.conn();
         // Take the write lock up front, so claims never interleave.
-        let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         let now_ms = now.as_millisecond();
         let next: Option<i64> = tx
             .query_row(

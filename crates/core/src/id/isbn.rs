@@ -40,11 +40,6 @@ fn isbn13_check(first12: &[u8]) -> u8 {
     b'0' + ((10 - sum % 10) % 10) as u8
 }
 
-/// Whether `s` (compacted) is a checksum-valid ISBN-10 or ISBN-13.
-pub(crate) fn looks_like_isbn(s: &str) -> bool {
-    Isbn::parse_bare(&compact(s)).is_ok()
-}
-
 impl IdSyntax for Isbn {
     const KIND: IdKind = IdKind::Isbn;
 

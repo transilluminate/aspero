@@ -239,14 +239,17 @@ impl WorkId {
         }
         // 13 digits from the book prefixes with a valid checksum, or a
         // hyphenated form, can only be an ISBN; plain 10 digits might be.
-        let compact: String = s.chars().filter(|c| !matches!(c, '-' | ' ')).collect();
-        let book_prefix = compact.starts_with("978") || compact.starts_with("979");
-        if isbn::looks_like_isbn(s) && ((compact.len() == 13 && book_prefix) || s.contains('-')) {
-            return WorkId::parse_as(IdKind::Isbn, input);
+        let isbn = Isbn::parse_bare(s).is_ok();
+        if isbn {
+            let compact: String = s.chars().filter(|c| !matches!(c, '-' | ' ')).collect();
+            let book_prefix = compact.starts_with("978") || compact.starts_with("979");
+            if (compact.len() == 13 && book_prefix) || s.contains('-') {
+                return WorkId::parse_as(IdKind::Isbn, input);
+            }
         }
         if is_digits(s) {
             let mut candidates = vec![IdKind::Pmid, IdKind::CorpusId];
-            if isbn::looks_like_isbn(s) {
+            if isbn {
                 candidates.push(IdKind::Isbn);
             }
             return Err(IdError::Ambiguous {

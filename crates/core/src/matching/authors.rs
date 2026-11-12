@@ -37,3 +37,29 @@ pub(super) fn author_overlap(claimed: &[String], families: &[String]) -> f64 {
     let found = claimed.iter().filter(|c| families.contains(c)).count();
     0.5 * f64::from(u8::from(first_matches)) + 0.5 * found as f64 / claimed.len() as f64
 }
+
+/// Whether a reference names authors: "et al", or a family name followed
+/// by initials ("Laan DV", "Smith, J."). A family name is never followed by
+/// a full stop, so "Int. J. Care Injured" in a running header isn't one.
+pub(super) fn names_given(text: &str) -> bool {
+    if normalise(text).contains("et al") {
+        return true;
+    }
+    let tokens: Vec<&str> = text.split_whitespace().collect();
+    tokens.windows(2).any(|w| {
+        let family = w[0].trim_end_matches(',');
+        let initials: String = w[1]
+            .trim_end_matches([',', ';', '.'])
+            .chars()
+            .filter(|c| *c != '.')
+            .collect();
+        !w[0].ends_with('.')
+            && family.chars().count() >= 2
+            && family.chars().next().is_some_and(char::is_uppercase)
+            && family
+                .chars()
+                .all(|c| c.is_alphabetic() || matches!(c, '-' | '\''))
+            && (1..=3).contains(&initials.chars().count())
+            && initials.chars().all(|c| c.is_uppercase())
+    })
+}

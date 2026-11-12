@@ -162,6 +162,66 @@ impl Normalised {
         }
     }
 
+    /// Whether the reference gives no title: every word is accounted for
+    /// by the candidate's authors (`families`, normalised) and journal,
+    /// or is an initial, a number, a link's word or a reference's furniture
+    /// ("et al", "epub", a month). "Wittermans E, et al. ERJ Open Res.
+    /// 2022. doi:…" has none.
+    pub(super) fn untitled(&self, families: &[String], journal: Option<&str>) -> bool {
+        const FURNITURE: &[&str] = &[
+            "doi",
+            "epub",
+            "ahead",
+            "print",
+            "online",
+            "published",
+            "accessed",
+            "available",
+            "vol",
+            "pp",
+            "suppl",
+            "eds",
+            "jan",
+            "feb",
+            "mar",
+            "apr",
+            "may",
+            "jun",
+            "jul",
+            "aug",
+            "sep",
+            "sept",
+            "oct",
+            "nov",
+            "dec",
+            "january",
+            "february",
+            "march",
+            "april",
+            "june",
+            "july",
+            "august",
+            "september",
+            "october",
+            "november",
+            "december",
+            "pmid",
+            "pmcid",
+            "arxiv",
+            "isbn",
+        ];
+        let author_words: Vec<&str> = families.iter().flat_map(|f| f.split(' ')).collect();
+        self.words.iter().filter(|w| !w.is_empty()).all(|w| {
+            w.chars().count() <= 2
+                || w.bytes().any(|b| b.is_ascii_digit())
+                || STOPWORDS.contains(&w.as_str())
+                || LINK_WORDS.contains(&w.as_str())
+                || FURNITURE.contains(&w.as_str())
+                || author_words.contains(&w.as_str())
+                || journal.is_some_and(|j| crate::publication::journal_word(w, j))
+        })
+    }
+
     /// Four-digit numbers that look like publication years.
     pub(super) fn years(&self) -> Vec<i16> {
         self.words

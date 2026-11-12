@@ -61,10 +61,15 @@ pub struct Verification {
 pub enum Reason {
     /// The citation matches the work. (Verified)
     Matches,
-    /// The citation partly matches the work. (Plausible)
+    /// The citation partly matches the work. (Plausible) `differs` is
+    /// never empty.
     PartlyMatches { differs: Vec<Difference> },
+    /// The citation agrees with the work as far as it goes, but gives too
+    /// little to confirm it: nothing differs, and no authors, identifier
+    /// or journal and place corroborate it. (Plausible)
+    Unconfirmed,
     /// The closest work shares the title, but other details differ.
-    /// (Mismatch)
+    /// (Mismatch) `differs` is never empty.
     Closest { differs: Vec<Difference> },
     /// No matching work. (NotFound)
     NoMatch,
@@ -74,7 +79,8 @@ pub enum Reason {
     /// The identifiers exist and the citation agrees. (Verified)
     IdAgrees,
     /// The identifiers exist and the citation partly matches, or shares
-    /// the title with an error such as a wrong year. (Plausible)
+    /// the title with an error such as a wrong year. (Plausible) `differs`
+    /// is never empty.
     IdPartlyMatches { differs: Vec<Difference> },
     /// The identifiers are another work (candidate `cited`); the citation
     /// matches the work. (Mismatch)
@@ -98,6 +104,7 @@ impl Reason {
         match self {
             Reason::Matches => "matches",
             Reason::PartlyMatches { .. } => "partly_matches",
+            Reason::Unconfirmed => "unconfirmed",
             Reason::Closest { .. } => "closest",
             Reason::NoMatch => "no_match",
             Reason::IdExists => "id_exists",
@@ -140,6 +147,9 @@ pub enum CitedField {
     Journal,
     Volume,
     FirstPage,
+    /// What kind of work it is: the work is a reply, correction or
+    /// commentary on the one cited (`actual`: "correction", "reply", …).
+    Kind,
 }
 
 impl CitedField {
@@ -151,6 +161,7 @@ impl CitedField {
             CitedField::Journal => "journal",
             CitedField::Volume => "volume",
             CitedField::FirstPage => "first_page",
+            CitedField::Kind => "kind",
         }
     }
 }
@@ -179,7 +190,7 @@ fn near_miss(c: &Candidate) -> bool {
 /// The fields that don't fully agree. With `known_only`, only fields both
 /// sides gave and that disagree; otherwise also those the citation doesn't
 /// confirm.
-fn differences(c: &Candidate, known_only: bool) -> Vec<Difference> {
+fn differences(claim: &Claim, c: &Candidate, known_only: bool) -> Vec<Difference> {
     let a = &c.assessment;
     let w = &c.record.work;
     let off = |check: &matching::FieldCheck| match known_only {
@@ -200,6 +211,11 @@ fn differences(c: &Candidate, known_only: bool) -> Vec<Difference> {
             let first = w.page.as_deref().map(|p| first_page(p).to_owned());
             diff(CitedField::FirstPage, first)
         }),
+        w.title
+            .as_deref()
+            .and_then(matching::derivative_kind)
+            .filter(|_| !matching::claim_mentions_derivative(claim))
+            .map(|kind| diff(CitedField::Kind, Some(kind.to_owned()))),
     ]
     .into_iter()
     .flatten()
@@ -260,7 +276,24 @@ pub(crate) fn judge(claim: &Claim, report: ResolveReport) -> Verification {
     }
 }
 
+/// [`weigh`], settled: a reason that lists differences always lists
+/// one. Agreeing without them is [`Reason::Unconfirmed`]; a closest work
+/// that differs in nothing named isn't a mismatch to report.
 fn decide(claim: &Claim, report: &ResolveReport) -> (Verdict, Reason, Option<usize>) {
+    match weigh(claim, report) {
+        (
+            verdict,
+            Reason::PartlyMatches { differs } | Reason::IdPartlyMatches { differs },
+            best,
+        ) if differs.is_empty() => (verdict, Reason::Unconfirmed, best),
+        (_, Reason::Closest { differs }, _) if differs.is_empty() => {
+            (Verdict::NotFound, Reason::NoMatch, None)
+        }
+        settled => settled,
+    }
+}
+
+fn weigh(claim: &Claim, report: &ResolveReport) -> (Verdict, Reason, Option<usize>) {
     let best = report.candidates.first();
     let best_conf = best.map_or(0.0, |c| c.assessment.confidence);
     let failed = !report.errors.is_empty()
@@ -275,14 +308,14 @@ fn decide(claim: &Claim, report: &ResolveReport) -> (Verdict, Reason, Option<usi
             Some(c) if best_conf >= PLAUSIBLE => (
                 Verdict::Plausible,
                 Reason::PartlyMatches {
-                    differs: differences(c, true),
+                    differs: differences(claim, c, true),
                 },
                 Some(0),
             ),
             Some(c) if near_miss(c) => (
                 Verdict::Mismatch,
                 Reason::Closest {
-                    differs: differences(c, false),
+                    differs: differences(claim, c, false),
                 },
                 Some(0),
             ),
@@ -309,7 +342,7 @@ fn decide(claim: &Claim, report: &ResolveReport) -> (Verdict, Reason, Option<usi
         Some((i, c)) if c.assessment.confidence >= PLAUSIBLE => (
             Verdict::Plausible,
             Reason::IdPartlyMatches {
-                differs: differences(c, true),
+                differs: differences(claim, c, true),
             },
             Some(i),
         ),
@@ -320,7 +353,7 @@ fn decide(claim: &Claim, report: &ResolveReport) -> (Verdict, Reason, Option<usi
             None if near_miss(c) => (
                 Verdict::Plausible,
                 Reason::IdPartlyMatches {
-                    differs: differences(c, true),
+                    differs: differences(claim, c, true),
                 },
                 Some(i),
             ),
@@ -353,6 +386,10 @@ fn explain(claim: &Claim, report: &ResolveReport, why: &Reason, best: Option<usi
             "partly matches {}; {}",
             work(),
             details().unwrap_or_else(|| "check the details".into())
+        ),
+        Reason::Unconfirmed => format!(
+            "agrees with {} as far as it goes, but gives too little to confirm it",
+            work()
         ),
         Reason::Closest { .. } => format!(
             "closest work is {}, but {}",

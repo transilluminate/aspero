@@ -62,7 +62,12 @@ impl OpenAlex {
         capabilities.max_batch = MAX_PAGE as usize;
         capabilities.fields = FieldSet::ALL;
         capabilities.search = true;
-        capabilities.search_filters = vec![Filter::Years, Filter::WorkType, Filter::OpenAccess];
+        capabilities.search_filters = vec![
+            Filter::Years,
+            Filter::WorkType,
+            Filter::OpenAccess,
+            Filter::Place,
+        ];
         OpenAlex {
             config,
             http,
@@ -303,6 +308,12 @@ impl Provider for OpenAlex {
         }
         if let Some(oa) = query.open_access {
             filters.push(format!("is_oa:{oa}"));
+        }
+        if let Some(place) = &query.place {
+            // Filter values can't hold commas or pipes, which separate them.
+            let clean = |s: &str| s.replace([',', '|'], "");
+            filters.push(format!("biblio.volume:{}", clean(&place.volume)));
+            filters.push(format!("biblio.first_page:{}", clean(&place.first_page)));
         }
 
         let mut params: Vec<(&str, String)> = Vec::new();

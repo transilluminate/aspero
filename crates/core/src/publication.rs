@@ -39,6 +39,14 @@ pub(crate) fn journal_in(words: &[String], journal: &str) -> bool {
         || (full.len() > 1 && text.iter().any(|w| is_initials(w, &full)))
 }
 
+/// Whether `word` (normalised) is one of `journal`'s significant words,
+/// or abbreviates one, or is its initials ("res" or "erj" in "ERJ Open
+/// Research").
+pub(crate) fn journal_word(word: &str, journal: &str) -> bool {
+    let full = significant(journal);
+    full.iter().any(|f| abbreviates_word(word, f)) || (full.len() > 1 && is_initials(word, &full))
+}
+
 fn significant(name: &str) -> Vec<String> {
     normalise(name)
         .split(' ')
@@ -134,6 +142,33 @@ pub(crate) fn locator(text: &str) -> Locator {
                 page: Some(page),
             };
         }
+        // Running headers, Elsevier's "47 (2016) 797–804" and Nature's
+        // "521, 436–444 (2015)": a year in brackets tells them apart.
+        let next_page = tokens.get(i + 1).map(|p| p.trim_end_matches(['.', ',']));
+        if let Some((volume, year)) = token.split_once('(')
+            && bracketed_year(year)
+            && let (Some(volume), Some(page)) = (
+                volume_number(volume),
+                next_page.filter(|p| ranged(p)).and_then(page_number),
+            )
+        {
+            return Locator {
+                volume: Some(volume),
+                page: Some(page),
+            };
+        }
+        if tokens[i].ends_with(',')
+            && let Some(volume) = volume_number(token)
+            && let Some((pages, year)) = next_page.and_then(|p| p.split_once('('))
+            && bracketed_year(year)
+            && ranged(pages)
+            && let Some(page) = page_number(pages)
+        {
+            return Locator {
+                volume: Some(volume),
+                page: Some(page),
+            };
+        }
         let label = token.to_ascii_lowercase();
         let next = || tokens.get(i + 1).copied();
         match label.trim_end_matches('.') {
@@ -147,6 +182,18 @@ pub(crate) fn locator(text: &str) -> Locator {
         }
     }
     found
+}
+
+/// "2016)": a year, its bracket closed.
+fn bracketed_year(s: &str) -> bool {
+    s.strip_suffix(')')
+        .and_then(|y| y.parse::<u16>().ok())
+        .is_some_and(|y| (1600..=2100).contains(&y))
+}
+
+/// A page range: "797–804".
+fn ranged(pages: &str) -> bool {
+    pages.contains(['-', '–', '—'])
 }
 
 /// "376" or "376(26)": the volume number.
@@ -237,6 +284,13 @@ mod tests {
         );
         assert_eq!(locator("JAMA. 2014;311(11):e1117."), loc("311", "e1117"));
         assert_eq!(locator("Nature 521:436–444 (2015)"), loc("521", "436"));
+        assert_eq!(
+            locator("Injury, Int. J. Care Injured 47 (2016) 797–804"),
+            loc("47", "797")
+        );
+        assert_eq!(locator("Nature 521, 436–444 (2015)"), loc("521", "436"));
+        // A bracketed year without a page range: no place.
+        assert_eq!(locator("Smith 47 (2016) 797 patients"), Locator::default());
         assert_eq!(
             locator("Vaswani 2017. doi:10.48550/arXiv.1706.03762 at 10:30"),
             Locator::default()

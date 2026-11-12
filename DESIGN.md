@@ -156,7 +156,9 @@ citation styles. The rules, each from a real failure:
 - **One field can't verify.** "Deep learning" matches many works.
 - **Title and year alone stay plausible** (at most 0.8): short generic
   titles ("Health technology assessment") match by coincidence. Authors or
-  a shared identifier must corroborate.
+  a shared identifier must corroborate. Without a title, authors, an
+  identifier or the place, nothing is plausible: a year or journal alone,
+  or a title of a word or two found in free text, matches by chance.
 - **Titles compare on content words**, and a dropped subtitle still
   matches; a few shared topic words in free text are not a title match.
 - **Replies, errata and comments are not the original.** Their titles
@@ -171,7 +173,14 @@ citation styles. The rules, each from a real failure:
   at plausible: a citation error, and what separates an article from
   replies printed in the same volume. Matching volume and page corroborate
   like authors; with journal and volume agreeing, a title missing from a
-  short reference doesn't count against it.
+  short reference doesn't count against it. Journal, volume and first page
+  all agreeing verify on their own (0.9; 0.8 a year off), so running
+  headers (`Injury 47 (2016) 797–804`, `Nature 521, 436–444 (2015)`) are
+  found by an OpenAlex search on volume, first page and year (±1). A
+  reference whose every word is the work's authors, journal, numbers or
+  furniture gives no title rather than another one, but then needs an
+  identifier or the place. A reference that names no one (no "et al", no
+  surname with initials) has no author mismatch.
 - **First author alone is an author match** ("Vaswani et al."); an
   unmentioned sole author is no match.
 - **"RETRACTED:" title markers are ignored** when comparing titles.
@@ -179,7 +188,10 @@ citation styles. The rules, each from a real failure:
 Verdicts: verified, plausible, mismatch (claimed ID missing or another
 work's; or same title with matching authors *or* year but the other wrong),
 not_found, unverifiable (providers failed). A retraction is noted whatever
-the verdict.
+the verdict. Reasons that list differences (`partly_matches`, `closest`,
+`id_partly_matches`) always list one; agreeing with nothing to corroborate
+is `unconfirmed`, and a reply or correction carrying the cited title
+differs in `kind`.
 
 `check` adds findings per entry: add_doi (info), replace_id (error, an
 arXiv DataCite DOI counts as its arXiv ID; a kind the match lacks proves

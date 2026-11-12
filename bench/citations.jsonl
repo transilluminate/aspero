@@ -36,3 +36,8 @@
 {"why": "Vancouver with a wrong first page: the paper, flagged", "claim": "Daum RS et al. N Engl J Med 2017;376:2440", "expect": ["plausible"]}
 {"why": "full Vancouver reference: title, journal abbreviation, volume, pages", "claim": "Meyer G, Vicaut E, Danays T, et al. Fibrinolysis for patients with intermediate-risk pulmonary embolism. N Engl J Med. 2014;370(15):1402-11.", "expect": ["verified"], "ids": ["doi:10.1056/nejmoa1302097"]}
 {"why": "dogfood: a DOI link Preview spaced out at its punctuation (#33)", "claim": "https:// doi. org/ 10. 1183/ 23120 541. 00489- 2021", "expect": ["verified"], "ids": ["doi:10.1183/23120541.00489-2021"]}
+{"why": "running header without a title or authors (#23)", "claim": "Injury, Int. J. Care Injured 47 (2016) 797–804", "expect": ["verified"], "ids": ["doi:10.1016/j.injury.2015.11.045"]}
+{"why": "Vancouver short form without a title (#23)", "claim": "Injury. 2016;47(4):797-804.", "expect": ["verified"], "ids": ["doi:10.1016/j.injury.2015.11.045"]}
+{"why": "Nature running header (#23)", "claim": "Nature 521, 436–444 (2015)", "expect": ["verified"], "ids": ["doi:10.1038/nature14539"]}
+{"why": "control: a running header with the wrong volume (#23)", "claim": "Injury, Int. J. Care Injured 49 (2016) 797–804", "expect": ["not_found"]}
+{"why": "authors, journal and DOI without a title (#23, #33)", "claim": "Wittermans E, et al. ERJ Open Res. 2022. https:// doi. org/ 10. 1183/ 23120 541. 00489- 2021", "expect": ["verified", "plausible"], "ids": ["doi:10.1183/23120541.00489-2021"]}

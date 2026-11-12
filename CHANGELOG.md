@@ -1,5 +1,34 @@
 # Changelog
 
+## Unreleased
+
+Added:
+
+- Citations without a title are found by where they appeared: running
+  headers (`Injury, Int. J. Care Injured 47 (2016) 797–804`, `Nature 521,
+  436–444 (2015)`) and short forms (`Injury. 2016;47(4):797-804.`).
+  Journal, volume and first page agreeing verify; another page or volume
+  is not found, not a guess. `verify` searches OpenAlex by volume, first
+  page and year (±1) for them (`SearchQuery::place`, `Filter::Place`;
+  found-by `place_search`) (#23).
+- `Reason::Unconfirmed` (`"unconfirmed"`): the citation agrees with the
+  work as far as it goes, but gives too little to confirm it. Before, this
+  was `partly_matches` with no differences.
+- `CitedField::Kind` (`"kind"`): the closest work is a reply, correction or
+  commentary on the one cited; `actual` says which ("reply",
+  "correction", "comment", …). `matching::derivative_kind` names it.
+
+Changed:
+
+- `partly_matches`, `closest` and `id_partly_matches` always list at least
+  one difference. A closest work differing in nothing nameable is
+  `not_found`. **FFI**: `Reason.unconfirmed` and `CitedField.kind` are new
+  cases.
+- A reference without a title (authors, journal, year and an identifier,
+  say) no longer counts as citing a different title, and one naming no
+  authors no longer counts as naming others ("authors mismatch" on a
+  running header).
+
 ## 0.6.7
 
 Fixed:

@@ -66,6 +66,7 @@ impl Engine {
                 Filter::Years => sent.years = None,
                 Filter::WorkType => sent.work_type = None,
                 Filter::OpenAccess => sent.open_access = None,
+                Filter::Place => sent.place = None,
                 _ => {}
             }
         }

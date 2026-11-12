@@ -1,0 +1,12 @@
+doi:10.1038/nature14539  found via openalex
+  Deep learning
+  Yann LeCun, Yoshua Bengio, Geoffrey Hinton · 2016
+  doi:10.1038/nature14539
+  ⚠ the DOI's registry disagrees: issued 2016 (vs 2015); volume 521 (vs 522)
+
+doi:10.1234/missing  not found (openalex: not found; crossref: not found)
+
+pmid:12345678  unsupported (no enabled provider looks up pmid identifiers)
+
+not an identifier  invalid (unrecognised identifier "not an identifier")
+

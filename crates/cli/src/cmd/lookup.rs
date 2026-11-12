@@ -256,3 +256,43 @@ pub fn text(item: &Value, result: Option<&LookupResult>) -> String {
     let status = item["status"].as_str().unwrap_or("?").replace('_', " ");
     format!("{label}  {status} ({why})\n")
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::cmd::testing::{Scripted, engine, pinned, work};
+
+    /// What `lookup --full` prints as text, byte for byte: found (with the
+    /// registry disagreeing), not found, unsupported and invalid.
+    #[tokio::test]
+    async fn text_is_pinned() {
+        let lecun = ["Yann LeCun", "Yoshua Bengio", "Geoffrey Hinton"];
+        let mut late = work(&["10.1038/nature14539"], "Deep learning", &lecun, 2016);
+        late.work.volume = Some("521".into());
+        let mut registered = work(&["10.1038/nature14539"], "Deep learning", &lecun, 2015);
+        registered.work.volume = Some("522".into());
+        let engine = engine(vec![
+            Scripted::new("openalex", vec![late]),
+            Scripted::new("crossref", vec![registered]).registry(),
+        ]);
+        let inputs = [
+            "10.1038/nature14539",
+            "10.1234/missing",
+            "PMID:12345678",
+            "not an identifier",
+        ]
+        .map(String::from);
+        let mut extras = Extras::default();
+        extras.full = true;
+        let report = engine.lookup_inputs(&inputs, extras).await;
+        let text: String = inputs
+            .iter()
+            .zip(&report.items)
+            .map(|(input, lookup)| {
+                let item = aspero_json::input_lookup(input, lookup, true);
+                text(&item, looked(lookup).map(|l| &l.result)) + "\n"
+            })
+            .collect();
+        pinned("lookup/expected.txt", &text);
+    }
+}

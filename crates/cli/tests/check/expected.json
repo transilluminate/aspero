@@ -1,0 +1,412 @@
+{
+  "entries": [
+    {
+      "findings": [
+        {
+          "doi": "10.1038/nature14539",
+          "kind": "add_doi",
+          "message": "add doi = {10.1038/nature14539}",
+          "severity": "info"
+        }
+      ],
+      "key": "lecun",
+      "match": {
+        "checks": {
+          "authors": "match",
+          "container": "unknown",
+          "ids": "unknown",
+          "page": "unknown",
+          "title": "match",
+          "volume": "unknown",
+          "year": "match"
+        },
+        "confidence": 1.0,
+        "found_by": [
+          {
+            "provider": "openalex",
+            "rank": 1,
+            "score": 100.0,
+            "via": "title_search"
+          }
+        ],
+        "work": {
+          "authors": [
+            {
+              "name": "Yann LeCun"
+            },
+            {
+              "name": "Yoshua Bengio"
+            },
+            {
+              "name": "Geoffrey Hinton"
+            }
+          ],
+          "canonical": "doi:10.1038/nature14539",
+          "ids": [
+            "doi:10.1038/nature14539"
+          ],
+          "issued": "2015",
+          "source": "openalex",
+          "title": "Deep learning"
+        }
+      },
+      "severity": "info",
+      "type": "article",
+      "verdict": "verified"
+    },
+    {
+      "findings": [
+        {
+          "kind": "verdict",
+          "message": "doi:10.1145/3448250 is \"Deep learning for AI\" (2021), doi:10.1145/3448250, but the citation matches \"Deep learning\" (2015), doi:10.1038/nature14539",
+          "severity": "error"
+        },
+        {
+          "claimed": "doi:10.1145/3448250",
+          "kind": "replace_id",
+          "message": "replace doi:10.1145/3448250 with doi:10.1038/nature14539",
+          "severity": "error",
+          "with": "doi:10.1038/nature14539"
+        },
+        {
+          "kind": "duplicate",
+          "message": "duplicate of lecun",
+          "of": "lecun",
+          "severity": "warning"
+        }
+      ],
+      "key": "wrongdoi",
+      "match": {
+        "checks": {
+          "authors": "match",
+          "container": "unknown",
+          "ids": "mismatch",
+          "page": "unknown",
+          "title": "match",
+          "volume": "unknown",
+          "year": "match"
+        },
+        "confidence": 1.0,
+        "found_by": [
+          {
+            "provider": "openalex",
+            "rank": 1,
+            "score": 100.0,
+            "via": "title_search"
+          }
+        ],
+        "work": {
+          "authors": [
+            {
+              "name": "Yann LeCun"
+            },
+            {
+              "name": "Yoshua Bengio"
+            },
+            {
+              "name": "Geoffrey Hinton"
+            }
+          ],
+          "canonical": "doi:10.1038/nature14539",
+          "ids": [
+            "doi:10.1038/nature14539"
+          ],
+          "issued": "2015",
+          "source": "openalex",
+          "title": "Deep learning"
+        }
+      },
+      "severity": "error",
+      "type": "article",
+      "verdict": "mismatch"
+    },
+    {
+      "findings": [
+        {
+          "actual": 2017,
+          "claimed": 2018,
+          "kind": "year_differs",
+          "message": "year 2018 → 2017 (often preprint vs published, or online vs print)",
+          "severity": "info"
+        }
+      ],
+      "key": "vaswani",
+      "match": {
+        "checks": {
+          "authors": "match",
+          "container": "unknown",
+          "ids": "match",
+          "page": "unknown",
+          "title": "match",
+          "volume": "unknown",
+          "year": "partial"
+        },
+        "confidence": 0.88,
+        "found_by": [
+          {
+            "provider": "openalex",
+            "rank": 1,
+            "score": null,
+            "via": "lookup"
+          },
+          {
+            "provider": "openalex",
+            "rank": 1,
+            "score": 100.0,
+            "via": "title_search"
+          }
+        ],
+        "work": {
+          "authors": [
+            {
+              "name": "Ashish Vaswani"
+            },
+            {
+              "name": "Noam Shazeer"
+            },
+            {
+              "name": "Niki Parmar"
+            }
+          ],
+          "canonical": "arxiv:1706.03762",
+          "ids": [
+            "openalex:W2626778328",
+            "arxiv:1706.03762",
+            "doi:10.48550/arxiv.1706.03762"
+          ],
+          "issued": "2017",
+          "source": "openalex",
+          "title": "Attention Is All You Need"
+        }
+      },
+      "severity": "info",
+      "type": "inproceedings",
+      "verdict": "verified"
+    },
+    {
+      "findings": [
+        {
+          "kind": "verdict",
+          "message": "closest work is \"Deep learning for AI\" (2021), doi:10.1145/3448250, but its year (2021) differs",
+          "severity": "error"
+        },
+        {
+          "actual": 2021,
+          "claimed": 2015,
+          "kind": "year_differs",
+          "message": "year 2015 → 2021",
+          "severity": "error"
+        }
+      ],
+      "key": "late",
+      "match": {
+        "checks": {
+          "authors": "match",
+          "container": "unknown",
+          "ids": "unknown",
+          "page": "unknown",
+          "title": "match",
+          "volume": "unknown",
+          "year": "mismatch"
+        },
+        "confidence": 0.38,
+        "found_by": [
+          {
+            "provider": "openalex",
+            "rank": 1,
+            "score": 100.0,
+            "via": "title_search"
+          }
+        ],
+        "work": {
+          "authors": [
+            {
+              "name": "Yann LeCun"
+            },
+            {
+              "name": "Yoshua Bengio"
+            },
+            {
+              "name": "Geoffrey Hinton"
+            }
+          ],
+          "canonical": "doi:10.1145/3448250",
+          "ids": [
+            "doi:10.1145/3448250"
+          ],
+          "issued": "2021",
+          "source": "openalex",
+          "title": "Deep learning for AI"
+        }
+      },
+      "severity": "error",
+      "type": "article",
+      "verdict": "mismatch"
+    },
+    {
+      "findings": [
+        {
+          "kind": "verdict",
+          "message": "no matching work found",
+          "severity": "error"
+        }
+      ],
+      "key": "invented",
+      "severity": "error",
+      "type": "article",
+      "verdict": "not_found"
+    },
+    {
+      "findings": [
+        {
+          "kind": "updated",
+          "message": "RETRACTED (notice doi:10.1234/notice)",
+          "severity": "error",
+          "update": {
+            "kind": "retraction",
+            "notice": "doi:10.1234/notice"
+          }
+        }
+      ],
+      "key": "retracted",
+      "match": {
+        "checks": {
+          "authors": "match",
+          "container": "unknown",
+          "ids": "match",
+          "page": "unknown",
+          "title": "match",
+          "volume": "unknown",
+          "year": "match"
+        },
+        "confidence": 1.0,
+        "found_by": [
+          {
+            "provider": "openalex",
+            "rank": 1,
+            "score": null,
+            "via": "lookup"
+          }
+        ],
+        "work": {
+          "authors": [
+            {
+              "name": "Jane Doe"
+            }
+          ],
+          "canonical": "doi:10.1234/retracted",
+          "ids": [
+            "doi:10.1234/retracted"
+          ],
+          "issued": "2019",
+          "source": "openalex",
+          "title": "A retracted study",
+          "updates": [
+            {
+              "kind": "retraction",
+              "notice": "doi:10.1234/notice"
+            }
+          ]
+        }
+      },
+      "severity": "error",
+      "type": "article",
+      "verdict": "verified"
+    },
+    {
+      "findings": [
+        {
+          "field": "doi",
+          "kind": "entry",
+          "message": "doi field \"not a doi\" is not a valid DOI",
+          "problem": "not_a_doi",
+          "severity": "warning",
+          "value": "not a doi"
+        },
+        {
+          "doi": "10.1038/nature14539",
+          "kind": "add_doi",
+          "message": "add doi = {10.1038/nature14539}",
+          "severity": "info"
+        },
+        {
+          "kind": "duplicate",
+          "message": "duplicate of lecun",
+          "of": "lecun",
+          "severity": "warning"
+        }
+      ],
+      "key": "baddoi",
+      "match": {
+        "checks": {
+          "authors": "match",
+          "container": "unknown",
+          "ids": "unknown",
+          "page": "unknown",
+          "title": "match",
+          "volume": "unknown",
+          "year": "match"
+        },
+        "confidence": 1.0,
+        "found_by": [
+          {
+            "provider": "openalex",
+            "rank": 1,
+            "score": 100.0,
+            "via": "title_search"
+          }
+        ],
+        "work": {
+          "authors": [
+            {
+              "name": "Yann LeCun"
+            },
+            {
+              "name": "Yoshua Bengio"
+            },
+            {
+              "name": "Geoffrey Hinton"
+            }
+          ],
+          "canonical": "doi:10.1038/nature14539",
+          "ids": [
+            "doi:10.1038/nature14539"
+          ],
+          "issued": "2015",
+          "source": "openalex",
+          "title": "Deep learning"
+        }
+      },
+      "severity": "warning",
+      "type": "article",
+      "verdict": "verified"
+    },
+    {
+      "findings": [
+        {
+          "kind": "skipped",
+          "message": "nothing to check: no title or identifier",
+          "severity": "warning"
+        }
+      ],
+      "key": "empty",
+      "severity": "warning",
+      "type": "misc",
+      "verdict": "skipped"
+    }
+  ],
+  "file": "refs.bib",
+  "summary": {
+    "entries": 8,
+    "errors": 4,
+    "skipped": 1,
+    "suggestions": 2,
+    "verified": 4,
+    "warnings": 2
+  },
+  "usage": {
+    "openalex": {
+      "cost": 3.1875
+    }
+  }
+}

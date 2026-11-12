@@ -1,0 +1,23 @@
+INFO     lecun  (verified)
+         - add doi = {10.1038/nature14539}
+ERROR    wrongdoi  (mismatch)
+         - doi:10.1145/3448250 is "Deep learning for AI" (2021), doi:10.1145/3448250, but the citation matches "Deep learning" (2015), doi:10.1038/nature14539
+         - replace doi:10.1145/3448250 with doi:10.1038/nature14539
+         - duplicate of lecun
+INFO     vaswani  (verified)
+         - year 2018 → 2017 (often preprint vs published, or online vs print)
+ERROR    late  (mismatch)
+         - closest work is "Deep learning for AI" (2021), doi:10.1145/3448250, but its year (2021) differs
+         - year 2015 → 2021
+ERROR    invented  (not found)
+         - no matching work found
+ERROR    retracted  (verified)
+         - RETRACTED (notice doi:10.1234/notice)
+WARNING  baddoi  (verified)
+         - doi field "not a doi" is not a valid DOI
+         - add doi = {10.1038/nature14539}
+         - duplicate of lecun
+WARNING  empty  (skipped)
+         - nothing to check: no title or identifier
+
+refs.bib: 8 entries, 4 verified; 4 with errors, 2 with warnings, 2 with suggestions, 1 skipped

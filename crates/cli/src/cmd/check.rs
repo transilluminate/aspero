@@ -3,6 +3,7 @@
 use std::io::IsTerminal;
 
 use aspero_bib::BibEntry;
+use aspero_core::{ProviderId, Usage};
 use aspero_engine::{Checked, Engine, Finding, Severity, Verdict, describe_update};
 use serde_json::{Value, json};
 
@@ -28,43 +29,23 @@ pub async fn run(
         return Err(Failure::usage(format!("{path}: no entries")));
     }
 
-    let checkable: Vec<&BibEntry> = entries.iter().filter(|e| e.is_checkable()).collect();
-    let claims: Vec<_> = checkable.iter().map(|e| e.claim.clone()).collect();
     let show_progress = out.format.is_human() && std::io::stderr().is_terminal();
-    let total = claims.len();
+    let total = entries.iter().filter(|e| e.is_checkable()).count();
     let mut done = 0;
-    let checked = engine
-        .check(&claims, limit, |_| {
-            done += 1;
-            if show_progress {
-                eprint!("\rchecking {done}/{total}…");
-            }
-        })
-        .await;
+    let (checked, usage) = check(engine, &entries, limit, |_| {
+        done += 1;
+        if show_progress {
+            eprint!("\rchecking {done}/{total}…");
+        }
+    })
+    .await;
     if show_progress {
         eprint!("\r\x1b[K");
     }
 
-    // Reports in file order, skipped entries included.
-    let mut by_entry = checked.iter();
-    let keys: Vec<&str> = checkable.iter().map(|e| e.key.as_str()).collect();
-    let mut reports = Vec::new();
-    for entry in &entries {
-        let checked = entry
-            .is_checkable()
-            .then(|| by_entry.next().expect("one per checkable"));
-        reports.push(Report::new(entry, checked, &keys));
-    }
-
+    let reports = reports(&entries, &checked);
     let summary = Summary::of(&reports);
     let failed = reports.iter().any(|r| fails(r.severity, fail_on));
-    let usage = checked
-        .iter()
-        .flat_map(|c| &c.verification.report.usage)
-        .fold(Vec::new(), |mut acc, (p, u)| {
-            super::merge_usage(&mut acc, p, *u);
-            acc
-        });
 
     match out.format {
         Format::Table => {
@@ -78,27 +59,85 @@ pub async fn run(
             }
         }
         Format::Text => {
-            for report in &reports {
-                print!("{}", report.text());
-            }
-            println!("\n{}", summary.text(&path));
+            print!("{}", text(&path, &reports, &summary));
             if let Some(text) = output::usage_text(&usage) {
                 eprintln!("{text}");
             }
         }
         Format::Jsonl => reports.iter().for_each(|r| print_line(&r.json(out.full))),
         Format::Bibtex | Format::Ris | Format::Cite => unreachable!("rejected in main"),
-        Format::Json | Format::Auto => print(&json!({
-            "file": path,
-            "summary": summary.json(),
-            "entries": reports.iter().map(|r| r.json(out.full)).collect::<Vec<_>>(),
-            "usage": output::usage(&usage),
-        })),
+        Format::Json | Format::Auto => {
+            print(&document(&path, &reports, &summary, &usage, out.full))
+        }
     }
     Ok(if failed { Exit::Unverified } else { Exit::Ok })
 }
 
-/// A bibliography file's entries, or a Word document's citations (a zip
+/// The whole check as one JSON document.
+fn document(
+    path: &str,
+    reports: &[Report],
+    summary: &Summary,
+    usage: &[(ProviderId, Usage)],
+    full: bool,
+) -> Value {
+    json!({
+        "file": path,
+        "summary": summary.json(),
+        "entries": reports.iter().map(|r| r.json(full)).collect::<Vec<_>>(),
+        "usage": output::usage(usage),
+    })
+}
+
+/// The whole check as text: each entry, then the summary.
+fn text(path: &str, reports: &[Report], summary: &Summary) -> String {
+    let entries: String = reports.iter().map(Report::text).collect();
+    format!("{entries}\n{}\n", summary.text(path))
+}
+
+/// Checks the checkable entries, in order, and what that cost.
+async fn check(
+    engine: &Engine,
+    entries: &[BibEntry],
+    limit: u32,
+    progress: impl FnMut(usize),
+) -> (Vec<Checked>, Vec<(ProviderId, Usage)>) {
+    let claims: Vec<_> = entries
+        .iter()
+        .filter(|e| e.is_checkable())
+        .map(|e| e.claim.clone())
+        .collect();
+    let checked = engine.check(&claims, limit, progress).await;
+    let usage = checked
+        .iter()
+        .flat_map(|c| &c.verification.report.usage)
+        .fold(Vec::new(), |mut acc, (p, u)| {
+            super::merge_usage(&mut acc, p, *u);
+            acc
+        });
+    (checked, usage)
+}
+
+/// Reports in file order, skipped entries included.
+fn reports<'a>(entries: &'a [BibEntry], checked: &'a [Checked]) -> Vec<Report<'a>> {
+    let keys: Vec<&str> = entries
+        .iter()
+        .filter(|e| e.is_checkable())
+        .map(|e| e.key.as_str())
+        .collect();
+    let mut by_entry = checked.iter();
+    entries
+        .iter()
+        .map(|entry| {
+            let checked = entry
+                .is_checkable()
+                .then(|| by_entry.next().expect("one per checkable"));
+            Report::new(entry, checked, &keys)
+        })
+        .collect()
+}
+
+/// A bibliography file's entries,or a Word document's citations (a zip
 /// file, as .docx files are).
 fn entries(path: &str, source: &[u8]) -> Result<Vec<BibEntry>, Failure> {
     if source.starts_with(b"PK") {
@@ -335,5 +374,159 @@ impl Summary {
             "suggestions": self.infos,
             "skipped": self.skipped,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use aspero_core::{
+        Capabilities, FieldSet, Hit, IdKind, Lookup, Page, PartialDate, Person, Provider, Raw,
+        ResiliencePolicy, Response, Result, SearchQuery, SourceRecord, Update, UpdateKind, Work,
+        WorkId,
+    };
+    use async_trait::async_trait;
+    use jiff::Timestamp;
+
+    use super::*;
+
+    /// Lookups by identifier and searches by exact title over a few works,
+    /// each call at a cost. Costs are binary fractions, so totals don't
+    /// depend on the order calls finish in.
+    struct Scripted {
+        caps: Capabilities,
+        works: Vec<SourceRecord>,
+    }
+
+    fn costing<T>(value: T, cost: f64) -> Response<T> {
+        let mut usage = Usage::default();
+        usage.cost = Some(cost);
+        let mut response = Response::new(value);
+        response.usage = Some(usage);
+        response
+    }
+
+    #[async_trait]
+    impl Provider for Scripted {
+        fn id(&self) -> ProviderId {
+            ProviderId::from_static("openalex")
+        }
+
+        fn capabilities(&self) -> &Capabilities {
+            &self.caps
+        }
+
+        async fn lookup(&self, ids: &[WorkId], _: FieldSet) -> Result<Response<Vec<Lookup>>> {
+            let lookups = ids
+                .iter()
+                .map(|id| Lookup {
+                    id: id.clone(),
+                    record: self.works.iter().find(|w| w.ids.contains(id)).cloned(),
+                })
+                .collect();
+            Ok(costing(lookups, 0.0625))
+        }
+
+        async fn search(&self, query: &SearchQuery) -> Result<Response<Page>> {
+            let title = |w: &SourceRecord| w.work.title.as_deref().map(str::to_lowercase);
+            let hits = self
+                .works
+                .iter()
+                .filter(|w| title(w) == Some(query.text.to_lowercase()))
+                .map(|w| Hit::new(w.clone(), Some(100.0)))
+                .collect();
+            Ok(costing(Page::new(hits, None, None), 0.5))
+        }
+    }
+
+    fn work(ids: &[&str], title: &str, authors: &[&str], year: i16) -> SourceRecord {
+        let mut w = Work::default();
+        w.title = Some(title.into());
+        w.authors = authors.iter().map(|a| Person::literal(*a)).collect();
+        w.issued = Some(PartialDate::from_year(year));
+        SourceRecord::new(
+            ProviderId::from_static("openalex"),
+            ids.iter().map(|i| i.parse().unwrap()).collect(),
+            w,
+            FieldSet::ALL,
+            Raw {
+                media_type: "application/json".into(),
+                body: "{}".into(),
+            },
+            Timestamp::UNIX_EPOCH,
+        )
+    }
+
+    fn engine() -> Engine {
+        let lecun = ["Yann LeCun", "Yoshua Bengio", "Geoffrey Hinton"];
+        let mut retracted = work(
+            &["10.1234/retracted"],
+            "A retracted study",
+            &["Jane Doe"],
+            2019,
+        );
+        let mut retraction = Update::new(UpdateKind::Retraction);
+        retraction.notice = Some("10.1234/notice".parse().unwrap());
+        retracted.work.updates = vec![retraction];
+        let works = vec![
+            work(&["10.1038/nature14539"], "Deep learning", &lecun, 2015),
+            work(&["10.1145/3448250"], "Deep learning for AI", &lecun, 2021),
+            work(
+                &[
+                    "W2626778328",
+                    "arXiv:1706.03762",
+                    "10.48550/arXiv.1706.03762",
+                ],
+                "Attention Is All You Need",
+                &["Ashish Vaswani", "Noam Shazeer", "Niki Parmar"],
+                2017,
+            ),
+            retracted,
+        ];
+        let mut caps = Capabilities::default();
+        caps.lookup_kinds = vec![IdKind::Doi, IdKind::Arxiv];
+        caps.max_batch = 10;
+        caps.fields = FieldSet::ALL;
+        caps.search = true;
+        Engine::builder()
+            .provider(
+                Arc::new(Scripted { caps, works }),
+                ResiliencePolicy::default(),
+                10,
+            )
+            .build()
+    }
+
+    /// What `check` prints, byte for byte: JSON (agents' contract), JSON
+    /// Lines with `--full`, and text. `ASPERO_BLESS=1` rewrites the
+    /// expected files after an intended change.
+    #[tokio::test]
+    async fn output_is_pinned() {
+        let path = "refs.bib";
+        let entries = entries(path, include_bytes!("../../tests/check/refs.bib")).unwrap();
+        let (checked, usage) = check(&engine(), &entries, 5, |_| {}).await;
+        let reports = reports(&entries, &checked);
+        let summary = Summary::of(&reports);
+
+        let json = document(path, &reports, &summary, &usage, false);
+        let json = serde_json::to_string_pretty(&json).unwrap() + "\n";
+        let lines: String = reports
+            .iter()
+            .map(|r| format!("{}\n", r.json(true)))
+            .collect();
+        let text = text(path, &reports, &summary);
+        for (name, actual) in [
+            ("expected.json", json),
+            ("expected.jsonl", lines),
+            ("expected.txt", text),
+        ] {
+            let file = format!("{}/tests/check/{name}", env!("CARGO_MANIFEST_DIR"));
+            if std::env::var_os("ASPERO_BLESS").is_some() {
+                std::fs::write(&file, &actual).unwrap();
+            }
+            let expected = std::fs::read_to_string(&file).unwrap();
+            assert_eq!(actual, expected, "{name} changed");
+        }
     }
 }

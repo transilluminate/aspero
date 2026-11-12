@@ -37,6 +37,9 @@ tracing-subscriber = { workspace = true, features = ["registry"] }
 [target.'cfg(unix)'.dependencies]
 libc = "0.2.191"
 
+[dev-dependencies]
+async-trait.workspace = true
+
 # Released as binaries by dist (and published to crates.io).
 [package.metadata.dist]
 dist = true

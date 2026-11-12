@@ -168,17 +168,29 @@ impl Claim {
         }
     }
 
-    /// Where the claim says the work appeared, volume and first page: from
-    /// its fields, else from its text ("Injury 47 (2016) 797–804").
-    pub fn place(&self) -> Option<Place> {
-        let (volume, page) = match (&self.volume, &self.page) {
-            (Some(v), Some(p)) => (Some(v.clone()), Some(first_page(p).to_owned())),
-            _ => {
-                let found = publication::locator(self.text.as_deref()?);
-                (found.volume, found.page)
-            }
+    /// The volume and first page the claim cites: its fields, each one not
+    /// given read from its text ("Injury 47 (2016) 797–804").
+    pub(crate) fn locator(&self) -> publication::Locator {
+        let given = publication::Locator {
+            volume: self.volume.clone(),
+            page: self.page.as_deref().map(|p| first_page(p).to_owned()),
         };
-        Some(Place::new(volume?, page?))
+        match &self.text {
+            Some(text) if given.volume.is_none() || given.page.is_none() => {
+                let found = publication::locator(text);
+                publication::Locator {
+                    volume: given.volume.or(found.volume),
+                    page: given.page.or(found.page),
+                }
+            }
+            _ => given,
+        }
+    }
+
+    /// Where the claim says the work appeared: volume and first page.
+    pub fn place(&self) -> Option<Place> {
+        let located = self.locator();
+        Some(Place::new(located.volume?, located.page?))
     }
 
     /// The claim as read: as given, with what its text says of the year
@@ -192,13 +204,9 @@ impl Claim {
         {
             read.year = Some(year);
         }
-        if read.volume.is_none()
-            && read.page.is_none()
-            && let Some(place) = self.place()
-        {
-            read.volume = Some(place.volume);
-            read.page = Some(place.first_page);
-        }
+        let located = self.locator();
+        read.volume = read.volume.or(located.volume);
+        read.page = read.page.or(located.page);
         read
     }
 
@@ -399,13 +407,7 @@ pub fn assess(claim: &Claim, record: &SourceRecord) -> Assessment {
         }
         _ => FieldCheck::UNKNOWN,
     };
-    let located = match &claim.text {
-        Some(text) if claim.volume.is_none() && claim.page.is_none() => publication::locator(text),
-        _ => publication::Locator {
-            volume: claim.volume.clone(),
-            page: claim.page.as_deref().map(|p| first_page(p).to_owned()),
-        },
-    };
+    let located = claim.locator();
     let same = |claimed: Option<&str>, actual: Option<&str>| match (claimed, actual) {
         (Some(c), Some(a)) if !c.is_empty() && !a.is_empty() => {
             FieldCheck::exact(c.trim().eq_ignore_ascii_case(a.trim()))

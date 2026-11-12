@@ -42,26 +42,31 @@ macro_rules! numeric_id {
 
 numeric_id!(
     /// PubMed ID, e.g. `31452104`.
-    Pmid, letter = ""
+    Pmid,
+    letter = ""
 );
 numeric_id!(
     /// PubMed Central ID, canonically `PMC6716493`. The `PMC` letters are
     /// optional on input.
-    Pmcid, letter = "PMC"
+    Pmcid,
+    letter = "PMC"
 );
 numeric_id!(
     /// OpenAlex work ID, canonically `W2741809807`. The `W` is optional when
     /// explicitly prefixed (`openalex:2741809807`).
-    OpenAlexId, letter = "W"
+    OpenAlexId,
+    letter = "W"
 );
 numeric_id!(
     /// Semantic Scholar CorpusId, e.g. `13756489`.
-    CorpusId, letter = ""
+    CorpusId,
+    letter = ""
 );
 numeric_id!(
     /// NCBI Bookshelf ID, canonically `NBK526056`: a book or chapter, such
     /// as a StatPearls article. The `NBK` letters are optional on input.
-    Nbk, letter = "NBK"
+    Nbk,
+    letter = "NBK"
 );
 
 /// The segment after `marker` in the URL path, if present.

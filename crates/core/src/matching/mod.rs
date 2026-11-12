@@ -379,7 +379,7 @@ pub fn assess(claim: &Claim, record: &SourceRecord) -> Assessment {
             // Nearest pairing: any edition's year may be the one cited.
             let delta = claimed_years
                 .iter()
-                .flat_map(|c| actual_years.iter().map(move |a| (c - a).unsigned_abs()))
+                .flat_map(|c| actual_years.iter().map(move |a| c.abs_diff(*a)))
                 .min()
                 .unwrap_or(u16::MAX);
             // Halves per year off: off by one is common (online-first vs

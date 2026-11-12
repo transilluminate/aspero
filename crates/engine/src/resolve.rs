@@ -362,8 +362,8 @@ impl Engine {
                     .min()
                     .zip(years.iter().max())
                     .map(|(&a, &b)| YearRange {
-                        from: Some(a - 1),
-                        to: Some(b + 1),
+                        from: Some(a.saturating_sub(1)),
+                        to: Some(b.saturating_add(1)),
                     });
                 jobs.push((provider, q, Via::PlaceSearch));
             }

@@ -447,6 +447,22 @@ async fn a_reference_without_a_title_is_found_by_where_it_appeared() {
 }
 
 #[tokio::test]
+async fn extreme_years_do_not_overflow() {
+    let mut ancient = work("openalex", &["doi:10.1234/old"], "Old", &["Laan"], -1);
+    ancient.work.container_title = Some("Injury".into());
+    ancient.work.volume = Some("47".into());
+    ancient.work.page = Some("797-804".into());
+    let openalex = Arc::new(Scripted::new("openalex").placer().with(vec![ancient]));
+    let engine = engine(vec![openalex.clone()]);
+    let mut claim = Claim::from_text("Injury, Int. J. Care Injured 47 (2016) 797\u{2013}804");
+    claim.year = Some(i16::MAX);
+    let v = engine.verify(&claim, 5).await;
+    assert_ne!(v.verdict, Verdict::Verified, "{}", v.reason);
+    let years = openalex.sent().iter().find_map(|q| q.years).unwrap();
+    assert_eq!((years.from, years.to), (Some(i16::MAX - 1), Some(i16::MAX)));
+}
+
+#[tokio::test]
 async fn agreeing_without_corroboration_is_unconfirmed() {
     // A title and year that agree, with nothing to corroborate them.
     let paper = work(

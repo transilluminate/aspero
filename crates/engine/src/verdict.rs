@@ -223,7 +223,7 @@ fn differences(claim: &Claim, c: &Candidate, known_only: bool) -> Vec<Difference
         (None, Some(actual)) => claim
             .cited_years()
             .into_iter()
-            .min_by_key(|y| (y - actual).unsigned_abs()),
+            .min_by_key(|y| y.abs_diff(actual)),
         (None, None) => None,
     };
     [

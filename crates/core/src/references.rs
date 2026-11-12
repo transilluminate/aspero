@@ -83,7 +83,12 @@ pub struct LineReference {
 pub fn split_lines(lines: &[IndentedLine]) -> Vec<LineReference> {
     let text = lines
         .iter()
-        .map(|l| l.text.replace(['\r', '\n'], " "))
+        // One line each, whatever breaks they hold (cleaning makes all of
+        // these line breaks).
+        .map(|l| {
+            l.text
+                .replace(['\r', '\n', '\u{85}', '\u{2028}', '\u{2029}'], " ")
+        })
         .collect::<Vec<_>>()
         .join("\n");
     let folded = Folded::new(&text);
@@ -93,8 +98,20 @@ pub fn split_lines(lines: &[IndentedLine]) -> Vec<LineReference> {
             let mut groups: Vec<Vec<Range<usize>>> = Vec::new();
             for (i, line) in list.lines.iter().enumerate() {
                 let Some(line) = line else { continue };
+                // Whatever the indent, a line in lower case or closing a
+                // bracket, or after a word broken at a hyphen, continues
+                // the reference ("sur-" then "gery: a systematic…").
+                let text = &folded.text[line.clone()];
                 match groups.last_mut() {
-                    Some(group) if !starts[i] => group.push(line.clone()),
+                    Some(group)
+                        if !starts[i]
+                            || continues(text)
+                            || group
+                                .last()
+                                .is_some_and(|l| folded.text[l.clone()].ends_with('-')) =>
+                    {
+                        group.push(line.clone())
+                    }
                     _ => groups.push(vec![line.clone()]),
                 }
             }
@@ -750,6 +767,56 @@ mod tests {
         ] {
             assert_eq!(texts(prose).len(), 1, "{prose}");
         }
+    }
+
+    #[test]
+    fn unnumbered_vancouver_lists_split_however_lines_break() {
+        // #40: copied from a journal PDF; Preview's copies break lines
+        // with `\r` or Unicode separators.
+        let list = "Benjamin EJ, Muntner P, Alonso A, et al. Heart disease\n\
+            and stroke statistics-2019 update. Circulation\n\
+            2019;139:e56-528. https://doi.org/10.1161/CIR.0000000000000659\n\
+            Schmieder RE, Kjeldsen SE, Julius S, et al. Reduced incidence\n\
+            of new-onset atrial fibrillation: the VALUE trial. J\n\
+            Hypertens 2008;26:403-11. https://doi.org/10.1097/HJH.0b013e3282f35c67\n\
+            Chokesuwattanaskul R, Thongprayoon C, Bathini T, Sharma K, Watthanasuntorn K, Lertjitbanjong\n\
+            P, et al. Incident atrial fibrillation in patients undergoing bariatric sur-\n\
+            gery: a systematic review and meta-analysis. Intern Med J 2020;50:810-7. https://doi.org/10.1111/imj.14436";
+        for sep in ["\n", "\r\n", "\r", "\u{2028}", "\u{2029}"] {
+            let found = texts(&list.replace('\n', sep));
+            assert_eq!(found.len(), 3, "{sep:?}: {found:?}");
+            assert!(
+                found[2].contains("bariatric surgery: a systematic"),
+                "{found:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn indents_never_start_a_reference_mid_word_or_in_lower_case() {
+        // Hanging indents, with lines a PDF's layout put at the margin
+        // although they continue the reference.
+        let lines = [
+            IndentedLine::new(
+                "Chokesuwattanaskul R, et al. Incident atrial fibrillation in bariatric sur-",
+                0.0,
+            ),
+            IndentedLine::new(
+                "gery: a systematic review. Intern Med J 2020;50:810-7.",
+                0.0,
+            ),
+            IndentedLine::new("Sardana M, et al. Obstructive sleep apnea (the SAVE", 0.0),
+            IndentedLine::new("trial). Circ Arrhythm Electrophysiol 2017;10:e005463.", 0.0),
+            IndentedLine::new("Smith J, et al. Another reference about", 0.0),
+            IndentedLine::new("the same thing. Lancet 2019;393:10-12.", 12.0),
+        ];
+        let found: Vec<String> = split_lines(&lines).into_iter().map(|r| r.text).collect();
+        assert_eq!(found.len(), 3, "{found:?}");
+        assert!(
+            found[0].contains("bariatric surgery: a systematic"),
+            "{found:?}"
+        );
+        assert!(found[1].contains("(the SAVE trial)."), "{found:?}");
     }
 
     #[test]

@@ -131,9 +131,20 @@ impl Claim {
     /// mentions extracted as asserted identifiers.
     pub fn from_text(text: impl Into<String>) -> Self {
         let text = text.into();
+        // A DOI broken across lines may be meant otherwise (#39).
+        let mut alternatives: Vec<Alternative> = Vec::new();
+        for m in crate::id::scan(&text) {
+            if let Some(other) = m.alternative(&text) {
+                let a = Alternative::new(m.id, other);
+                if !alternatives.contains(&a) {
+                    alternatives.push(a);
+                }
+            }
+        }
         Claim {
             ids: find_ids(&text),
             text: Some(text),
+            alternatives,
             ..Claim::default()
         }
     }

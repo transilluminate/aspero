@@ -20,8 +20,8 @@
 
 use aspero_core::matching::{self, id_agreement, same_work_id};
 use aspero_core::{
-    Agreement, Assessment, Claim, FieldSet, Filter, ProviderId, SearchQuery, SourceRecord, Update,
-    Usage, WorkId, YearRange,
+    Agreement, Assessment, Claim, FieldSet, Filter, IdKind, ProviderId, SearchQuery, SourceRecord,
+    Update, Usage, WorkId, YearRange,
 };
 
 use futures::future::{Either, join_all, select};
@@ -555,17 +555,40 @@ impl Accumulator<'_> {
 /// claim: lookups of readings not taken dropped, candidates rescored.
 fn settle_alternatives(claim: &Claim, report: &mut ResolveReport) -> Claim {
     let mut claim = claim.clone();
-    if claim.alternatives.is_empty() {
+    let lookup = |id: &WorkId| report.lookups.iter().find(|l| l.id == *id);
+    let missing = |id: &WorkId| lookup(id).is_some_and(LookupResult::is_not_found);
+    let mut settled: Vec<(WorkId, WorkId)> = Vec::new();
+    for a in &claim.alternatives {
+        if missing(&a.claimed) && lookup(&a.alternative).is_some_and(|l| l.record.is_some()) {
+            settled.push((a.claimed.clone(), a.alternative.clone()));
+        }
+    }
+    // A DOI that doesn't exist, and a work found by the citation's text
+    // whose DOI starts with it: the same DOI, cut short at a line break
+    // (#39).
+    for id in claim
+        .ids
+        .iter()
+        .filter(|id| id.kind() == IdKind::Doi && missing(id))
+    {
+        let cited = id.to_string();
+        let longer = report
+            .candidates
+            .iter()
+            .flat_map(|c| &c.ids)
+            .find(|c| c.kind() == IdKind::Doi && c.to_string().starts_with(&cited) && *c != id);
+        if let Some(longer) = longer
+            && !settled.iter().any(|(from, _)| from == id)
+        {
+            settled.push((id.clone(), longer.clone()));
+        }
+    }
+    if claim.alternatives.is_empty() && settled.is_empty() {
         return claim;
     }
-    let lookup = |id: &WorkId| report.lookups.iter().find(|l| l.id == *id);
-    for a in claim.alternatives.clone() {
-        let missing = lookup(&a.claimed).is_some_and(LookupResult::is_not_found);
-        let exists = lookup(&a.alternative).is_some_and(|l| l.record.is_some());
-        if missing && exists {
-            for id in claim.ids.iter_mut().filter(|id| **id == a.claimed) {
-                *id = a.alternative.clone();
-            }
+    for (from, to) in settled {
+        for id in claim.ids.iter_mut().filter(|id| **id == from) {
+            *id = to.clone();
         }
     }
     report.lookups.retain(|l| claim.ids.contains(&l.id));

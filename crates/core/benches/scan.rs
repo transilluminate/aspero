@@ -12,31 +12,53 @@ use aspero_core::id::scan;
 use aspero_core::split_references;
 use corpus::{Density, generate};
 
+/// What a case times.
+#[derive(Clone, Copy, PartialEq)]
+enum Run {
+    Scan,
+    Split,
+    /// `split_references` on prose as one paragraph: many lines, few of
+    /// them starting a reference.
+    Paragraph,
+}
+
 fn main() {
     let filter = std::env::args().skip(1).find(|a| !a.starts_with('-'));
     const MB: usize = 1 << 20;
     let cases = [
-        ("scan/plain/16M", Density::None, 16 * MB, false),
-        ("scan/prose/64K", Density::Prose, 64 << 10, false),
-        ("scan/prose/1M", Density::Prose, MB, false),
-        ("scan/prose/16M", Density::Prose, 16 * MB, false),
-        ("scan/references/1M", Density::References, MB, false),
+        ("scan/plain/16M", Density::None, 16 * MB, Run::Scan),
+        ("scan/prose/64K", Density::Prose, 64 << 10, Run::Scan),
+        ("scan/prose/1M", Density::Prose, MB, Run::Scan),
+        ("scan/prose/16M", Density::Prose, 16 * MB, Run::Scan),
+        ("scan/references/1M", Density::References, MB, Run::Scan),
         (
             "split/references/256K",
             Density::References,
             256 << 10,
-            true,
+            Run::Split,
+        ),
+        (
+            "split/paragraph/64K",
+            Density::Prose,
+            64 << 10,
+            Run::Paragraph,
+        ),
+        (
+            "split/paragraph/256K",
+            Density::Prose,
+            256 << 10,
+            Run::Paragraph,
         ),
     ];
     println!(
         "{:<24} {:>9} {:>9} {:>10} {:>10} {:>10} {:>10}",
         "case", "bytes", "mentions", "median", "min", "MB/s", "best MB/s"
     );
-    for (name, density, bytes, split) in cases {
+    for (name, density, bytes, run) in cases {
         if filter.as_deref().is_some_and(|f| !name.contains(f)) {
             continue;
         }
-        let c = generate(42, bytes, density);
+        let mut c = generate(42, bytes, density);
         let found: Vec<_> = scan(&c.text)
             .into_iter()
             .map(|m| (m.id.to_string(), m.span))
@@ -45,14 +67,19 @@ fn main() {
             found == c.expected,
             "{name}: scan disagrees with the corpus"
         );
-        let run = || {
-            if split {
-                black_box(split_references(black_box(&c.text)).len())
-            } else {
-                black_box(scan(black_box(&c.text)).len())
-            }
-        };
-        let times = time(run);
+        if run == Run::Paragraph {
+            // No blank lines, and none starting with a number or bullet.
+            c.text = c
+                .text
+                .lines()
+                .filter(|l| l.starts_with(char::is_alphabetic))
+                .collect::<Vec<_>>()
+                .join("\n");
+        }
+        let times = time(|| match run {
+            Run::Scan => black_box(scan(black_box(&c.text)).len()),
+            Run::Split | Run::Paragraph => black_box(split_references(black_box(&c.text)).len()),
+        });
         let median = times[times.len() / 2];
         let rate = |d: Duration| c.text.len() as f64 / MB as f64 / d.as_secs_f64();
         println!(

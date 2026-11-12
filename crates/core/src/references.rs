@@ -367,42 +367,89 @@ impl<'a> List<'a> {
         if one_per_line {
             return lines.into_iter().map(|l| vec![l]).collect();
         }
-        let mut groups: Vec<Vec<Range<usize>>> = Vec::new();
+        // Each group joined as it grows, not again for every line.
+        let mut groups: Vec<(Vec<Range<usize>>, Joined)> = Vec::new();
         for line in lines {
             let text = self.line(&line);
             match groups.last_mut() {
                 // A reference so far without a year or identifier (an author
                 // line ending "et al.") still needs its title and the rest.
-                Some(group)
-                    if !(ends_sentence(&self.join(group))
-                        && dated(&self.join(group))
+                Some((group, joined))
+                    if !(ends_sentence(&joined.text)
+                        && joined.dated
                         && starts_with_author(text)) =>
                 {
-                    group.push(line)
+                    group.push(line);
+                    joined.push(text);
                 }
-                _ => groups.push(vec![line]),
+                _ => groups.push((vec![line], Joined::new(text))),
             }
         }
-        groups
+        groups.into_iter().map(|(group, _)| group).collect()
     }
 
-    /// A group's lines as one: joined with a space, or with none where a
-    /// word, DOI or URL was broken across lines.
+    /// A group's lines as one: see [`push_line`].
     fn join(&self, group: &[Range<usize>]) -> String {
         let mut out = String::new();
         for line in group {
-            let next = self.line(line);
-            let first = next.chars().next().unwrap_or(' ');
-            if out.is_empty() {
-                // Nothing to join to.
-            } else if out.ends_with('-') && first.is_lowercase() && hyphenated_word(&out) {
-                out.pop();
-            } else if !link_continues(&out, next) {
-                out.push(' ');
-            }
-            out.push_str(next);
+            push_line(&mut out, self.line(line));
         }
         out
+    }
+}
+
+/// Appends a line to lines joined so far: after a space, or with none
+/// where a word, DOI or URL was broken across lines. False if it runs on
+/// from the last character, so a number there may now be longer.
+fn push_line(out: &mut String, next: &str) -> bool {
+    let first = next.chars().next().unwrap_or(' ');
+    let apart = if out.is_empty() {
+        // Nothing to join to.
+        true
+    } else if out.ends_with('-') && first.is_lowercase() && hyphenated_word(out) {
+        // Letters either side, so no number runs on.
+        out.pop();
+        true
+    } else if !link_continues(out, next) {
+        out.push(' ');
+        true
+    } else {
+        false
+    };
+    out.push_str(next);
+    apart
+}
+
+/// Lines joined as [`List::join`] does, and whether they are [`dated`],
+/// kept up to date as each line is added.
+struct Joined {
+    text: String,
+    dated: bool,
+}
+
+impl Joined {
+    fn new(line: &str) -> Self {
+        Joined {
+            text: line.to_string(),
+            dated: dated(line),
+        }
+    }
+
+    /// Adds a line. Undated text before it stays undated, so only the new
+    /// line and the end before it are read: as much as the longest mark
+    /// (14 characters) could overlap, back to the start of a number.
+    fn push(&mut self, line: &str) {
+        let tail = self.text.char_indices().rev().nth(15).map_or(0, |(i, _)| i);
+        let tail = self.text[..tail]
+            .trim_end_matches(|c: char| c.is_ascii_digit())
+            .len();
+        let apart = push_line(&mut self.text, line);
+        if !self.dated {
+            self.dated = dated(&self.text[tail..]);
+        } else if !apart {
+            // A year running on ("2019" then "5") is a year no longer.
+            self.dated = dated(&self.text);
+        }
     }
 }
 
@@ -990,5 +1037,42 @@ mod tests {
             ["Smith J. A study. Journal 2020;1:2."]
         );
         assert!(texts("  \n\n").is_empty());
+    }
+
+    #[test]
+    fn a_year_running_on_in_a_link_is_undated() {
+        let mut joined = Joined::new("DOI:10/2019");
+        assert!(joined.dated);
+        joined.push("05");
+        assert_eq!(joined.text, "DOI:10/201905");
+        assert!(!joined.dated);
+    }
+
+    proptest::proptest! {
+        #![proptest_config(proptest::prelude::ProptestConfig::with_cases(4000))]
+        /// Joining line by line agrees with joining the lines afresh.
+        #[test]
+        fn joined_as_it_grows_matches_join(
+            lines in proptest::collection::vec(proptest::collection::vec(
+                proptest::sample::select(vec![
+                    "a", "Smith", " ", "-", "/", ".", "é", "\u{3a3}", "\u{212a}", "\u{130}",
+                    "2019", "0", "5", "n.", "d.", "no", "date", "available", "from", "[cited",
+                    "DOI:", "HTTP", "10.", "10/",
+                ]),
+                1..5,
+            ), 1..12),
+        ) {
+            let text = lines.iter().map(|l| l.concat()).collect::<Vec<_>>().join("\n");
+            let list = List::new(&text);
+            let ranges: Vec<Range<usize>> = list.lines.iter().flatten().cloned().collect();
+            let Some((first, rest)) = ranges.split_first() else { return Ok(()) };
+            let mut joined = Joined::new(list.line(first));
+            for (i, line) in rest.iter().enumerate() {
+                joined.push(list.line(line));
+                let fresh = list.join(&ranges[..i + 2]);
+                proptest::prop_assert_eq!(&joined.text, &fresh);
+                proptest::prop_assert_eq!(joined.dated, dated(&fresh));
+            }
+        }
     }
 }

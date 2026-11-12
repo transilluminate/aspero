@@ -65,94 +65,16 @@ pub(crate) enum Name {
     Whole(String),
 }
 
-/// Lowercase words that join a family name: "van Gogh", "de la Cruz".
-const PARTICLES: [&str; 14] = [
-    "van", "von", "de", "der", "den", "da", "di", "du", "la", "le", "del", "dos", "ten", "ter",
-];
-
-/// Words that make a name an organisation's.
-const BODIES: [&str; 40] = [
-    "university",
-    "institute",
-    "institution",
-    "group",
-    "team",
-    "organization",
-    "organisation",
-    "consortium",
-    "committee",
-    "association",
-    "society",
-    "collaboration",
-    "network",
-    "centre",
-    "center",
-    "foundation",
-    "agency",
-    "council",
-    "department",
-    "ministry",
-    "office",
-    "board",
-    "federation",
-    "alliance",
-    "project",
-    "initiative",
-    "commission",
-    "programme",
-    "program",
-    "inc",
-    "ltd",
-    "corporation",
-    "company",
-    "trust",
-    "investigators",
-    "study",
-    "panel",
-    "laboratory",
-    "hospital",
-    "college",
-];
-
 pub(crate) fn name(p: &Person) -> Name {
-    match (&p.family, &p.literal) {
-        (Some(family), _) => Name::Person {
-            family: family.clone(),
-            given: p.given.clone(),
-        },
-        (None, Some(literal)) => {
-            split_literal(literal).unwrap_or_else(|| Name::Whole(literal.clone()))
-        }
-        (None, None) => Name::Whole(p.given.clone().unwrap_or_default()),
+    match p.parts() {
+        Some((family, given)) => Name::Person { family, given },
+        None => Name::Whole(
+            p.literal
+                .clone()
+                .or_else(|| p.given.clone())
+                .unwrap_or_default(),
+        ),
     }
-}
-
-/// A personal name written whole ("Yann LeCun", "Vincent van Gogh"), as
-/// family and given names; `None` for anything that may be an
-/// organisation's.
-fn split_literal(literal: &str) -> Option<Name> {
-    let words: Vec<&str> = literal.split_whitespace().collect();
-    let personal = (2..=5).contains(&words.len())
-        && words.iter().all(|w| {
-            let lower = w.trim_end_matches(['.', ',']).to_lowercase();
-            let capital = w.chars().next().is_some_and(char::is_uppercase);
-            let acronym = w.chars().count() > 2 && w.chars().all(|c| !c.is_lowercase());
-            (capital || PARTICLES.contains(&lower.as_str()))
-                && !acronym
-                && !BODIES.contains(&lower.as_str())
-                && !w.chars().any(|c| c.is_ascii_digit())
-        });
-    if !personal {
-        return None;
-    }
-    let mut start = words.len() - 1;
-    while start > 1 && PARTICLES.contains(&words[start - 1]) {
-        start -= 1;
-    }
-    Some(Name::Person {
-        family: words[start..].join(" "),
-        given: Some(words[..start].join(" ")),
-    })
 }
 
 /// `c` without its accent (Latin letters), or as it is.

@@ -15,8 +15,8 @@ use std::sync::Arc;
 
 use aspero_core::{Cursor, Error, ErrorKind, FieldSet, SearchQuery, WorkId, WorkType, YearRange};
 use aspero_engine::{
-    CallOptions, CrossrefConfig, DataciteConfig, DoiConfig, Engine, EuropePmcConfig, Extras,
-    OpenAlexConfig, OpenLibraryConfig, SecretString, SqliteCache, StandardConfig, standard,
+    CallOptions, Engine, Extras, OpenAlexConfig, SecretString, SqliteCache, StandardConfig,
+    standard,
 };
 use aspero_json::InputClaim;
 use futures::StreamExt;
@@ -141,21 +141,11 @@ impl Aspero {
             None => None,
         };
         let mailto = config.mailto.filter(|m| !m.trim().is_empty());
-        let mut standard_config = StandardConfig::default();
+        let key = config.openalex_key.filter(|k| !k.trim().is_empty());
+        let mut standard_config = StandardConfig::all(key.map(SecretString::from));
         standard_config.mailto = mailto.clone();
         standard_config.pacing = cache.clone().map(|c| c as _);
         standard_config.cache = cache.clone().map(|c| c as _);
-        let mut openalex = OpenAlexConfig::default();
-        openalex.api_key = config
-            .openalex_key
-            .filter(|k| !k.trim().is_empty())
-            .map(SecretString::from);
-        standard_config.openalex = Some(openalex);
-        standard_config.crossref = Some(CrossrefConfig::default());
-        standard_config.datacite = Some(DataciteConfig::default());
-        standard_config.doi = Some(DoiConfig::default());
-        standard_config.europepmc = Some(EuropePmcConfig::default());
-        standard_config.openlibrary = Some(OpenLibraryConfig::default());
         let engine = standard(standard_config).map_err(|e| setup(e.to_string()))?;
         let runtime = tokio::runtime::Builder::new_multi_thread()
             .worker_threads(2)

@@ -5,7 +5,7 @@ use std::sync::Arc;
 use aspero_core::{Error, HttpClient, ResiliencePolicy};
 
 use crate::transport::{Paced, ReqwestClient};
-use crate::{Cache, Engine, EngineBuilder, Pacing};
+use crate::{Cache, Engine, EngineBuilder, Pacing, SecretString};
 
 #[cfg(feature = "crossref")]
 pub use aspero_crossref::CrossrefConfig;
@@ -43,6 +43,34 @@ pub struct StandardConfig {
     pub europepmc: Option<EuropePmcConfig>,
     #[cfg(feature = "openlibrary")]
     pub openlibrary: Option<OpenLibraryConfig>,
+}
+
+impl StandardConfig {
+    /// Every compiled-in provider with its defaults, OpenAlex using
+    /// `openalex_key`; no contact address, cache or shared pacing.
+    // The key is unused only without the OpenAlex feature.
+    #[allow(unused_variables)]
+    pub fn all(openalex_key: Option<SecretString>) -> Self {
+        StandardConfig {
+            #[cfg(feature = "openalex")]
+            openalex: Some({
+                let mut openalex = OpenAlexConfig::default();
+                openalex.api_key = openalex_key;
+                openalex
+            }),
+            #[cfg(feature = "crossref")]
+            crossref: Some(CrossrefConfig::default()),
+            #[cfg(feature = "datacite")]
+            datacite: Some(DataciteConfig::default()),
+            #[cfg(feature = "doi")]
+            doi: Some(DoiConfig::default()),
+            #[cfg(feature = "europepmc")]
+            europepmc: Some(EuropePmcConfig::default()),
+            #[cfg(feature = "openlibrary")]
+            openlibrary: Some(OpenLibraryConfig::default()),
+            ..StandardConfig::default()
+        }
+    }
 }
 
 /// Builds an engine with each enabled provider behind its own paced

@@ -59,7 +59,7 @@ pub async fn run(engine: &Engine, ids: Vec<String>, out: Out) -> Result<Exit, Fa
         Format::Text => {
             for (item, lookup) in items.iter().zip(&report.items) {
                 let looked = looked(lookup);
-                print!("{}", text(item, looked.map(|l| &l.result)));
+                print!("{}", text(item, looked));
                 if let Some(found) = looked.and_then(|l| l.abstract_text.as_ref()) {
                     println!("{}", output::abstract_text(found.as_ref(), "  "));
                 }
@@ -184,12 +184,14 @@ fn row(item: &Value, result: Option<&LookupResult>) -> Vec<comfy_table::Cell> {
 }
 
 /// One result as terminal text.
-pub fn text(item: &Value, result: Option<&LookupResult>) -> String {
+pub fn text(item: &Value, looked: Option<&Looked>) -> String {
     let label = item["id"]
         .as_str()
         .or(item["input"].as_str())
         .unwrap_or("?");
-    if let Some(record) = result.and_then(|r| r.record.as_ref()) {
+    if let Some(looked) = looked
+        && let Some(record) = &looked.result.record
+    {
         let served = item["served"]
             .as_str()
             .map(|s| format!(" ({s})"))
@@ -203,23 +205,10 @@ pub fn text(item: &Value, result: Option<&LookupResult>) -> String {
                 l["issued"].as_str().unwrap_or("?"),
             ),
         };
-        let conflicts: Vec<String> = item["disagreements"]
-            .as_array()
-            .into_iter()
-            .flatten()
-            .map(|d| {
-                let registry = d
-                    .as_object()
-                    .and_then(|o| o.keys().find(|k| !matches!(k.as_str(), "field" | "value")));
-                let theirs = registry
-                    .map(|k| d[k].as_str().unwrap_or("?"))
-                    .unwrap_or("?");
-                format!(
-                    "{} {} (vs {theirs})",
-                    d["field"].as_str().unwrap_or("?"),
-                    d["value"].as_str().unwrap_or("?")
-                )
-            })
+        let conflicts: Vec<String> = looked
+            .disagreements
+            .iter()
+            .map(|d| format!("{} {} (vs {})", d.field, d.value, d.registry_value))
             .collect();
         let conflicts = match conflicts.is_empty() {
             true => String::new(),
@@ -290,7 +279,7 @@ mod tests {
             .zip(&report.items)
             .map(|(input, lookup)| {
                 let item = aspero_json::input_lookup(input, lookup, true);
-                text(&item, looked(lookup).map(|l| &l.result)) + "\n"
+                text(&item, looked(lookup)) + "\n"
             })
             .collect();
         pinned("lookup/expected.txt", &text);

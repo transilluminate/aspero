@@ -83,7 +83,12 @@ pub struct LineReference {
 pub fn split_lines(lines: &[IndentedLine]) -> Vec<LineReference> {
     let text = lines
         .iter()
-        .map(|l| l.text.replace(['\r', '\n'], " "))
+        // One line each, whatever breaks they hold (cleaning makes all of
+        // these line breaks).
+        .map(|l| {
+            l.text
+                .replace(['\r', '\n', '\u{85}', '\u{2028}', '\u{2029}'], " ")
+        })
         .collect::<Vec<_>>()
         .join("\n");
     let folded = Folded::new(&text);

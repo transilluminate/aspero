@@ -314,6 +314,14 @@ impl Engine {
     }
 }
 
+/// Locks `mutex`, poisoned or not: the maps behind the engine's locks stay
+/// consistent if a holder panics, and a second panic (in a `Drop`) would abort.
+pub(crate) fn lock<T>(mutex: &std::sync::Mutex<T>) -> std::sync::MutexGuard<'_, T> {
+    mutex
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
 fn add_usage(totals: &mut Vec<(ProviderId, Usage)>, provider: &ProviderId, usage: Usage) {
     match totals.iter_mut().find(|(p, _)| p == provider) {
         Some((_, total)) => *total = total.then(usage),

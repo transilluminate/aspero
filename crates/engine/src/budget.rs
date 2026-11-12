@@ -6,6 +6,8 @@ use std::sync::Mutex;
 use aspero_core::{Error, ProviderId, Usage};
 use jiff::Timestamp;
 
+use crate::lock;
+
 /// What a provider last said was left of its budget.
 #[derive(Debug, Clone, Copy, PartialEq)]
 #[non_exhaustive]
@@ -41,7 +43,7 @@ impl Budgets {
             resets_at,
             seen_at: now,
         };
-        let mut all = self.0.lock().unwrap();
+        let mut all = lock(&self.0);
         match all.iter_mut().find(|(p, _)| p == provider) {
             Some((_, known)) => *known = budget,
             None => all.push((provider.clone(), budget)),
@@ -49,6 +51,6 @@ impl Budgets {
     }
 
     pub(crate) fn all(&self) -> Vec<(ProviderId, Budget)> {
-        self.0.lock().unwrap().clone()
+        lock(&self.0).clone()
     }
 }

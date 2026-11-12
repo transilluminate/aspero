@@ -13,6 +13,8 @@ pub mod resolve;
 pub mod scan;
 pub mod search;
 pub mod styles;
+#[cfg(test)]
+mod testing;
 pub mod verify;
 
 use std::io::Read;

@@ -161,89 +161,17 @@ fn summary_text(path: &str, s: &CheckSummary) -> String {
         s.entries, s.verified, s.errors, s.warnings, s.suggestions, s.skipped
     )
 }
-
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
-
-    use aspero_core::{
-        Capabilities, FieldSet, Hit, IdKind, Lookup, Page, PartialDate, Person, Provider,
-        ProviderId, Raw, ResiliencePolicy, Response, Result, SearchQuery, SourceRecord, Update,
-        UpdateKind, Usage, Work, WorkId,
-    };
-    use async_trait::async_trait;
-    use jiff::Timestamp;
+    use aspero_core::{Update, UpdateKind};
 
     use super::*;
+    use crate::cmd::testing::{Scripted, engine, pinned, work};
 
-    /// Lookups by identifier and searches by exact title over a few works,
-    /// each call at a cost. Costs are binary fractions, so totals don't
-    /// depend on the order calls finish in.
-    struct Scripted {
-        caps: Capabilities,
-        works: Vec<SourceRecord>,
-    }
-
-    fn costing<T>(value: T, cost: f64) -> Response<T> {
-        let mut usage = Usage::default();
-        usage.cost = Some(cost);
-        let mut response = Response::new(value);
-        response.usage = Some(usage);
-        response
-    }
-
-    #[async_trait]
-    impl Provider for Scripted {
-        fn id(&self) -> ProviderId {
-            ProviderId::from_static("openalex")
-        }
-
-        fn capabilities(&self) -> &Capabilities {
-            &self.caps
-        }
-
-        async fn lookup(&self, ids: &[WorkId], _: FieldSet) -> Result<Response<Vec<Lookup>>> {
-            let lookups = ids
-                .iter()
-                .map(|id| Lookup {
-                    id: id.clone(),
-                    record: self.works.iter().find(|w| w.ids.contains(id)).cloned(),
-                })
-                .collect();
-            Ok(costing(lookups, 0.0625))
-        }
-
-        async fn search(&self, query: &SearchQuery) -> Result<Response<Page>> {
-            let title = |w: &SourceRecord| w.work.title.as_deref().map(str::to_lowercase);
-            let hits = self
-                .works
-                .iter()
-                .filter(|w| title(w) == Some(query.text.to_lowercase()))
-                .map(|w| Hit::new(w.clone(), Some(100.0)))
-                .collect();
-            Ok(costing(Page::new(hits, None, None), 0.5))
-        }
-    }
-
-    fn work(ids: &[&str], title: &str, authors: &[&str], year: i16) -> SourceRecord {
-        let mut w = Work::default();
-        w.title = Some(title.into());
-        w.authors = authors.iter().map(|a| Person::literal(*a)).collect();
-        w.issued = Some(PartialDate::from_year(year));
-        SourceRecord::new(
-            ProviderId::from_static("openalex"),
-            ids.iter().map(|i| i.parse().unwrap()).collect(),
-            w,
-            FieldSet::ALL,
-            Raw {
-                media_type: "application/json".into(),
-                body: "{}".into(),
-            },
-            Timestamp::UNIX_EPOCH,
-        )
-    }
-
-    fn engine() -> Engine {
+    /// What `check` prints, byte for byte: JSON (agents' contract), JSON
+    /// Lines with `--full`, and text.
+    #[tokio::test]
+    async fn output_is_pinned() {
         let lecun = ["Yann LeCun", "Yoshua Bengio", "Geoffrey Hinton"];
         let mut retracted = work(
             &["10.1234/retracted"],
@@ -269,49 +197,24 @@ mod tests {
             ),
             retracted,
         ];
-        let mut caps = Capabilities::default();
-        caps.lookup_kinds = vec![IdKind::Doi, IdKind::Arxiv];
-        caps.max_batch = 10;
-        caps.fields = FieldSet::ALL;
-        caps.search = true;
-        Engine::builder()
-            .provider(
-                Arc::new(Scripted { caps, works }),
-                ResiliencePolicy::default(),
-                10,
-            )
-            .build()
-    }
+        let engine = engine(vec![Scripted::new("openalex", works)]);
 
-    /// What `check` prints, byte for byte: JSON (agents' contract), JSON
-    /// Lines with `--full`, and text. `ASPERO_BLESS=1` rewrites the
-    /// expected files after an intended change.
-    #[tokio::test]
-    async fn output_is_pinned() {
         let path = "refs.bib";
         let entries = entries(path, include_bytes!("../../tests/check/refs.bib")).unwrap();
-        let report = engine().check_entries(&entries, 5, |_| {}).await;
+        let report = engine.check_entries(&entries, 5, |_| {}).await;
 
         let json = aspero_json::check::report(path, &entries, &report, false);
-        let json = serde_json::to_string_pretty(&json).unwrap() + "\n";
+        pinned(
+            "check/expected.json",
+            &(serde_json::to_string_pretty(&json).unwrap() + "\n"),
+        );
         let keys = keys(&entries);
         let lines: String = entries
             .iter()
             .zip(&report.entries)
             .map(|(e, c)| format!("{}\n", aspero_json::check::entry(e, c, &keys, true)))
             .collect();
-        let text = text(path, &entries, &report);
-        for (name, actual) in [
-            ("expected.json", json),
-            ("expected.jsonl", lines),
-            ("expected.txt", text),
-        ] {
-            let file = format!("{}/tests/check/{name}", env!("CARGO_MANIFEST_DIR"));
-            if std::env::var_os("ASPERO_BLESS").is_some() {
-                std::fs::write(&file, &actual).unwrap();
-            }
-            let expected = std::fs::read_to_string(&file).unwrap();
-            assert_eq!(actual, expected, "{name} changed");
-        }
+        pinned("check/expected.jsonl", &lines);
+        pinned("check/expected.txt", &text(path, &entries, &report));
     }
 }

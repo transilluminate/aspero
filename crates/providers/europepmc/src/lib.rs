@@ -13,8 +13,8 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use aspero_core::csl::{plain_text, strip_markup};
-use aspero_core::http::escape_lucene;
+use aspero_core::csl::{null_default, plain_text, strip_markup};
+use aspero_core::http::{escape_lucene, status_error};
 use aspero_core::{
     Capabilities, Cursor, Doi, Error, FieldSet, Filter, Hit, HttpClient, HttpRequest, HttpResponse,
     IdKind, Lookup, Nbk, OpenAccess, Page, PartialDate, Person, Pmcid, Pmid, Provider, ProviderId,
@@ -96,17 +96,7 @@ fn check(resp: &HttpResponse) -> Result<()> {
     }
     Err(match resp.status {
         400 => Error::BadRequest("rejected by Europe PMC".into()),
-        404 => Error::NotFound,
-        429 => Error::RateLimited {
-            retry_after: resp
-                .header("retry-after")
-                .and_then(|v| v.trim().parse().ok())
-                .map(Duration::from_secs),
-        },
-        status => Error::Server {
-            status,
-            message: None,
-        },
+        _ => status_error(resp, None),
     })
 }
 
@@ -115,12 +105,14 @@ fn check(resp: &HttpResponse) -> Result<()> {
 struct WireResults {
     hit_count: Option<u64>,
     next_cursor_mark: Option<String>,
+    #[serde(deserialize_with = "null_default")]
     result_list: ResultList,
 }
 
 #[derive(Debug, Default, Deserialize)]
 #[serde(default)]
 struct ResultList {
+    #[serde(deserialize_with = "null_default")]
     result: Vec<serde_json::Value>,
 }
 
@@ -133,19 +125,24 @@ struct WireRecord {
     pmcid: Option<String>,
     doi: Option<String>,
     title: Option<String>,
+    #[serde(deserialize_with = "null_default")]
     author_list: AuthorList,
     pub_year: Option<String>,
     first_publication_date: Option<String>,
+    #[serde(deserialize_with = "null_default")]
     journal_info: JournalInfo,
     page_info: Option<String>,
     abstract_text: Option<String>,
+    #[serde(deserialize_with = "null_default")]
     pub_type_list: PubTypes,
     cited_by_count: Option<u64>,
     is_open_access: Option<String>,
     license: Option<String>,
+    #[serde(deserialize_with = "null_default")]
     full_text_url_list: FullTextUrls,
     /// NCBI Bookshelf ID, for books and chapters (StatPearls).
     bookid: Option<String>,
+    #[serde(deserialize_with = "null_default")]
     book_or_report_details: BookDetails,
 }
 
@@ -161,6 +158,7 @@ struct BookDetails {
 #[serde(default)]
 struct FullTextUrls {
     #[serde(rename = "fullTextUrl")]
+    #[serde(deserialize_with = "null_default")]
     full_text_url: Vec<FullTextUrl>,
 }
 
@@ -209,6 +207,7 @@ impl WireRecord {
 #[derive(Debug, Default, Deserialize)]
 #[serde(default)]
 struct AuthorList {
+    #[serde(deserialize_with = "null_default")]
     author: Vec<Author>,
 }
 
@@ -237,6 +236,7 @@ struct JournalInfo {
     year_of_publication: Option<i16>,
     volume: Option<String>,
     issue: Option<String>,
+    #[serde(deserialize_with = "null_default")]
     journal: Journal,
 }
 
@@ -249,6 +249,7 @@ struct Journal {
 #[derive(Debug, Default, Deserialize)]
 #[serde(default, rename_all = "camelCase")]
 struct PubTypes {
+    #[serde(deserialize_with = "null_default")]
     pub_type: Vec<String>,
 }
 
@@ -269,6 +270,19 @@ impl Author {
             .and_then(|id| id.value);
         Some(person)
     }
+}
+
+/// The record, or `None` with a warning when it doesn't decode: one bad
+/// record shouldn't cost the rest of the page.
+fn or_skip(record: serde_json::Result<SourceRecord>) -> Option<SourceRecord> {
+    record
+        .inspect_err(|e| {
+            tracing::warn!(
+                target: "aspero::decode",
+                provider = %ID, error = %e, "skipped a record that doesn't decode"
+            );
+        })
+        .ok()
 }
 
 fn to_record(value: &serde_json::Value, at: Timestamp) -> serde_json::Result<SourceRecord> {
@@ -411,16 +425,18 @@ impl Provider for EuropePmc {
         let clauses = ids.iter().map(clause).collect::<Result<Vec<_>>>()?;
         let mut found = Vec::new();
         for chunk in clauses.chunks(MAX_BATCH) {
+            // Room for clauses matching more than one record, so a requested
+            // one isn't pushed to a second page and taken as not found.
+            let page_size = (2 * chunk.len()).min(MAX_PAGE as usize);
             let params = [
                 ("query", chunk.join(" OR ")),
                 ("resultType", "core".to_owned()),
                 ("format", "json".to_owned()),
-                ("pageSize", chunk.len().to_string()),
+                ("pageSize", page_size.to_string()),
             ];
             let (results, at) = self.search_raw(&params).await?;
-            for v in &results.result_list.result {
-                found.push(to_record(v, at).map_err(Error::decode)?);
-            }
+            let records = results.result_list.result.iter();
+            found.extend(records.filter_map(|v| or_skip(to_record(v, at))));
         }
         let lookups = ids
             .iter()
@@ -475,9 +491,9 @@ impl Provider for EuropePmc {
             .result_list
             .result
             .iter()
-            .map(|v| to_record(v, at).map(|r| Hit::new(r, None)))
-            .collect::<serde_json::Result<_>>()
-            .map_err(Error::decode)?;
+            .filter_map(|v| or_skip(to_record(v, at)))
+            .map(|r| Hit::new(r, None))
+            .collect();
         // The last page repeats its cursor; an empty page is also the end.
         let next = results
             .next_cursor_mark

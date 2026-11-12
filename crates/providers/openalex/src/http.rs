@@ -6,6 +6,7 @@
 
 use std::time::Duration;
 
+use aspero_core::http::status_error;
 use aspero_core::{Error, HttpResponse, Usage};
 
 /// Error messages longer than this are cut; OpenAlex's 400 bodies list every
@@ -32,18 +33,11 @@ pub(crate) fn check(resp: &HttpResponse) -> Result<(), Error> {
     let message = message(resp);
     Err(match resp.status {
         400 => Error::BadRequest(message.unwrap_or_else(|| "rejected by OpenAlex".into())),
-        401 | 403 => Error::AuthRejected { message },
-        404 => Error::NotFound,
         429 if quota_exhausted(resp) => Error::QuotaExhausted {
             resets_at: usage(resp).resets_at,
         },
-        429 => Error::RateLimited {
-            retry_after: resp
-                .header("retry-after")
-                .and_then(|v| v.trim().parse().ok())
-                .map(Duration::from_secs),
-        },
-        status => Error::Server { status, message },
+        401 | 403 => Error::AuthRejected { message },
+        _ => status_error(resp, message),
     })
 }
 

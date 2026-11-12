@@ -21,7 +21,7 @@ mod text;
 
 use serde::{Deserialize, Serialize};
 
-use crate::id::WorkId;
+use crate::id::{WorkId, starts_with_ci};
 use crate::provider::Place;
 use crate::publication::{self, first_page, journal_in, same_journal};
 use crate::record::SourceRecord;
@@ -168,17 +168,29 @@ impl Claim {
         }
     }
 
-    /// Where the claim says the work appeared, volume and first page: from
-    /// its fields, else from its text ("Injury 47 (2016) 797–804").
-    pub fn place(&self) -> Option<Place> {
-        let (volume, page) = match (&self.volume, &self.page) {
-            (Some(v), Some(p)) => (Some(v.clone()), Some(first_page(p).to_owned())),
-            _ => {
-                let found = publication::locator(self.text.as_deref()?);
-                (found.volume, found.page)
-            }
+    /// The volume and first page the claim cites: its fields, each one not
+    /// given read from its text ("Injury 47 (2016) 797–804").
+    pub(crate) fn locator(&self) -> publication::Locator {
+        let given = publication::Locator {
+            volume: self.volume.clone(),
+            page: self.page.as_deref().map(|p| first_page(p).to_owned()),
         };
-        Some(Place::new(volume?, page?))
+        match &self.text {
+            Some(text) if given.volume.is_none() || given.page.is_none() => {
+                let found = publication::locator(text);
+                publication::Locator {
+                    volume: given.volume.or(found.volume),
+                    page: given.page.or(found.page),
+                }
+            }
+            _ => given,
+        }
+    }
+
+    /// Where the claim says the work appeared: volume and first page.
+    pub fn place(&self) -> Option<Place> {
+        let located = self.locator();
+        Some(Place::new(located.volume?, located.page?))
     }
 
     /// The claim as read: as given, with what its text says of the year
@@ -192,13 +204,9 @@ impl Claim {
         {
             read.year = Some(year);
         }
-        if read.volume.is_none()
-            && read.page.is_none()
-            && let Some(place) = self.place()
-        {
-            read.volume = Some(place.volume);
-            read.page = Some(place.first_page);
-        }
+        let located = self.locator();
+        read.volume = read.volume.or(located.volume);
+        read.page = read.page.or(located.page);
         read
     }
 
@@ -314,8 +322,10 @@ pub struct Assessment {
 /// A title that is a URL.
 fn is_url(title: &str) -> bool {
     let t = title.trim();
-    let starts = |p: &str| t.get(..p.len()).is_some_and(|h| h.eq_ignore_ascii_case(p));
-    starts("http://") || starts("https://") || starts("www.") || t.contains("://")
+    ["http://", "https://", "www."]
+        .iter()
+        .any(|p| starts_with_ci(t, p))
+        || t.contains("://")
 }
 
 fn dedup_years(mut years: Vec<i16>) -> Vec<i16> {
@@ -379,7 +389,7 @@ pub fn assess(claim: &Claim, record: &SourceRecord) -> Assessment {
             // Nearest pairing: any edition's year may be the one cited.
             let delta = claimed_years
                 .iter()
-                .flat_map(|c| actual_years.iter().map(move |a| (c - a).unsigned_abs()))
+                .flat_map(|c| actual_years.iter().map(move |a| c.abs_diff(*a)))
                 .min()
                 .unwrap_or(u16::MAX);
             // Halves per year off: off by one is common (online-first vs
@@ -397,13 +407,7 @@ pub fn assess(claim: &Claim, record: &SourceRecord) -> Assessment {
         }
         _ => FieldCheck::UNKNOWN,
     };
-    let located = match &claim.text {
-        Some(text) if claim.volume.is_none() && claim.page.is_none() => publication::locator(text),
-        _ => publication::Locator {
-            volume: claim.volume.clone(),
-            page: claim.page.as_deref().map(|p| first_page(p).to_owned()),
-        },
-    };
+    let located = claim.locator();
     let same = |claimed: Option<&str>, actual: Option<&str>| match (claimed, actual) {
         (Some(c), Some(a)) if !c.is_empty() && !a.is_empty() => {
             FieldCheck::exact(c.trim().eq_ignore_ascii_case(a.trim()))

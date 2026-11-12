@@ -13,6 +13,8 @@ use std::str::FromStr;
 
 use serde::{Deserialize, Serialize};
 
+use crate::id::is_digits;
+
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[non_exhaustive]
 pub struct Work {
@@ -408,6 +410,10 @@ pub fn tidy_abstract(text: &str) -> String {
     text.to_owned()
 }
 
+/// Years a work could have been published in: a four-digit number in
+/// text is read as a year only within these.
+pub(crate) const PLAUSIBLE_YEARS: std::ops::RangeInclusive<i16> = 1600..=2100;
+
 /// A date known to year, month or day precision. Serialises as `2017`,
 /// `2017-06` or `2017-06-12`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -436,7 +442,7 @@ impl PartialDate {
             (None, Some(_)) => return None,
             (Some(m), None) if !(1..=12).contains(&m) => return None,
             (Some(m), Some(d)) => {
-                jiff::civil::Date::new(year, m as i8, d as i8).ok()?;
+                jiff::civil::Date::new(year, i8::try_from(m).ok()?, i8::try_from(d).ok()?).ok()?;
             }
             _ => {}
         }
@@ -462,19 +468,23 @@ impl FromStr for PartialDate {
     fn from_str(s: &str) -> Result<Self, DateError> {
         let err = || DateError(s.to_owned());
         let mut parts = s.trim().splitn(3, '-');
-        let mut num = |len: usize| -> Result<Option<u16>, DateError> {
-            match parts.next() {
-                None => Ok(None),
-                Some(p) if p.len() == len && p.bytes().all(|b| b.is_ascii_digit()) => {
-                    Ok(Some(p.parse().map_err(|_| err())?))
-                }
-                Some(_) => Err(err()),
-            }
+        // The next part, if it is `len` digits.
+        let mut num = |len: usize| match parts.next() {
+            None => Ok(None),
+            Some(p) if p.len() == len && is_digits(p) => Ok(Some(p)),
+            Some(_) => Err(err()),
         };
         let year = num(4)?.ok_or_else(err)?;
         let month = num(2)?;
         let day = num(2)?;
-        PartialDate::new(year as i16, month.map(|m| m as u8), day.map(|d| d as u8)).ok_or_else(err)
+        // Four digits fit an `i16`, two a `u8`.
+        let two = |d: &str| d.parse().expect("two digits");
+        PartialDate::new(
+            year.parse().expect("four digits"),
+            month.map(two),
+            day.map(two),
+        )
+        .ok_or_else(err)
     }
 }
 

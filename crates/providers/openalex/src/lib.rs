@@ -94,7 +94,8 @@ impl OpenAlex {
         format!("{}/works{rest}", self.config.base_url.trim_end_matches('/'))
     }
 
-    /// Sends and maps non-2xx statuses to errors, keeping usage either way.
+    /// Sends and maps non-2xx statuses to errors. Usage comes back only
+    /// with a success; a spent quota's reset time comes in its error.
     async fn send(&self, url: String) -> Result<(HttpResponse, Usage)> {
         let resp = self.http.send(self.request(url)).await?;
         http::check(&resp)?;
@@ -127,14 +128,27 @@ impl OpenAlex {
         let hits = list
             .results
             .iter()
-            .map(|v| {
+            .filter_map(|v| {
                 let score = v.get("relevance_score").and_then(serde_json::Value::as_f64);
-                wire::to_record(v, Raw::json(v), resp.received_at).map(|r| Hit::new(r, score))
+                let record = wire::to_record(v, Raw::json(v), resp.received_at);
+                or_skip(record).map(|r| Hit::new(r, score))
             })
-            .collect::<serde_json::Result<_>>()
-            .map_err(Error::decode)?;
+            .collect();
         Ok((hits, list, usage))
     }
+}
+
+/// The record, or `None` with a warning when it doesn't decode: one bad
+/// record shouldn't cost the rest of the page.
+fn or_skip(record: serde_json::Result<SourceRecord>) -> Option<SourceRecord> {
+    record
+        .inspect_err(|e| {
+            tracing::warn!(
+                target: "aspero::decode",
+                provider = %ID, error = %e, "skipped a record that doesn't decode"
+            );
+        })
+        .ok()
 }
 
 /// How a requested ID is addressed at OpenAlex.

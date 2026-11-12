@@ -5,8 +5,7 @@
 //! limits are advertised in `x-api-pool`, `x-rate-limit-*` and
 //! `x-concurrency-limit`.
 
-use std::time::Duration;
-
+use aspero_core::http::status_error;
 use aspero_core::{Error, HttpResponse};
 
 const MAX_MESSAGE: usize = 300;
@@ -19,14 +18,7 @@ pub(crate) fn check(resp: &HttpResponse) -> Result<(), Error> {
     Err(match resp.status {
         400 => Error::BadRequest(message.unwrap_or_else(|| "rejected by Crossref".into())),
         401 | 403 => Error::AuthRejected { message },
-        404 => Error::NotFound,
-        429 => Error::RateLimited {
-            retry_after: resp
-                .header("retry-after")
-                .and_then(|v| v.trim().parse().ok())
-                .map(Duration::from_secs),
-        },
-        status => Error::Server { status, message },
+        _ => status_error(resp, message),
     })
 }
 

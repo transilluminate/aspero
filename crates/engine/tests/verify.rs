@@ -308,6 +308,28 @@ async fn identifier_only_claims_check_existence_without_searching() {
 }
 
 #[tokio::test]
+async fn an_identifier_with_a_wrong_year_is_plausible() {
+    let (engine, _, _) = live_like();
+    let mut claim = Claim::default();
+    claim.ids = vec!["10.1038/nature14539".parse().unwrap()];
+    claim.year = Some(1999);
+
+    let v = engine.verify(&claim, 5).await;
+    assert_eq!(v.verdict, Verdict::Plausible, "{}", v.reason);
+    let Reason::IdPartlyMatches { differs } = &v.why else {
+        panic!("{:?}", v.why);
+    };
+    assert_eq!(differs.len(), 1);
+    assert_eq!(differs[0].field, CitedField::Year);
+    assert_eq!(differs[0].cited.as_deref(), Some("1999"));
+
+    claim.year = Some(2015);
+    let v = engine.verify(&claim, 5).await;
+    assert_eq!(v.verdict, Verdict::Verified, "{}", v.reason);
+    assert_eq!(v.why, Reason::IdExists);
+}
+
+#[tokio::test]
 async fn records_sharing_an_identifier_merge_into_one_candidate() {
     let openalex = Arc::new(
         Scripted::new("openalex")
@@ -444,6 +466,22 @@ async fn a_reference_without_a_title_is_found_by_where_it_appeared() {
     );
     let years = q.years.unwrap();
     assert_eq!((years.from, years.to), (Some(2015), Some(2017)));
+}
+
+#[tokio::test]
+async fn extreme_years_do_not_overflow() {
+    let mut ancient = work("openalex", &["doi:10.1234/old"], "Old", &["Laan"], -1);
+    ancient.work.container_title = Some("Injury".into());
+    ancient.work.volume = Some("47".into());
+    ancient.work.page = Some("797-804".into());
+    let openalex = Arc::new(Scripted::new("openalex").placer().with(vec![ancient]));
+    let engine = engine(vec![openalex.clone()]);
+    let mut claim = Claim::from_text("Injury, Int. J. Care Injured 47 (2016) 797\u{2013}804");
+    claim.year = Some(i16::MAX);
+    let v = engine.verify(&claim, 5).await;
+    assert_ne!(v.verdict, Verdict::Verified, "{}", v.reason);
+    let years = openalex.sent().iter().find_map(|q| q.years).unwrap();
+    assert_eq!((years.from, years.to), (Some(i16::MAX - 1), Some(i16::MAX)));
 }
 
 #[tokio::test]

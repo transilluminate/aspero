@@ -124,6 +124,7 @@ dependencies = [
  "directories",
  "futures",
  "jiff",
+ "libc",
  "serde",
  "serde_json",
  "tokio",
@@ -167,6 +168,7 @@ dependencies = [
  "jiff",
  "serde",
  "serde_json",
+ "tracing",
  "url",
 ]
 
@@ -180,6 +182,7 @@ dependencies = [
  "serde",
  "serde_json",
  "thiserror",
+ "tracing",
  "url",
 ]
 
@@ -226,6 +229,7 @@ dependencies = [
  "jiff",
  "serde",
  "serde_json",
+ "tracing",
  "url",
 ]
 
@@ -267,6 +271,7 @@ dependencies = [
  "secrecy",
  "serde",
  "serde_json",
+ "tracing",
  "url",
 ]
 
@@ -279,6 +284,7 @@ dependencies = [
  "jiff",
  "serde",
  "serde_json",
+ "tracing",
  "url",
 ]
 

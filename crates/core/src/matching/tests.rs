@@ -639,3 +639,19 @@ fn finds_ids_in_running_text() {
     );
     assert!(find_ids("Published in 2017, pages 10-20.").is_empty());
 }
+
+#[test]
+fn a_claims_place_takes_its_fields_then_its_text() {
+    let claim = Claim {
+        volume: Some("47".into()),
+        text: Some("Injury 47 (2016) 797–804".into()),
+        ..Claim::default()
+    };
+    let place = claim.place().expect("placed");
+    assert_eq!(
+        (place.volume.as_str(), place.first_page.as_str()),
+        ("47", "797")
+    );
+    let read = claim.as_read();
+    assert_eq!(read.page.as_deref(), Some("797"));
+}

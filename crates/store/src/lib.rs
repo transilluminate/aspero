@@ -24,7 +24,7 @@ use std::time::Duration;
 
 use aspero_core::{Page, ProviderId, SearchQuery, SourceRecord, WorkId};
 use jiff::Timestamp;
-use rusqlite::{Connection, OptionalExtension, params};
+use rusqlite::{Connection, OptionalExtension, TransactionBehavior, params};
 
 /// Bump on any schema change, *and* when cached records' shape or mapping
 /// changes (records are stored as mapped); older caches are dropped and
@@ -108,6 +108,10 @@ impl<T> Entry<T> {
 /// cached "not found".
 pub type CachedLookup = Entry<Option<SourceRecord>>;
 
+/// One ID's stored rows: its record (JSON, stored_at) and its miss
+/// (stored_at).
+type LookupRow = (Option<(String, i64)>, Option<i64>);
+
 /// What the engine needs from a cache; it depends on this, not on SQLite.
 pub trait Cache: Send + Sync {
     /// The cached answer for each of `ids` at `provider`, in order; `None`
@@ -161,12 +165,29 @@ pub struct SqliteCache {
 }
 
 impl SqliteCache {
-    /// Opens (creating if needed) the cache at `path`.
+    /// Opens (creating if needed) the cache at `path`. A file that isn't a
+    /// readable SQLite database is deleted and started afresh.
     pub fn open(path: &Path) -> Result<Self> {
         if let Some(dir) = path.parent() {
             std::fs::create_dir_all(dir)?;
         }
-        Self::init(Connection::open(path)?)
+        match Connection::open(path)
+            .map_err(StoreError::from)
+            .and_then(Self::init)
+        {
+            Err(StoreError::Sqlite(e)) if is_unreadable(&e) => {
+                for suffix in ["", "-wal", "-shm"] {
+                    let mut file = path.as_os_str().to_owned();
+                    file.push(suffix);
+                    match std::fs::remove_file(&file) {
+                        Err(e) if e.kind() != std::io::ErrorKind::NotFound => return Err(e.into()),
+                        _ => {}
+                    }
+                }
+                Self::init(Connection::open(path)?)
+            }
+            opened => opened,
+        }
     }
 
     pub fn open_in_memory() -> Result<Self> {
@@ -176,19 +197,25 @@ impl SqliteCache {
     fn init(mut conn: Connection) -> Result<Self> {
         conn.busy_timeout(Duration::from_secs(5))?;
         conn.pragma_update(None, "journal_mode", "WAL")?;
-        let version: i64 = conn.pragma_query_value(None, "user_version", |r| r.get(0))?;
-        if version != SCHEMA_VERSION {
-            // Disposable: drop whatever is there (older or newer) and rebuild.
-            let tx = conn.transaction()?;
-            let tables: Vec<String> = tx
-                .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' AND name != 'pacing'")?
-                .query_map([], |r| r.get(0))?
-                .collect::<rusqlite::Result<_>>()?;
-            for table in tables {
-                tx.execute_batch(&format!("DROP TABLE \"{}\";", table.replace('"', "\"\"")))?;
+        let version = |c: &Connection| -> rusqlite::Result<i64> {
+            c.pragma_query_value(None, "user_version", |r| r.get(0))
+        };
+        if version(&conn)? != SCHEMA_VERSION {
+            // Take the write lock, then check again: another process may
+            // have rebuilt it meanwhile.
+            let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+            if version(&tx)? != SCHEMA_VERSION {
+                // Disposable: drop whatever is there (older or newer) and rebuild.
+                let tables: Vec<String> = tx
+                    .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' AND name != 'pacing'")?
+                    .query_map([], |r| r.get(0))?
+                    .collect::<rusqlite::Result<_>>()?;
+                for table in tables {
+                    tx.execute_batch(&format!("DROP TABLE \"{}\";", table.replace('"', "\"\"")))?;
+                }
+                tx.execute_batch(SCHEMA)?;
+                tx.pragma_update(None, "user_version", SCHEMA_VERSION)?;
             }
-            tx.execute_batch(SCHEMA)?;
-            tx.pragma_update(None, "user_version", SCHEMA_VERSION)?;
             tx.commit()?;
         }
         conn.execute_batch(PACING)?;
@@ -201,6 +228,30 @@ impl SqliteCache {
         // A panic while holding the lock leaves SQLite consistent (writes
         // are transactional), so poisoning is ignorable.
         self.conn.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    /// The stored rows for each of `ids`, unparsed.
+    fn lookup_rows(&self, provider: &ProviderId, ids: &[WorkId]) -> Result<Vec<LookupRow>> {
+        let mut conn = self.conn();
+        // One read transaction: a consistent snapshot, one lock.
+        let tx = conn.transaction()?;
+        let mut found = tx.prepare_cached(
+            "SELECT r.record, r.stored_at FROM record_id i
+             JOIN record r ON r.provider = i.provider AND r.native_id = i.native_id
+             WHERE i.provider = ?1 AND i.work_id = ?2",
+        )?;
+        let mut missed =
+            tx.prepare_cached("SELECT stored_at FROM miss WHERE provider = ?1 AND work_id = ?2")?;
+        let mut rows = Vec::with_capacity(ids.len());
+        for id in ids {
+            let key = params![provider.as_str(), id.to_string()];
+            let record = found
+                .query_row(key, |r| Ok((r.get(0)?, r.get(1)?)))
+                .optional()?;
+            let miss = missed.query_row(key, |r| r.get(0)).optional()?;
+            rows.push((record, miss));
+        }
+        Ok(rows)
     }
 
     pub fn stats(&self) -> Result<Stats> {
@@ -227,6 +278,14 @@ impl SqliteCache {
     }
 }
 
+/// Whether `e` says the file isn't a database, or is a damaged one.
+fn is_unreadable(e: &rusqlite::Error) -> bool {
+    matches!(
+        e.sqlite_error_code(),
+        Some(rusqlite::ErrorCode::NotADatabase | rusqlite::ErrorCode::DatabaseCorrupt)
+    )
+}
+
 fn timestamp(seconds: i64) -> Timestamp {
     Timestamp::from_second(seconds).unwrap_or(Timestamp::UNIX_EPOCH)
 }
@@ -235,7 +294,7 @@ impl Pacing for SqliteCache {
     fn claim_slot(&self, provider: &str, interval: Duration, now: Timestamp) -> Result<Timestamp> {
         let mut conn = self.conn();
         // Take the write lock up front, so claims never interleave.
-        let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         let now_ms = now.as_millisecond();
         let next: Option<i64> = tx
             .query_row(
@@ -264,24 +323,10 @@ impl Cache for SqliteCache {
         provider: &ProviderId,
         ids: &[WorkId],
     ) -> Result<Vec<Option<CachedLookup>>> {
-        let mut conn = self.conn();
-        // One read transaction: a consistent snapshot, one lock.
-        let tx = conn.transaction()?;
-        let mut found = tx.prepare_cached(
-            "SELECT r.record, r.stored_at FROM record_id i
-             JOIN record r ON r.provider = i.provider AND r.native_id = i.native_id
-             WHERE i.provider = ?1 AND i.work_id = ?2",
-        )?;
-        let mut missed =
-            tx.prepare_cached("SELECT stored_at FROM miss WHERE provider = ?1 AND work_id = ?2")?;
-
+        let rows = self.lookup_rows(provider, ids)?;
+        // Parsed after the lock is released.
         let mut out = Vec::with_capacity(ids.len());
-        for id in ids {
-            let key = params![provider.as_str(), id.to_string()];
-            let record: Option<(String, i64)> = found
-                .query_row(key, |r| Ok((r.get(0)?, r.get(1)?)))
-                .optional()?;
-            let miss: Option<i64> = missed.query_row(key, |r| r.get(0)).optional()?;
+        for (record, miss) in rows {
             let not_found = |at: i64| Entry {
                 value: None,
                 stored_at: timestamp(at),

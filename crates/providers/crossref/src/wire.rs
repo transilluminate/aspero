@@ -6,7 +6,7 @@
 use std::collections::BTreeMap;
 
 use aspero_core::csl::{
-    CrossrefRelation, CrossrefUpdate, plain_text, relation_updates, strip_markup,
+    CrossrefRelation, CrossrefUpdate, null_default, plain_text, relation_updates, strip_markup,
 };
 use aspero_core::{
     Doi, FieldSet, PartialDate, Person, Raw, SourceRecord, Work, WorkId, WorkType, tidy_abstract,
@@ -28,6 +28,7 @@ pub(crate) struct WireList {
     pub total_results: Option<u64>,
     pub next_cursor: Option<String>,
     /// Kept as raw values so each work's `Raw` is its own JSON object.
+    #[serde(deserialize_with = "null_default")]
     pub items: Vec<serde_json::Value>,
 }
 
@@ -40,24 +41,34 @@ struct WireWork {
     url: Option<String>,
     #[serde(rename = "type")]
     work_type: Option<String>,
+    #[serde(deserialize_with = "null_default")]
     title: Vec<String>,
+    #[serde(deserialize_with = "null_default")]
     container_title: Vec<String>,
     publisher: Option<String>,
     volume: Option<String>,
     issue: Option<String>,
     page: Option<String>,
+    #[serde(deserialize_with = "null_default")]
     issued: WireDate,
+    #[serde(deserialize_with = "null_default")]
     published: WireDate,
+    #[serde(deserialize_with = "null_default")]
     published_print: WireDate,
+    #[serde(deserialize_with = "null_default")]
     published_online: WireDate,
+    #[serde(deserialize_with = "null_default")]
     author: Vec<WireAuthor>,
     #[serde(rename = "abstract")]
     abstract_jats: Option<String>,
     is_referenced_by_count: Option<u64>,
     /// Retraction Watch and publisher notices about this work.
+    #[serde(deserialize_with = "null_default")]
     updated_by: Vec<CrossrefUpdate>,
     /// For a notice, the works it updates.
+    #[serde(deserialize_with = "null_default")]
     update_to: Vec<CrossrefUpdate>,
+    #[serde(deserialize_with = "null_default")]
     relation: BTreeMap<String, Vec<CrossrefRelation>>,
 }
 
@@ -76,6 +87,7 @@ struct WireAuthor {
 #[derive(Debug, Default, Deserialize)]
 #[serde(default, rename_all = "kebab-case")]
 struct WireDate {
+    #[serde(deserialize_with = "null_default")]
     date_parts: Vec<Vec<Option<i64>>>,
 }
 

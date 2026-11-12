@@ -236,6 +236,34 @@ fn transport_statuses_map_to_errors() {
 }
 
 #[test]
+fn a_record_that_does_not_decode_is_skipped_not_the_page() {
+    let body = r#"{"status": "ok", "message": {"total-results": 3, "items": [
+        {"DOI": "10.1000/a", "title": ["A"]},
+        {"DOI": "10.1000/b", "title": 42},
+        {"DOI": "10.1000/c", "title": ["C"]}
+    ]}}"#;
+    let (cr, _) = provider([response(200, &[], body)]);
+    let page = block_on(cr.search(&SearchQuery::new("x"))).unwrap().value;
+    let titles: Vec<_> = page
+        .hits
+        .iter()
+        .map(|h| h.record.work.title.as_deref())
+        .collect();
+    assert_eq!(titles, [Some("A"), Some("C")]);
+}
+
+#[test]
+fn null_reads_as_an_absent_field() {
+    let body = r#"{"status": "ok", "message": {"DOI": "10.1000/a", "title": ["A"],
+        "author": null, "container-title": null, "issued": null, "relation": null}}"#;
+    let (cr, _) = provider([response(200, &[], body)]);
+    let resp = block_on(cr.lookup(&[id("10.1000/a")], FieldSet::DEFAULT)).unwrap();
+    let work = &resp.value[0].record.as_ref().unwrap().work;
+    assert_eq!(work.title.as_deref(), Some("A"));
+    assert!(work.authors.is_empty());
+}
+
+#[test]
 fn only_dois_are_supported() {
     let (cr, http) = provider([]);
     let err = block_on(cr.lookup(&[id("arXiv:1706.03762")], FieldSet::DEFAULT)).unwrap_err();

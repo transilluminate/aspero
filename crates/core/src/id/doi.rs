@@ -2,7 +2,9 @@ use std::borrow::Cow;
 use std::fmt;
 
 use super::IdKind;
-use super::syntax::{IdSyntax, clean_pasted, impl_id_traits, strip_kind_prefix, strip_prefix_ci};
+use super::syntax::{
+    IdSyntax, clean_pasted, impl_id_traits, is_digits, strip_kind_prefix, strip_prefix_ci,
+};
 use super::url::Url;
 
 const INFO_PREFIX: &str = "info:doi/";
@@ -110,8 +112,7 @@ impl IdSyntax for Doi {
             .ok_or("must start with \"10.\"")?;
         let mut groups = registrant.split('.');
         let first = groups.next().unwrap_or_default();
-        let digits = |g: &str| !g.is_empty() && g.bytes().all(|b| b.is_ascii_digit());
-        if !(4..=9).contains(&first.len()) || !digits(first) || !groups.all(digits) {
+        if !(4..=9).contains(&first.len()) || !is_digits(first) || !groups.all(is_digits) {
             return Err("registrant must be digits, e.g. 10.1234 or 10.1234.5");
         }
         if suffix.is_empty() {

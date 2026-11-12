@@ -17,7 +17,7 @@ mod wire;
 use std::sync::Arc;
 use std::time::Duration;
 
-use aspero_core::http::{escape_lucene, path_segment};
+use aspero_core::http::{escape_lucene, path_segment, status_error};
 use aspero_core::{
     Capabilities, Cursor, Doi, Error, Field, FieldSet, Filter, Hit, HttpClient, HttpRequest,
     HttpResponse, IdKind, Lookup, Page, Provider, ProviderId, ResiliencePolicy, Response, Result,
@@ -125,11 +125,24 @@ impl Datacite {
         let hits = list
             .data
             .iter()
-            .map(|v| wire::to_record(v, resp.received_at).map(|r| Hit::new(r, None)))
-            .collect::<serde_json::Result<_>>()
-            .map_err(Error::decode)?;
+            .filter_map(|v| or_skip(wire::to_record(v, resp.received_at)))
+            .map(|r| Hit::new(r, None))
+            .collect();
         Ok((hits, list.meta))
     }
+}
+
+/// The record, or `None` with a warning when it doesn't decode: one bad
+/// record shouldn't cost the rest of the page.
+fn or_skip(record: serde_json::Result<SourceRecord>) -> Option<SourceRecord> {
+    record
+        .inspect_err(|e| {
+            tracing::warn!(
+                target: "aspero::decode",
+                provider = %ID, error = %e, "skipped a record that doesn't decode"
+            );
+        })
+        .ok()
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -152,14 +165,7 @@ fn check(resp: &HttpResponse) -> Result<()> {
     Err(match resp.status {
         400 | 422 => Error::BadRequest(message.unwrap_or_else(|| "rejected by DataCite".into())),
         401 | 403 => Error::AuthRejected { message },
-        404 => Error::NotFound,
-        429 => Error::RateLimited {
-            retry_after: resp
-                .header("retry-after")
-                .and_then(|v| v.trim().parse().ok())
-                .map(Duration::from_secs),
-        },
-        status => Error::Server { status, message },
+        _ => status_error(resp, message),
     })
 }
 

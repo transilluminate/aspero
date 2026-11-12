@@ -6,7 +6,7 @@
 
 use std::collections::BTreeMap;
 
-use aspero_core::csl::plain_text;
+use aspero_core::csl::{null_default, plain_text};
 use aspero_core::{
     ArxivId, Doi, FieldSet, OpenAccess, OpenAlexId, PartialDate, Person, Pmcid, Pmid, Raw,
     SourceRecord, Update, UpdateKind, Work, WorkId, WorkType, tidy_abstract,
@@ -30,14 +30,19 @@ pub(crate) struct WireWork {
     publication_date: Option<String>,
     #[serde(rename = "type")]
     work_type: Option<String>,
+    #[serde(deserialize_with = "null_default")]
     ids: WireIds,
+    #[serde(deserialize_with = "null_default")]
     authorships: Vec<WireAuthorship>,
     primary_location: Option<WireLocation>,
+    #[serde(deserialize_with = "null_default")]
     locations: Vec<WireLocation>,
+    #[serde(deserialize_with = "null_default")]
     biblio: WireBiblio,
     abstract_inverted_index: Option<BTreeMap<String, Vec<usize>>>,
     cited_by_count: Option<u64>,
     /// From Retraction Watch; OpenAlex gives no notice details.
+    #[serde(deserialize_with = "null_default")]
     is_retracted: bool,
     /// Unpaywall's data.
     open_access: Option<WireOpenAccess>,
@@ -47,6 +52,7 @@ pub(crate) struct WireWork {
 #[derive(Debug, Default, Deserialize)]
 #[serde(default)]
 struct WireOpenAccess {
+    #[serde(deserialize_with = "null_default")]
     is_oa: bool,
     oa_status: Option<String>,
     oa_url: Option<String>,
@@ -64,6 +70,7 @@ struct WireIds {
 #[derive(Debug, Default, Deserialize)]
 #[serde(default)]
 struct WireAuthorship {
+    #[serde(deserialize_with = "null_default")]
     author: WireAuthor,
     raw_author_name: Option<String>,
 }
@@ -106,8 +113,10 @@ struct WireBiblio {
 #[derive(Debug, Default, Deserialize)]
 #[serde(default)]
 pub(crate) struct WireList {
+    #[serde(deserialize_with = "null_default")]
     pub meta: WireMeta,
     /// Kept as raw values so each work's `Raw` is its own JSON object.
+    #[serde(deserialize_with = "null_default")]
     pub results: Vec<serde_json::Value>,
 }
 

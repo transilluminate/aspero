@@ -223,7 +223,7 @@ fn differences(claim: &Claim, c: &Candidate, known_only: bool) -> Vec<Difference
         (None, Some(actual)) => claim
             .cited_years()
             .into_iter()
-            .min_by_key(|y| (y - actual).unsigned_abs()),
+            .min_by_key(|y| y.abs_diff(actual)),
         (None, None) => None,
     };
     [
@@ -378,7 +378,23 @@ fn weigh(claim: &Claim, report: &ResolveReport) -> (Verdict, Reason, Option<usiz
             .position(|(i, c)| Some(i) != skip && c.assessment.confidence >= PLAUSIBLE)
     };
     match by_id.map(|i| (i, &report.candidates[i])) {
-        Some((i, _)) if !claim.is_descriptive() => (Verdict::Verified, Reason::IdExists, Some(i)),
+        // Beside the identifiers, at most a year, journal, volume or page:
+        // the identifiers name the work, and any of those that disagree are
+        // the citation's errors.
+        Some((i, c)) if !claim.is_descriptive() => {
+            let differs: Vec<Difference> = differences(claim, c, true)
+                .into_iter()
+                .filter(|d| d.field != CitedField::Kind)
+                .collect();
+            match differs.is_empty() {
+                true => (Verdict::Verified, Reason::IdExists, Some(i)),
+                false => (
+                    Verdict::Plausible,
+                    Reason::IdPartlyMatches { differs },
+                    Some(i),
+                ),
+            }
+        }
         Some((i, c)) if c.assessment.confidence >= VERIFIED => {
             (Verdict::Verified, Reason::IdAgrees, Some(i))
         }

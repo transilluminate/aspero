@@ -32,7 +32,7 @@ use records::{
     Bibliography, Budget, CacheStats, CitationStyle, CiteFormat, CitedEntry, Claim as ClaimRecord,
     DocxReferences, ExportFormat, Identification, KeyCheck, KeyStatus, Line, LineReference, Lookup,
     Lookups, Mention, ProviderUsage, ReadError, Reference, SearchRequest, SearchResults,
-    StyleError, StyleSource, Unavailable, Verification, Verifications, Work,
+    StyleError, StyleSource, Unavailable, Utf16Offsets, Verification, Verifications, Work,
 };
 
 uniffi::setup_scaffolding!();
@@ -323,9 +323,10 @@ impl Aspero {
     /// The identifiers mentioned in `text`, in order, where and as written.
     /// Offline.
     pub fn scan(&self, text: String) -> Vec<Mention> {
+        let mut utf16 = Utf16Offsets::new(&text);
         aspero_core::id::scan(&text)
             .iter()
-            .map(|m| Mention::new(&text, m))
+            .map(|m| Mention::new(&text, m, &mut utf16))
             .collect()
     }
 
@@ -333,9 +334,10 @@ impl Aspero {
     /// paragraph or line; wrapped lines rejoined), each ready to verify.
     /// Offline.
     pub fn split_references(&self, text: String) -> Vec<Reference> {
+        let mut utf16 = Utf16Offsets::new(&text);
         aspero_core::split_references(&text)
             .iter()
-            .map(|r| Reference::new(&text, r))
+            .map(|r| Reference::new(r, &mut utf16))
             .collect()
     }
 

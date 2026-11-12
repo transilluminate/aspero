@@ -362,8 +362,8 @@ impl Engine {
                     .min()
                     .zip(years.iter().max())
                     .map(|(&a, &b)| YearRange {
-                        from: Some(a - 1),
-                        to: Some(b + 1),
+                        from: Some(a.saturating_sub(1)),
+                        to: Some(b.saturating_add(1)),
                     });
                 jobs.push((provider, q, Via::PlaceSearch));
             }
@@ -433,7 +433,6 @@ impl Accumulator<'_> {
     /// Adds a record, merging it into an existing candidate that shares an
     /// identifier.
     fn add(&mut self, mut record: SourceRecord, sighting: Sighting) {
-        let assessment = matching::assess(self.claim, &record);
         let candidates = &mut self.report.candidates;
         let existing = candidates.iter_mut().find(|c| {
             c.ids
@@ -473,9 +472,9 @@ impl Accumulator<'_> {
                 candidates.push(Candidate {
                     ids: record.ids.clone(),
                     updates,
-                    record,
                     sightings: vec![sighting],
-                    assessment,
+                    assessment: matching::assess(self.claim, &record),
+                    record,
                 });
                 candidates.last_mut().expect("just pushed")
             }

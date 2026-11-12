@@ -171,6 +171,27 @@ async fn repeated_failures_open_the_breaker_until_a_probe_succeeds() {
 }
 
 #[tokio::test(start_paused = true)]
+async fn a_huge_cooldown_keeps_the_breaker_open_without_panicking() {
+    let failing = Failing::new(vec![server_error(), server_error()]);
+    let mut policy = ResiliencePolicy::default();
+    policy.max_retries = 0;
+    policy.breaker_threshold = 2;
+    policy.breaker_cooldown = Duration::MAX;
+    let engine = Engine::builder()
+        .provider(failing.clone(), policy, 0)
+        .clock(|| Timestamp::UNIX_EPOCH)
+        .build();
+    outcome(&engine).await;
+    outcome(&engine).await;
+    assert!(matches!(
+        outcome(&engine).await,
+        Outcome::Failed(Error::CircuitOpen { until: Some(_) })
+    ));
+    assert_eq!(engine.unavailable().len(), 1);
+    assert_eq!(failing.calls(), 2);
+}
+
+#[tokio::test(start_paused = true)]
 async fn views_share_what_the_engine_remembers() {
     let failing = Failing::new(vec![Error::AuthRejected { message: None }]);
     let engine = engine(failing.clone());

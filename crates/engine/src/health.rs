@@ -16,8 +16,13 @@ use aspero_core::{Error, ProviderId, ResiliencePolicy};
 use jiff::Timestamp;
 use tokio::time::Instant;
 
+use crate::lock;
+
 /// How long to wait out a spent quota whose reset time is unknown.
 const UNKNOWN_RESET: Duration = Duration::from_secs(3600);
+
+/// Stands in for a cooldown too long to add to an `Instant`: about 30 years.
+const FAR_FUTURE: Duration = Duration::from_secs(30 * 365 * 86_400);
 
 #[derive(Default)]
 pub(crate) struct Health {
@@ -50,7 +55,7 @@ impl Health {
         provider: &ProviderId,
         now: Timestamp,
     ) -> Result<Pass, Error> {
-        let mut providers = self.providers.lock().expect("provider health");
+        let mut providers = lock(&self.providers);
         let state = providers.entry(provider.clone()).or_default();
         let at = Instant::now();
         if let Some((error, until)) = &state.blocked {
@@ -69,6 +74,7 @@ impl Health {
             state.probing = true;
             probe = true;
         }
+        drop(providers);
         Ok(Pass {
             health: self.clone(),
             provider: provider.clone(),
@@ -79,7 +85,7 @@ impl Health {
 
     /// Providers refusing calls now, and why.
     pub(crate) fn unavailable(&self, now: Timestamp) -> Vec<(ProviderId, Error)> {
-        let providers = self.providers.lock().expect("provider health");
+        let providers = lock(&self.providers);
         let at = Instant::now();
         let mut out: Vec<(ProviderId, Error)> = providers
             .iter()
@@ -94,6 +100,7 @@ impl Health {
                 Some((p.clone(), Error::CircuitOpen { until }))
             })
             .collect();
+        drop(providers);
         out.sort_by(|a, b| a.0.as_str().cmp(b.0.as_str()));
         out
     }
@@ -108,7 +115,7 @@ impl Pass {
         now: Timestamp,
     ) {
         self.recorded = true;
-        let mut providers = self.health.providers.lock().expect("provider health");
+        let mut providers = lock(&self.health.providers);
         let state = providers.entry(self.provider.clone()).or_default();
         if self.probe {
             state.probing = false;
@@ -120,12 +127,14 @@ impl Pass {
                 let wait = resets_at
                     .and_then(|r| Duration::try_from(r.duration_since(now)).ok())
                     .unwrap_or(UNKNOWN_RESET);
-                state.blocked = Some((e.clone(), Some(at + wait)));
+                // A reset too far off to represent blocks for good.
+                state.blocked = Some((e.clone(), at.checked_add(wait)));
             }
             Some(e) if e.trips_breaker() => {
                 state.failures += 1;
                 if self.probe || state.failures >= policy.breaker_threshold {
-                    state.open_until = Some(at + policy.breaker_cooldown);
+                    let until = at.checked_add(policy.breaker_cooldown);
+                    state.open_until = Some(until.unwrap_or(at + FAR_FUTURE));
                 }
             }
             // Answered, even if not as hoped: the provider is up.
@@ -142,7 +151,7 @@ impl Drop for Pass {
     /// the way for another.
     fn drop(&mut self) {
         if self.probe && !self.recorded {
-            let mut providers = self.health.providers.lock().expect("provider health");
+            let mut providers = lock(&self.health.providers);
             if let Some(state) = providers.get_mut(&self.provider) {
                 state.probing = false;
             }

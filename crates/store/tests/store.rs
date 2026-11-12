@@ -202,6 +202,18 @@ fn a_cache_from_another_schema_version_is_rebuilt() {
         .unwrap();
 }
 
+#[test]
+fn a_file_that_is_not_a_cache_is_replaced() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("cache.sqlite");
+    std::fs::write(&path, "not a database, just text. ".repeat(200)).unwrap();
+    let cache = SqliteCache::open(&path).unwrap();
+    cache
+        .put_lookups(&OA, &[(&id("W1"), Some(&record(&["W1"], "new")))], at(0))
+        .unwrap();
+    assert_eq!(cache.stats().unwrap().records, 1);
+}
+
 mod pacing {
     use std::time::Duration;
 

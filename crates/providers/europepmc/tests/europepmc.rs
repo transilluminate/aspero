@@ -52,6 +52,7 @@ fn batch_lookup_of_pmids_pmcids_and_dois() {
         "query",
         r#"(EXT_ID:26017442 AND SRC:MED) OR PMCID:PMC6716493 OR DOI:"10.1016/s0140-6736(97)11096-0" OR (EXT_ID:99999999 AND SRC:MED)"#
     )));
+    assert!(query(&http, 0).contains(&pair("pageSize", "8")));
     let [lecun, pmc, wakefield, missing] = &resp.value[..] else {
         panic!()
     };

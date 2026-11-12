@@ -114,6 +114,9 @@ impl Engine {
                 let best = titles.iter().map(|t| title_score(t, r)).fold(0.0, f64::max);
                 (best >= TITLE_MATCH).then_some((best, id))
             })
+            // On a tie, the first: the page's header and footer come before
+            // its body (a preprint's DOI and the published one both match).
+            .rev()
             .max_by(|a, b| a.0.total_cmp(&b.0))
             .map(|(_, id)| (id, Decision::IdentifierAndTitle));
         // A short letter's references may start on its first page, titles

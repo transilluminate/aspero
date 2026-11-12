@@ -16,6 +16,16 @@ use crate::work::{
     PartialDate, Person, Update, UpdateKind, UpdateTo, Work, WorkType, tidy_abstract,
 };
 
+/// For `#[serde(deserialize_with)]`: an explicit `null` reads as the
+/// default, as a missing field does under `#[serde(default)]`.
+pub fn null_default<'de, D, T>(d: D) -> Result<T, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: Default + Deserialize<'de>,
+{
+    Ok(Option::<T>::deserialize(d)?.unwrap_or_default())
+}
+
 /// One CSL-JSON item.
 #[derive(Debug, Clone, Default, Deserialize)]
 #[serde(default, rename_all = "kebab-case")]
@@ -27,6 +37,7 @@ pub struct CslItem {
     pub item_type: Option<String>,
     pub title: Option<OneOrMany>,
     pub container_title: Option<OneOrMany>,
+    #[serde(deserialize_with = "null_default")]
     pub author: Vec<CslName>,
     pub issued: Option<CslDate>,
     pub published: Option<CslDate>,
@@ -49,11 +60,14 @@ pub struct CslItem {
     pub is_referenced_by_count: Option<u64>,
     /// Crossref-registered DOIs carry their notices here (see
     /// [`CrossrefUpdate`]).
+    #[serde(deserialize_with = "null_default")]
     pub updated_by: Vec<CrossrefUpdate>,
     /// And notices carry the works they update here.
+    #[serde(deserialize_with = "null_default")]
     pub update_to: Vec<CrossrefUpdate>,
     /// Typed links to other works, e.g. `{"is-replaced-by": [{"id-type":
     /// "doi", "id": "10.…"}]}`; see [`relation_updates`].
+    #[serde(deserialize_with = "null_default")]
     pub relation: BTreeMap<String, Vec<CrossrefRelation>>,
 }
 
@@ -170,6 +184,7 @@ pub struct CslName {
 #[derive(Debug, Clone, Default, Deserialize)]
 #[serde(default, rename_all = "kebab-case")]
 pub struct CslDate {
+    #[serde(deserialize_with = "null_default")]
     pub date_parts: Vec<Vec<Option<serde_json::Value>>>,
 }
 
@@ -328,7 +343,7 @@ fn tag(s: &str) -> Option<(usize, bool)> {
 
 /// The entity `s` starts with, if it is one: its length and character.
 fn entity(s: &str) -> Option<(usize, char)> {
-    let end = s.get(..12).unwrap_or(s).find(';')?;
+    let end = s.bytes().take(12).position(|b| b == b';')?;
     let name = &s[1..end];
     let c = if let Some(hex) = name.strip_prefix("#x").or_else(|| name.strip_prefix("#X")) {
         char::from_u32(u32::from_str_radix(hex, 16).ok()?)?

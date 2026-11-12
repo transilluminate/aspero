@@ -13,7 +13,7 @@ use std::sync::{Arc, Mutex};
 use aspero_core::{FieldSet, ProviderId, SourceRecord, WorkId};
 use tokio::sync::watch;
 
-use crate::Attempt;
+use crate::{Attempt, lock};
 
 pub(crate) type Answer = (Attempt, Option<SourceRecord>);
 
@@ -60,7 +60,7 @@ impl InFlight {
             calls: HashMap::new(),
         };
         let mut joined = Vec::new();
-        let mut calls = self.calls.lock().expect("in-flight map");
+        let mut calls = lock(&self.calls);
         for (i, id) in ids {
             let key = (provider.clone(), id.clone());
             match calls.get(&key) {
@@ -85,7 +85,7 @@ impl InFlight {
     }
 
     fn finish(&self, provider: &ProviderId, id: &WorkId, token: u64) {
-        let mut calls = self.calls.lock().expect("in-flight map");
+        let mut calls = lock(&self.calls);
         let key = (provider.clone(), id.clone());
         if calls.get(&key).is_some_and(|c| c.token == token) {
             calls.remove(&key);

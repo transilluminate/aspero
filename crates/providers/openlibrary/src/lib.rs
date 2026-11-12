@@ -15,7 +15,8 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use aspero_core::http::escape_lucene;
+use aspero_core::csl::null_default;
+use aspero_core::http::{escape_lucene, status_error};
 use aspero_core::{
     Capabilities, Cursor, Error, FieldSet, Filter, Hit, HttpClient, HttpRequest, HttpResponse,
     IdKind, Isbn, Lookup, Page, PartialDate, Person, Provider, ProviderId, Raw, ResiliencePolicy,
@@ -110,17 +111,7 @@ fn check(resp: &HttpResponse) -> Result<()> {
     }
     Err(match resp.status {
         400 | 422 => Error::BadRequest("rejected by Open Library".into()),
-        404 => Error::NotFound,
-        429 => Error::RateLimited {
-            retry_after: resp
-                .header("retry-after")
-                .and_then(|v| v.trim().parse().ok())
-                .map(Duration::from_secs),
-        },
-        status => Error::Server {
-            status,
-            message: None,
-        },
+        _ => status_error(resp, None),
     })
 }
 
@@ -130,9 +121,12 @@ fn check(resp: &HttpResponse) -> Result<()> {
 struct Edition {
     title: Option<String>,
     subtitle: Option<String>,
+    #[serde(deserialize_with = "null_default")]
     authors: Vec<Named>,
     publish_date: Option<String>,
+    #[serde(deserialize_with = "null_default")]
     publishers: Vec<Named>,
+    #[serde(deserialize_with = "null_default")]
     identifiers: Identifiers,
     url: Option<String>,
 }
@@ -146,7 +140,9 @@ struct Named {
 #[derive(Debug, Default, Deserialize)]
 #[serde(default)]
 struct Identifiers {
+    #[serde(deserialize_with = "null_default")]
     isbn_13: Vec<String>,
+    #[serde(deserialize_with = "null_default")]
     isbn_10: Vec<String>,
 }
 
@@ -157,11 +153,15 @@ struct SearchDoc {
     key: Option<String>,
     title: Option<String>,
     subtitle: Option<String>,
+    #[serde(deserialize_with = "null_default")]
     author_name: Vec<String>,
     first_publish_year: Option<i16>,
     /// Every edition's year.
+    #[serde(deserialize_with = "null_default")]
     publish_year: Vec<i16>,
+    #[serde(deserialize_with = "null_default")]
     isbn: Vec<String>,
+    #[serde(deserialize_with = "null_default")]
     publisher: Vec<String>,
 }
 
@@ -169,6 +169,7 @@ struct SearchDoc {
 #[serde(default, rename_all = "camelCase")]
 struct SearchResults {
     num_found: Option<u64>,
+    #[serde(deserialize_with = "null_default")]
     docs: Vec<serde_json::Value>,
 }
 
@@ -215,6 +216,19 @@ fn year_in(date: &str) -> Option<i16> {
         .windows(4)
         .find(|w| w.iter().all(u8::is_ascii_digit))
         .and_then(|w| std::str::from_utf8(w).ok()?.parse().ok())
+}
+
+/// The record, or `None` with a warning when it doesn't decode: one bad
+/// record shouldn't cost the rest of the page.
+fn or_skip(record: serde_json::Result<SourceRecord>) -> Option<SourceRecord> {
+    record
+        .inspect_err(|e| {
+            tracing::warn!(
+                target: "aspero::decode",
+                provider = %ID, error = %e, "skipped a record that doesn't decode"
+            );
+        })
+        .ok()
 }
 
 fn edition_record(
@@ -315,9 +329,7 @@ impl Provider for OpenLibrary {
             for ((id, isbn), key) in chunk_ids.iter().zip(chunk).zip(&keys) {
                 let record = body
                     .get(key)
-                    .map(|v| edition_record(isbn, v, resp.received_at))
-                    .transpose()
-                    .map_err(Error::decode)?;
+                    .and_then(|v| or_skip(edition_record(isbn, v, resp.received_at)));
                 lookups.push(Lookup {
                     id: id.clone(),
                     record,
@@ -368,12 +380,16 @@ impl Provider for OpenLibrary {
         let hits: Vec<Hit> = results
             .docs
             .iter()
-            .map(|v| search_record(base, v, resp.received_at).map(|r| Hit::new(r, None)))
-            .collect::<serde_json::Result<_>>()
-            .map_err(Error::decode)?;
+            .filter_map(|v| or_skip(search_record(base, v, resp.received_at)))
+            .map(|r| Hit::new(r, None))
+            .collect();
         let seen = u64::from(page_number) * u64::from(limit);
         let more = !hits.is_empty() && results.num_found.is_some_and(|n| n > seen);
-        let next = more.then(|| Cursor((page_number + 1).to_string()));
+        // No page follows the last one a u32 can number.
+        let next = page_number
+            .checked_add(1)
+            .filter(|_| more)
+            .map(|n| Cursor(n.to_string()));
         Ok(Response::new(Page::new(hits, results.num_found, next)))
     }
 }

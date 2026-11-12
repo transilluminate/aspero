@@ -94,7 +94,8 @@ impl OpenAlex {
         format!("{}/works{rest}", self.config.base_url.trim_end_matches('/'))
     }
 
-    /// Sends and maps non-2xx statuses to errors, keeping usage either way.
+    /// Sends and maps non-2xx statuses to errors. Usage comes back only
+    /// with a success; a spent quota's reset time comes in its error.
     async fn send(&self, url: String) -> Result<(HttpResponse, Usage)> {
         let resp = self.http.send(self.request(url)).await?;
         http::check(&resp)?;

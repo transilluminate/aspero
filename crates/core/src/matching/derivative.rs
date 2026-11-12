@@ -32,9 +32,40 @@ pub fn is_derivative(title: &str) -> bool {
     derivative_kind(title).is_some()
 }
 
-/// What a derivative record is, by its title: "reply", "correction",
-/// "comment", "retraction", "expression of concern" or "recommendation".
+/// What a derivative record is.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
+pub enum WorkKind {
+    Reply,
+    Correction,
+    Comment,
+    Retraction,
+    ExpressionOfConcern,
+    Recommendation,
+}
+
+impl WorkKind {
+    /// "reply", "correction", "comment", "retraction", "expression of
+    /// concern" or "recommendation".
+    pub fn as_str(self) -> &'static str {
+        match self {
+            WorkKind::Reply => "reply",
+            WorkKind::Correction => "correction",
+            WorkKind::Comment => "comment",
+            WorkKind::Retraction => "retraction",
+            WorkKind::ExpressionOfConcern => "expression of concern",
+            WorkKind::Recommendation => "recommendation",
+        }
+    }
+}
+
+/// What a derivative record is, by its title, as [`WorkKind::as_str`].
 pub fn derivative_kind(title: &str) -> Option<&'static str> {
+    derivative_work_kind(title).map(WorkKind::as_str)
+}
+
+/// What a derivative record is, by its title.
+pub fn derivative_work_kind(title: &str) -> Option<WorkKind> {
     let norm = normalise(title);
     let words = format!(" {norm} ");
     let leading = |m: &str| match m {
@@ -55,12 +86,12 @@ pub fn derivative_kind(title: &str) -> Option<&'static str> {
             false => words.contains(&format!(" {m} ")),
         })?;
     Some(match *marker {
-        "reply" | "response to" | "in response" => "reply",
-        "erratum" | "errata" | "corrigendum" | "correction" => "correction",
-        "comment on" => "comment",
-        "retraction of" => "retraction",
-        "expression of concern" => "expression of concern",
-        _ => "recommendation",
+        "reply" | "response to" | "in response" => WorkKind::Reply,
+        "erratum" | "errata" | "corrigendum" | "correction" => WorkKind::Correction,
+        "comment on" => WorkKind::Comment,
+        "retraction of" => WorkKind::Retraction,
+        "expression of concern" => WorkKind::ExpressionOfConcern,
+        _ => WorkKind::Recommendation,
     })
 }
 

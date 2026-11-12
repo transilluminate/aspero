@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+Added:
+
+- `WorkKind` (reply, correction, comment, retraction, expression of
+  concern, recommendation): a `CitedField::Kind` difference's `kind`, the
+  value `actual` words, so front ends can match on it exhaustively.
+  `matching::derivative_work_kind` returns it. FFI: `Difference.kind:
+  WorkKind?`.
+
 ## 0.8.0
 
 Added:

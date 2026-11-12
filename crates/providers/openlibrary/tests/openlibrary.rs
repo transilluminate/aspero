@@ -116,6 +116,17 @@ fn year_ranges_use_query_syntax_and_paging_continues() {
 }
 
 #[test]
+fn paging_ends_at_the_last_numbered_page() {
+    let body = r#"{"numFound": 99999999999, "docs": [{"key": "/works/OL1W", "title": "A"}]}"#;
+    let (ol, _) = provider([response(200, &[], body)]);
+    let mut q = SearchQuery::new("x");
+    q.page.cursor = Some(Cursor(u32::MAX.to_string()));
+    let page = block_on(ol.search(&q)).unwrap().value;
+    assert_eq!(page.hits.len(), 1);
+    assert_eq!(page.next, None);
+}
+
+#[test]
 fn user_text_is_escaped_and_extras_rejected() {
     let (ol, http) = provider([recorded("search")]);
     block_on(ol.search(&SearchQuery::new("C++: a guide"))).unwrap();

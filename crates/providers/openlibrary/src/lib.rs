@@ -385,7 +385,11 @@ impl Provider for OpenLibrary {
             .collect();
         let seen = u64::from(page_number) * u64::from(limit);
         let more = !hits.is_empty() && results.num_found.is_some_and(|n| n > seen);
-        let next = more.then(|| Cursor((page_number + 1).to_string()));
+        // No page follows the last one a u32 can number.
+        let next = page_number
+            .checked_add(1)
+            .filter(|_| more)
+            .map(|n| Cursor(n.to_string()));
         Ok(Response::new(Page::new(hits, results.num_found, next)))
     }
 }

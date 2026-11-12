@@ -1,5 +1,35 @@
 # Changelog
 
+## 0.8.6
+
+Fixed:
+
+- A claim of an identifier with a wrong year, journal, volume or page
+  verified (at confidence 0). It's now plausible, the field a difference.
+- Claimed authors in Vancouver form ("Daum RS") or with particles
+  ("A. van der Berg") scored no overlap with their records.
+- `identify` took a body mention over the header's identifier when both
+  records carried the title.
+- A claim using "response to" or "correction" as ordinary words lifted
+  the derivative penalty: claims now read markers as records do.
+- A claim giving only one of volume and page was searched by one place
+  and scored by another.
+- The CLI panicked on a closed stdout (`aspero scan … | head`); it now
+  exits quietly.
+- A huge `Retry-After`, deadline or breaker cooldown, or an extreme
+  year, could overflow and panic. Engine locks survive poisoning.
+- One record that doesn't decode, or a `null` field, failed a provider's
+  whole page; the record is skipped, the `null` read as absent.
+- The cache recovers from an unreadable file, and rebuilds an outdated
+  schema under the write lock.
+- Europe PMC batch lookups could miss a record pushed onto a second page.
+
+Faster:
+
+- Splitting a long unnumbered paragraph of references is linear: 256 KB
+  in 2.6 ms, from 408 ms.
+- FFI UTF-16 spans no longer re-encode the text for each mention.
+
 ## 0.8.5
 
 Added:

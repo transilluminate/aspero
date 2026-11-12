@@ -2,7 +2,7 @@
 //! of items, or a single item. Read with the lenient [`CslItem`] used for
 //! doi.org's responses.
 
-use aspero_core::csl::CslItem;
+use aspero_core::csl::{CslItem, OneOrMany};
 use aspero_core::{Claim, Person};
 
 use crate::{BibEntry, Format, Ids, ReadError};
@@ -51,7 +51,7 @@ pub(crate) fn entry(item: &CslItem, position: usize) -> BibEntry {
     if let Some(pmcid) = &item.pmcid {
         ids.urls(&format!("PMCID: {pmcid}"));
     }
-    if let Some(isbn) = &item.isbn {
+    for isbn in item.isbn.iter().flat_map(OneOrMany::all) {
         ids.isbns("ISBN", isbn, true);
     }
     if let Some(url) = &item.url {

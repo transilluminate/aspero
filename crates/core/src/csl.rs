@@ -1,5 +1,5 @@
-//! CSL-JSON items, as served by doi.org content negotiation and used for
-//! citation export/import.
+//! CSL-JSON items, as served by doi.org content negotiation and Crossref's
+//! REST API, and used for citation export/import.
 //!
 //! Reading is lenient, because real producers deviate from the spec:
 //! `title`/`container-title` arrive as a string or an array; Crossref's
@@ -49,8 +49,9 @@ pub struct CslItem {
     pub doi: Option<String>,
     #[serde(rename = "URL")]
     pub url: Option<String>,
+    /// A string in CSL; an array in Crossref's REST API.
     #[serde(rename = "ISBN")]
-    pub isbn: Option<String>,
+    pub isbn: Option<OneOrMany>,
     #[serde(rename = "PMID")]
     pub pmid: Option<Scalar>,
     #[serde(rename = "PMCID")]
@@ -151,6 +152,14 @@ impl OneOrMany {
             OneOrMany::Many(v) => v.first().map(String::as_str),
         }
     }
+
+    /// Every string, one or many.
+    pub fn all(&self) -> &[String] {
+        match self {
+            OneOrMany::One(s) => std::slice::from_ref(s),
+            OneOrMany::Many(v) => v,
+        }
+    }
 }
 
 /// CSL allows numbers or strings for volume, issue and page.
@@ -176,6 +185,8 @@ pub struct CslName {
     pub family: Option<String>,
     pub given: Option<String>,
     pub literal: Option<String>,
+    /// An organisation, in Crossref's REST API.
+    pub name: Option<String>,
     #[serde(rename = "ORCID")]
     pub orcid: Option<String>,
 }
@@ -210,7 +221,7 @@ impl CslDate {
 impl CslName {
     fn person(&self) -> Option<Person> {
         let mut person = Person::default();
-        match (&self.family, &self.literal) {
+        match (&self.family, self.literal.as_ref().or(self.name.as_ref())) {
             (Some(family), _) => {
                 person.family = Some(family.clone());
                 person.given = self.given.clone();
@@ -229,9 +240,11 @@ pub fn work_type(name: &str) -> WorkType {
         "journal-article" => WorkType::JournalArticle,
         "proceedings-article" => WorkType::ConferencePaper,
         "posted-content" => WorkType::Preprint,
-        "book-chapter" | "book-section" | "book-part" => WorkType::Chapter,
-        "monograph" | "edited-book" | "reference-book" => WorkType::Book,
+        "book-chapter" | "book-section" | "book-part" | "reference-entry" => WorkType::Chapter,
+        "monograph" | "edited-book" | "reference-book" | "book-set" => WorkType::Book,
         "dissertation" => WorkType::Thesis,
+        "report-component" => WorkType::Report,
+        "database" => WorkType::Dataset,
         csl => WorkType::from_csl(csl),
     }
 }
@@ -433,6 +446,72 @@ mod tests {
         assert_eq!(w.issued.unwrap().to_string(), "2015-05-27");
         assert_eq!(w.authors[0].display_name().as_deref(), Some("Yann LeCun"));
         assert_eq!(w.cited_by_count, Some(79265));
+    }
+
+    #[test]
+    fn dates_keep_their_precision_and_tolerate_nulls() {
+        let date = |v: serde_json::Value| {
+            serde_json::from_value::<CslDate>(v)
+                .unwrap()
+                .to_partial()
+                .map(|d| d.to_string())
+        };
+        assert_eq!(
+            date(serde_json::json!({"date-parts": [[2015, 5, 27]]})).unwrap(),
+            "2015-05-27"
+        );
+        assert_eq!(
+            date(serde_json::json!({"date-parts": [[2017, 4]]})).unwrap(),
+            "2017-04"
+        );
+        assert_eq!(
+            date(serde_json::json!({"date-parts": [[2017, 2, 31]]})).unwrap(),
+            "2017-02"
+        );
+        assert_eq!(date(serde_json::json!({"date-parts": [[null]]})), None);
+        assert_eq!(date(serde_json::json!({})), None);
+    }
+
+    #[test]
+    fn organisational_and_orcid_authors() {
+        let author = |v: serde_json::Value| {
+            serde_json::from_value::<CslName>(v)
+                .unwrap()
+                .person()
+                .unwrap()
+        };
+        // Crossref's REST API names organisations `name`, not `literal`.
+        for org in [
+            serde_json::json!({"name": "ATLAS Collaboration"}),
+            serde_json::json!({"literal": "ATLAS Collaboration"}),
+        ] {
+            let org = author(org);
+            assert_eq!(org.literal.as_deref(), Some("ATLAS Collaboration"));
+        }
+        let p = author(serde_json::json!({
+            "given": "Ada", "family": "Lovelace", "ORCID": "http://orcid.org/0000-0002-1825-0097"
+        }));
+        assert_eq!(p.display_name().as_deref(), Some("Ada Lovelace"));
+        assert_eq!(p.orcid.as_deref(), Some("0000-0002-1825-0097"));
+        assert_eq!(
+            author(serde_json::json!({"given": "Plato"}))
+                .literal
+                .as_deref(),
+            Some("Plato")
+        );
+    }
+
+    #[test]
+    fn crossref_types_map_to_csl() {
+        for (crossref, expected) in [
+            ("reference-entry", WorkType::Chapter),
+            ("book-set", WorkType::Book),
+            ("report-component", WorkType::Report),
+            ("database", WorkType::Dataset),
+            ("peer-review", WorkType::Other("peer-review".into())),
+        ] {
+            assert_eq!(work_type(crossref), expected, "{crossref}");
+        }
     }
 
     #[test]

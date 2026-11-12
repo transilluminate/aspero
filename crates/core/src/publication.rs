@@ -8,6 +8,7 @@
 //! "BMJ") are reported as different, so callers treat a journal mismatch as
 //! a hint, not proof. Volume and page are numbers and compare exactly.
 
+use crate::id::is_digits;
 use crate::matching::normalise;
 
 /// Words a journal abbreviation leaves out.
@@ -199,16 +200,14 @@ fn ranged(pages: &str) -> bool {
 /// "376" or "376(26)": the volume number.
 fn volume_number(s: &str) -> Option<String> {
     let volume = s.split('(').next().unwrap_or(s);
-    (!volume.is_empty() && volume.len() <= 6 && volume.bytes().all(|b| b.is_ascii_digit()))
-        .then(|| volume.to_owned())
+    (volume.len() <= 6 && is_digits(volume)).then(|| volume.to_owned())
 }
 
 /// "2545-55", "e1234" or "S12": the first page.
 fn page_number(s: &str) -> Option<String> {
     let page = first_page(s.trim_end_matches(['.', ',', ';']));
     let digits = page.trim_start_matches(['e', 'E', 's', 'S']);
-    (!digits.is_empty() && digits.len() <= 8 && digits.bytes().all(|b| b.is_ascii_digit()))
-        .then(|| page.to_ascii_lowercase())
+    (digits.len() <= 8 && is_digits(digits)).then(|| page.to_ascii_lowercase())
 }
 
 #[cfg(test)]

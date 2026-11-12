@@ -120,9 +120,14 @@ pub(crate) fn strip_prefix_ci<'a>(s: &'a str, prefix: &str) -> Option<&'a str> {
         .then(|| &s[prefix.len()..])
 }
 
+/// Whether `s` is one or more ASCII digits.
+pub(crate) fn is_digits(s: &str) -> bool {
+    !s.is_empty() && s.bytes().all(|b| b.is_ascii_digit())
+}
+
 /// Parses a strictly positive decimal integer; leading zeros are accepted.
 pub(crate) fn parse_positive(s: &str) -> Result<u64, &'static str> {
-    if s.is_empty() || !s.bytes().all(|b| b.is_ascii_digit()) {
+    if !is_digits(s) {
         return Err("expected digits");
     }
     match s.parse::<u64>() {

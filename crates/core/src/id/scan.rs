@@ -15,7 +15,7 @@
 
 use std::ops::Range;
 
-use super::syntax::clean_pasted;
+use super::syntax::{clean_pasted, is_digits};
 use super::url::Url;
 use super::{IdKind, WorkId};
 
@@ -353,11 +353,10 @@ fn mend_spaced(text: &str, broken: &Broken, line_end: usize) -> Option<(WorkId, 
         let Some(first) = token.chars().next() else {
             break;
         };
-        let digits = |s: &str| !s.is_empty() && s.bytes().all(|b| b.is_ascii_digit());
         let joins = match last.chars().next_back() {
             Some('/' | '-' | '_' | ':') => first.is_alphanumeric(),
             Some('.') => first.is_lowercase() || first.is_ascii_digit(),
-            _ => digits(last) && first.is_ascii_digit(),
+            _ => is_digits(last) && first.is_ascii_digit(),
         };
         if !joins {
             break;

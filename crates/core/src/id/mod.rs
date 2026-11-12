@@ -36,6 +36,7 @@ pub use s2::S2PaperId;
 pub use scan::{Mention, scan};
 
 use syntax::IdSyntax;
+pub(crate) use syntax::is_digits;
 use url::Url;
 
 /// The kinds of work identifier aspero understands.
@@ -220,8 +221,6 @@ impl WorkId {
 
     /// Guesses the kind of an unprefixed, non-URL identifier.
     fn detect_bare(s: &str, input: &str) -> Result<Self, IdError> {
-        let all_digits = |t: &str| !t.is_empty() && t.bytes().all(|b| b.is_ascii_digit());
-
         if s.starts_with("10.") || doi::has_info_prefix(s) {
             return WorkId::parse_as(IdKind::Doi, input);
         }
@@ -229,13 +228,13 @@ impl WorkId {
         if s.get(..4).is_some_and(|p| p.eq_ignore_ascii_case("isbn")) {
             return WorkId::parse_as(IdKind::Isbn, input);
         }
-        if s.get(..3).is_some_and(|p| p.eq_ignore_ascii_case("pmc")) && all_digits(&s[3..]) {
+        if s.get(..3).is_some_and(|p| p.eq_ignore_ascii_case("pmc")) && is_digits(&s[3..]) {
             return WorkId::parse_as(IdKind::Pmcid, input);
         }
-        if s.get(..3).is_some_and(|p| p.eq_ignore_ascii_case("nbk")) && all_digits(&s[3..]) {
+        if s.get(..3).is_some_and(|p| p.eq_ignore_ascii_case("nbk")) && is_digits(&s[3..]) {
             return WorkId::parse_as(IdKind::Nbk, input);
         }
-        if s.starts_with(['W', 'w']) && all_digits(&s[1..]) {
+        if s.starts_with(['W', 'w']) && is_digits(&s[1..]) {
             return WorkId::parse_as(IdKind::OpenAlex, input);
         }
         // 13 digits from the book prefixes with a valid checksum, or a
@@ -245,7 +244,7 @@ impl WorkId {
         if isbn::looks_like_isbn(s) && ((compact.len() == 13 && book_prefix) || s.contains('-')) {
             return WorkId::parse_as(IdKind::Isbn, input);
         }
-        if all_digits(s) {
+        if is_digits(s) {
             let mut candidates = vec![IdKind::Pmid, IdKind::CorpusId];
             if isbn::looks_like_isbn(s) {
                 candidates.push(IdKind::Isbn);

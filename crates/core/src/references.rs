@@ -22,6 +22,7 @@ use std::ops::Range;
 
 use crate::Alternative;
 use crate::fold::Folded;
+use crate::id::is_digits;
 
 /// One reference found in a list.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -609,9 +610,8 @@ pub(crate) fn link_continues(text: &str, next: &str) -> bool {
 /// A number that reads as itself ("3.14", "2019", "797"), not a run of a
 /// DOI's digits ("0000659", "00489").
 fn plain_number(token: &str) -> bool {
-    let digits = token.bytes().all(|b| b.is_ascii_digit());
     (token.contains('.') && token.parse::<f64>().is_ok())
-        || (digits && token.len() < 5 && !token.starts_with('0'))
+        || (is_digits(token) && token.len() < 5 && !token.starts_with('0'))
 }
 
 /// `token` is a link of its own, not the rest of one.
@@ -627,9 +627,7 @@ fn starts_link(token: &str) -> bool {
 
 /// `token` numbers a list item (`18.`).
 fn is_number(token: &str) -> bool {
-    token
-        .strip_suffix('.')
-        .is_some_and(|n| !n.is_empty() && n.bytes().all(|b| b.is_ascii_digit()))
+    token.strip_suffix('.').is_some_and(is_digits)
 }
 
 /// `text` ends inside a DOI or URL.

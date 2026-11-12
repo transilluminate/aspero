@@ -19,6 +19,9 @@ use tokio::time::Instant;
 /// How long to wait out a spent quota whose reset time is unknown.
 const UNKNOWN_RESET: Duration = Duration::from_secs(3600);
 
+/// Stands in for a cooldown too long to add to an `Instant`: about 30 years.
+const FAR_FUTURE: Duration = Duration::from_secs(30 * 365 * 86_400);
+
 #[derive(Default)]
 pub(crate) struct Health {
     providers: Mutex<HashMap<ProviderId, State>>,
@@ -120,12 +123,14 @@ impl Pass {
                 let wait = resets_at
                     .and_then(|r| Duration::try_from(r.duration_since(now)).ok())
                     .unwrap_or(UNKNOWN_RESET);
-                state.blocked = Some((e.clone(), Some(at + wait)));
+                // A reset too far off to represent blocks for good.
+                state.blocked = Some((e.clone(), at.checked_add(wait)));
             }
             Some(e) if e.trips_breaker() => {
                 state.failures += 1;
                 if self.probe || state.failures >= policy.breaker_threshold {
-                    state.open_until = Some(at + policy.breaker_cooldown);
+                    let until = at.checked_add(policy.breaker_cooldown);
+                    state.open_until = Some(until.unwrap_or(at + FAR_FUTURE));
                 }
             }
             // Answered, even if not as hoped: the provider is up.

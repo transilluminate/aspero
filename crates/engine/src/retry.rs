@@ -26,10 +26,15 @@ where
     F: FnMut() -> Fut,
     Fut: Future<Output = Result<T, Error>>,
 {
-    let deadline = Instant::now() + policy.deadline;
+    // `None`: a deadline too far off to represent, so no deadline.
+    let deadline = Instant::now().checked_add(policy.deadline);
     let mut retry = 0;
     loop {
-        let error = match tokio::time::timeout_at(deadline, op()).await {
+        let attempt = match deadline {
+            Some(deadline) => tokio::time::timeout_at(deadline, op()).await,
+            None => Ok(op().await),
+        };
+        let error = match attempt {
             Ok(Ok(value)) => return Ok(value),
             Ok(Err(e)) => e,
             Err(_elapsed) => return Err(Error::Timeout),
@@ -44,7 +49,9 @@ where
         {
             delay = delay.max(*after);
         }
-        if Instant::now() + delay >= deadline {
+        // A wake time that overflows is past any deadline.
+        let wake = Instant::now().checked_add(delay);
+        if wake.is_none_or(|w| deadline.is_some_and(|d| w >= d)) {
             return Err(error);
         }
         tracing::info!(
@@ -156,6 +163,26 @@ mod tests {
         // Sleeps 100ms; the next 200ms sleep would end at 300ms > 250ms.
         assert_eq!(calls.load(Ordering::SeqCst), 2);
         assert_eq!(start.elapsed(), Duration::from_millis(100));
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_huge_retry_after_gives_up_without_panicking() {
+        let limited = Error::RateLimited {
+            retry_after: Some(Duration::from_secs(u64::MAX)),
+        };
+        let (op, calls) = scripted(vec![limited]);
+        let err = with_retries(&policy(), full_jitter, op).await.unwrap_err();
+        assert!(matches!(err, Error::RateLimited { .. }));
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_huge_deadline_means_none() {
+        let mut p = policy();
+        p.deadline = Duration::MAX;
+        let (op, calls) = scripted(vec![server_error()]);
+        assert_eq!(with_retries(&p, full_jitter, op).await.unwrap(), 1);
+        assert_eq!(calls.load(Ordering::SeqCst), 2);
     }
 
     #[tokio::test(start_paused = true)]

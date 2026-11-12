@@ -217,7 +217,7 @@ fn row(item: &Value) -> Vec<comfy_table::Cell> {
     ]
 }
 
-fn exit_for(verdict: Verdict) -> Exit {
+pub(super) fn exit_for(verdict: Verdict) -> Exit {
     match verdict {
         Verdict::Verified => Exit::Ok,
         Verdict::NotFound => Exit::NotFound,
@@ -226,7 +226,7 @@ fn exit_for(verdict: Verdict) -> Exit {
     }
 }
 
-fn verdict_text(input: &str, v: &Verification) -> String {
+pub(super) fn verdict_text(input: &str, v: &Verification) -> String {
     let mut lines = vec![
         format!(
             "{}  {input}",

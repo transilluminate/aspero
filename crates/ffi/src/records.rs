@@ -1370,3 +1370,37 @@ impl From<aspero_bib::docx::DocxReferences> for DocxReferences {
         }
     }
 }
+
+/// What decided which work a document is, surest first.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Enum)]
+pub enum IdentifiedBy {
+    /// An identifier on the page, its work's title matching the title given.
+    IdentifierAndTitle,
+    /// An identifier on the page, its work's title and first author on the
+    /// page too.
+    IdentifierAndPage,
+    /// The page's only identifier, with no title to check it against.
+    OnlyIdentifier,
+    /// No identifier confirmed: found by searching the title and the top of
+    /// the page.
+    TitleSearch,
+}
+
+impl From<engine::Decision> for IdentifiedBy {
+    fn from(d: engine::Decision) -> Self {
+        match d {
+            engine::Decision::IdentifierAndTitle => IdentifiedBy::IdentifierAndTitle,
+            engine::Decision::IdentifierAndPage => IdentifiedBy::IdentifierAndPage,
+            engine::Decision::OnlyIdentifier => IdentifiedBy::OnlyIdentifier,
+            _ => IdentifiedBy::TitleSearch,
+        }
+    }
+}
+
+/// The work a document is, and how that was decided.
+#[derive(Debug, Clone, uniffi::Record)]
+pub struct Identification {
+    pub decided_by: IdentifiedBy,
+    /// The work as a verified citation (plausible when found by title).
+    pub verification: Verification,
+}

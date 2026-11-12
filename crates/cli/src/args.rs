@@ -298,7 +298,9 @@ trailing punctuation are dropped, brackets inside a DOI kept
 Publisher URLs give their DOI without page suffixes (/full, /pdf, .pdf).
 DOIs, PMC… and NBK… count anywhere; PMIDs, ISBNs and arXiv IDs only when
 labelled (PMID: 123, ISBN 978-…), prefixed (arXiv:…) or as URLs. A DOI
-broken across lines is not found. Nothing is fetched.
+or URL broken across lines, or spaced out after its punctuation as some
+PDF copies are (https:// doi. org/ 10. …), is rejoined. Nothing is
+fetched.
 
 Examples:
   aspero scan notes/*.md
@@ -307,6 +309,34 @@ Examples:
     Scan {
         /// Text or Markdown files; `-` (or none, when piped) reads stdin.
         files: Vec<std::path::PathBuf>,
+    },
+
+    /// Which work a document is, from its first page's text.
+    #[command(after_help = "\
+A first page prints the paper's own DOI, but often others too (the
+journal's, data, a related article, the first references), so none is
+taken on trust. Each identifier on the page, those in the header and
+footer first (at most six), is looked up, and its work must be confirmed:
+by --title-hint (the largest type at the top of the page) or --title (the
+file's title metadata, ignored when junk such as \"Microsoft Word -
+draft3.docx\"), or by its own title and first author appearing on the page.
+With none confirmed, the title and the top of the page are verified as a
+citation. `decided_by` says which: identifier_and_title,
+identifier_and_page, only_identifier (the page's one identifier, no title
+to check) or title_search. Exits 3 when nothing is sure enough.
+
+Examples:
+  pdftotext -l 1 paper.pdf - | aspero identify --title \"$(pdfinfo paper.pdf | sed -n 's/^Title: *//p')\"
+  aspero identify page1.txt --title-hint 'Deep learning'")]
+    Identify {
+        /// The first page as text; `-` (or none, when piped) reads stdin.
+        file: Option<std::path::PathBuf>,
+        /// The document's title metadata (ignored when junk).
+        #[arg(long)]
+        title: Option<String>,
+        /// The largest type at the top of the page.
+        #[arg(long)]
+        title_hint: Option<String>,
     },
 
     /// Inspect or empty the answer cache.

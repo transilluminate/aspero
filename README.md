@@ -65,6 +65,9 @@ aspero verify --style vancouver - < citations.txt   # `aspero styles` lists them
 # Look up identifiers: DOIs, arXiv IDs, PMIDs, PMCIDs, NBK IDs, ISBNs, URLs
 aspero lookup 10.1038/nature14539 arXiv:1706.03762 "ISBN 978-0-262-03561-3"
 
+# Which paper is this PDF? From its first page's text and title
+pdftotext -l 1 paper.pdf - | aspero identify --title "Deep learning"
+
 # Find the identifiers in documents (offline), then look them up
 aspero scan notes/*.md
 aspero scan --format jsonl page.md | aspero lookup -   # each result echoes its mention

@@ -7,6 +7,7 @@
 pub mod cache;
 pub mod check;
 pub mod claim;
+pub mod identify;
 pub mod lookup;
 pub mod resolve;
 pub mod scan;

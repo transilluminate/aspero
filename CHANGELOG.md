@@ -1,5 +1,21 @@
 # Changelog
 
+## Unreleased
+
+Added:
+
+- `Verification.read`: the claim as aspero read it, for a "cited vs
+  found" view. Identifiers as written (a DOI cut short at a line break
+  stays visible, with the readings tried as `alternatives`); from free
+  text, the year (when it gives one), volume and first page
+  (`Claim::as_read`). Title, authors and journal aren't parsed out of
+  free text: they're scored by finding the work's own in it.
+- `Difference.cited`: the citation's value for the field, as compared
+  (the year nearest the work's, the volume or first page read, or the
+  title, authors or journal given).
+- JSON: `"read"` on each verification, `"cited"` in `why.differs`. FFI:
+  `Verification.read: Claim?`, `Difference.cited: String?` (#46).
+
 ## 0.8.4
 
 Fixed:

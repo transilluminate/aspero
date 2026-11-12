@@ -18,6 +18,7 @@ pub fn verification(echo: Value, v: &Verification, full: bool) -> Value {
             "verdict": v.verdict.as_str(),
             "reason": v.reason,
             "why": why(v, full),
+            "read": v.read,
         }),
     );
     if let Some(best) = v.best {
@@ -42,17 +43,23 @@ pub fn verification(echo: Value, v: &Verification, full: bool) -> Value {
     item
 }
 
-/// The reason as data: `{"code", "differs": [{"field", "actual"}], "cited":
-/// candidate}`, so a front end can word it itself.
+/// The reason as data: `{"code", "differs": [{"field", "actual", "cited"}],
+/// "cited": candidate}`, so a front end can word it itself.
 fn why(v: &Verification, full: bool) -> Value {
     let mut out = json!({"code": v.why.as_str()});
     let differs: Vec<Value> = v
         .why
         .differs()
         .iter()
-        .map(|d| match &d.actual {
-            Some(actual) => json!({"field": d.field.as_str(), "actual": actual}),
-            None => json!({"field": d.field.as_str()}),
+        .map(|d| {
+            let mut out = json!({"field": d.field.as_str()});
+            if let Some(actual) = &d.actual {
+                out["actual"] = json!(actual);
+            }
+            if let Some(cited) = &d.cited {
+                out["cited"] = json!(cited);
+            }
+            out
         })
         .collect();
     if !differs.is_empty() {

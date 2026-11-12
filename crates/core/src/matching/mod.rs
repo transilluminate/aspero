@@ -181,6 +181,27 @@ impl Claim {
         Some(Place::new(volume?, page?))
     }
 
+    /// The claim as read: as given, with what its text says of the year
+    /// (when it gives one), volume and first page filled in where not
+    /// given. Free text's title, authors and journal aren't parsed out:
+    /// they're scored by finding a work's own in the text.
+    pub fn as_read(&self) -> Claim {
+        let mut read = self.clone();
+        if read.year.is_none()
+            && let [year] = dedup_years(self.cited_years())[..]
+        {
+            read.year = Some(year);
+        }
+        if read.volume.is_none()
+            && read.page.is_none()
+            && let Some(place) = self.place()
+        {
+            read.volume = Some(place.volume);
+            read.page = Some(place.first_page);
+        }
+        read
+    }
+
     /// The years the claim cites: its year, else those in its text.
     pub fn cited_years(&self) -> Vec<i16> {
         match (self.year, &self.text) {
@@ -295,6 +316,12 @@ fn is_url(title: &str) -> bool {
     let t = title.trim();
     let starts = |p: &str| t.get(..p.len()).is_some_and(|h| h.eq_ignore_ascii_case(p));
     starts("http://") || starts("https://") || starts("www.") || t.contains("://")
+}
+
+fn dedup_years(mut years: Vec<i16>) -> Vec<i16> {
+    years.sort_unstable();
+    years.dedup();
+    years
 }
 
 /// Scores how well `record` matches `claim`.

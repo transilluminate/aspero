@@ -178,9 +178,13 @@ impl Engine {
             }
         }
         let mut report = self.gather(&wide, limit, true).await;
-        let claim = settle_alternatives(claim, &mut report);
+        let settled = settle_alternatives(claim, &mut report);
         self.detail_notices(&mut report).await;
-        judge(&claim, report)
+        let mut v = judge(&settled, report);
+        // As written, not as settled: a DOI cut short at a line break shows
+        // beside the one found.
+        v.read = claim.as_read();
+        v
     }
 
     /// Verifies many claims, several at a time (each provider's pacing

@@ -47,6 +47,10 @@ pub struct Verification {
     /// What to know about the work the verdict is about, whatever the
     /// verdict: its retraction or withdrawal, and its newer version.
     pub notes: Vec<Update>,
+    /// The claim as read: its identifiers as written (a DOI cut short at a
+    /// line break, with the readings tried in `alternatives`), and from
+    /// free text the year, volume and first page ([`Claim::as_read`]).
+    pub read: Claim,
     /// The candidate the verdict is about, as an index into
     /// `report.candidates`: the matching work, or the best guess at what was
     /// meant.
@@ -136,6 +140,11 @@ impl Reason {
 pub struct Difference {
     pub field: CitedField,
     pub actual: Option<String>,
+    /// The citation's value, as compared: the year, volume or first page
+    /// read from it, or the title, authors or journal given. `None` when
+    /// free text was searched for the work's own (title, authors,
+    /// journal).
+    pub cited: Option<String>,
     /// For [`CitedField::Kind`]: what the work is (`actual` as a value).
     pub kind: Option<WorkKind>,
 }
@@ -199,23 +208,47 @@ fn differences(claim: &Claim, c: &Candidate, known_only: bool) -> Vec<Difference
         true => matches!(check.agreement, Agreement::Mismatch | Agreement::Partial),
         false => check.agreement != Agreement::Match,
     };
-    let diff = |field, actual: Option<String>| Difference {
+    let read = claim.as_read();
+    let diff = |field, actual: Option<String>, cited: Option<String>| Difference {
         field,
         actual,
+        cited,
         kind: None,
     };
+    let authors = (!claim.authors.is_empty()).then(|| claim.authors.join("; "));
+    // Of the years a text gives, the one nearest the work's, as compared.
+    let actual_year = w.issued.map(|d| d.year());
+    let cited_year = match (read.year, actual_year) {
+        (Some(y), _) => Some(y),
+        (None, Some(actual)) => claim
+            .cited_years()
+            .into_iter()
+            .min_by_key(|y| (y - actual).unsigned_abs()),
+        (None, None) => None,
+    };
     [
-        off(&a.title).then(|| diff(CitedField::Title, None)),
-        off(&a.authors).then(|| diff(CitedField::Authors, None)),
-        matches!(a.year.agreement, Agreement::Mismatch | Agreement::Partial)
-            .then(|| diff(CitedField::Year, w.issued.map(|d| d.year().to_string()))),
-        (a.container.agreement == Agreement::Mismatch)
-            .then(|| diff(CitedField::Journal, w.container_title.clone())),
+        off(&a.title).then(|| diff(CitedField::Title, None, claim.title.clone())),
+        off(&a.authors).then(|| diff(CitedField::Authors, None, authors.clone())),
+        matches!(a.year.agreement, Agreement::Mismatch | Agreement::Partial).then(|| {
+            diff(
+                CitedField::Year,
+                actual_year.map(|y| y.to_string()),
+                cited_year.map(|y| y.to_string()),
+            )
+        }),
+        (a.container.agreement == Agreement::Mismatch).then(|| {
+            diff(
+                CitedField::Journal,
+                w.container_title.clone(),
+                claim.container.clone(),
+            )
+        }),
         (a.volume.agreement == Agreement::Mismatch)
-            .then(|| diff(CitedField::Volume, w.volume.clone())),
+            .then(|| diff(CitedField::Volume, w.volume.clone(), read.volume.clone())),
         (a.page.agreement == Agreement::Mismatch).then(|| {
             let first = w.page.as_deref().map(|p| first_page(p).to_owned());
-            diff(CitedField::FirstPage, first)
+            let cited = read.page.as_deref().map(|p| first_page(p).to_owned());
+            diff(CitedField::FirstPage, first, cited)
         }),
         w.title
             .as_deref()
@@ -223,7 +256,7 @@ fn differences(claim: &Claim, c: &Candidate, known_only: bool) -> Vec<Difference
             .filter(|_| !matching::claim_mentions_derivative(claim))
             .map(|kind| Difference {
                 kind: Some(kind),
-                ..diff(CitedField::Kind, Some(kind.as_str().to_owned()))
+                ..diff(CitedField::Kind, Some(kind.as_str().to_owned()), None)
             }),
     ]
     .into_iter()
@@ -280,6 +313,7 @@ pub(crate) fn judge(claim: &Claim, report: ResolveReport) -> Verification {
         reason,
         why,
         notes,
+        read: claim.as_read(),
         best,
         report,
     }

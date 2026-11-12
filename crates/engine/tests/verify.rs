@@ -593,3 +593,57 @@ async fn a_doi_cut_short_at_a_line_break_is_the_work_whose_doi_it_starts() {
             .contains(&"doi:10.1097/hjh.0b013e3282f35c67".parse().unwrap())
     );
 }
+
+#[tokio::test]
+async fn the_claim_as_read_and_cited_values_come_back() {
+    // #46: a cited-vs-found table needs what was read from free text.
+    let crossref = Arc::new(Scripted::new("crossref").matcher(vec![deep_learning()]));
+    let v = engine(vec![crossref])
+        .verify(
+            &Claim::from_text(
+                "LeCun Y, Bengio Y, Hinton G. Deep learning. Nature 2019;521:436-44.",
+            ),
+            5,
+        )
+        .await;
+    assert_eq!(v.read.year, Some(2019));
+    assert_eq!(
+        (v.read.volume.as_deref(), v.read.page.as_deref()),
+        (Some("521"), Some("436"))
+    );
+    let year = v.why.differs().iter().find(|d| d.field == CitedField::Year);
+    assert_eq!(
+        year.map(|d| (d.cited.as_deref(), d.actual.as_deref())),
+        Some((Some("2019"), Some("2015"))),
+        "{:?}",
+        v.why
+    );
+}
+
+#[tokio::test]
+async fn a_doi_cut_short_reads_as_written() {
+    let full = work(
+        "crossref",
+        &["10.1097/hjh.0b013e3282f35c67"],
+        "Reduced incidence of new-onset atrial fibrillation with angiotensin II receptor blockade",
+        &["Schmieder"],
+        2008,
+    );
+    let crossref = Arc::new(
+        Scripted::new("crossref")
+            .matcher(vec![full.clone()])
+            .with(vec![full]),
+    );
+    let v = engine(vec![crossref])
+        .verify(
+            &Claim::from_text(
+                "Schmieder RE, et al. Reduced incidence of new-onset atrial fibrillation with \
+                 angiotensin II receptor blockade. J Hypertens 2008. https://doi.org/10.1097/HJH.0b013e",
+            ),
+            5,
+        )
+        .await;
+    // Found under the whole DOI, read as written.
+    assert_eq!(v.verdict, Verdict::Verified);
+    assert_eq!(v.read.ids[0].to_string(), "doi:10.1097/hjh.0b013e");
+}

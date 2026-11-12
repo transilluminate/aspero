@@ -1,6 +1,7 @@
 //! Rendering works, results and usage as terminal text and tables. JSON
 //! shapes are the contract in `aspero-json`, re-exported here.
 
+use aspero_core::matching::{PLAUSIBLE, VERIFIED};
 use aspero_core::{
     Agreement, Hit, IdKind, ProviderId, SourceRecord, UpdateKind, Usage, Work, WorkId,
 };
@@ -319,8 +320,8 @@ pub fn candidate_row(rank: usize, c: &Candidate) -> Vec<comfy_table::Cell> {
         checks.push_str(&format!(" id {}", mark(a.ids)));
     }
     let level = match a.confidence {
-        c if c >= 0.85 => Level::Good,
-        c if c >= 0.6 => Level::Warning,
+        c if c >= VERIFIED => Level::Good,
+        c if c >= PLAUSIBLE => Level::Warning,
         _ => Level::Error,
     };
     let w = &c.record.work;

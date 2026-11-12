@@ -50,7 +50,7 @@ async fn a_bibliography_gets_verdicts_and_fixes() {
     ];
 
     let mut seen = Vec::new();
-    let checked = engine.check(&claims, 5, |i| seen.push(i)).await;
+    let checked = engine.check(&claims, 5, |i| seen.push(i)).await.checked;
     seen.sort();
     assert_eq!(seen, [0, 1, 2, 3], "progress per claim");
 
@@ -96,7 +96,7 @@ async fn entries_citing_the_same_work_are_duplicates() {
         claim("Attention is all you need", &["Vaswani, A."], 2017, &[]),
         claim("Deep Learning", &["LeCun, Y.", "Bengio, Y."], 2015, &[]),
     ];
-    let checked = engine.check(&claims, 5, |_| {}).await;
+    let checked = engine.check(&claims, 5, |_| {}).await.checked;
     assert!(checked[2].findings.contains(&Finding::Duplicate { of: 0 }));
     assert!(
         !checked[0]
@@ -150,7 +150,7 @@ async fn retractions_are_errors_with_the_detailed_notice() {
         1998,
         &[],
     )];
-    let checked = engine.check(&claims, 5, |_| {}).await;
+    let checked = engine.check(&claims, 5, |_| {}).await.checked;
     let c = &checked[0];
 
     assert_eq!(
@@ -207,7 +207,7 @@ async fn a_bare_retraction_flag_is_detailed_from_another_provider() {
         1998,
         &[doi],
     )];
-    let c = &engine.check(&claims, 5, |_| {}).await[0];
+    let c = &engine.check(&claims, 5, |_| {}).await.checked[0];
     assert!(
         c.verification
             .reason
@@ -215,4 +215,35 @@ async fn a_bare_retraction_flag_is_detailed_from_another_provider() {
         "{}",
         c.verification.reason
     );
+}
+
+/// The lookup of every claimed identifier at once, before the claims are
+/// verified, counts in the usage too.
+#[tokio::test]
+async fn usage_includes_the_prefetch() {
+    let openalex = Arc::new(
+        Scripted::new("openalex")
+            .keyword()
+            .costing(0.25)
+            .with(vec![attention_real(), deep_learning()]),
+    );
+    let engine = engine(vec![openalex]);
+    let claims = [
+        claim(
+            "Deep learning",
+            &["LeCun, Y."],
+            2015,
+            &["10.1038/nature14539"],
+        ),
+        claim(
+            "Attention is all you need",
+            &["Vaswani, A."],
+            2017,
+            &["arXiv:1706.03762"],
+        ),
+    ];
+    let report = engine.check(&claims, 5, |_| {}).await;
+    // One lookup of both identifiers, then one per claim (no cache).
+    assert_eq!(report.usage.len(), 1);
+    assert_eq!(report.usage[0].1.cost, Some(0.75));
 }

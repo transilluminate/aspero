@@ -103,7 +103,7 @@ async fn claims_in_a_batch_are_checked_several_at_a_time() {
     let claims: Vec<Claim> = (0..8).map(|i| titled(&format!("Title {i}"))).collect();
     let start = Instant::now();
     let mut order = Vec::new();
-    let checked = engine.check(&claims, 5, |i| order.push(i)).await;
+    let checked = engine.check(&claims, 5, |i| order.push(i)).await.checked;
     assert_eq!(checked.len(), 8);
     order.sort();
     assert_eq!(order, (0..8).collect::<Vec<_>>(), "progress per claim");

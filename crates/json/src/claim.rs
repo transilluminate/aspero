@@ -137,6 +137,15 @@ impl InputClaim {
         }
     }
 
+    /// The claims that could be read, with each one's index in `claims`.
+    pub fn valid(claims: &[InputClaim]) -> (Vec<usize>, Vec<Claim>) {
+        claims
+            .iter()
+            .enumerate()
+            .filter_map(|(i, c)| Some((i, c.claim.as_ref().ok()?.clone())))
+            .unzip()
+    }
+
     /// What every result for this claim starts with: the input, the
     /// caller's key, and the claim as understood.
     pub fn echo(&self) -> Value {

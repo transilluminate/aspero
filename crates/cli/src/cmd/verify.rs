@@ -4,8 +4,8 @@
 use std::io::IsTerminal;
 
 use aspero_core::{ProviderId, Usage};
-use aspero_engine::{Engine, Verdict, Verification, add_usage};
-use aspero_json::ClaimInput;
+use aspero_engine::{Engine, Verdict, Verification};
+use aspero_json::{ClaimInput, InputClaim};
 use futures::StreamExt;
 use serde_json::{Value, json};
 
@@ -24,20 +24,7 @@ pub async fn run(engine: &Engine, args: ClaimArgs, out: Out) -> Result<Exit, Fai
         return Err(Failure::usage("no claims given"));
     }
 
-    let mut usage: Vec<(ProviderId, Usage)> = Vec::new();
-    // One batched lookup of every claimed identifier first; with the cache
-    // warm, claims are then verified several at a time.
-    let (positions, valid): (Vec<usize>, Vec<_>) = claims
-        .iter()
-        .enumerate()
-        .filter_map(|(i, c)| Some((i, c.claim.as_ref().ok()?.clone())))
-        .unzip();
-    if valid.len() > 1 {
-        for (p, u) in engine.prefetch(&valid).await.usage {
-            add_usage(&mut usage, &p, u);
-        }
-    }
-
+    let (positions, valid) = InputClaim::valid(&claims);
     let total = claims.len();
     let show_progress = out.format == Format::Table && total > 1 && std::io::stderr().is_terminal();
     let mut results = Results::new(out.format, total, show_progress);
@@ -49,13 +36,10 @@ pub async fn run(engine: &Engine, args: ClaimArgs, out: Out) -> Result<Exit, Fai
             results.add(i, item, text, Exit::Usage);
         }
     }
-    let mut verified = std::pin::pin!(engine.verify_many(&valid, limit));
+    let mut verified = engine.verify_batch(&valid, limit);
     while let Some((k, v)) = verified.next().await {
         let i = positions[k];
         let claim = &claims[i];
-        for (p, u) in &v.report.usage {
-            add_usage(&mut usage, p, *u);
-        }
         let mut item = aspero_json::verification(claim.echo(), &v, out.full);
         if out.format.is_export() {
             // The work the citation refers to, when that's known: verified,
@@ -81,9 +65,7 @@ pub async fn run(engine: &Engine, args: ClaimArgs, out: Out) -> Result<Exit, Fai
             let mut record = best.record.clone();
             record.ids = best.ids.clone();
             let fetched = engine.abstracts(&[&record]).await;
-            for (p, u) in &fetched.usage {
-                add_usage(&mut usage, p, *u);
-            }
+            verified.add_usage(&fetched.usage);
             let found = fetched.found.into_iter().next().flatten();
             aspero_json::set_abstract(&mut item["match"]["work"], found.as_ref());
             text.push_str(&output::abstract_text(found.as_ref(), "  "));
@@ -91,7 +73,7 @@ pub async fn run(engine: &Engine, args: ClaimArgs, out: Out) -> Result<Exit, Fai
         }
         results.add(i, item, text, exit_for(v.verdict));
     }
-    let exit = results.finish(&usage);
+    let exit = results.finish(verified.usage());
     print!("{}", export.finish());
     exit
 }

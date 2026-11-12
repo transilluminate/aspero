@@ -29,6 +29,7 @@
 //! Not yet: fan-out search.
 
 mod abstracts;
+mod batch;
 mod budget;
 mod check;
 mod enrich;
@@ -49,8 +50,9 @@ mod versions;
 
 pub use abstracts::{Abstract, AbstractsReport};
 pub use aspero_core::matching::WorkKind;
+pub use batch::Batch;
 pub use budget::Budget;
-pub use check::{Checked, Finding, Severity, duplicates, findings};
+pub use check::{CheckReport, Checked, Finding, Severity, duplicates, findings};
 pub use identify::{Decision, Identified, MAX_IDENTIFIERS};
 pub use registry::{Disagreement, disagreements};
 pub use resolve::{Candidate, ResolveReport, Sighting, Via};

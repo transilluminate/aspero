@@ -4,7 +4,7 @@ use std::io::IsTerminal;
 
 use aspero_bib::BibEntry;
 use aspero_core::{ProviderId, Usage};
-use aspero_engine::{Checked, Engine, Finding, Severity, Verdict, add_usage, describe_update};
+use aspero_engine::{Checked, Engine, Finding, Severity, Verdict, describe_update};
 use serde_json::{Value, json};
 
 use super::{Failure, Out, print, print_line, read_stdin};
@@ -107,15 +107,8 @@ async fn check(
         .filter(|e| e.is_checkable())
         .map(|e| e.claim.clone())
         .collect();
-    let checked = engine.check(&claims, limit, progress).await;
-    let usage = checked
-        .iter()
-        .flat_map(|c| &c.verification.report.usage)
-        .fold(Vec::new(), |mut acc, (p, u)| {
-            add_usage(&mut acc, p, *u);
-            acc
-        });
-    (checked, usage)
+    let report = engine.check(&claims, limit, progress).await;
+    (report.checked, report.usage)
 }
 
 /// Reports in file order, skipped entries included.

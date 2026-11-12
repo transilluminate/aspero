@@ -13,13 +13,10 @@
 
 use std::sync::Arc;
 
-use aspero_core::{
-    Claim, Cursor, Error, ErrorKind, FieldSet, SearchQuery, WorkId, WorkType, YearRange,
-};
+use aspero_core::{Cursor, Error, ErrorKind, FieldSet, SearchQuery, WorkId, WorkType, YearRange};
 use aspero_engine::{
     CallOptions, CrossrefConfig, DataciteConfig, DoiConfig, Engine, EuropePmcConfig, Extras,
-    OpenAlexConfig, OpenLibraryConfig, SecretString, SqliteCache, StandardConfig, add_usage,
-    standard,
+    OpenAlexConfig, OpenLibraryConfig, SecretString, SqliteCache, StandardConfig, standard,
 };
 use aspero_json::InputClaim;
 use futures::StreamExt;
@@ -605,29 +602,16 @@ async fn verify_all(
     mut each: impl FnMut(Verification),
 ) -> Vec<ProviderUsage> {
     let claims: Vec<InputClaim> = claims.into_iter().map(ClaimRecord::into_input).collect();
-    let (positions, valid): (Vec<usize>, Vec<Claim>) = claims
-        .iter()
-        .enumerate()
-        .filter_map(|(i, c)| Some((i, c.claim.as_ref().ok()?.clone())))
-        .unzip();
+    let (positions, valid) = InputClaim::valid(&claims);
     for (i, claim) in claims.iter().enumerate() {
         if let Err(e) = &claim.claim {
             each(Verification::invalid(i, claim, e));
         }
     }
-    let mut usage = Vec::new();
-    if valid.len() > 1 {
-        for (p, u) in engine.prefetch(&valid).await.usage {
-            add_usage(&mut usage, &p, u);
-        }
-    }
-    let mut verified = std::pin::pin!(engine.verify_many(&valid, SEARCH_LIMIT));
+    let mut verified = engine.verify_batch(&valid, SEARCH_LIMIT);
     while let Some((k, v)) = verified.next().await {
-        for (p, u) in &v.report.usage {
-            add_usage(&mut usage, p, *u);
-        }
         let i = positions[k];
         each(Verification::new(i, &claims[i], &v, full));
     }
-    records::usage(&usage)
+    records::usage(verified.usage())
 }

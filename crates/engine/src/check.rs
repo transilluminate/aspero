@@ -1,12 +1,12 @@
 //! `check`: verifying a whole bibliography, with fixes to suggest.
 //!
-//! Each claim is verified (identifiers prefetched in one batch first), then
-//! its verification is turned into [`Finding`]s beyond the verdict: the DOI
-//! to add, the identifier to replace, a year that differs, and entries that
+//! The claims are verified as a batch ([`Engine::verify_batch`]), then each
+//! verification is turned into [`Finding`]s beyond the verdict: the DOI to
+//! add, the identifier to replace, a year that differs, and entries that
 //! cite the same work twice.
 
 use aspero_core::matching::same_work_id;
-use aspero_core::{Claim, IdKind, Update, UpdateKind, WorkId};
+use aspero_core::{Claim, IdKind, ProviderId, Update, UpdateKind, Usage, WorkId};
 use futures::StreamExt;
 
 use crate::{Candidate, Engine, Verdict, Verification};
@@ -109,6 +109,14 @@ impl Checked {
     }
 }
 
+/// Every claim checked, and what it cost.
+#[derive(Debug, Clone)]
+pub struct CheckReport {
+    /// In claim order.
+    pub checked: Vec<Checked>,
+    pub usage: Vec<(ProviderId, Usage)>,
+}
+
 impl Engine {
     /// Verifies every claim and derives findings, including duplicates
     /// across claims; in claim order. `progress` is called with each
@@ -118,10 +126,9 @@ impl Engine {
         claims: &[Claim],
         limit: u32,
         mut progress: impl FnMut(usize),
-    ) -> Vec<Checked> {
-        self.prefetch(claims).await;
+    ) -> CheckReport {
         let mut slots: Vec<Option<Checked>> = (0..claims.len()).map(|_| None).collect();
-        let mut verifications = std::pin::pin!(self.verify_many(claims, limit));
+        let mut verifications = self.verify_batch(claims, limit);
         while let Some((i, verification)) = verifications.next().await {
             let findings = findings(&claims[i], &verification);
             slots[i] = Some(Checked {
@@ -130,6 +137,7 @@ impl Engine {
             });
             progress(i);
         }
+        let usage = verifications.into_usage();
         let mut checked: Vec<Checked> = slots
             .into_iter()
             .map(|c| c.expect("every claim verified"))
@@ -141,7 +149,7 @@ impl Engine {
                 c.findings.push(Finding::Duplicate { of });
             }
         }
-        checked
+        CheckReport { checked, usage }
     }
 }
 

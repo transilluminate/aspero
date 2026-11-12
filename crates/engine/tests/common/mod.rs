@@ -23,6 +23,8 @@ pub struct Scripted {
     pub queries: Mutex<Vec<SearchQuery>>,
     /// How long each search takes.
     pub search_delay: std::time::Duration,
+    /// What each lookup costs.
+    pub lookup_cost: Option<f64>,
 }
 
 impl Scripted {
@@ -38,7 +40,14 @@ impl Scripted {
             matcher_hits: Vec::new(),
             queries: Mutex::default(),
             search_delay: std::time::Duration::ZERO,
+            lookup_cost: None,
         }
+    }
+
+    /// Each lookup costs `cost`.
+    pub fn costing(mut self, cost: f64) -> Self {
+        self.lookup_cost = Some(cost);
+        self
     }
 
     /// Searches take `delay` (as Crossref's matcher can).
@@ -107,7 +116,13 @@ impl Provider for Scripted {
                 record: self.works.iter().find(|w| w.ids.contains(id)).cloned(),
             })
             .collect();
-        Ok(Response::new(lookups))
+        let mut response = Response::new(lookups);
+        response.usage = self.lookup_cost.map(|cost| {
+            let mut usage = aspero_core::Usage::default();
+            usage.cost = Some(cost);
+            usage
+        });
+        Ok(response)
     }
 
     async fn search(&self, query: &SearchQuery) -> Result<Response<Page>> {

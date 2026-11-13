@@ -11,16 +11,21 @@
 //! - **all** of anything: one clause per node;
 //! - **any** within one text field, however nested (`title.search:(a OR
 //!   (b AND c))`), or of values of one filter (work types, languages,
-//!   ORCIDs, OpenAlex author ids, works cited or citing). Across fields
-//!   it can't: there is no OR between filters;
+//!   ORCIDs, OpenAlex author ids, works cited or citing, identifiers of
+//!   one kind). Across fields it can't: there is no OR between filters;
 //! - **none** of anything that can be negated, as an AND of negations: a
 //!   text field or keywords, a work type, language, author id, journal,
-//!   open access, retraction, abstract or relation. A range of years
-//!   can't be, nor an all of several fields (that would need an OR).
+//!   open access, retraction, abstract, relation or identifier. A range of
+//!   years can't be, nor an all of several fields (that would need an OR).
+//!
+//! Identifiers are filters too (checked live 2026-11-14): `doi:` (arXiv
+//! ids by their DataCite DOI, `10.48550/arxiv.…`), `ids.pmid:`,
+//! `ids.pmcid:` (`PMC…`, though records hold the bare number) and
+//! `openalex:`. There is no ISBN filter.
 
 use aspero_core::query::{AuthorId, check_supported, render_lucene};
 use aspero_core::{
-    Capabilities, FilterValue, OpenAlexId, QueryNode, Relation, TermField, WorkType,
+    Capabilities, FilterValue, OpenAlexId, QueryNode, Relation, Term, TermField, WorkId, WorkType,
 };
 
 /// As reasons name it.
@@ -170,7 +175,13 @@ fn text_value(value: &str, phrase: bool, grouped: bool) -> String {
 /// An any of leaves that are all values of one filter: `type:a|b`, or
 /// journals, whose sources are then ORed.
 fn any_of_values(node: &QueryNode, nodes: &[QueryNode]) -> Result<Clause, String> {
-    let refuse = || format!("{NAME} can't combine {} with any", node.leaf_names());
+    let refuse = || match identifier_kinds(nodes) {
+        Some(kinds) => format!(
+            "{NAME} can't combine {} with any, only identifiers of one kind",
+            kinds
+        ),
+        None => format!("{NAME} can't combine {} with any", node.leaf_names()),
+    };
     let journals: Option<Vec<(String, bool)>> = nodes
         .iter()
         .map(|n| match n {
@@ -206,9 +217,54 @@ fn orable(node: &QueryNode) -> Option<Result<(&'static str, String), String>> {
         QueryNode::Filter(FilterValue::WorkType(t)) => work_type(t).map(|v| ("type", v.to_owned())),
         QueryNode::Filter(FilterValue::Language(code)) => Ok(("language", code.clone())),
         QueryNode::Term(t) if t.field == TermField::AuthorId => Ok(author_id(&t.value)),
+        QueryNode::Term(t) if t.field == TermField::Identifier => identifier(t),
         QueryNode::Relation(r) => Ok((relation_key(r.relation), work_id(&r.id))),
         _ => return None,
     })
+}
+
+/// The kinds of identifier `nodes` are, as an English list, when every one
+/// is an identifier: `DOI and PMID`.
+fn identifier_kinds(nodes: &[QueryNode]) -> Option<String> {
+    let mut names: Vec<&str> = Vec::new();
+    for node in nodes {
+        let QueryNode::Term(t) = node else {
+            return None;
+        };
+        if t.field != TermField::Identifier {
+            return None;
+        }
+        let name = t.work_id().ok()?.kind().name();
+        if !names.contains(&name) {
+            names.push(name);
+        }
+    }
+    Some(match names.as_slice() {
+        [init @ .., last] if !init.is_empty() => format!("{} and {last}", init.join(", ")),
+        _ => names.concat(),
+    })
+}
+
+/// An identifier's filter key and value: `doi:` (an arXiv id by its
+/// DataCite DOI), `ids.pmid:`, `ids.pmcid:` or `openalex:`.
+fn identifier(t: &Term) -> Result<(&'static str, String), String> {
+    let id = t.work_id()?;
+    let (key, value) = match &id {
+        WorkId::Doi(doi) => ("doi", doi.as_str().to_owned()),
+        WorkId::Arxiv(arxiv) => ("doi", arxiv.doi().as_str().to_owned()),
+        WorkId::Pmid(pmid) => ("ids.pmid", pmid.to_string()),
+        WorkId::Pmcid(pmcid) => ("ids.pmcid", pmcid.to_string()),
+        WorkId::OpenAlex(w) => ("openalex", w.to_string()),
+        other => return Err(format!("{NAME} has no {} filter", other.kind().name())),
+    };
+    // `,` and `|` would split the filter; a DOI may hold either.
+    if value.contains([',', '|']) {
+        return Err(format!(
+            "{NAME} can't filter by a {} holding a comma or a pipe",
+            id.kind().name()
+        ));
+    }
+    Ok((key, value))
 }
 
 fn leaf_clauses(leaf: &QueryNode, negated: bool) -> Result<Vec<Clause>, String> {
@@ -223,6 +279,10 @@ fn leaf_clauses(leaf: &QueryNode, negated: bool) -> Result<Vec<Clause>, String> 
         }
         QueryNode::Term(t) if t.field == TermField::AuthorId => {
             let (key, value) = author_id(&t.value);
+            filter(key, &value)
+        }
+        QueryNode::Term(t) if t.field == TermField::Identifier => {
+            let (key, value) = identifier(t)?;
             filter(key, &value)
         }
         QueryNode::Term(t) => Err(format!("{NAME} can't search by {}", t.field.name())),
@@ -512,5 +572,67 @@ mod tests {
     #[test]
     fn reviews_are_a_type_openalex_filters_on() {
         assert_eq!(work_type(&WorkType::Review), Ok("review"));
+    }
+
+    fn id(v: &str) -> QueryNode {
+        term(TermField::Identifier, v)
+    }
+
+    #[test]
+    fn identifiers_are_filters_ored_within_a_kind() {
+        let tree = QueryNode::All(vec![
+            QueryNode::phrase(TermField::Identifier, "https://doi.org/10.1038/NATURE14539"),
+            QueryNode::filter(FilterValue::NotRetracted),
+            QueryNode::Any(vec![id("pmid:26017442"), id("pmid:31452104")]),
+            QueryNode::Any(vec![id("10.1145/3065386"), id("arXiv:1706.03762v5")]),
+            id("PMC7254481"),
+            id("https://openalex.org/W2919115771"),
+            QueryNode::None(vec![id("openalex:W1"), id("pmcid:2")]),
+        ]);
+        assert_eq!(
+            plan(tree).unwrap().filters,
+            [
+                "doi:10.1038/nature14539",
+                "is_retracted:false",
+                "ids.pmid:26017442|31452104",
+                "doi:10.1145/3065386|10.48550/arxiv.1706.03762",
+                "ids.pmcid:PMC7254481",
+                "openalex:W2919115771",
+                "openalex:!W1",
+                "ids.pmcid:!PMC2",
+            ]
+        );
+    }
+
+    #[test]
+    fn identifiers_openalex_cant_filter_by() {
+        let reason = |tree| plan(tree).unwrap_err();
+        assert_eq!(
+            reason(id("978-0-262-03561-3")),
+            "OpenAlex has no ISBN filter"
+        );
+        assert_eq!(
+            reason(id("NBK526056")),
+            "OpenAlex has no NCBI Bookshelf id filter"
+        );
+        assert_eq!(
+            reason(QueryNode::Any(vec![
+                id("10.1038/nature14539"),
+                id("arxiv:1706.03762"),
+                id("pmid:26017442"),
+            ])),
+            "OpenAlex can't combine DOI, arXiv id and PMID with any, only identifiers of one kind"
+        );
+        assert_eq!(
+            reason(QueryNode::Any(vec![
+                id("10.1038/nature14539"),
+                term(TermField::Title, "deep learning"),
+            ])),
+            "OpenAlex can't combine identifier and title with any"
+        );
+        assert_eq!(
+            reason(id("10.1000/a,b")),
+            "OpenAlex can't filter by a DOI holding a comma or a pipe"
+        );
     }
 }

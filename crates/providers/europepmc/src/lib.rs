@@ -77,6 +77,7 @@ impl EuropePmc {
             Filter::Language,
             Filter::HasAbstract,
             Filter::Since,
+            Filter::Identifier,
         ];
         capabilities.sorts = vec![Sort::Relevance, Sort::Newest, Sort::MostCited];
         // Lucene: AND, OR and NOT across fields, nested.
@@ -564,7 +565,10 @@ impl Provider for EuropePmc {
 /// three-letter codes (`ger`, not `deu`), `HAS_ABSTRACT:Y`, and retracted
 /// works left out by PubMed's "Retracted Publication" type, which flags
 /// the retracted works themselves (the notices are "Retraction of
-/// Publication"). `NOT` works alone and nested.
+/// Publication"). `NOT` works alone and nested. Identifiers are the
+/// clauses lookups use: `DOI:"…"`, `(EXT_ID:… AND SRC:MED)` for a PMID,
+/// `PMCID:PMC…` and `BOOK_ID:NBK…` (checked live 2026-11-14); its arXiv
+/// preprints carry no DOI, so there is no finding them by arXiv id.
 fn express(tree: &QueryNode, caps: &Capabilities) -> std::result::Result<String, String> {
     const NAME: &str = "Europe PMC";
     check_supported(tree, caps, NAME)?;
@@ -576,6 +580,11 @@ fn express(tree: &QueryNode, caps: &Capabilities) -> std::result::Result<String,
                 TermField::Author => Some("AUTH"),
                 TermField::Container => Some("JOURNAL"),
                 TermField::Abstract => Some("ABSTRACT"),
+                TermField::Identifier => {
+                    let id = t.work_id()?;
+                    return clause(&id)
+                        .map_err(|_| format!("{NAME} can't find works by {}", id.kind().name()));
+                }
                 TermField::AuthorId => {
                     return match aspero_core::AuthorId::parse(&t.value) {
                         Some(aspero_core::AuthorId::Orcid(orcid)) => {

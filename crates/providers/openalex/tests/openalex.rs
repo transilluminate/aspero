@@ -737,6 +737,37 @@ fn author_ids_and_flags_are_filters() {
 }
 
 #[test]
+fn identifiers_are_filters_beside_the_rest() {
+    let (oa, http) = provider([recorded("works_search_ids")]);
+    let id = |v| QueryNode::term(TermField::Identifier, v);
+    let tree = QueryNode::All(vec![
+        QueryNode::Any(vec![id("10.1038/nature14539"), id("arXiv:1706.03762")]),
+        QueryNode::filter(FilterValue::NotRetracted),
+        QueryNode::filter(FilterValue::Years(YearRange {
+            from: Some(2015),
+            to: None,
+        })),
+    ]);
+    let page = block_on(oa.search(&tree_query(tree))).unwrap().value;
+    assert_eq!(
+        query(&http, 0),
+        pairs([
+            (
+                "filter",
+                "doi:10.1038/nature14539|10.48550/arxiv.1706.03762,is_retracted:false,from_publication_date:2015-01-01"
+            ),
+            ("per-page", "3"),
+            ("cursor", "*"),
+        ])
+    );
+    assert_eq!(page.total, Some(2));
+    assert_eq!(
+        oa.express(&id("isbn:9780262035613")).unwrap_err(),
+        "OpenAlex has no ISBN filter"
+    );
+}
+
+#[test]
 fn trees_openalex_cant_say_fail_before_sending() {
     let (oa, http) = provider([]);
     let across = QueryNode::Any(vec![

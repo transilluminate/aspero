@@ -40,6 +40,9 @@ record search_tree /dois \
 record search_tree_orcid /dois \
   'query=creators.nameIdentifiers.nameIdentifier:("https://orcid.org/0000-0001-6187-6610" OR "0000-0001-6187-6610") AND language:(en OR eng)' \
   'sort=relevance' 'page[number]=1' 'page[size]=3'
+record search_tree_ids /dois \
+  'query=(doi:"10.48550/arxiv.1706.03762" OR doi:"10.5281/zenodo.24110911") AND publicationYear:[2017 TO 2017]' \
+  'sort=relevance' 'page[number]=1' 'page[size]=3'
 record search_since /dois 'query=(sepsis) AND created:[2026-11-01 TO *]' \
   'sort=relevance' 'page[number]=1' 'page[size]=3'
 record bad_request /dois 'published=2017-2018'

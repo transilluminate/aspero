@@ -85,6 +85,7 @@ impl Datacite {
             Filter::Language,
             Filter::HasAbstract,
             Filter::Since,
+            Filter::Identifier,
         ];
         capabilities.sorts = vec![Sort::Relevance, Sort::MostCited];
         // Elasticsearch's query string: AND, OR and NOT across fields.
@@ -345,7 +346,9 @@ impl Provider for Datacite {
 /// for having one), ORCIDs in `creators.nameIdentifiers.nameIdentifier`
 /// (mostly as URLs, some bare, so both), `language` as deposited (mostly
 /// `en`, some `eng`, so both), and work types as `types.resourceTypeGeneral`.
-/// DataCite records no retractions and no OpenAlex ids.
+/// Works are named by `doi:"…"`, an arXiv id by its DataCite DOI
+/// (`10.48550/arxiv.…`, as stored; the match ignores case). DataCite
+/// records no retractions and no OpenAlex ids.
 fn express(tree: &QueryNode, caps: &Capabilities) -> std::result::Result<String, String> {
     const NAME: &str = "DataCite";
     check_supported(tree, caps, NAME)?;
@@ -356,6 +359,14 @@ fn express(tree: &QueryNode, caps: &Capabilities) -> std::result::Result<String,
                 TermField::Title => Some("titles.title"),
                 TermField::Author => Some("creators.name"),
                 TermField::Abstract => Some("descriptions.description"),
+                TermField::Identifier => {
+                    let doi = match t.work_id()? {
+                        WorkId::Doi(doi) => doi,
+                        WorkId::Arxiv(arxiv) => arxiv.doi(),
+                        _ => return Err(format!("{NAME} finds works by DOI or arXiv id only")),
+                    };
+                    return Ok(format!("doi:\"{}\"", doi.as_str().replace('"', "\\\"")));
+                }
                 TermField::AuthorId => {
                     return match AuthorId::parse(&t.value) {
                         Some(AuthorId::Orcid(orcid)) => Ok(format!(

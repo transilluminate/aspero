@@ -507,6 +507,97 @@ fn trees_crossref_cant_say_and_why() {
     assert!(http.requests().is_empty());
 }
 
+fn id_term(v: &str) -> QueryNode {
+    QueryNode::term(TermField::Identifier, v)
+}
+
+#[test]
+fn an_any_of_dois_is_repeated_doi_filters() {
+    let (cr, http) = provider([recorded("works_search_ids")]);
+    let tree = QueryNode::All(vec![
+        QueryNode::Any(vec![
+            id_term("https://doi.org/10.1038/nature14539"),
+            id_term("doi:10.1145/3065386"),
+        ]),
+        QueryNode::filter(FilterValue::Years(YearRange {
+            from: Some(2015),
+            to: None,
+        })),
+    ]);
+    let page = block_on(cr.search(&tree_query(tree))).unwrap().value;
+    assert_eq!(
+        query(&http, 0),
+        [
+            pair(
+                "filter",
+                "from-pub-date:2015,doi:10.1038/nature14539,doi:10.1145/3065386"
+            ),
+            pair("rows", "3"),
+            pair("cursor", "*"),
+            pair("mailto", "test@example.org"),
+        ]
+    );
+    assert_eq!(page.hits.len(), 2);
+    // One DOI, with keywords: a query and a filter, ranked by score.
+    let (cr, http) = provider([empty_page()]);
+    let tree = QueryNode::All(vec![
+        QueryNode::term(TermField::Keywords, "deep learning"),
+        QueryNode::phrase(TermField::Identifier, "10.1038/nature14539"),
+    ]);
+    block_on(cr.search(&tree_query(tree))).unwrap();
+    let sent = query(&http, 0);
+    assert!(sent.contains(&pair("query", "deep learning")));
+    assert!(sent.contains(&pair("filter", "doi:10.1038/nature14539")));
+}
+
+#[test]
+fn identifiers_crossref_cant_search_by_and_why() {
+    let (cr, http) = provider([]);
+    let reason = |tree: QueryNode| cr.express(&tree).unwrap_err();
+    for other in [
+        "pmid:26017442",
+        "PMC7254481",
+        "W2919115771",
+        "978-0-262-03561-3",
+    ] {
+        assert_eq!(
+            reason(id_term(other)),
+            "Crossref finds works by DOI only",
+            "{other}"
+        );
+    }
+    assert_eq!(
+        reason(QueryNode::Any(vec![
+            id_term("10.1038/nature14539"),
+            id_term("arXiv:1706.03762"),
+        ])),
+        "Crossref has no arXiv works: their DOIs are DataCite's"
+    );
+    assert_eq!(
+        reason(QueryNode::All(vec![
+            id_term("10.1038/nature14539"),
+            id_term("10.1145/3065386"),
+        ])),
+        "Crossref can't require two DOIs at once, only any of them"
+    );
+    assert_eq!(
+        reason(QueryNode::None(vec![id_term("10.1038/nature14539")])),
+        "Crossref can't leave out terms with none"
+    );
+    assert_eq!(
+        reason(QueryNode::Any(vec![
+            id_term("10.1038/nature14539"),
+            QueryNode::term(TermField::Title, "deep learning"),
+        ])),
+        "Crossref can't combine terms with any"
+    );
+    assert_eq!(
+        reason(id_term("10.1000/a,b")),
+        "Crossref can't filter by a DOI holding a comma"
+    );
+    assert!(http.requests().is_empty());
+}
+
 #[test]
 fn since_is_the_first_deposit_with_text_or_a_tree() {
     let (cr, http) = provider([recorded("works_search_since"), empty_page()]);

@@ -45,6 +45,9 @@ record search_tree \
   'resultType=core' 'format=json' 'pageSize=3' 'cursorMark=*'
 record search_tree_orcid 'query=AUTHORID:"0000-0001-6187-6610" AND (NOT LANG:ger)' 'resultType=core' 'format=json' \
   'pageSize=3' 'cursorMark=*' 'sort=P_PDATE_D desc'
+record search_tree_ids \
+  'query=((EXT_ID:26017442 AND SRC:MED) OR PMCID:PMC7254481 OR DOI:"10.1038/s41587-019-0209-9") AND (NOT DOI:"10.1016/j.jbi.2019.103208") AND PUB_YEAR:[2015 TO 2019]' \
+  'resultType=core' 'format=json' 'pageSize=3' 'cursorMark=*'
 record search_since 'query=(sepsis) AND FIRST_IDATE:[2026-11-01 TO *]' 'resultType=core' 'format=json' \
   'pageSize=3' 'cursorMark=*'
 

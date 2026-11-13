@@ -364,6 +364,50 @@ fn orcids_are_author_ids_and_languages_medline_codes() {
     );
 }
 
+fn id_term(v: &str) -> QueryNode {
+    QueryNode::term(TermField::Identifier, v)
+}
+
+#[test]
+fn identifiers_are_lookup_clauses_with_full_boolean() {
+    let (epmc, http) = provider([recorded("search_tree_ids")]);
+    let tree = QueryNode::All(vec![
+        QueryNode::Any(vec![
+            id_term("pmid:26017442"),
+            id_term("PMC7254481"),
+            id_term("https://doi.org/10.1038/s41587-019-0209-9"),
+        ]),
+        QueryNode::None(vec![id_term("10.1016/j.jbi.2019.103208")]),
+        QueryNode::filter(FilterValue::Years(YearRange {
+            from: Some(2015),
+            to: Some(2019),
+        })),
+    ]);
+    let page = block_on(epmc.search(&tree_query(tree))).unwrap().value;
+    assert_eq!(
+        query(&http, 0)[0],
+        pair(
+            "query",
+            r#"((EXT_ID:26017442 AND SRC:MED) OR PMCID:PMC7254481 OR DOI:"10.1038/s41587-019-0209-9") AND (NOT DOI:"10.1016/j.jbi.2019.103208") AND PUB_YEAR:[2015 TO 2019]"#
+        )
+    );
+    assert_eq!(page.total, Some(2));
+    let (epmc, http) = provider([]);
+    let express = |tree: QueryNode| epmc.express(&tree);
+    assert_eq!(express(id_term("NBK526056")), Ok(()));
+    for (other, kind) in [
+        ("arXiv:1706.03762", "arXiv id"),
+        ("W2919115771", "OpenAlex work id"),
+        ("978-0-262-03561-3", "ISBN"),
+    ] {
+        assert_eq!(
+            express(id_term(other)).unwrap_err(),
+            format!("Europe PMC can't find works by {kind}")
+        );
+    }
+    assert!(http.requests().is_empty());
+}
+
 #[test]
 fn since_is_the_first_index_date_anded_with_text_or_a_tree() {
     let (epmc, http) = provider([recorded("search_since"), empty_page(), empty_page()]);

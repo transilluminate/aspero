@@ -319,6 +319,44 @@ fn orcids_match_as_urls_or_bare_and_languages_both_ways() {
 }
 
 #[test]
+fn identifiers_are_dois_arxiv_ids_by_theirs() {
+    let (dc, http) = provider([recorded("search_tree_ids")]);
+    let id = |v| QueryNode::term(TermField::Identifier, v);
+    let tree = QueryNode::All(vec![
+        QueryNode::Any(vec![
+            id("arXiv:1706.03762v7"),
+            id("https://doi.org/10.5281/zenodo.24110911"),
+        ]),
+        QueryNode::filter(FilterValue::Years(YearRange {
+            from: Some(2017),
+            to: Some(2017),
+        })),
+    ]);
+    let page = block_on(dc.search(&tree_query(tree))).unwrap().value;
+    assert_eq!(
+        query(&http, 0)[0],
+        pair(
+            "query",
+            r#"(doi:"10.48550/arxiv.1706.03762" OR doi:"10.5281/zenodo.24110911") AND publicationYear:[2017 TO 2017]"#
+        )
+    );
+    assert_eq!(page.total, Some(1));
+    let (dc, _) = provider([]);
+    for other in [
+        "pmid:26017442",
+        "PMC7254481",
+        "W2919115771",
+        "978-0-262-03561-3",
+    ] {
+        assert_eq!(
+            dc.express(&id(other)).unwrap_err(),
+            "DataCite finds works by DOI or arXiv id only",
+            "{other}"
+        );
+    }
+}
+
+#[test]
 fn since_is_the_registration_date_anded_with_text_or_a_tree() {
     let (dc, http) = provider([recorded("search_since"), empty_page()]);
     let since = Some(jiff::civil::date(2026, 11, 1));

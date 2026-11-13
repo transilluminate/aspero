@@ -86,6 +86,7 @@ impl OpenAlex {
             Filter::NotRetracted,
             Filter::Language,
             Filter::HasAbstract,
+            Filter::Identifier,
         ];
         capabilities.sorts = vec![Sort::Relevance, Sort::Newest, Sort::MostCited];
         // Filters only AND; within one text field a value is a boolean

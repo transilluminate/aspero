@@ -13,7 +13,7 @@
 
 use std::sync::Arc;
 
-use aspero_core::{Cursor, Error, SearchQuery, WorkType, YearRange};
+use aspero_core::{Cursor, Error, SearchQuery, Sort, WorkType, YearRange};
 use aspero_engine::{
     CallOptions, Engine, Extras, SecretString, SqliteCache, StandardConfig, standard,
 };
@@ -27,8 +27,8 @@ pub mod records;
 use records::{
     Bibliography, Budget, CacheStats, CitationStyle, CiteFormat, CitedEntry, Claim as ClaimRecord,
     DocxReferences, ExportFormat, Identification, KeyCheck, Line, LineReference, Lookup, Lookups,
-    Mention, ProviderUsage, ReadError, Reference, SearchRequest, SearchResults, StyleError,
-    StyleSource, Unavailable, Utf16Offsets, Verification, Verifications, Work,
+    Mention, ProviderUsage, ReadError, Reference, SearchRequest, SearchResults, SourceSearch,
+    StyleError, StyleSource, Unavailable, Utf16Offsets, Verification, Verifications, Work,
 };
 
 uniffi::setup_scaffolding!();
@@ -293,11 +293,25 @@ impl Aspero {
                 query.open_access = request.open_access_only.then_some(true);
                 query.page.limit = request.limit;
                 query.page.cursor = request.cursor.map(Cursor);
+                query.author = request.author;
+                query.title = request.title;
+                query.container = request.container;
+                query.sort = request.sort.map_or(Sort::Relevance, Into::into);
+                query.extra = request.extra.into_iter().collect();
                 SearchResults::new(engine.search(request.source.as_deref(), &query).await)
             },
             cancel,
         )
         .await
+    }
+
+    /// What each source can search by, in the order `search` picks from:
+    /// without a `source`, the first. Offline.
+    pub fn search_capabilities(&self) -> Vec<SourceSearch> {
+        self.engine
+            .search_providers()
+            .map(|p| SourceSearch::new(&p.id(), p.capabilities()))
+            .collect()
     }
 
     /// The identifiers mentioned in `text`, in order, where and as written.

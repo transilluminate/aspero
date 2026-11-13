@@ -5,9 +5,12 @@
 //! the JSON contract's shape. Identifiers are strings with their prefix
 //! (`doi:10.1038/nature14539`), dates ISO 8601 as precise as known.
 
+use std::collections::HashMap;
 use std::time::SystemTime;
 
-use aspero_core::{Agreement as CoreAgreement, SourceRecord, UpdateKind};
+use aspero_core::{
+    Agreement as CoreAgreement, Capabilities, Filter, ProviderId, Sort, SourceRecord, UpdateKind,
+};
 use aspero_engine::{
     self as engine, Candidate as CoreCandidate, Disagreement as CoreDisagreement, InputLookup,
     LookupResult, Outcome, Served,
@@ -60,6 +63,10 @@ pub struct Work {
     /// When the work is itself a notice, the works it updates.
     pub notice_for: Vec<NoticeFor>,
     pub open_access: Option<OpenAccess>,
+    /// Works citing this one, as the source counts them (counts differ
+    /// between sources).
+    #[uniffi(default = None)]
+    pub cited_by_count: Option<u64>,
     pub fetched_at: SystemTime,
     /// Everything known, as the JSON contract's full `work`.
     pub json: String,
@@ -100,6 +107,7 @@ impl Work {
             notices: w.updates.iter().map(Notice::from).collect(),
             notice_for: w.update_to.iter().map(NoticeFor::from).collect(),
             open_access: w.open_access.as_ref().map(OpenAccess::from),
+            cited_by_count: w.cited_by_count,
             fetched_at: time(record.fetched_at),
             json: aspero_json::work(record, true).to_string(),
         }
@@ -1132,6 +1140,130 @@ pub struct SearchRequest {
     /// A previous page's `next`, with the same request otherwise.
     #[uniffi(default = None)]
     pub cursor: Option<String>,
+    /// An author's name. Fields are ANDed with `text`, which may then be
+    /// empty; a source that can't search one fails (`unsupported`), as
+    /// `searchCapabilities` tells.
+    #[uniffi(default = None)]
+    pub author: Option<String>,
+    /// Words of the title.
+    #[uniffi(default = None)]
+    pub title: Option<String>,
+    /// Where the work appeared: the journal, or the book for a chapter.
+    #[uniffi(default = None)]
+    pub container: Option<String>,
+    /// The order of hits; `None` is relevance. A source without the order
+    /// fails (`unsupported`).
+    #[uniffi(default = None)]
+    pub sort: Option<SearchSort>,
+    /// Provider-specific parameters, passed through by name: OpenAlex
+    /// `filter` and `sort`, Crossref `query.*`, Europe PMC `query` (its
+    /// own syntax), …. A name the source doesn't know fails.
+    #[uniffi(default)]
+    pub extra: HashMap<String, String>,
+}
+
+/// The order of search hits.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Enum)]
+pub enum SearchSort {
+    /// Best match first; with only fields to go on, the source's own order.
+    Relevance,
+    /// Most recently published first.
+    Newest,
+    MostCited,
+}
+
+impl SearchSort {
+    fn from_core(sort: Sort) -> Option<Self> {
+        match sort {
+            Sort::Relevance => Some(SearchSort::Relevance),
+            Sort::Newest => Some(SearchSort::Newest),
+            Sort::MostCited => Some(SearchSort::MostCited),
+            _ => None,
+        }
+    }
+}
+
+impl From<SearchSort> for Sort {
+    fn from(sort: SearchSort) -> Self {
+        match sort {
+            SearchSort::Relevance => Sort::Relevance,
+            SearchSort::Newest => Sort::Newest,
+            SearchSort::MostCited => Sort::MostCited,
+        }
+    }
+}
+
+/// A field a search can name ([`SearchRequest`]'s `author`, `title`,
+/// `container`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Enum)]
+pub enum SearchField {
+    Author,
+    Title,
+    Container,
+}
+
+impl SearchField {
+    fn from_core(filter: Filter) -> Option<Self> {
+        match filter {
+            Filter::Author => Some(SearchField::Author),
+            Filter::Title => Some(SearchField::Title),
+            Filter::Container => Some(SearchField::Container),
+            _ => None,
+        }
+    }
+}
+
+/// A filter a search can apply. One a source lacks is ignored.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Enum)]
+pub enum SearchFilter {
+    /// `yearFrom` and `yearTo`.
+    Years,
+    WorkType,
+    /// `openAccessOnly`.
+    OpenAccess,
+}
+
+impl SearchFilter {
+    fn from_core(filter: Filter) -> Option<Self> {
+        match filter {
+            Filter::Years => Some(SearchFilter::Years),
+            Filter::WorkType => Some(SearchFilter::WorkType),
+            Filter::OpenAccess => Some(SearchFilter::OpenAccess),
+            _ => None,
+        }
+    }
+}
+
+/// What one source can search by.
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct SourceSearch {
+    /// As `SearchRequest.source` and `SearchResults.provider` name it.
+    pub source: String,
+    pub fields: Vec<SearchField>,
+    pub filters: Vec<SearchFilter>,
+    pub sorts: Vec<SearchSort>,
+}
+
+impl SourceSearch {
+    pub(crate) fn new(source: &ProviderId, caps: &Capabilities) -> Self {
+        let filters = &caps.search_filters;
+        SourceSearch {
+            source: source.to_string(),
+            fields: filters
+                .iter()
+                .filter_map(|f| SearchField::from_core(*f))
+                .collect(),
+            filters: filters
+                .iter()
+                .filter_map(|f| SearchFilter::from_core(*f))
+                .collect(),
+            sorts: caps
+                .sorts
+                .iter()
+                .filter_map(|s| SearchSort::from_core(*s))
+                .collect(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, uniffi::Record)]
@@ -1565,6 +1697,22 @@ mod tests {
         }
         for k in aspero_core::matching::WorkKind::ALL {
             assert_eq!(name(WorkKind::from(*k)), k.as_str().replace(' ', "_"));
+        }
+        for s in Sort::ALL {
+            let sort = SearchSort::from_core(*s).unwrap();
+            assert_eq!(name(sort), s.as_str());
+            assert_eq!(Sort::from(sort), *s);
+        }
+        // Each filter is a field or a filter, but for `place`, kept
+        // internal.
+        for f in Filter::ALL {
+            let field = SearchField::from_core(*f).map(name);
+            let filter = SearchFilter::from_core(*f).map(name);
+            match (field, filter) {
+                (Some(n), None) | (None, Some(n)) => assert_eq!(n, f.as_str()),
+                (None, None) => assert_eq!(*f, Filter::Place),
+                both => panic!("{f:?} maps twice: {both:?}"),
+            }
         }
 
         // `IdElsewhere` cites a candidate.

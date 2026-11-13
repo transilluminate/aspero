@@ -34,9 +34,12 @@ fn search(v: &Value) -> String {
         "live" => String::new(),
         s => format!(" ({s})"),
     };
+    let works = match hits.len() {
+        1 => "1 work".to_owned(),
+        n => format!("{n} works"),
+    };
     let mut lines = vec![format!(
-        "{} works{total} via {}{served}:",
-        hits.len(),
+        "{works}{total} via {}{served}:",
         str(&v["provider"])
     )];
     lines.extend(

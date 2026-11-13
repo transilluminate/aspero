@@ -84,7 +84,7 @@ async fn a_client_lists_and_calls_the_tools() {
     assert_eq!(structured["hits"][0]["work"]["title"], "Deep learning");
     assert_eq!(structured["session"]["spent_usd"], 0.25);
     let text = &result.content[0].as_text().unwrap().text;
-    assert!(text.starts_with("1 works of 42 via openalex:"), "{text}");
+    assert!(text.starts_with("1 work of 42 via openalex:"), "{text}");
 
     // An unknown tool is the protocol's error.
     assert!(

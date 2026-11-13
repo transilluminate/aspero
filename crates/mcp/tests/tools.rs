@@ -98,7 +98,7 @@ async fn search_takes_a_query_tree_as_the_cli_does() {
         v["session"],
         json!({"spent_usd": 0.25, "budget_usd": 1.0, "left_usd": 0.75})
     );
-    assert!(out.summary.starts_with("1 works of 42 via openalex:\n1. Deep learning (2015), Yann LeCun et al., doi:10.1038/nature14539"), "{}", out.summary);
+    assert!(out.summary.starts_with("1 work of 42 via openalex:\n1. Deep learning (2015), Yann LeCun et al., doi:10.1038/nature14539"), "{}", out.summary);
     assert!(
         out.summary
             .ends_with("This call: $0.2500. Session: $0.2500 spent of $1.00, $0.7500 left."),
@@ -186,6 +186,12 @@ async fn search_supports_says_why_and_search_fails_alike() {
     assert_eq!(out.structured["supported"], false);
     assert_eq!(out.structured["reason"], reason);
     assert_eq!(out.structured["usage"], json!({}));
+    // Nothing spent is $0, not -$0.
+    assert!(
+        out.summary.contains("This call: $0.0000."),
+        "{}",
+        out.summary
+    );
 
     let e = err(&tools, &session, "search", json!({"query": tree})).await;
     assert_eq!(e.kind, ToolErrorKind::Unsupported);

@@ -86,7 +86,11 @@ impl Session {
     /// Adds a call's usage to the session; returns what the call cost.
     /// Costs are in each provider's units: the paid ones report USD.
     pub(crate) fn charge(&self, usage: &[(ProviderId, Usage)]) -> f64 {
-        let cost: f64 = usage.iter().filter_map(|(_, u)| u.cost).sum();
+        // A fold from 0.0: `sum` starts at -0.0, which prints as "-0.0000".
+        let cost = usage
+            .iter()
+            .filter_map(|(_, u)| u.cost)
+            .fold(0.0, |total, c| total + c);
         *self
             .spent_usd
             .lock()

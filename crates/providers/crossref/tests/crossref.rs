@@ -506,3 +506,46 @@ fn trees_crossref_cant_say_and_why() {
     )));
     assert!(http.requests().is_empty());
 }
+
+#[test]
+fn since_is_the_first_deposit_with_text_or_a_tree() {
+    let (cr, http) = provider([recorded("works_search_since"), empty_page()]);
+    let since = Some(jiff::civil::date(2026, 11, 1));
+    let mut q = SearchQuery::new("sepsis");
+    q.since = since;
+    q.page.limit = 3;
+    let page = block_on(cr.search(&q)).unwrap().value;
+    assert_eq!(
+        query(&http, 0),
+        [
+            pair("query", "sepsis"),
+            pair("filter", "from-created-date:2026-11-01"),
+            pair("sort", "score"),
+            pair("order", "desc"),
+            pair("rows", "3"),
+            pair("cursor", "*"),
+            pair("mailto", "test@example.org"),
+        ]
+    );
+    assert_eq!(page.total, Some(399));
+    assert_eq!(page.hits.len(), 3);
+    // Added since, whenever published: one was issued in October.
+    let months: Vec<Option<u8>> = page
+        .hits
+        .iter()
+        .map(|h| h.record.work.issued.unwrap().month())
+        .collect();
+    assert_eq!(months, [Some(11), Some(10), Some(11)]);
+
+    // A tree's filters join it.
+    let mut q = tree_query(QueryNode::All(vec![
+        QueryNode::term(TermField::Title, "sepsis"),
+        years(2026, 2026),
+    ]));
+    q.since = since;
+    block_on(cr.search(&q)).unwrap();
+    assert!(query(&http, 1).contains(&pair(
+        "filter",
+        "from-created-date:2026-11-01,from-pub-date:2026,until-pub-date:2026"
+    )));
+}

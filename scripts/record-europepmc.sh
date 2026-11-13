@@ -45,6 +45,8 @@ record search_tree \
   'resultType=core' 'format=json' 'pageSize=3' 'cursorMark=*'
 record search_tree_orcid 'query=AUTHORID:"0000-0001-6187-6610" AND (NOT LANG:ger)' 'resultType=core' 'format=json' \
   'pageSize=3' 'cursorMark=*' 'sort=P_PDATE_D desc'
+record search_since 'query=(sepsis) AND FIRST_IDATE:[2026-11-01 TO *]' 'resultType=core' 'format=json' \
+  'pageSize=3' 'cursorMark=*'
 
 if grep -rqiF "$ASPERO_MAILTO" "$out"; then
   echo "mailto address found in fixtures; deleting them" >&2

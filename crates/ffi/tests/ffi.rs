@@ -432,6 +432,7 @@ fn search_request(text: &str) -> SearchRequest {
         sort: None,
         extra: HashMap::new(),
         query: None,
+        since: None,
     }
 }
 
@@ -546,9 +547,12 @@ fn search_supports_says_why_and_search_fails_the_same_way() {
     let at = |source: &str| Some(source.to_owned());
     // Retraction in a none flips to retracted works only, which OpenAlex
     // (the default) and Europe PMC can say; Crossref can't say any.
-    assert_eq!(aspero.search_supports(None, nested_tree()), None);
-    assert_eq!(aspero.search_supports(at("europepmc"), nested_tree()), None);
-    let crossref = aspero.search_supports(at("crossref"), nested_tree());
+    assert_eq!(aspero.search_supports(None, nested_tree(), None), None);
+    assert_eq!(
+        aspero.search_supports(at("europepmc"), nested_tree(), None),
+        None
+    );
+    let crossref = aspero.search_supports(at("crossref"), nested_tree(), None);
     assert_eq!(
         crossref.as_deref(),
         Some("Crossref can't combine terms with any")
@@ -561,7 +565,9 @@ fn search_supports_says_why_and_search_fails_the_same_way() {
     };
     let reason = "OpenAlex can't combine title and author with any";
     assert_eq!(
-        aspero.search_supports(None, across.clone()).as_deref(),
+        aspero
+            .search_supports(None, across.clone(), None)
+            .as_deref(),
         Some(reason)
     );
     let request = SearchRequest {
@@ -592,6 +598,82 @@ fn search_supports_says_why_and_search_fails_the_same_way() {
     };
     let found = block_on(aspero.search(request, Patience::Offline, None)).unwrap();
     assert_eq!(found.failure.unwrap().kind, ErrorKind::NotCached);
+}
+
+#[test]
+fn since_picks_a_source_that_can_and_one_that_cant_says_why() {
+    let aspero = aspero(None);
+    let at = |source: &str| Some(source.to_owned());
+    let day = || Some("2026-11-01".to_owned());
+    let dated: Vec<String> = aspero
+        .search_capabilities()
+        .into_iter()
+        .filter(|s| s.filters.contains(&SearchFilter::Since))
+        .map(|s| s.source)
+        .collect();
+    assert_eq!(dated, ["crossref", "datacite", "europepmc"]);
+
+    // Without a source, the first that can: Crossref, not OpenAlex.
+    let keywords = term(SearchField::Keywords, "sepsis");
+    assert_eq!(aspero.search_supports(None, keywords.clone(), day()), None);
+    let request = SearchRequest {
+        since: day(),
+        ..search_request("sepsis")
+    };
+    let failure = block_on(aspero.search(request.clone(), Patience::Offline, None))
+        .unwrap()
+        .failure
+        .unwrap();
+    assert_eq!(failure.kind, ErrorKind::NotCached);
+    assert_eq!(failure.provider.as_deref(), Some("crossref"));
+
+    // Named, OpenAlex and Open Library refuse, saying why.
+    for (source, reason) in [
+        (
+            "openalex",
+            "OpenAlex can't search by date added (it needs a paid plan)",
+        ),
+        ("openlibrary", "Open Library can't search by date added"),
+    ] {
+        assert_eq!(
+            aspero
+                .search_supports(at(source), keywords.clone(), day())
+                .as_deref(),
+            Some(reason)
+        );
+        assert_eq!(
+            aspero.search_supports(at(source), keywords.clone(), None),
+            None
+        );
+        let request = SearchRequest {
+            source: at(source),
+            ..request.clone()
+        };
+        let failure = block_on(aspero.search(request, Patience::Offline, None))
+            .unwrap()
+            .failure
+            .unwrap();
+        assert_eq!(failure.kind, ErrorKind::Unsupported);
+        assert!(failure.message.ends_with(reason), "{}", failure.message);
+    }
+
+    // A date that isn't one is the caller's to fix.
+    let reason = "invalid date \"1 Nov 2026\": expected YYYY-MM-DD";
+    let bad = || Some("1 Nov 2026".to_owned());
+    assert_eq!(
+        aspero.search_supports(None, keywords, bad()).as_deref(),
+        Some(reason)
+    );
+    let request = SearchRequest {
+        since: bad(),
+        ..request
+    };
+    let failure = block_on(aspero.search(request, Patience::Offline, None))
+        .unwrap()
+        .failure
+        .unwrap();
+    assert_eq!(failure.kind, ErrorKind::BadRequest);
+    assert_eq!(failure.message, reason);
 }
 
 #[test]
@@ -630,7 +712,9 @@ fn a_query_replaces_text_and_fields() {
         phrase: false,
     };
     assert_eq!(
-        aspero.search_supports(None, bad_id.clone()).as_deref(),
+        aspero
+            .search_supports(None, bad_id.clone(), None)
+            .as_deref(),
         Some("\"Yann LeCun\" is neither an ORCID nor an OpenAlex author id (A…)")
     );
     let request = SearchRequest {

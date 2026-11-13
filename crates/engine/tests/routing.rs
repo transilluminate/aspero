@@ -458,6 +458,63 @@ async fn search_errors_name_the_provider() {
 }
 
 #[tokio::test(start_paused = true)]
+async fn since_picks_the_first_source_that_can_and_is_never_ignored() {
+    let first = Arc::new(Mock::new("first", &[]).searchable(false, &[Filter::Keywords]));
+    let dated =
+        Arc::new(Mock::new("dated", &[]).searchable(false, &[Filter::Keywords, Filter::Since]));
+    let engine = engine(vec![(first.clone(), 10), (dated.clone(), 20)]);
+    let mut q = SearchQuery::new("sepsis");
+    q.since = Some(jiff::civil::date(2026, 11, 1));
+
+    // Without a source: the first that can, as search_supports says.
+    let report = engine.search(None, &q).await.unwrap();
+    assert_eq!(report.provider.as_str(), "dated");
+    assert!(report.ignored_filters.is_empty());
+    assert_eq!(dated.searches.lock().unwrap()[0].since, q.since);
+    let keywords = QueryNode::term(TermField::Keywords, "sepsis");
+    assert_eq!(engine.search_supports_since(None, &keywords, q.since), None);
+    // Without since, the first as ever.
+    let plain = engine
+        .search(None, &SearchQuery::new("sepsis"))
+        .await
+        .unwrap();
+    assert_eq!(plain.provider.as_str(), "first");
+
+    // Named, a source that can't fails and says why, unasked.
+    let reason = "first can't search by date added";
+    match engine.search(Some("first"), &q).await {
+        Err(EngineError::Provider {
+            provider,
+            error: Error::UnsupportedQuery(r),
+        }) => assert_eq!((provider.as_str(), r.as_str()), ("first", reason)),
+        other => panic!("{:?}", other.map(|_| ())),
+    }
+    assert_eq!(
+        engine
+            .search_supports_since(Some("first"), &keywords, q.since)
+            .as_deref(),
+        Some(reason)
+    );
+    assert_eq!(engine.search_supports(Some("first"), &keywords), None);
+    assert_eq!(first.searches.lock().unwrap().len(), 1);
+
+    // None can: a clear refusal.
+    let engine = self::engine(vec![(first, 10)]);
+    let err = engine.search(None, &q).await.unwrap_err();
+    assert!(matches!(
+        err,
+        EngineError::NoCapableProvider("search by date added")
+    ));
+    assert_eq!(err.kind(), ErrorKind::Unsupported);
+    assert_eq!(
+        engine
+            .search_supports_since(None, &keywords, q.since)
+            .as_deref(),
+        Some("no enabled provider supports search by date added")
+    );
+}
+
+#[tokio::test(start_paused = true)]
 async fn a_search_for_nothing_is_refused() {
     let mock = Arc::new(Mock::new("any", &[]).searchable(false, &[]));
     let engine = engine(vec![(mock.clone(), 10)]);

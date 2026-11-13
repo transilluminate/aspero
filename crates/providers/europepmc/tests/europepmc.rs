@@ -363,3 +363,47 @@ fn orcids_are_author_ids_and_languages_medline_codes() {
         "Europe PMC can't filter by work type"
     );
 }
+
+#[test]
+fn since_is_the_first_index_date_anded_with_text_or_a_tree() {
+    let (epmc, http) = provider([recorded("search_since"), empty_page(), empty_page()]);
+    let since = Some(jiff::civil::date(2026, 11, 1));
+    let mut q = SearchQuery::new("sepsis");
+    q.since = since;
+    q.page.limit = 3;
+    let page = block_on(epmc.search(&q)).unwrap().value;
+    assert_eq!(
+        query(&http, 0),
+        [
+            pair("query", "(sepsis) AND FIRST_IDATE:[2026-11-01 TO *]"),
+            pair("resultType", "core"),
+            pair("format", "json"),
+            pair("pageSize", "3"),
+            pair("cursorMark", "*"),
+        ]
+    );
+    assert_eq!(page.total, Some(1294));
+    assert_eq!(page.hits.len(), 3);
+
+    // A tree's top-level any is bracketed, so the date bounds all of it.
+    let any = QueryNode::Any(vec![
+        QueryNode::term(TermField::Title, "sepsis"),
+        QueryNode::term(TermField::Abstract, "septic shock"),
+    ]);
+    let mut q = tree_query(any.clone());
+    q.since = since;
+    block_on(epmc.search(&q)).unwrap();
+    assert_eq!(
+        query(&http, 1)[0],
+        pair(
+            "query",
+            "(TITLE:(sepsis) OR ABSTRACT:(septic shock)) AND FIRST_IDATE:[2026-11-01 TO *]"
+        )
+    );
+    // Without since, the tree is sent as before.
+    block_on(epmc.search(&tree_query(any))).unwrap();
+    assert_eq!(
+        query(&http, 2)[0],
+        pair("query", "TITLE:(sepsis) OR ABSTRACT:(septic shock)")
+    );
+}

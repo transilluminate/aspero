@@ -23,8 +23,8 @@ use aspero_core::query::check_supported;
 use aspero_core::{
     AuthorId, Capabilities, Cursor, Doi, Error, Field, FieldSet, Filter, FilterValue, Hit,
     HttpClient, HttpRequest, HttpResponse, IdKind, Lookup, Page, Provider, ProviderId, QueryNode,
-    ResiliencePolicy, Response, Result, SearchMode, SearchQuery, Sort, SourceRecord, TermField,
-    WorkId, YearRange,
+    ResiliencePolicy, Response, Result, SearchMode, SearchQuery, Sort, SourceRecord, Term,
+    TermField, WorkId, YearRange,
 };
 use async_trait::async_trait;
 
@@ -88,9 +88,11 @@ impl Crossref {
             Filter::AuthorId,
             Filter::HasAbstract,
             Filter::Since,
+            Filter::Identifier,
         ];
         capabilities.sorts = vec![Sort::Relevance, Sort::Newest, Sort::MostCited];
-        // Queries are bags of words, ANDed with filters: all of, only.
+        // Queries are bags of words, ANDed with filters: all of, only (but
+        // for an any of DOIs: see `express`).
         Crossref {
             config,
             http,
@@ -382,17 +384,60 @@ struct Tree {
 /// of one name OR (two ORCIDs would mean either). Crossref has no filter
 /// for retracted works themselves (`update-type:retraction` finds the
 /// notices), nor for language.
+///
+/// Works are named by DOI alone (`doi:`), so an any of DOIs is its one
+/// any: repeated `doi:` filters OR, ANDed with the rest (checked live
+/// 2026-11-14). It holds no arXiv works (their DOIs are DataCite's), and
+/// its filters can't leave anything out.
 fn express(tree: &QueryNode, caps: &Capabilities) -> std::result::Result<Tree, String> {
     const NAME: &str = "Crossref";
-    check_supported(tree, caps, NAME)?;
-    let leaves = match tree {
+    let nodes = match tree {
         QueryNode::All(nodes) => nodes.iter().collect(),
-        leaf => vec![leaf],
+        node => vec![node],
     };
+    let doi = |t: &Term| match t.work_id()? {
+        WorkId::Doi(doi) if doi.as_str().contains(',') => {
+            Err(format!("{NAME} can't filter by a DOI holding a comma"))
+        }
+        WorkId::Doi(doi) => Ok(doi.as_str().to_owned()),
+        WorkId::Arxiv(_) => Err(format!(
+            "{NAME} has no arXiv works: their DOIs are DataCite's"
+        )),
+        _ => Err(format!("{NAME} finds works by DOI only")),
+    };
+    let identifier = |node: &QueryNode| match node {
+        QueryNode::Term(t) if t.field == TermField::Identifier => Some(t.clone()),
+        _ => None,
+    };
+    let mut dois: Option<Vec<String>> = None;
+    let mut rest = Vec::new();
+    for node in nodes {
+        let found = match node {
+            QueryNode::Any(any) if any.iter().all(|n| identifier(n).is_some()) => any
+                .iter()
+                .filter_map(identifier)
+                .map(|t| doi(&t))
+                .collect::<std::result::Result<Vec<_>, _>>()?,
+            node => match identifier(node) {
+                Some(t) => vec![doi(&t)?],
+                None => {
+                    rest.push(node.clone());
+                    continue;
+                }
+            },
+        };
+        if dois.replace(found).is_some() {
+            return Err(format!(
+                "{NAME} can't require two DOIs at once, only any of them"
+            ));
+        }
+    }
+    // The rest, as all of it (a tree is normalised: no all holds an all).
+    check_supported(&QueryNode::All(rest.clone()), caps, NAME)?;
     let mut out = Tree::default();
     let mut years: Option<YearRange> = None;
     let (mut work_type, mut orcid) = (None, None);
-    for leaf in leaves {
+    for leaf in &rest {
         match leaf {
             QueryNode::Term(t) if t.phrase => {
                 return Err(format!("{NAME} can't search for phrases"));
@@ -459,5 +504,7 @@ fn express(tree: &QueryNode, caps: &Capabilities) -> std::result::Result<Tree, S
     }
     out.filters.extend(work_type.map(|t| format!("type:{t}")));
     out.filters.extend(orcid.map(|o| format!("orcid:{o}")));
+    out.filters
+        .extend(dois.into_iter().flatten().map(|d| format!("doi:{d}")));
     Ok(out)
 }

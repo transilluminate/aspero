@@ -231,6 +231,37 @@ fn trees_are_solr_queries_across_fields() {
 }
 
 #[test]
+fn isbns_are_solr_terms_combined_with_the_rest() {
+    let (ol, http) = provider([recorded("search_tree_ids")]);
+    let id = |v| QueryNode::term(TermField::Identifier, v);
+    let tree = QueryNode::All(vec![
+        QueryNode::Any(vec![id("0-262-03561-8"), id("isbn:978-0-13-110362-7")]),
+        QueryNode::term(TermField::Author, "goodfellow"),
+    ]);
+    let page = block_on(ol.search(&tree_query(tree))).unwrap().value;
+    assert_eq!(
+        query(&http, 0)[0],
+        pair(
+            "q",
+            "(isbn:9780262035613 OR isbn:9780131103627) AND author_name:(goodfellow)"
+        )
+    );
+    assert_eq!(page.hits.len(), 1);
+    assert_eq!(
+        page.hits[0].record.work.title.as_deref(),
+        Some("Deep Learning")
+    );
+    let (ol, _) = provider([]);
+    for other in ["10.1038/nature14539", "pmid:26017442", "W2919115771"] {
+        assert_eq!(
+            ol.express(&id(other)).unwrap_err(),
+            "Open Library finds works by ISBN only",
+            "{other}"
+        );
+    }
+}
+
+#[test]
 fn a_none_needs_something_beside_it_to_find() {
     let (ol, _) = provider([]);
     let reason = "Open Library can only leave out terms beside something to find, in an all";

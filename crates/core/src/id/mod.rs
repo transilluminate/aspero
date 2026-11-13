@@ -84,6 +84,21 @@ impl IdKind {
         }
     }
 
+    /// In English, for reasons: `DOI`, `arXiv id`, `ISBN`, ….
+    pub fn name(self) -> &'static str {
+        match self {
+            IdKind::Doi => "DOI",
+            IdKind::Arxiv => "arXiv id",
+            IdKind::Pmid => "PMID",
+            IdKind::Pmcid => "PMCID",
+            IdKind::OpenAlex => "OpenAlex work id",
+            IdKind::S2Paper => "Semantic Scholar paper id",
+            IdKind::CorpusId => "Semantic Scholar CorpusId",
+            IdKind::Isbn => "ISBN",
+            IdKind::Nbk => "NCBI Bookshelf id",
+        }
+    }
+
     /// Case-insensitive inverse of [`IdKind::prefix`].
     pub fn from_prefix(s: &str) -> Option<Self> {
         Self::ALL

@@ -87,6 +87,7 @@ impl OpenLibrary {
             Filter::Title,
             Filter::Keywords,
             Filter::Language,
+            Filter::Identifier,
         ];
         capabilities.sorts = vec![Sort::Relevance, Sort::Newest];
         // Solr: AND, OR and NOT across fields, nested; a NOT needs
@@ -440,8 +441,10 @@ const NAME: &str = "Open Library";
 
 /// A query tree as Open Library's `q` (Solr, checked live 2026-11-13):
 /// `title`, `author_name`, `first_publish_year` and `language` (MARC's
-/// three-letter codes: `fre`, `ger`) take AND, OR and NOT, nested. A
-/// query that only leaves things out fails (HTTP 500), alone or as one
+/// three-letter codes: `fre`, `ger`) take AND, OR and NOT, nested, as does
+/// `isbn` (any edition's; an ISBN-13 finds what its ISBN-10 does, checked
+/// live 2026-11-14).
+/// A query that only leaves things out fails (HTTP 500), alone or as one
 /// side of an OR, so a none must sit in an all beside something to find.
 fn express(tree: &QueryNode, caps: &Capabilities) -> std::result::Result<String, String> {
     check_supported(tree, caps, NAME)?;
@@ -452,6 +455,12 @@ fn express(tree: &QueryNode, caps: &Capabilities) -> std::result::Result<String,
                 TermField::Keywords => None,
                 TermField::Title => Some("title"),
                 TermField::Author => Some("author_name"),
+                TermField::Identifier => {
+                    return match t.work_id()? {
+                        WorkId::Isbn(isbn) => Ok(format!("isbn:{}", isbn.as_str())),
+                        _ => Err(format!("{NAME} finds works by ISBN only")),
+                    };
+                }
                 _ => return Err(format!("{NAME} can't search by {}", t.field.name())),
             };
             Ok(lucene_term(prefix, &t.value, t.phrase))

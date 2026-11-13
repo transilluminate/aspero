@@ -29,6 +29,7 @@ requests=(
   "works_search_tree /works?search=protein%20structure&filter=title.search:alphafold%20OR%20%22structure%20prediction%22,raw_author_name.search:!jumper,is_retracted:false,language:en,from_publication_date:2021-01-01&per-page=3&cursor=*"
   "works_search_relation /works?sort=cited_by_count:desc&filter=cites:W2919115771,title.search:medical,type:article|review&per-page=3&cursor=*"
   "works_search_orcid /works?filter=authorships.author.orcid:0000-0002-3271-7861|0000-0001-6187-6610,has_abstract:true,is_oa:true&per-page=3&cursor=*"
+  "works_search_ids  /works?filter=doi:10.1038/nature14539|10.48550/arxiv.1706.03762,is_retracted:false,from_publication_date:2015-01-01&per-page=3&cursor=*"
   "sources_named     /sources?filter=display_name.search:nature%20machine&select=id&per-page=100"
   "bad_filter        /works?filter=no_such_field:1"
   "work_retracted    /works/doi:10.1016/S0140-6736(97)11096-0"

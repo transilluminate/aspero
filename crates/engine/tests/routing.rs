@@ -704,6 +704,29 @@ async fn trees_a_source_cant_say_fail_as_search_supports_says() {
 }
 
 #[tokio::test(start_paused = true)]
+async fn identifiers_are_checked_before_a_source_sees_them() {
+    let mock = Arc::new(tree_mock("ids", &[]));
+    let engine = engine(vec![(mock.clone(), 10)]);
+    let id = |v| QueryNode::term(TermField::Identifier, v);
+    // A source without the field can't search by it.
+    let reason = "Mock can't search by identifier";
+    assert_eq!(
+        engine
+            .search_supports(None, &id("10.1038/nature14539"))
+            .as_deref(),
+        Some(reason)
+    );
+    let bad = QueryNode::All(vec![title("a"), id("not an id")]);
+    let why = r#"can't search by identifier "not an id": unrecognised identifier "not an id""#;
+    assert_eq!(engine.search_supports(None, &bad).as_deref(), Some(why));
+    match engine.search(None, &with_tree(bad)).await {
+        Err(EngineError::InvalidQuery(r)) => assert_eq!(r, why),
+        other => panic!("{other:?}"),
+    }
+    assert!(mock.searches.lock().unwrap().is_empty());
+}
+
+#[tokio::test(start_paused = true)]
 async fn newest_trees_stop_at_this_year_unless_their_years_say_otherwise() {
     let mock = Arc::new(tree_mock("dated", &[]));
     let engine = Engine::builder()

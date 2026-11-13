@@ -1,5 +1,28 @@
 # Changelog
 
+## Unreleased
+
+Added:
+
+- Query trees find works by identifier (#65), to combine with anything
+  else a tree says: `{"all": [{"id": "10.1038/nature14539"},
+  {"not_retracted": true}]}` is that work if it isn't retracted. The
+  value is any identifier `lookup` takes; one that isn't fails as a bad
+  query, and `phrase` means nothing. Each source takes some kinds:
+  OpenAlex DOIs (arXiv ids by their DataCite DOI), PMIDs, PMCIDs and
+  OpenAlex ids, any of one kind ORed, none of any (`doi:!…`), but no ISBNs;
+  Crossref DOIs only, any of them but neither all of two nor none, and no
+  arXiv ids (their DOIs are DataCite's); DataCite DOIs and arXiv ids;
+  Europe PMC DOIs, PMIDs, PMCIDs and NBK ids, with any and none across
+  kinds; Open Library ISBNs. A kind a source can't take is refused with
+  the reason ("Crossref finds works by DOI only", "OpenAlex has no ISBN
+  filter"), as `search_supports` says beforehand.
+- `TermField::Identifier`, `Filter::Identifier`, `Term::work_id` and
+  `IdKind::name` in core; `{"id": …}` (or `"identifier"`) in the JSON tree
+  `search --query` and MCP's `search` take; on the FFI,
+  `SearchField.identifier`, listed in `searchCapabilities` by every
+  searching source.
+
 ## 0.14.0
 
 Added:

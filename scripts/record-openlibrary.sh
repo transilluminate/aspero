@@ -35,6 +35,9 @@ record search_fields /search.json 'q=' 'author=Goodfellow' 'title=deep learning'
 record search_tree /search.json \
   'q=(title:(hobbit) OR title:(silmarillion)) AND author_name:(tolkien) AND (NOT title:(companion)) AND language:eng' \
   "fields=$fields" 'limit=3' 'page=1'
+record search_tree_ids /search.json \
+  'q=(isbn:9780262035613 OR isbn:9780131103627) AND author_name:(goodfellow)' \
+  "fields=$fields" 'limit=3' 'page=1'
 
 if grep -rqiF "$ASPERO_MAILTO" "$out"; then
   echo "mailto address found in fixtures; deleting them" >&2

@@ -13,7 +13,7 @@ Added:
   summary; `full` for every field. A new crate, `aspero-mcp`, holds them,
   on the official Rust SDK (`rmcp`).
 - Each MCP session has a spend cap, `aspero mcp --budget <usd>` (default
-  $1.00, provisional); once spent, tools that may spend are refused with a
+  $0.25); once spent, tools that may spend are refused with a
   budget error. Every result reports the call's usage and the session's
   spend.
 - `aspero-json`: `QueryTree`, the query tree's JSON form as a serde type,

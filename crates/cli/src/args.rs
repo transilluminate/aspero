@@ -371,14 +371,13 @@ a short text summary; `full` gives every field.
 Spending: OpenAlex searches cost $0.001 each (lookups are free). Each
 session, one connection, may spend up to --budget (USD); once it has, tools
 that may spend are refused with a budget error. Every result reports its
-own usage and the session's spend so far. The default budget is
-provisional.
+own usage and the session's spend so far.
 
 Same environment (keys and contact address, as the agent passes them on),
 cache and pacing as the other commands; -v logs requests to stderr. Exits
 when stdin closes.")]
     Mcp {
-        /// The most one session may spend, in USD (provisional default).
+        /// The most one session may spend, in USD.
         #[arg(long, value_name = "USD", default_value_t = aspero_mcp::DEFAULT_BUDGET_USD, value_parser = budget)]
         budget: f64,
     },

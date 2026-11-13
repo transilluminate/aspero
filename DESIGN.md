@@ -377,8 +377,7 @@ fixture recorded with different parameters once hid a ranking bug.
   are third-party data, not instructions.
 
 A **`Session`** is one connection: its `Caller` (empty over stdio; tokens
-will go there) and a spend cap in USD (`--budget`, provisional default
-$1.00). Tools that may spend are refused once the session has spent it,
+will go there) and a spend cap in USD (`--budget`, default $0.25). Tools that may spend are refused once the session has spent it,
 checked before each call; a call's cost is known only after it, so the
 last one can overshoot by its own cost. Spend is the engine's reported
 usage (OpenAlex's `cost`), as the CLI totals it; every result carries the

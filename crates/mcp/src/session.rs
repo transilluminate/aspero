@@ -7,12 +7,9 @@ use serde_json::{Value, json};
 
 use crate::{ToolError, ToolErrorKind};
 
-/// A session's spend cap unless the caller sets one, in USD.
-///
-/// PROVISIONAL: a placeholder until the defaults are chosen (before
-/// Streamable HTTP, #58). An OpenAlex search costs $0.001, so this is about
-/// a thousand searches; lookups are free.
-pub const DEFAULT_BUDGET_USD: f64 = 1.0;
+/// A session's spend cap unless the caller sets one, in USD. An OpenAlex
+/// search costs $0.001, so this is about 250 searches; lookups are free.
+pub const DEFAULT_BUDGET_USD: f64 = 0.25;
 
 /// Who is calling. Over stdio, the agent that launched the server, which
 /// is all there is to know; an HTTP transport will add the token's

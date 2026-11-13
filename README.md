@@ -111,7 +111,7 @@ fields, or a batch), `identify` (a first page's text), and `cites` and
 JSON the commands print, as structured content with a short text summary;
 `full: true` gives every field.
 
-Each session may spend up to `--budget` dollars (default $1.00, for now)
+Each session may spend up to `--budget` dollars (default $0.25)
 on OpenAlex searches; once it has, tools that may spend are refused. Every
 result reports its usage and the session's spend. The environment, cache
 and pacing are the other commands'.

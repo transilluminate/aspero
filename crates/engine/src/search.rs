@@ -1,6 +1,10 @@
 //! Searching one provider.
 
-use aspero_core::{Error, Filter, Page, ProviderId, SearchMode, SearchQuery, Usage};
+use std::sync::Arc;
+
+use aspero_core::{
+    Error, Filter, Page, Provider, ProviderId, SearchMode, SearchQuery, Sort, Usage,
+};
 
 use crate::{Engine, EngineError, Served};
 
@@ -8,15 +12,24 @@ use crate::{Engine, EngineError, Served};
 pub struct SearchReport {
     pub provider: ProviderId,
     pub page: Page,
-    /// Query filters the provider can't apply; they were not sent.
+    /// Query filters the provider can't apply; they were not sent. Fields
+    /// (author, title, container) are never ignored: a provider lacking
+    /// one fails.
     pub ignored_filters: Vec<Filter>,
     pub usage: Option<Usage>,
     pub served: Served,
 }
 
 impl Engine {
+    /// Providers that search by keywords, in the order [`search`](Self::search)
+    /// picks from: without a `source`, the first.
+    pub fn search_providers(&self) -> impl Iterator<Item = &Arc<dyn Provider>> {
+        self.providers().filter(|p| p.capabilities().search)
+    }
+
     /// Searches one provider: `source` if given, otherwise the first that
-    /// supports the query's mode.
+    /// supports the query's mode. Fields and sorts it lacks fail with
+    /// [`Error::Unsupported`]; other filters it lacks are ignored.
     pub async fn search(
         &self,
         source: Option<&str>,
@@ -55,11 +68,24 @@ impl Engine {
             return Err(refuse("citation search"));
         }
 
-        let ignored_filters: Vec<Filter> = query
+        let (missing_fields, ignored_filters): (Vec<Filter>, Vec<Filter>) = query
             .filters()
             .into_iter()
             .filter(|f| !caps.search_filters.contains(f))
-            .collect();
+            .partition(|f| f.is_field());
+        if let Some(field) = missing_fields.first() {
+            return Err(refuse(match field {
+                Filter::Author => "search by author",
+                Filter::Title => "search by title",
+                _ => "search by container",
+            }));
+        }
+        if query.sort != Sort::Relevance && !caps.sorts.contains(&query.sort) {
+            return Err(refuse(match query.sort {
+                Sort::Newest => "sorting newest first",
+                _ => "sorting most cited first",
+            }));
+        }
         let mut sent = query.clone();
         for filter in &ignored_filters {
             match filter {

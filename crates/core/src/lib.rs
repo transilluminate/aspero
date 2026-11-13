@@ -37,7 +37,7 @@ pub use id::{
 pub use matching::{Agreement, Alternative, Assessment, Claim, FieldCheck};
 pub use provider::{
     Capabilities, Cursor, Filter, Hit, Lookup, Page, PageReq, Place, Provider, ProviderId,
-    Response, SearchMode, SearchQuery, Usage, YearRange,
+    Response, SearchMode, SearchQuery, Sort, Usage, YearRange,
 };
 pub use record::{Field, FieldSet, Raw, SourceRecord};
 pub use references::{IndentedLine, LineReference, Reference, split_lines, split_references};

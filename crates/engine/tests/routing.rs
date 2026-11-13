@@ -6,8 +6,8 @@ use std::time::Duration;
 
 use aspero_core::{
     Capabilities, Error, FieldSet, Filter, Hit, IdKind, Lookup, Page, Provider, ProviderId, Raw,
-    ResiliencePolicy, Response, Result, SearchMode, SearchQuery, SourceRecord, Usage, Work, WorkId,
-    YearRange,
+    ResiliencePolicy, Response, Result, SearchMode, SearchQuery, Sort, SourceRecord, Usage, Work,
+    WorkId, YearRange,
 };
 use aspero_engine::{Engine, EngineError, Outcome};
 use async_trait::async_trait;
@@ -349,6 +349,61 @@ async fn undeclared_filters_are_stripped_and_reported() {
     assert_eq!(report.ignored_filters, [Filter::OpenAccess]);
     let sent = &only_years.searches.lock().unwrap()[0];
     assert!(sent.years.is_some() && sent.open_access.is_none());
+}
+
+#[tokio::test(start_paused = true)]
+async fn missing_fields_and_sorts_fail_rather_than_widen_the_search() {
+    let mut mock = Mock::new("fields", &[]).searchable(false, &[Filter::Author]);
+    mock.caps.sorts = vec![Sort::MostCited];
+    let mock = Arc::new(mock);
+    let engine = engine(vec![(mock.clone(), 10)]);
+    let unsupported = |r: std::result::Result<_, EngineError>| match r {
+        Err(EngineError::Provider {
+            error: Error::Unsupported(what),
+            ..
+        }) => what,
+        other => panic!("{:?}", other.map(|_: aspero_engine::SearchReport| ())),
+    };
+
+    let mut q = SearchQuery::new("");
+    q.author = Some("LeCun".into());
+    q.title = Some("Deep learning".into());
+    assert_eq!(
+        unsupported(engine.search(None, &q).await),
+        "search by title"
+    );
+    q.title = None;
+    q.sort = Sort::Newest;
+    assert_eq!(
+        unsupported(engine.search(None, &q).await),
+        "sorting newest first"
+    );
+    assert!(mock.searches.lock().unwrap().is_empty());
+
+    // Fields alone, by relevance or a declared sort, are searched.
+    for sort in [Sort::Relevance, Sort::MostCited] {
+        q.sort = sort;
+        engine.search(None, &q).await.unwrap();
+    }
+    let sent = mock.searches.lock().unwrap();
+    assert_eq!(sent[0].author.as_deref(), Some("LeCun"));
+    assert_eq!(sent[1].sort, Sort::MostCited);
+}
+
+#[tokio::test(start_paused = true)]
+async fn search_providers_come_in_the_order_search_picks_from() {
+    let lookups_only = Arc::new(Mock::new("lookups", &[IdKind::Doi]));
+    let second = Arc::new(Mock::new("second", &[]).searchable(false, &[]));
+    let first = Arc::new(Mock::new("first", &[]).searchable(true, &[]));
+    let engine = engine(vec![(lookups_only, 5), (second, 20), (first, 10)]);
+
+    let names: Vec<String> = engine
+        .search_providers()
+        .map(|p| p.id().to_string())
+        .collect();
+    assert_eq!(names, ["first", "second"]);
+    let report = engine.search(None, &SearchQuery::new("x")).await.unwrap();
+    assert_eq!(report.provider.as_str(), names[0]);
 }
 
 #[tokio::test(start_paused = true)]

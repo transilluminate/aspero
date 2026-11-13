@@ -6,8 +6,8 @@
 //! `provider_failed`) and how far it got (`done` of `total`).
 
 use aspero_engine::{
-    Analysis, Estimate, Incomplete, Missing, OddOne, ReferencesPage, RetractedReference, Section,
-    Seed,
+    Analysis, Estimate, Incomplete, Missing, OddOne, ReferencesPage, RelatedWork,
+    RetractedReference, Section, Seed,
 };
 use serde_json::{Map, Value, json};
 
@@ -46,9 +46,9 @@ pub fn references(input: &str, page: &ReferencesPage, full: bool) -> Value {
     Value::Object(out)
 }
 
-/// The analyses: every seed, then each analysis asked for, kinds not
-/// built yet, an estimate (with `estimate_only`), `complete`, and the
-/// usage.
+/// The analyses: every seed, then each analysis asked for (related works
+/// last), kinds not built yet, an estimate (with `estimate_only`),
+/// `complete`, and the usage.
 pub fn analysis(a: &Analysis, full: bool) -> Value {
     let mut out = Map::new();
     let seeds: Vec<Value> = a
@@ -73,6 +73,9 @@ pub fn analysis(a: &Analysis, full: bool) -> Value {
             "probably_missing".into(),
             section(found, |m| missing(m, full)),
         );
+    }
+    if let Some(found) = &a.related {
+        out.insert("related".into(), section(found, |r| related(r, full)));
     }
     if !a.not_yet.is_empty() {
         let kinds: Vec<&str> = a.not_yet.iter().map(|k| k.as_str()).collect();
@@ -180,6 +183,25 @@ fn missing(m: &Missing, full: bool) -> Value {
     }
     out.insert("cited_by".into(), json!(m.cited_by));
     out.insert("count".into(), json!(m.count()));
+    Value::Object(out)
+}
+
+/// A related work: its `score` (0 to 1), and why: `co_cited_with` (citing
+/// works read that cite it and the set), `shared_references` (the set's
+/// references it cites too) and the `seeds` linking it.
+fn related(r: &RelatedWork, full: bool) -> Value {
+    let mut out = Map::new();
+    out.insert("id".into(), json!(r.id));
+    if r.ids.len() > 1 {
+        out.insert("ids".into(), json!(r.ids));
+    }
+    if let Some(record) = &r.record {
+        out.insert("work".into(), work::work(record, full));
+    }
+    out.insert("score".into(), json!(r.score));
+    out.insert("co_cited_with".into(), json!(r.co_cited_with));
+    out.insert("shared_references".into(), json!(r.shared_references));
+    out.insert("seeds".into(), json!(r.seeds));
     Value::Object(out)
 }
 

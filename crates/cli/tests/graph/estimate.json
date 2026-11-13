@@ -1,13 +1,10 @@
 {
   "complete": true,
   "estimate": {
-    "exact": true,
-    "requests": 3,
-    "usd": 0.00030000000000000003
+    "exact": false,
+    "requests": 10,
+    "usd": 0.001
   },
-  "not_yet": [
-    "related"
-  ],
   "seeds": [
     {
       "id": "openalex:W1",
@@ -25,6 +22,7 @@
           }
         ],
         "canonical": "doi:10.1234/a",
+        "cited_by_count": 2,
         "ids": [
           "openalex:W1",
           "doi:10.1234/a"
@@ -47,6 +45,7 @@
           }
         ],
         "canonical": "doi:10.1234/b",
+        "cited_by_count": 1,
         "ids": [
           "openalex:W2",
           "doi:10.1234/b"

@@ -74,6 +74,22 @@ impl Provider for Scripted {
     }
 
     async fn search(&self, query: &SearchQuery) -> Result<Response<Page>> {
+        // OpenAlex's citing works, `cites:W1|W2`, on one page.
+        if let Some(cited) = query
+            .extra
+            .get("filter")
+            .and_then(|f| f.strip_prefix("cites:"))
+        {
+            let cited: Vec<WorkId> = cited.split('|').filter_map(|w| w.parse().ok()).collect();
+            let hits: Vec<Hit> = self
+                .works
+                .iter()
+                .filter(|w| w.references.iter().flatten().any(|r| cited.contains(r)))
+                .map(|w| Hit::new(w.clone(), None))
+                .collect();
+            let total = hits.len() as u64;
+            return Ok(costing(Page::new(hits, Some(total), None), 0.5));
+        }
         // OpenAlex's retraction check: `openalex:W1|W2,is_retracted:true`.
         if let Some(filter) = query.extra.get("filter") {
             let ids: Vec<WorkId> = filter

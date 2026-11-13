@@ -57,6 +57,7 @@
       }
     ],
     "canonical": "doi:10.1234/a",
+    "cited_by_count": 2,
     "ids": [
       "openalex:W1",
       "doi:10.1234/a"

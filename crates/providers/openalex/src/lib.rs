@@ -34,8 +34,10 @@ pub const ID: ProviderId = ProviderId::from_static("openalex");
 
 pub const DEFAULT_BASE_URL: &str = "https://api.openalex.org";
 
-/// OpenAlex's cap on `per-page` and on values OR-ed in one filter.
+/// Works per batch lookup: as many as one filter ORs.
 const MAX_PAGE: u32 = 100;
+/// OpenAlex's cap on `per-page` for lists.
+const MAX_PER_PAGE: u32 = 200;
 /// Most values OpenAlex takes in one filter (`a|b|…`).
 const MAX_FILTER_VALUES: usize = 100;
 
@@ -472,9 +474,11 @@ impl Provider for OpenAlex {
             match key.as_str() {
                 "filter" => filters.push(value.clone()),
                 "sort" => params.push(("sort", value.clone())),
+                // The fields to return, as citation links need (`id,referenced_works`).
+                "select" => params.push(("select", value.clone())),
                 other => {
                     return Err(Error::BadRequest(format!(
-                        "unknown OpenAlex parameter {other:?} (supported: filter, sort)"
+                        "unknown OpenAlex parameter {other:?} (supported: filter, select, sort)"
                     )));
                 }
             }
@@ -553,7 +557,7 @@ fn unresolved_relation(tree: &QueryNode) -> Option<&str> {
 fn page_params(page: &PageReq) -> [(&'static str, String); 2] {
     let cursor = page.cursor.as_ref().map_or("*", |c| c.0.as_str());
     [
-        ("per-page", page.limit.clamp(1, MAX_PAGE).to_string()),
+        ("per-page", page.limit.clamp(1, MAX_PER_PAGE).to_string()),
         ("cursor", cursor.to_owned()),
     ]
 }

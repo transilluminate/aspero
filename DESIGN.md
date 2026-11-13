@@ -304,19 +304,74 @@ from `cites:` pages); G3 OpenCitations as a free source of citing works.
   works that turn out to be a seed or each other (versions) drop or merge
   at no extra cost; then the best `limit`. A version cited by only one
   seed isn't seen.
+- **Related works** (G2, `graph/related.rs`; OpenAlex only: OpenCitations
+  lags 6–9 months and truncates long lists). From the works citing the
+  set: `cites:A|B|…` filters, 200 a page ($0.0001), most cited first,
+  `select=id,publication_year,referenced_works`; which works of the set
+  each cites is in its references.
+  - *Pages.* Works cited at most 200 times (`cited_by_count`) share
+    filters, packed to fill one page (most cited first, first fit), so a
+    page each; others are read alone, at most 5 pages (a classic's 1,000
+    most cited citing works: `capped`). At most 75 pages a set, taken off
+    the works read most (the most cited first). A budget is shared out
+    before reading, a page at a time (each filter's first page, then
+    second pages, …; coupling's last), keeping back the lookup; filters
+    are read four at a time. 25 works cited 300 times each: 50 pages.
+  - *Co-citation:* the citing works read that cite a work and at least
+    one work of the set, once each however many of the set they cite
+    (a review citing ten seeds counts once). A seed citing another seed
+    counts too.
+  - *Coupling:* how many of the set's references (all its works'
+    together) a work cites too, from two (one is chance), counted for every
+    work whose references are known: the citing works read, the
+    candidates looked up, and works citing the set's most shared
+    references: one filter of those at least two works of the set cite
+    (the 100 most shared), at most 5 pages, most cited first (a fixed
+    sample, not counted as capped). A seed links a work by coupling when
+    the work cites two of the seed's own references.
+  - *Score:* each count as a share of the highest found, weighted 0.8
+    co-citation and 0.2 coupling (all to one when no work has the
+    other). Weighted evenly (tried on two sets, 2026-11), coupling's
+    long-reference-list favourites (broad reviews, theses, AI in food
+    science) outranked the field's core works; co-citation-led, a set of
+    eleven sepsis trials gets its peers (VASST, SAFE, CORTICUS, TRICC,
+    VISEP) and the guidelines and definitions.
+  - The best 100 (per 100 of `limit`) are looked up in one batch, so works
+    of the set (any shared identifier with any seed, resolved or not, or
+    `same_work` with one), retracted works, drop, and versions merge
+    (counts joined), as probably missing does; then the best `limit`,
+    ties by id. Each says `co_cited_with`, `shared_references` and the
+    `seeds` linking it.
+  - Citing works dated more than a year before a work of the set they cite
+    are set aside: OpenAlex gave a 2001 paper on mustard 300 references,
+    2014 sepsis trials among them.
+  - `incomplete` counts citing works read of those the set's
+    `cited_by_count`s promise (`done` of `total`): `capped` when a work was
+    sampled, `budget`, `provider_failed`.
+  - Live (2026-11): eleven sepsis trials, $0.0060 (60 pages, as estimated),
+    16 s, 10,647 of 15,357 citing works; eight deep-learning works with
+    LeCun 2015 (90,000 citing works), $0.0046, 13 s, 8,000 of 149,057.
+    Cached, a second run is free and takes a second.
 - **Spend.** Analyses run cheapest first (odd one out, probably missing,
-  retracted references). With a budget (US dollars), each paid request is
-  refused when it could take the spend past it; what was stopped says
-  so: `incomplete: {kind: budget|provider_failed|capped, done, total}`
-  (`capped` is G2's sampling). `estimate_only` resolves seeds from the
-  cache and free lookups of one id (which the run then finds cached) and
-  counts the rest exactly: requests not answerable from the cache, and
-  without a cache the seeds' batches too (the run asks for them again). A set
+  retracted references, related works). With a budget (US dollars), each
+  paid request is refused when it could take the spend past it; what was
+  stopped says so: `incomplete: {kind: budget|provider_failed|capped,
+  done, total}`. `estimate_only` resolves seeds from the cache and free
+  lookups of one id (which the run then finds cached) and counts the rest
+  exactly: requests not answerable from the cache, and without a cache
+  the seeds' batches too (the run asks for them again). With related
+  works it is a ceiling (`exact: false`): their citing works' pages are
+  exact (from the seeds' `cited_by_count`s, given they're current), but
+  coupling's pages may run out early and the lookup may be cached. A set
   of 11 works with 350 references cost $0.0005 and 3 s (2026-11).
 - **Cache.** An `edges` table (work, direction `references`|`cited_by`,
-  ids, complete, stored_at): references 30 days, citing pages (G2) 1 day.
-  It is created with `CREATE TABLE IF NOT EXISTS` beside the versioned
-  schema, so adding it rebuilt nothing; rebuilds drop it like the rest.
+  ids, complete, stored_at): references 30 days, citing works 1 day. A
+  work of the set's `cited_by` row lists the citing works read (all of
+  them, `complete`, or a sample), each one's references in `references`
+  rows; a later run reuses a row covering what it would read. Coupling's
+  pages are cached as searches (a day). The table is created with
+  `CREATE TABLE IF NOT EXISTS` beside the versioned schema, so adding it
+  rebuilt nothing; rebuilds drop it like the rest.
 
 ## Storage
 
@@ -378,7 +433,10 @@ fixture recorded with different parameters once hid a ranking bug.
 - **OpenAlex.** Key as `Authorization: Bearer` (keeps it out of URLs). Free
   key: $1/day. Lookups by ID are free; filter batches $0.0001; searches
   $0.001; `x-ratelimit-cost-usd` / `-remaining-usd` headers report spend.
-  404s are HTML. Batch filter results come back unordered with missing IDs
+  404s are HTML. Lists take up to 200 a page (`per-page`); filters OR up to
+  100 values; `select` trims works to the fields named (citing works:
+  `id,publication_year,referenced_works`, about 3 KB a work). Batch
+  filter results come back unordered with missing IDs
   absent. A DOI re-registered when a journal changed publisher
   (`10.1197/j.aem.2003.09.015`) still finds the work, whose record carries
   only its new DOI: alone, the lookup answers with it; in a batch, a

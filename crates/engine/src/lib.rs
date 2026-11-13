@@ -82,7 +82,7 @@ pub use check::{
 };
 pub use graph::{
     Analysis, AnalysisKind, Coverage, Estimate, Incomplete, IncompleteKind, LIST_PRICE, Missing,
-    OddOne, OddReason, ReferencesPage, RetractedReference, Section, Seed, SeedProblem,
+    OddOne, OddReason, ReferencesPage, RelatedWork, RetractedReference, Section, Seed, SeedProblem,
 };
 pub use identify::{Decision, Identified, MAX_IDENTIFIERS};
 #[cfg(feature = "openalex")]

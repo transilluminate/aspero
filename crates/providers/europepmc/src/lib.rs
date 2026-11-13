@@ -18,7 +18,7 @@ use aspero_core::http::{escape_lucene, status_error};
 use aspero_core::{
     Capabilities, Cursor, Doi, Error, FieldSet, Filter, Hit, HttpClient, HttpRequest, HttpResponse,
     IdKind, Lookup, Nbk, OpenAccess, Page, PartialDate, Person, Pmcid, Pmid, Provider, ProviderId,
-    Raw, ResiliencePolicy, Response, Result, SearchMode, SearchQuery, SourceRecord, Update,
+    Raw, ResiliencePolicy, Response, Result, SearchMode, SearchQuery, Sort, SourceRecord, Update,
     UpdateKind, Work, WorkId, WorkType, tidy_abstract,
 };
 use async_trait::async_trait;
@@ -62,7 +62,14 @@ impl EuropePmc {
         capabilities.max_batch = MAX_BATCH;
         capabilities.fields = FieldSet::ALL;
         capabilities.search = true;
-        capabilities.search_filters = vec![Filter::Years, Filter::OpenAccess];
+        capabilities.search_filters = vec![
+            Filter::Years,
+            Filter::OpenAccess,
+            Filter::Author,
+            Filter::Title,
+            Filter::Container,
+        ];
+        capabilities.sorts = vec![Sort::Relevance, Sort::Newest, Sort::MostCited];
         EuropePmc {
             config,
             http,
@@ -478,14 +485,32 @@ impl Provider for EuropePmc {
         if let Some(oa) = query.open_access {
             clauses.push(format!("OPEN_ACCESS:{}", if oa { "y" } else { "n" }));
         }
+        // Names as phrases ("Jumper J" also matches "Jumper JM"); a title's
+        // words in any order.
+        if let Some(author) = query.field(Filter::Author) {
+            clauses.push(format!("AUTH:\"{}\"", escape_lucene(author)));
+        }
+        if let Some(title) = query.field(Filter::Title) {
+            clauses.push(format!("TITLE:({})", escape_lucene(title)));
+        }
+        if let Some(journal) = query.field(Filter::Container) {
+            clauses.push(format!("JOURNAL:\"{}\"", escape_lucene(journal)));
+        }
         let cursor = query.page.cursor.as_ref().map_or("*", |c| c.0.as_str());
-        let params = [
+        let mut params = vec![
             ("query", clauses.join(" AND ")),
             ("resultType", "core".to_owned()),
             ("format", "json".to_owned()),
             ("pageSize", query.page.limit.clamp(1, MAX_PAGE).to_string()),
             ("cursorMark", cursor.to_owned()),
         ];
+        // Relevance is the default; sorted results still page by cursor.
+        match query.sort {
+            Sort::Relevance => {}
+            Sort::Newest => params.push(("sort", "P_PDATE_D desc".to_owned())),
+            Sort::MostCited => params.push(("sort", "CITED desc".to_owned())),
+            _ => return Err(Error::Unsupported("Europe PMC sort")),
+        }
         let (results, at) = self.search_raw(&params).await?;
         let hits: Vec<Hit> = results
             .result_list

@@ -7,7 +7,9 @@
 //! - Lookup by ISBN in batches: `/api/books?bibkeys=ISBN:a,ISBN:b&jscmd=data`
 //!   (one edition per ISBN; ISBNs it doesn't know are simply absent).
 //! - Search: `/search.json` (Solr, relevance-ordered), returning works with
-//!   every edition's ISBNs; year ranges via `first_publish_year:[A TO B]`.
+//!   every edition's ISBNs; year ranges via `first_publish_year:[A TO B]`,
+//!   authors and titles as `author=` and `title=` (which take any text:
+//!   Open Library escapes them), newest first with `sort=new`.
 //!
 //! Data quality varies: some ISBNs carry unrelated records, so scoring (not
 //! the identifier alone) decides matches.
@@ -20,7 +22,7 @@ use aspero_core::http::{escape_lucene, status_error};
 use aspero_core::{
     Capabilities, Cursor, Error, FieldSet, Filter, Hit, HttpClient, HttpRequest, HttpResponse,
     IdKind, Isbn, Lookup, Page, PartialDate, Person, Provider, ProviderId, Raw, ResiliencePolicy,
-    Response, Result, SearchMode, SearchQuery, SourceRecord, Work, WorkId, WorkType,
+    Response, Result, SearchMode, SearchQuery, Sort, SourceRecord, Work, WorkId, WorkType,
 };
 use async_trait::async_trait;
 use jiff::Timestamp;
@@ -77,7 +79,8 @@ impl OpenLibrary {
             aspero_core::Field::Url,
         ]);
         capabilities.search = true;
-        capabilities.search_filters = vec![Filter::Years];
+        capabilities.search_filters = vec![Filter::Years, Filter::Author, Filter::Title];
+        capabilities.sorts = vec![Sort::Relevance, Sort::Newest];
         OpenLibrary {
             config,
             http,
@@ -368,12 +371,23 @@ impl Provider for OpenLibrary {
                 .map_err(|_| Error::BadRequest(format!("invalid Open Library cursor {:?}", c.0)))?,
         };
         let limit = query.page.limit.clamp(1, MAX_PAGE);
-        let params = [
-            ("q", clauses.join(" AND ")),
+        let mut params = vec![("q", clauses.join(" AND "))];
+        if let Some(author) = query.field(Filter::Author) {
+            params.push(("author", author.to_owned()));
+        }
+        if let Some(title) = query.field(Filter::Title) {
+            params.push(("title", title.to_owned()));
+        }
+        match query.sort {
+            Sort::Relevance => {}
+            Sort::Newest => params.push(("sort", "new".to_owned())),
+            _ => return Err(Error::Unsupported("Open Library sort")),
+        }
+        params.extend([
             ("fields", SEARCH_FIELDS.to_owned()),
             ("limit", limit.to_string()),
             ("page", page_number.to_string()),
-        ];
+        ]);
         let resp = self.get("/search.json", &params).await?;
         let results: SearchResults = serde_json::from_slice(&resp.body).map_err(Error::decode)?;
         let base = self.config.base_url.trim_end_matches('/');

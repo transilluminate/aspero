@@ -5,7 +5,7 @@ use std::sync::Arc;
 
 use aspero_core::testing::{ReplayClient, block_on, fixture, response};
 use aspero_core::{
-    Cursor, Error, FieldSet, HttpResponse, Provider, SearchQuery, WorkId, WorkType, YearRange,
+    Cursor, Error, FieldSet, HttpResponse, Provider, SearchQuery, Sort, WorkId, WorkType, YearRange,
 };
 use aspero_openlibrary::{OpenLibrary, OpenLibraryConfig};
 
@@ -124,6 +124,34 @@ fn paging_ends_at_the_last_numbered_page() {
     let page = block_on(ol.search(&q)).unwrap().value;
     assert_eq!(page.hits.len(), 1);
     assert_eq!(page.next, None);
+}
+
+#[test]
+fn authors_and_titles_are_parameters_and_newest_is_sort_new() {
+    let (ol, http) = provider([response(200, &[], r#"{"numFound": 0, "docs": []}"#)]);
+    let mut q = SearchQuery::new("");
+    q.author = Some("Goodfellow".into());
+    // Open Library escapes these itself.
+    q.title = Some("Deep learning: (adaptive)".into());
+    q.sort = Sort::Newest;
+    block_on(ol.search(&q)).unwrap();
+    let params = query(&http, 0);
+    assert_eq!(
+        params[..4],
+        [
+            pair("q", ""),
+            pair("author", "Goodfellow"),
+            pair("title", "Deep learning: (adaptive)"),
+            pair("sort", "new"),
+        ]
+    );
+
+    q.sort = Sort::MostCited;
+    assert!(matches!(
+        block_on(ol.search(&q)),
+        Err(Error::Unsupported(_))
+    ));
+    assert_eq!(http.requests().len(), 1);
 }
 
 #[test]

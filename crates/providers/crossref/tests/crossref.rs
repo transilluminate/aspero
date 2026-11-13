@@ -5,7 +5,7 @@ use std::time::Duration;
 
 use aspero_core::testing::{FIXTURE_TIME, ReplayClient, block_on, fixture, response};
 use aspero_core::{
-    Error, FieldSet, HttpResponse, Provider, SearchQuery, WorkId, WorkType, YearRange,
+    Error, FieldSet, HttpResponse, Provider, SearchQuery, Sort, WorkId, WorkType, YearRange,
 };
 use aspero_crossref::{Crossref, CrossrefConfig};
 
@@ -216,6 +216,77 @@ fn query_extras_pass_through_and_unknown_extras_are_rejected() {
     q.extra.insert("select".into(), "DOI".into());
     assert!(matches!(block_on(cr.search(&q)), Err(Error::BadRequest(_))));
     assert_eq!(http.requests().len(), 1);
+}
+
+fn empty_page() -> HttpResponse {
+    response(
+        200,
+        &[],
+        r#"{"status": "ok", "message": {"total-results": 0, "items": []}}"#,
+    )
+}
+
+#[test]
+fn fields_become_field_queries_ranked_by_score() {
+    let (cr, http) = provider([empty_page()]);
+    let mut q = SearchQuery::new("");
+    q.author = Some("LeCun".into());
+    q.title = Some("Deep learning".into());
+    q.container = Some(" Nature ".into());
+    q.page.limit = 5;
+    block_on(cr.search(&q)).unwrap();
+    assert_eq!(
+        query(&http, 0),
+        [
+            pair("query.author", "LeCun"),
+            pair("query.title", "Deep learning"),
+            pair("query.container-title", "Nature"),
+            pair("sort", "score"),
+            pair("order", "desc"),
+            pair("rows", "5"),
+            pair("cursor", "*"),
+            pair("mailto", "test@example.org"),
+        ]
+    );
+}
+
+#[test]
+fn sorts_map_to_crossref_fields_newest_and_most_cited_first() {
+    let (cr, http) = provider([empty_page(), empty_page(), empty_page()]);
+    let mut q = SearchQuery::new("deep learning");
+    q.sort = Sort::Newest;
+    block_on(cr.search(&q)).unwrap();
+    q.sort = Sort::MostCited;
+    block_on(cr.search(&q)).unwrap();
+    // A sort given as an extra wins.
+    q.extra.insert("sort".into(), "deposited".into());
+    block_on(cr.search(&q)).unwrap();
+    let sort = |n| {
+        query(&http, n)
+            .into_iter()
+            .filter(|(k, _)| k == "sort" || k == "order")
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(sort(0), [pair("sort", "published"), pair("order", "desc")]);
+    assert_eq!(
+        sort(1),
+        [
+            pair("sort", "is-referenced-by-count"),
+            pair("order", "desc")
+        ]
+    );
+    assert_eq!(sort(2), [pair("sort", "deposited")]);
+}
+
+#[test]
+fn citation_text_and_a_title_are_separate_queries() {
+    let (cr, http) = provider([empty_page()]);
+    let mut q = SearchQuery::citation("LeCun Y. Nature. 2015");
+    q.title = Some("Deep learning".into());
+    block_on(cr.search(&q)).unwrap();
+    let params = query(&http, 0);
+    assert!(params.contains(&pair("query.bibliographic", "LeCun Y. Nature. 2015")));
+    assert!(params.contains(&pair("query.title", "Deep learning")));
 }
 
 #[test]

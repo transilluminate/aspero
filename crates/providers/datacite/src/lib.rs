@@ -11,6 +11,10 @@
 //! come back by creation date regardless. So the provider's [`Cursor`] is
 //! the next page number. Year ranges use the query syntax
 //! (`publicationYear:[2017 TO *]`); `published=` only takes year lists.
+//!
+//! Authors and titles are searched as `creators.name:` and `titles.title:`.
+//! There is no newest-first order: `sort=-published` leaves years unordered
+//! (2026-11-13), and a container field (`container.title:`) matches nothing.
 
 mod wire;
 
@@ -21,7 +25,7 @@ use aspero_core::http::{escape_lucene, path_segment, status_error};
 use aspero_core::{
     Capabilities, Cursor, Doi, Error, Field, FieldSet, Filter, Hit, HttpClient, HttpRequest,
     HttpResponse, IdKind, Lookup, Page, Provider, ProviderId, ResiliencePolicy, Response, Result,
-    SearchMode, SearchQuery, SourceRecord, WorkId,
+    SearchMode, SearchQuery, Sort, SourceRecord, WorkId,
 };
 use async_trait::async_trait;
 
@@ -68,7 +72,13 @@ impl Datacite {
         // Records say nothing about free copies.
         capabilities.fields = FieldSet::ALL.difference(FieldSet::of(&[Field::OpenAccess]));
         capabilities.search = true;
-        capabilities.search_filters = vec![Filter::Years, Filter::WorkType];
+        capabilities.search_filters = vec![
+            Filter::Years,
+            Filter::WorkType,
+            Filter::Author,
+            Filter::Title,
+        ];
+        capabilities.sorts = vec![Sort::Relevance, Sort::MostCited];
         Datacite {
             config,
             http,
@@ -242,6 +252,17 @@ impl Provider for Datacite {
                 end(years.to)
             ));
         }
+        if let Some(author) = query.field(Filter::Author) {
+            clauses.push(format!("creators.name:({})", escape_lucene(author)));
+        }
+        if let Some(title) = query.field(Filter::Title) {
+            clauses.push(format!("titles.title:({})", escape_lucene(title)));
+        }
+        let sort = match query.sort {
+            Sort::Relevance => "relevance",
+            Sort::MostCited => "-citation-count",
+            _ => return Err(Error::Unsupported("DataCite sort")),
+        };
         let mut params: Vec<(&str, String)> = Vec::new();
         for (key, value) in &query.extra {
             match key.as_str() {
@@ -275,7 +296,7 @@ impl Provider for Datacite {
                     .map_err(|_| Error::BadRequest(format!("invalid DataCite cursor {:?}", c.0)))?
             }
         };
-        params.push(("sort", "relevance".into()));
+        params.push(("sort", sort.into()));
         params.push(("page[number]", page_number.to_string()));
         params.push((
             "page[size]",

@@ -5,7 +5,7 @@ use std::time::Duration;
 
 use aspero_core::testing::{FIXTURE_TIME, ReplayClient, block_on, fixture, response};
 use aspero_core::{
-    Error, FieldSet, HttpResponse, Page, Place, Provider, SearchQuery, SourceRecord, WorkId,
+    Error, FieldSet, HttpResponse, Page, Place, Provider, SearchQuery, Sort, SourceRecord, WorkId,
     WorkType, YearRange,
 };
 use aspero_openalex::{OpenAlex, OpenAlexConfig};
@@ -284,6 +284,121 @@ fn search_by_place_filters_volume_and_first_page() {
             .into()
     )));
     assert!(!params.iter().any(|(k, _)| k == "search"), "{params:?}");
+}
+
+#[test]
+fn fields_alone_search_by_filter_and_sort_when_asked() {
+    let (oa, http) = provider([recorded("works_search_fields")]);
+    let mut q = SearchQuery::new("");
+    q.author = Some("lecun".into());
+    q.title = Some(" deep learning ".into());
+    q.sort = Sort::MostCited;
+    q.page.limit = 3;
+    let resp = block_on(oa.search(&q)).unwrap();
+
+    assert_eq!(
+        query(&http, 0),
+        [
+            ("sort", "cited_by_count:desc"),
+            (
+                "filter",
+                "raw_author_name.search:lecun,title.search:deep learning"
+            ),
+            ("per-page", "3"),
+            ("cursor", "*"),
+        ]
+        .map(|(k, v)| (k.to_owned(), v.to_owned()))
+    );
+    let counts: Vec<u64> = resp
+        .value
+        .hits
+        .iter()
+        .map(|h| h.record.work.cited_by_count.unwrap())
+        .collect();
+    assert!(counts.is_sorted_by(|a, b| a >= b), "{counts:?}");
+    assert_eq!(
+        resp.value.hits[0].record.work.title.as_deref(),
+        Some("Deep learning")
+    );
+}
+
+#[test]
+fn relevance_without_text_sends_no_sort() {
+    // OpenAlex refuses `relevance_score` sorting without a search to rank by.
+    let (oa, http) = provider([recorded("works_search_fields")]);
+    let mut q = SearchQuery::new("");
+    q.author = Some("lecun".into());
+    block_on(oa.search(&q)).unwrap();
+    let params = query(&http, 0);
+    assert!(
+        !params.iter().any(|(k, _)| k == "sort" || k == "search"),
+        "{params:?}"
+    );
+
+    let (oa, http) = provider([recorded("works_search")]);
+    let mut q = SearchQuery::new("x");
+    q.sort = Sort::Newest;
+    block_on(oa.search(&q)).unwrap();
+    assert!(query(&http, 0).contains(&("sort".into(), "publication_date:desc".into())));
+}
+
+#[test]
+fn field_values_lose_the_commas_and_pipes_that_split_filters() {
+    let (oa, http) = provider([recorded("works_search_fields")]);
+    let mut q = SearchQuery::new("");
+    q.author = Some("LeCun, Y|Bengio".into());
+    block_on(oa.search(&q)).unwrap();
+    assert!(query(&http, 0).contains(&(
+        "filter".into(),
+        "raw_author_name.search:LeCun YBengio".into()
+    )));
+}
+
+#[test]
+fn container_searches_the_sources_so_named_first() {
+    let empty = r#"{"meta": {"count": 0}, "results": []}"#;
+    let (oa, http) = provider([
+        recorded("sources_named"),
+        response(200, &[("x-ratelimit-cost-usd", "0.001")], empty),
+    ]);
+    let mut q = SearchQuery::new("deep learning");
+    q.container = Some("nature machine".into());
+    let resp = block_on(oa.search(&q)).unwrap();
+
+    assert!(
+        http.requests()[0]
+            .url
+            .starts_with("https://api.openalex.org/sources?")
+    );
+    assert_eq!(
+        query(&http, 0),
+        [
+            ("filter", "display_name.search:nature machine"),
+            ("select", "id"),
+            ("per-page", "100"),
+        ]
+        .map(|(k, v)| (k.to_owned(), v.to_owned()))
+    );
+    let filter = query(&http, 1)
+        .into_iter()
+        .find(|(k, _)| k == "filter")
+        .unwrap()
+        .1;
+    assert_eq!(filter, "primary_location.source.id:S2912241403|S7407104579");
+    // Both searches are paid for.
+    assert_eq!(resp.usage.unwrap().cost, Some(0.002));
+}
+
+#[test]
+fn a_container_no_source_is_named_finds_nothing() {
+    let none = r#"{"meta": {"count": 0}, "results": []}"#;
+    let (oa, http) = provider([response(200, &[("x-ratelimit-cost-usd", "0.001")], none)]);
+    let mut q = SearchQuery::new("");
+    q.container = Some("no such journal".into());
+    let page = block_on(oa.search(&q)).unwrap().value;
+    assert!(page.hits.is_empty() && page.next.is_none());
+    assert_eq!(page.total, Some(0));
+    assert_eq!(http.requests().len(), 1);
 }
 
 #[test]

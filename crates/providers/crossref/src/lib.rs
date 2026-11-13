@@ -22,7 +22,7 @@ use aspero_core::http::path_segment;
 use aspero_core::{
     Capabilities, Cursor, Doi, Error, Field, FieldSet, Filter, Hit, HttpClient, HttpRequest,
     HttpResponse, IdKind, Lookup, Page, Provider, ProviderId, ResiliencePolicy, Response, Result,
-    SearchMode, SearchQuery, SourceRecord, WorkId,
+    SearchMode, SearchQuery, Sort, SourceRecord, WorkId,
 };
 use async_trait::async_trait;
 
@@ -72,7 +72,14 @@ impl Crossref {
         capabilities.search = true;
         capabilities.citation_search = true;
         capabilities.notices = true;
-        capabilities.search_filters = vec![Filter::Years, Filter::WorkType];
+        capabilities.search_filters = vec![
+            Filter::Years,
+            Filter::WorkType,
+            Filter::Author,
+            Filter::Title,
+            Filter::Container,
+        ];
+        capabilities.sorts = vec![Sort::Relevance, Sort::Newest, Sort::MostCited];
         Crossref {
             config,
             http,
@@ -256,15 +263,35 @@ impl Provider for Crossref {
             };
             params.push((field, text.to_owned()));
         }
+        // Field queries. `query.title` matches titles only, unlike
+        // `query.bibliographic` (Swagger docs; checked live 2026-11-13).
+        let fields = [
+            (Filter::Author, "query.author"),
+            (Filter::Title, "query.title"),
+            (Filter::Container, "query.container-title"),
+        ];
+        for (field, param) in fields {
+            if let Some(value) = query.field(field) {
+                params.push((param, value.to_owned()));
+            }
+        }
         if !filters.is_empty() {
             params.push(("filter", filters.join(",")));
         }
         // Cursor paging silently drops relevance order (observed 2026-11-10:
         // the right match at 92.1 vanished from the top 3), so ask for it
         // explicitly whenever there is text to rank by.
-        let has_query = params.iter().any(|(k, _)| k.starts_with("query"));
-        if has_query && !params.iter().any(|(k, _)| *k == "sort") {
-            params.push(("sort", "score".into()));
+        let sort = match query.sort {
+            Sort::Relevance => {
+                let has_query = params.iter().any(|(k, _)| k.starts_with("query"));
+                has_query.then_some("score")
+            }
+            Sort::Newest => Some("published"),
+            Sort::MostCited => Some("is-referenced-by-count"),
+            _ => return Err(Error::Unsupported("Crossref sort")),
+        };
+        if let Some(sort) = sort.filter(|_| !params.iter().any(|(k, _)| *k == "sort")) {
+            params.push(("sort", sort.into()));
             params.push(("order", "desc".into()));
         }
         params.push(("rows", query.page.limit.clamp(1, MAX_ROWS).to_string()));

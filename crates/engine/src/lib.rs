@@ -260,6 +260,10 @@ pub enum EngineError {
     UnknownProvider(String),
     #[error("no enabled provider supports {0}")]
     NoCapableProvider(&'static str),
+    /// A search with no keywords, no author, title or container, and no
+    /// provider parameters.
+    #[error("nothing to search for: give keywords, or an author, title or container")]
+    NothingToSearch,
     #[error("{provider}: {error}")]
     Provider {
         provider: ProviderId,
@@ -273,6 +277,7 @@ impl EngineError {
         match self {
             EngineError::UnknownProvider(_) => ErrorCategory::Usage,
             EngineError::NoCapableProvider(_) => ErrorCategory::Unsupported,
+            EngineError::NothingToSearch => ErrorCategory::Usage,
             EngineError::Provider { error, .. } => error.category(),
         }
     }
@@ -281,6 +286,7 @@ impl EngineError {
         match self {
             EngineError::UnknownProvider(_) => ErrorKind::BadRequest,
             EngineError::NoCapableProvider(_) => ErrorKind::Unsupported,
+            EngineError::NothingToSearch => ErrorKind::BadRequest,
             EngineError::Provider { error, .. } => error.kind(),
         }
     }

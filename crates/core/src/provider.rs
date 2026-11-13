@@ -6,9 +6,11 @@
 //!    maps the response, and returns. Retries, backoff, rate limiting, caching
 //!    and merging are the engine's job, so they are consistent and shared.
 //! 2. **Declared capabilities are honoured.** Every [`Filter`] listed in
-//!    [`Capabilities::search_filters`] is applied when present in a query. The
-//!    engine reports filters a provider doesn't declare as ignored, so nothing
-//!    is dropped silently. Unknown keys in [`SearchQuery::extra`] are
+//!    [`Capabilities::search_filters`] is applied when present in a query,
+//!    and every [`Sort`] in [`Capabilities::sorts`] honoured. The engine
+//!    reports filters a provider doesn't declare as ignored, so nothing is
+//!    dropped silently, and refuses fields and sorts it doesn't declare with
+//!    [`Error::Unsupported`]. Unknown keys in [`SearchQuery::extra`] are
 //!    rejected with [`Error::BadRequest`].
 //! 3. **Batch lookups answer every ID.** [`Provider::lookup`] returns one
 //!    [`Lookup`] per input ID, in input order, with `record: None` for IDs the
@@ -107,7 +109,11 @@ pub struct Capabilities {
     /// corrections, a correction's work), so the engine asks it about
     /// records other providers supplied.
     pub notices: bool,
+    /// Filters and fields [`Provider::search`] applies.
     pub search_filters: Vec<Filter>,
+    /// Orders [`Provider::search`] can return hits in. Every searching
+    /// provider lists [`Sort::Relevance`].
+    pub sorts: Vec<Sort>,
     /// Identifier kinds whose "not found" here is final: no other provider
     /// can know them (doi.org for DOIs), so lookups stop asking.
     pub final_misses: Vec<IdKind>,
@@ -126,6 +132,72 @@ pub enum Filter {
     OpenAccess,
     /// Volume and first page ([`SearchQuery::place`]).
     Place,
+    /// [`SearchQuery::author`].
+    Author,
+    /// [`SearchQuery::title`].
+    Title,
+    /// [`SearchQuery::container`].
+    Container,
+}
+
+impl Filter {
+    /// Every filter, for front ends to test their mappings.
+    pub const ALL: &[Filter] = &[
+        Filter::Years,
+        Filter::WorkType,
+        Filter::OpenAccess,
+        Filter::Place,
+        Filter::Author,
+        Filter::Title,
+        Filter::Container,
+    ];
+
+    /// As serialized: `years`, `work_type`, ….
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Filter::Years => "years",
+            Filter::WorkType => "work_type",
+            Filter::OpenAccess => "open_access",
+            Filter::Place => "place",
+            Filter::Author => "author",
+            Filter::Title => "title",
+            Filter::Container => "container",
+        }
+    }
+
+    /// Whether this filter narrows by a field of the work (author, title,
+    /// container). A source lacking one fails rather than ignoring it.
+    pub fn is_field(self) -> bool {
+        matches!(self, Filter::Author | Filter::Title | Filter::Container)
+    }
+}
+
+/// The order of search hits.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+#[non_exhaustive]
+pub enum Sort {
+    /// Best match first; without text to rank by, the source's own order.
+    #[default]
+    Relevance,
+    /// Most recently published first.
+    Newest,
+    /// Most cited first.
+    MostCited,
+}
+
+impl Sort {
+    /// Every sort, for front ends to test their mappings.
+    pub const ALL: &[Sort] = &[Sort::Relevance, Sort::Newest, Sort::MostCited];
+
+    /// As serialized: `relevance`, `newest` or `most_cited`.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Sort::Relevance => "relevance",
+            Sort::Newest => "newest",
+            Sort::MostCited => "most_cited",
+        }
+    }
 }
 
 /// Where a work appeared, to search by: volume and first page.
@@ -201,8 +273,21 @@ pub enum SearchMode {
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[non_exhaustive]
 pub struct SearchQuery {
+    /// May be empty when a field (author, title, container) is given.
     pub text: String,
     pub mode: SearchMode,
+    /// An author's name, ANDed with the rest.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub author: Option<String>,
+    /// Words of the title.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
+    /// Where the work appeared: the journal, or the book for a chapter.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub container: Option<String>,
+    /// Sources fail with [`Error::Unsupported`] for a sort they lack.
+    #[serde(default, skip_serializing_if = "is_relevance")]
+    pub sort: Sort,
     pub years: Option<YearRange>,
     pub work_type: Option<WorkType>,
     pub open_access: Option<bool>,
@@ -238,11 +323,31 @@ impl SearchQuery {
             self.work_type.as_ref().map(|_| Filter::WorkType),
             self.open_access.map(|_| Filter::OpenAccess),
             self.place.as_ref().map(|_| Filter::Place),
+            self.field(Filter::Author).map(|_| Filter::Author),
+            self.field(Filter::Title).map(|_| Filter::Title),
+            self.field(Filter::Container).map(|_| Filter::Container),
         ]
         .into_iter()
         .flatten()
         .collect()
     }
+
+    /// A field's value, trimmed; `None` when absent or blank, or for a
+    /// filter that isn't a field.
+    pub fn field(&self, field: Filter) -> Option<&str> {
+        let value = match field {
+            Filter::Author => &self.author,
+            Filter::Title => &self.title,
+            Filter::Container => &self.container,
+            _ => return None,
+        };
+        value.as_deref().map(str::trim).filter(|v| !v.is_empty())
+    }
+}
+
+// Keeps queries without a sort keyed as before in caches.
+fn is_relevance(sort: &Sort) -> bool {
+    *sort == Sort::Relevance
 }
 
 /// The answer for one requested ID in a batch lookup.
@@ -445,6 +550,50 @@ mod tests {
         });
         q.open_access = Some(true);
         assert_eq!(q.filters(), [Filter::Years, Filter::OpenAccess]);
+        q.author = Some("LeCun".into());
+        q.container = Some("  ".into());
+        assert_eq!(
+            q.filters(),
+            [Filter::Years, Filter::OpenAccess, Filter::Author]
+        );
+    }
+
+    #[test]
+    fn every_filter_and_sort_is_listed_under_its_name() {
+        let position = |f: Filter| match f {
+            Filter::Years => 0,
+            Filter::WorkType => 1,
+            Filter::OpenAccess => 2,
+            Filter::Place => 3,
+            Filter::Author => 4,
+            Filter::Title => 5,
+            Filter::Container => 6,
+        };
+        for (i, f) in Filter::ALL.iter().enumerate() {
+            assert_eq!(position(*f), i);
+            assert_eq!(serde_json::to_value(f).unwrap(), f.as_str());
+        }
+        assert_eq!(Filter::ALL.len(), position(Filter::Container) + 1);
+        let position = |s: Sort| match s {
+            Sort::Relevance => 0,
+            Sort::Newest => 1,
+            Sort::MostCited => 2,
+        };
+        for (i, s) in Sort::ALL.iter().enumerate() {
+            assert_eq!(position(*s), i);
+            assert_eq!(serde_json::to_value(s).unwrap(), s.as_str());
+        }
+        assert_eq!(Sort::ALL.len(), position(Sort::MostCited) + 1);
+    }
+
+    #[test]
+    fn queries_without_fields_or_sort_serialize_as_before() {
+        let json = serde_json::to_string(&SearchQuery::new("x")).unwrap();
+        assert!(!json.contains("\"author\"") && !json.contains("\"sort\""));
+        let mut q = SearchQuery::new("x");
+        q.sort = Sort::MostCited;
+        let back: SearchQuery = serde_json::from_str(&serde_json::to_string(&q).unwrap()).unwrap();
+        assert_eq!(back, q);
     }
 
     #[test]

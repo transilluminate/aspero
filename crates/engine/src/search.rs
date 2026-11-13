@@ -1,6 +1,10 @@
 //! Searching one provider.
 
-use aspero_core::{Error, Filter, Page, ProviderId, SearchMode, SearchQuery, Usage};
+use std::sync::Arc;
+
+use aspero_core::{
+    Error, Filter, Page, Provider, ProviderId, SearchMode, SearchQuery, Sort, Usage,
+};
 
 use crate::{Engine, EngineError, Served};
 
@@ -8,21 +12,40 @@ use crate::{Engine, EngineError, Served};
 pub struct SearchReport {
     pub provider: ProviderId,
     pub page: Page,
-    /// Query filters the provider can't apply; they were not sent.
+    /// Query filters the provider can't apply; they were not sent. Fields
+    /// (author, title, container) are never ignored: a provider lacking
+    /// one fails.
     pub ignored_filters: Vec<Filter>,
     pub usage: Option<Usage>,
     pub served: Served,
 }
 
 impl Engine {
+    /// Providers that search by keywords, in the order [`search`](Self::search)
+    /// picks from: without a `source`, the first.
+    pub fn search_providers(&self) -> impl Iterator<Item = &Arc<dyn Provider>> {
+        self.providers().filter(|p| p.capabilities().search)
+    }
+
     /// Searches one provider: `source` if given, otherwise the first that
-    /// supports the query's mode.
+    /// supports the query's mode. Fields and sorts it lacks fail with
+    /// [`Error::Unsupported`]; other filters it lacks are ignored.
     pub async fn search(
         &self,
         source: Option<&str>,
         query: &SearchQuery,
     ) -> Result<SearchReport, EngineError> {
         let citation = query.mode == SearchMode::Citation;
+        // Keywords, a field, (verifying) a place, or an expert's own
+        // parameters (an OpenAlex `filter` alone): something to find.
+        let fields = [Filter::Author, Filter::Title, Filter::Container];
+        if query.text.trim().is_empty()
+            && query.place.is_none()
+            && query.extra.is_empty()
+            && !fields.iter().any(|f| query.field(*f).is_some())
+        {
+            return Err(EngineError::NothingToSearch);
+        }
         let entry = match source {
             Some(name) => self
                 .entries
@@ -55,12 +78,37 @@ impl Engine {
             return Err(refuse("citation search"));
         }
 
-        let ignored_filters: Vec<Filter> = query
+        let (missing_fields, ignored_filters): (Vec<Filter>, Vec<Filter>) = query
             .filters()
             .into_iter()
             .filter(|f| !caps.search_filters.contains(f))
-            .collect();
+            .partition(|f| f.is_field());
+        if let Some(field) = missing_fields.first() {
+            return Err(refuse(match field {
+                Filter::Author => "search by author",
+                Filter::Title => "search by title",
+                _ => "search by container",
+            }));
+        }
+        if query.sort != Sort::Relevance && !caps.sorts.contains(&query.sort) {
+            return Err(refuse(match query.sort {
+                Sort::Newest => "sorting newest first",
+                _ => "sorting most cited first",
+            }));
+        }
         let mut sent = query.clone();
+        // Newest first, records dated ahead (deposits, issues printed early,
+        // typos like 2115) would lead: unless the caller says otherwise,
+        // newest means up to this year.
+        if sent.sort == Sort::Newest
+            && caps.search_filters.contains(&Filter::Years)
+            && sent.years.is_none_or(|y| y.to.is_none())
+        {
+            let year = (self.clock)().to_zoned(jiff::tz::TimeZone::UTC).year();
+            let mut years = sent.years.unwrap_or_default();
+            years.to = Some(year);
+            sent.years = Some(years);
+        }
         for filter in &ignored_filters {
             match filter {
                 Filter::Years => sent.years = None,

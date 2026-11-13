@@ -6,6 +6,10 @@
 //! `filter` call per identifier kind, and search is the only real expense.
 //!
 //! Every call reports its cost and remaining budget in [`Usage`] (USD).
+//!
+//! Works have no filter on their journal's name, so a search by container
+//! first finds the sources so named (one more search, $0.001) and keeps
+//! works from the best 100 of them.
 
 mod http;
 mod wire;
@@ -17,7 +21,7 @@ use aspero_core::http::path_segment;
 use aspero_core::{
     Capabilities, Cursor, Doi, Error, FieldSet, Filter, Hit, HttpClient, HttpRequest, HttpResponse,
     IdKind, Lookup, Page, PageReq, Provider, ProviderId, Raw, ResiliencePolicy, Response, Result,
-    SearchMode, SearchQuery, SourceRecord, Usage, WorkId, WorkType,
+    SearchMode, SearchQuery, Sort, SourceRecord, Usage, WorkId, WorkType,
 };
 use async_trait::async_trait;
 use secrecy::{ExposeSecret, SecretString};
@@ -67,7 +71,11 @@ impl OpenAlex {
             Filter::WorkType,
             Filter::OpenAccess,
             Filter::Place,
+            Filter::Author,
+            Filter::Title,
+            Filter::Container,
         ];
+        capabilities.sorts = vec![Sort::Relevance, Sort::Newest, Sort::MostCited];
         OpenAlex {
             config,
             http,
@@ -92,6 +100,31 @@ impl OpenAlex {
 
     fn works_url(&self, rest: &str) -> String {
         format!("{}/works{rest}", self.config.base_url.trim_end_matches('/'))
+    }
+
+    /// The IDs of the sources (journals, repositories, …) best matching
+    /// `name`, at most as many as one filter can OR.
+    async fn sources_named(&self, name: &str) -> Result<(Vec<String>, Usage)> {
+        let base = format!("{}/sources", self.config.base_url.trim_end_matches('/'));
+        let params = [
+            (
+                "filter",
+                format!("display_name.search:{}", filter_value(name)),
+            ),
+            ("select", "id".to_owned()),
+            ("per-page", MAX_PAGE.to_string()),
+        ];
+        let url = url::Url::parse_with_params(&base, &params)
+            .map_err(|e| Error::BadRequest(format!("invalid OpenAlex base URL: {e}")))?;
+        let (resp, usage) = self.send(url.into()).await?;
+        let list: WireList = serde_json::from_slice(&resp.body).map_err(Error::decode)?;
+        let ids = list
+            .results
+            .iter()
+            .filter_map(|v| v.get("id")?.as_str())
+            .map(|id| id.rsplit('/').next().unwrap_or(id).to_owned())
+            .collect();
+        Ok((ids, usage))
     }
 
     /// Sends and maps non-2xx statuses to errors. Usage comes back only
@@ -226,6 +259,11 @@ fn type_filter(t: &WorkType) -> Result<String> {
     Ok(format!("type:{openalex}"))
 }
 
+/// A filter value with the commas and pipes that would split it removed.
+fn filter_value(s: &str) -> String {
+    s.replace([',', '|'], "")
+}
+
 fn respond<T>(value: T, usage: Option<Usage>) -> Response<T> {
     match usage {
         Some(u) => Response::with_usage(value, u),
@@ -321,13 +359,43 @@ impl Provider for OpenAlex {
             filters.push(format!("is_oa:{oa}"));
         }
         if let Some(place) = &query.place {
-            // Filter values can't hold commas or pipes, which separate them.
-            let clean = |s: &str| s.replace([',', '|'], "");
-            filters.push(format!("biblio.volume:{}", clean(&place.volume)));
-            filters.push(format!("biblio.first_page:{}", clean(&place.first_page)));
+            filters.push(format!("biblio.volume:{}", filter_value(&place.volume)));
+            filters.push(format!(
+                "biblio.first_page:{}",
+                filter_value(&place.first_page)
+            ));
+        }
+        if let Some(author) = query.field(Filter::Author) {
+            filters.push(format!("raw_author_name.search:{}", filter_value(author)));
+        }
+        if let Some(title) = query.field(Filter::Title) {
+            filters.push(format!("title.search:{}", filter_value(title)));
+        }
+        let mut usage = None;
+        if let Some(container) = query.field(Filter::Container) {
+            let (sources, u) = self.sources_named(container).await?;
+            usage = Some(u);
+            if sources.is_empty() {
+                return Ok(Response::with_usage(
+                    Page::new(Vec::new(), Some(0), None),
+                    u,
+                ));
+            }
+            filters.push(format!("primary_location.source.id:{}", sources.join("|")));
         }
 
         let mut params: Vec<(&str, String)> = Vec::new();
+        // Relevance is the default order whenever there is text to rank by;
+        // asking for it without any is an error.
+        let sort = match query.sort {
+            Sort::Relevance => None,
+            Sort::Newest => Some("publication_date:desc"),
+            Sort::MostCited => Some("cited_by_count:desc"),
+            _ => return Err(Error::Unsupported("OpenAlex sort")),
+        };
+        if let Some(sort) = sort.filter(|_| !query.extra.contains_key("sort")) {
+            params.push(("sort", sort.to_owned()));
+        }
         for (key, value) in &query.extra {
             match key.as_str() {
                 "filter" => filters.push(value.clone()),
@@ -347,9 +415,12 @@ impl Provider for OpenAlex {
         }
         params.extend(page_params(&query.page));
 
-        let (hits, list, usage) = self.list(&params).await?;
+        let (hits, list, u) = self.list(&params).await?;
         let page = Page::new(hits, list.meta.count, list.meta.next_cursor.map(Cursor));
-        Ok(Response::with_usage(page, usage))
+        Ok(Response::with_usage(
+            page,
+            usage.map_or(u, |s: Usage| s.then(u)),
+        ))
     }
 }
 

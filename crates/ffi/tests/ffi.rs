@@ -1,10 +1,13 @@
 //! The handle as an app sees it, without the network: typed answers,
 //! offline from the cache, and awaitable from any executor.
 
+use std::collections::HashMap;
+
 use aspero_ffi::records::ReadError;
 use aspero_ffi::records::{
     Author, BibFormat, BibProblem, CitationManager, CiteFormat, Claim, ErrorKind, ExportFormat,
-    KeyStatus, LookupStatus, Reason, SearchRequest, StyleError, StyleSource, Verdict, Work,
+    KeyStatus, LookupStatus, Reason, SearchField, SearchFilter, SearchRequest, SearchSort,
+    StyleError, StyleSource, Verdict, Work,
 };
 use aspero_ffi::{Aspero, AsperoError, CallToken, Config, Patience};
 
@@ -164,6 +167,7 @@ fn works_export_as_bibtex_and_ris() {
         notices: Vec::new(),
         notice_for: Vec::new(),
         open_access: None,
+        cited_by_count: None,
         fetched_at: std::time::SystemTime::UNIX_EPOCH,
         json: "{}".into(),
     };
@@ -209,6 +213,7 @@ fn work(title: &str, author: &str, year: i16) -> Work {
         notices: Vec::new(),
         notice_for: Vec::new(),
         open_access: None,
+        cited_by_count: None,
         fetched_at: std::time::SystemTime::UNIX_EPOCH,
         json: "{}".into(),
     }
@@ -379,21 +384,95 @@ fn a_cancelled_token_ends_calls_at_once() {
     assert!(matches!(result, Err(AsperoError::Cancelled)));
 }
 
-#[test]
-fn failed_searches_say_why() {
-    let request = SearchRequest {
-        text: "deep learning".into(),
+/// A request as the bindings' defaults make it.
+fn search_request(text: &str) -> SearchRequest {
+    SearchRequest {
+        text: text.into(),
         year_from: None,
         year_to: None,
         work_type: None,
         open_access_only: false,
-        limit: 5,
+        limit: 10,
         source: None,
         cursor: None,
+        author: None,
+        title: None,
+        container: None,
+        sort: None,
+        extra: HashMap::new(),
+    }
+}
+
+#[test]
+fn failed_searches_say_why() {
+    let request = SearchRequest {
+        limit: 5,
+        ..search_request("deep learning")
     };
     let found = block_on(aspero(None).search(request, Patience::Offline, None)).unwrap();
     assert!(found.hits.is_empty());
     assert_eq!(found.failure.unwrap().kind, ErrorKind::NotCached);
+}
+
+#[test]
+fn the_first_searching_source_is_the_one_search_picks() {
+    let aspero = aspero(None);
+    let sources = aspero.search_capabilities();
+    let names: Vec<&str> = sources.iter().map(|s| s.source.as_str()).collect();
+    assert_eq!(
+        names,
+        [
+            "openalex",
+            "crossref",
+            "datacite",
+            "europepmc",
+            "openlibrary"
+        ]
+    );
+    let found = block_on(aspero.search(search_request("x"), Patience::Offline, None)).unwrap();
+    assert_eq!(found.failure.unwrap().provider.as_deref(), Some(names[0]));
+    assert!(sources.iter().all(|s| s.sorts[0] == SearchSort::Relevance));
+    let openlibrary = &sources[4];
+    assert_eq!(
+        openlibrary.fields,
+        [SearchField::Author, SearchField::Title]
+    );
+    assert_eq!(openlibrary.filters, [SearchFilter::Years]);
+    assert_eq!(
+        openlibrary.sorts,
+        [SearchSort::Relevance, SearchSort::Newest]
+    );
+}
+
+#[test]
+fn fields_alone_search_and_what_a_source_lacks_fails() {
+    let aspero = aspero(None);
+    let search = |request| {
+        block_on(aspero.search(request, Patience::Offline, None))
+            .unwrap()
+            .failure
+            .unwrap()
+            .kind
+    };
+    // Reaches the (empty) cache: nothing refused it.
+    let by_author = SearchRequest {
+        author: Some("LeCun".into()),
+        ..search_request("")
+    };
+    assert_eq!(search(by_author.clone()), ErrorKind::NotCached);
+    let at = |source: &str| Some(source.to_owned());
+    let in_journal = SearchRequest {
+        container: Some("Nature".into()),
+        source: at("openlibrary"),
+        ..by_author.clone()
+    };
+    assert_eq!(search(in_journal), ErrorKind::Unsupported);
+    let most_cited = SearchRequest {
+        sort: Some(SearchSort::MostCited),
+        source: at("openlibrary"),
+        ..by_author
+    };
+    assert_eq!(search(most_cited), ErrorKind::Unsupported);
 }
 
 #[test]

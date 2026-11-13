@@ -22,7 +22,7 @@ use aspero_core::http::path_segment;
 use aspero_core::{
     Capabilities, Cursor, Doi, Error, Field, FieldSet, Filter, Hit, HttpClient, HttpRequest,
     HttpResponse, IdKind, Lookup, Page, Provider, ProviderId, ResiliencePolicy, Response, Result,
-    SearchMode, SearchQuery, SourceRecord, WorkId,
+    SearchMode, SearchQuery, Sort, SourceRecord, WorkId,
 };
 use async_trait::async_trait;
 
@@ -35,6 +35,10 @@ pub const DEFAULT_BASE_URL: &str = "https://api.crossref.org";
 /// DOIs per batched `filter=doi:…,doi:…` call; keeps URLs a sane length.
 const MAX_BATCH: usize = 50;
 
+/// Sorts Crossref won't combine with cursor paging.
+const DATE_SORTS: [&str; 4] = ["issued", "published", "published-print", "published-online"];
+/// The deepest `offset` Crossref serves.
+const MAX_OFFSET: u64 = 10_000;
 /// Crossref's cap on `rows`.
 const MAX_ROWS: u32 = 1000;
 
@@ -72,7 +76,14 @@ impl Crossref {
         capabilities.search = true;
         capabilities.citation_search = true;
         capabilities.notices = true;
-        capabilities.search_filters = vec![Filter::Years, Filter::WorkType];
+        capabilities.search_filters = vec![
+            Filter::Years,
+            Filter::WorkType,
+            Filter::Author,
+            Filter::Title,
+            Filter::Container,
+        ];
+        capabilities.sorts = vec![Sort::Relevance, Sort::Newest, Sort::MostCited];
         Crossref {
             config,
             http,
@@ -256,25 +267,75 @@ impl Provider for Crossref {
             };
             params.push((field, text.to_owned()));
         }
+        // Field queries. `query.title` matches titles only, unlike
+        // `query.bibliographic` (Swagger docs; checked live 2026-11-13).
+        let fields = [
+            (Filter::Author, "query.author"),
+            (Filter::Title, "query.title"),
+            (Filter::Container, "query.container-title"),
+        ];
+        for (field, param) in fields {
+            if let Some(value) = query.field(field) {
+                params.push((param, value.to_owned()));
+            }
+        }
         if !filters.is_empty() {
             params.push(("filter", filters.join(",")));
         }
         // Cursor paging silently drops relevance order (observed 2026-11-10:
         // the right match at 92.1 vanished from the top 3), so ask for it
         // explicitly whenever there is text to rank by.
-        let has_query = params.iter().any(|(k, _)| k.starts_with("query"));
-        if has_query && !params.iter().any(|(k, _)| *k == "sort") {
-            params.push(("sort", "score".into()));
+        let sort = match query.sort {
+            Sort::Relevance => {
+                let has_query = params.iter().any(|(k, _)| k.starts_with("query"));
+                has_query.then_some("score")
+            }
+            Sort::Newest => Some("published"),
+            Sort::MostCited => Some("is-referenced-by-count"),
+            _ => return Err(Error::Unsupported("Crossref sort")),
+        };
+        if let Some(sort) = sort.filter(|_| !params.iter().any(|(k, _)| *k == "sort")) {
+            params.push(("sort", sort.into()));
             params.push(("order", "desc".into()));
         }
-        params.push(("rows", query.page.limit.clamp(1, MAX_ROWS).to_string()));
-        let cursor = query.page.cursor.as_ref().map_or("*", |c| c.0.as_str());
-        params.push(("cursor", cursor.to_owned()));
+        let rows = query.page.limit.clamp(1, MAX_ROWS);
+        params.push(("rows", rows.to_string()));
+        // Crossref refuses date sorts with a cursor, so those page by offset,
+        // carried in our cursor as `offset:N`. Its order among works of one
+        // date isn't stable between requests, so such pages may repeat or
+        // skip them; one sort key leaves no tie-break to ask for.
+        let by_date = params
+            .iter()
+            .any(|(k, v)| *k == "sort" && DATE_SORTS.contains(&v.as_str()));
+        let offset = match &query.page.cursor {
+            Some(c) if by_date => {
+                c.0.strip_prefix("offset:")
+                    .and_then(|n| n.parse::<u64>().ok())
+                    .ok_or_else(|| Error::BadRequest("not a Crossref offset cursor".into()))?
+            }
+            _ => 0,
+        };
+        match by_date {
+            true => params.push(("offset", offset.to_string())),
+            false => {
+                let cursor = query.page.cursor.as_ref().map_or("*", |c| c.0.as_str());
+                params.push(("cursor", cursor.to_owned()));
+            }
+        }
 
         let (hits, list) = self.list(&params).await?;
         // Crossref keeps returning a cursor after the last page; an empty
         // page is the real end.
-        let next = list.next_cursor.filter(|_| !hits.is_empty()).map(Cursor);
+        let next = match by_date {
+            true => {
+                let next = offset + hits.len() as u64;
+                let more = !hits.is_empty()
+                    && list.total_results.is_none_or(|total| next < total)
+                    && next <= MAX_OFFSET;
+                more.then(|| Cursor(format!("offset:{next}")))
+            }
+            false => list.next_cursor.filter(|_| !hits.is_empty()).map(Cursor),
+        };
         Ok(Response::new(Page::new(hits, list.total_results, next)))
     }
 }

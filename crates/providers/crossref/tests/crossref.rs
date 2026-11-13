@@ -5,7 +5,7 @@ use std::time::Duration;
 
 use aspero_core::testing::{FIXTURE_TIME, ReplayClient, block_on, fixture, response};
 use aspero_core::{
-    Error, FieldSet, HttpResponse, Provider, SearchQuery, WorkId, WorkType, YearRange,
+    Error, FieldSet, HttpResponse, Provider, SearchQuery, Sort, WorkId, WorkType, YearRange,
 };
 use aspero_crossref::{Crossref, CrossrefConfig};
 
@@ -216,6 +216,116 @@ fn query_extras_pass_through_and_unknown_extras_are_rejected() {
     q.extra.insert("select".into(), "DOI".into());
     assert!(matches!(block_on(cr.search(&q)), Err(Error::BadRequest(_))));
     assert_eq!(http.requests().len(), 1);
+}
+
+fn empty_page() -> HttpResponse {
+    response(
+        200,
+        &[],
+        r#"{"status": "ok", "message": {"total-results": 0, "items": []}}"#,
+    )
+}
+
+#[test]
+fn fields_become_field_queries_ranked_by_score() {
+    let (cr, http) = provider([recorded("works_search_fields")]);
+    let mut q = SearchQuery::new("");
+    q.author = Some("LeCun".into());
+    q.title = Some("Deep learning".into());
+    q.container = Some(" Nature ".into());
+    q.page.limit = 5;
+    let page = block_on(cr.search(&q)).unwrap().value;
+    let first = &page.hits[0].record;
+    assert_eq!(first.ids, [id("10.1038/nature14539")]);
+    let scores: Vec<f64> = page.hits.iter().map(|h| h.score.unwrap()).collect();
+    assert!(scores.is_sorted_by(|a, b| a >= b), "{scores:?}");
+    assert_eq!(
+        query(&http, 0),
+        [
+            pair("query.author", "LeCun"),
+            pair("query.title", "Deep learning"),
+            pair("query.container-title", "Nature"),
+            pair("sort", "score"),
+            pair("order", "desc"),
+            pair("rows", "5"),
+            pair("cursor", "*"),
+            pair("mailto", "test@example.org"),
+        ]
+    );
+}
+
+#[test]
+fn newest_first_sorts_by_published() {
+    let (cr, http) = provider([recorded("works_search_newest")]);
+    let mut q = SearchQuery::new("deep learning");
+    q.sort = Sort::Newest;
+    q.page.limit = 3;
+    let page = block_on(cr.search(&q)).unwrap().value;
+    assert_eq!(
+        query(&http, 0),
+        [
+            pair("query", "deep learning"),
+            pair("sort", "published"),
+            pair("order", "desc"),
+            pair("rows", "3"),
+            pair("offset", "0"),
+            pair("mailto", "test@example.org"),
+        ]
+    );
+    assert_eq!(page.hits.len(), 3);
+    // Crossref refuses date sorts with a cursor: the next page is by offset.
+    assert_eq!(page.next.map(|c| c.0).as_deref(), Some("offset:3"));
+}
+
+#[test]
+fn most_cited_first_sorts_by_references_to_the_work() {
+    let (cr, http) = provider([recorded("works_search_most_cited")]);
+    let mut q = SearchQuery::new("deep learning");
+    q.sort = Sort::MostCited;
+    q.page.limit = 3;
+    let page = block_on(cr.search(&q)).unwrap().value;
+    assert_eq!(
+        query(&http, 0),
+        [
+            pair("query", "deep learning"),
+            pair("sort", "is-referenced-by-count"),
+            pair("order", "desc"),
+            pair("rows", "3"),
+            pair("cursor", "*"),
+            pair("mailto", "test@example.org"),
+        ]
+    );
+    let counts: Vec<u64> = page
+        .hits
+        .iter()
+        .map(|h| h.record.work.cited_by_count.unwrap())
+        .collect();
+    assert!(counts.is_sorted_by(|a, b| a >= b), "{counts:?}");
+}
+
+#[test]
+fn a_sort_given_as_an_extra_wins() {
+    let (cr, http) = provider([empty_page()]);
+    let mut q = SearchQuery::new("deep learning");
+    q.sort = Sort::MostCited;
+    q.extra.insert("sort".into(), "deposited".into());
+    block_on(cr.search(&q)).unwrap();
+    let sort: Vec<_> = query(&http, 0)
+        .into_iter()
+        .filter(|(k, _)| k == "sort" || k == "order")
+        .collect();
+    assert_eq!(sort, [pair("sort", "deposited")]);
+}
+
+#[test]
+fn citation_text_and_a_title_are_separate_queries() {
+    let (cr, http) = provider([empty_page()]);
+    let mut q = SearchQuery::citation("LeCun Y. Nature. 2015");
+    q.title = Some("Deep learning".into());
+    block_on(cr.search(&q)).unwrap();
+    let params = query(&http, 0);
+    assert!(params.contains(&pair("query.bibliographic", "LeCun Y. Nature. 2015")));
+    assert!(params.contains(&pair("query.title", "Deep learning")));
 }
 
 #[test]

@@ -173,19 +173,25 @@ Examples:
         ids: Vec<String>,
     },
 
-    /// Search one provider by keywords.
+    /// Search one provider by keywords, author, title or journal.
     #[command(after_help = "\
 Searches are not interchangeable across providers (rankings differ), so one
 provider answers: --source, or the first that can.
 
 Filters a provider can't apply are reported in `ignored_filters`, never
-silently dropped. OpenAlex searches cost $0.001 each.
+silently dropped. A provider that can't search by --author, --title,
+--container or the --sort asked for fails instead. OpenAlex searches cost
+$0.001 each, and a --container search one more.
 
 Examples:
   aspero search \"retrieval augmented generation\" --year 2020.. --limit 5
   aspero search transformer --source crossref --type article-journal
+  aspero search --author lecun --title \"deep learning\" --sort most-cited
   aspero search \"protein folding\" --oa --cursor <next_cursor from last page>")]
     Search {
+        /// Keywords; may be left out when --author, --title or --container
+        /// is given.
+        #[arg(required_unless_present_any = ["author", "title", "container"], default_value = "")]
         query: String,
         #[command(flatten)]
         options: SearchOptions,
@@ -364,6 +370,15 @@ Examples:
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub enum SortBy {
+    /// Best match first.
+    Relevance,
+    /// Most recently published first.
+    Newest,
+    MostCited,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
 pub enum FailOn {
     Error,
     Warning,
@@ -432,6 +447,18 @@ pub struct SearchOptions {
     /// Only open-access works.
     #[arg(long)]
     pub oa: bool,
+    /// An author's name.
+    #[arg(long)]
+    pub author: Option<String>,
+    /// Words of the title.
+    #[arg(long)]
+    pub title: Option<String>,
+    /// Where the work appeared: the journal, or the book for a chapter.
+    #[arg(long, visible_alias = "journal")]
+    pub container: Option<String>,
+    /// Order of the hits.
+    #[arg(long, value_enum, default_value_t = SortBy::Relevance)]
+    pub sort: SortBy,
     /// Results per page.
     #[arg(long, default_value_t = 10)]
     pub limit: u32,

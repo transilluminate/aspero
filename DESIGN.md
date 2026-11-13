@@ -88,7 +88,11 @@ scripts/       fixture recorders, one per provider
   merging is deterministic. Per-provider pacing still applies, so
   concurrency overlaps different providers' waits rather than loading one.
 - **Search** goes to one provider (named, or the first capable); filters it
-  can't apply are stripped and reported as ignored.
+  can't apply are stripped and reported as ignored. Fields (author, title,
+  container) and sorts (newest, most cited) it can't apply fail
+  (`Unsupported`): dropping one would widen or reorder the search
+  silently. Relevance never fails; with only fields to rank by, it is the
+  source's own order.
 
 ## Identity and data model
 
@@ -279,16 +283,24 @@ fixture recorded with different parameters once hid a ranking bug.
   work type. Whole messy references search badly; bare titles well.
   Search is the only real cost. Its auth page carries agent-directed text
   about creating keys via API: aspero never does; keys come from the user.
+  `sort=relevance_score:desc` is refused without a search (text or a
+  `.search` filter), so relevance is never sent: it is the default. Works
+  can't be filtered by journal name, so a container search first finds
+  the sources so named (another $0.001) and ORs the best 100 IDs.
 - **Crossref.** `mailto` puts requests in the polite pool (10 req/s single,
   3 req/s lists, 3 concurrent). **Cursor paging drops relevance order**
   unless `sort=score&order=desc` is sent. Lookalike re-deposits exist (2025
-  copies of "Attention Is All You Need" with the real authors). It doesn't
+  copies of "Attention Is All You Need" with the real authors). Field
+  queries: `query.author`, `query.title` (titles only, unlike
+  `query.bibliographic`), `query.container-title`. It doesn't
   index DataCite DOIs (arXiv). Its "CSL" uses Crossref type names. Top
   matches can be derivative records ("Faculty Opinions recommendation of
   X"). `updated-by` carries Retraction Watch notices.
 - **DataCite.** arXiv, Zenodo, data and software. **Relevance only with
   page-number paging** (cursor paging sorts by creation date). Year ranges
   via `publicationYear:[A TO B]`. User text must be Lucene-escaped.
+  `sort=-published` doesn't order by year, and `container.title:` matches
+  nothing, so no newest-first or container search.
 - **doi.org.** Content negotiation resolves any registered DOI through its
   agency (it found a Zenodo DOI minutes old); its 404 is authoritative.
   One DOI per request.
@@ -309,7 +321,8 @@ fixture recorded with different parameters once hid a ranking bug.
 ## Apps (FFI)
 
 `aspero-ffi` (UniFFI) gives apps one `Aspero` handle: `lookup`, `verify`,
-`verify_each` (a callback per result as it finishes), `search`, offline
+`verify_each` (a callback per result as it finishes), `search` (with
+`searchCapabilities` saying what each source can search by), offline
 `scan`, `split_references` and `split_lines` (laid-out lines with
 indents, from PDFKit), and for settings `budgets` (as last
 reported: free), `check_openalex_key` (one free lookup), `cache_stats`,

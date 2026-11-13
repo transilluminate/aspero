@@ -25,6 +25,8 @@ requests=(
   "works_batch_pmid  /works?filter=pmid:26017442&per-page=100"
   "works_search      /works?search=attention%20is%20all%20you%20need&per-page=5"
   "works_search_filtered /works?search=transformer&filter=from_publication_date:2017-01-01,to_publication_date:2018-12-31,is_oa:true,type:preprint&per-page=3&cursor=*"
+  "works_search_fields /works?sort=cited_by_count:desc&filter=raw_author_name.search:lecun,title.search:deep%20learning&per-page=3&cursor=*"
+  "sources_named     /sources?filter=display_name.search:nature%20machine&select=id&per-page=100"
   "bad_filter        /works?filter=no_such_field:1"
   "work_retracted    /works/doi:10.1016/S0140-6736(97)11096-0"
 )

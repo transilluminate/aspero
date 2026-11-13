@@ -27,6 +27,8 @@ pub fn work(record: &SourceRecord, full: bool) -> Value {
     put("issued", w.issued.map(|d| json!(d.to_string())));
     put("type", w.work_type.as_ref().map(|t| json!(t.as_csl())));
     put("container", w.container_title.as_ref().map(|c| json!(c)));
+    // Often what tells near-identical hits apart.
+    put("cited_by_count", w.cited_by_count.map(|c| json!(c)));
     put("url", w.url.as_ref().map(|u| json!(u)));
     // Never lean enough to leave out: a retracted work is not citable.
     put("updates", (!w.updates.is_empty()).then(|| json!(w.updates)));

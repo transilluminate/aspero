@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use aspero_core::testing::{ReplayClient, block_on, fixture, response};
 use aspero_core::{
-    Cursor, Error, FieldSet, HttpResponse, Provider, SearchQuery, WorkId, WorkType, YearRange,
+    Cursor, Error, FieldSet, HttpResponse, Provider, SearchQuery, Sort, WorkId, WorkType, YearRange,
 };
 use aspero_datacite::{Datacite, DataciteConfig};
 
@@ -111,6 +111,13 @@ fn search_ranks_by_relevance_with_page_number_paging() {
         titles.iter().all(|t| t == "attention is all you need"),
         "{titles:?}"
     );
+    // DataCite's 0 is "no citations it tracks", so none.
+    let counts: Vec<Option<u64>> = page
+        .hits
+        .iter()
+        .map(|h| h.record.work.cited_by_count)
+        .collect();
+    assert_eq!(counts, [None, None, Some(69)]);
 }
 
 #[test]
@@ -142,6 +149,48 @@ fn query_syntax_in_user_text_is_escaped() {
     let (dc, http) = provider([recorded("search")]);
     block_on(dc.search(&SearchQuery::new("BERT: pre-training (deep)"))).unwrap();
     assert!(query(&http, 0).contains(&pair("query", r"(BERT\: pre\-training \(deep\))")));
+}
+
+fn empty_page() -> HttpResponse {
+    response(
+        200,
+        &[],
+        r#"{"data": [], "meta": {"total": 0, "totalPages": 0}}"#,
+    )
+}
+
+#[test]
+fn authors_and_titles_are_escaped_field_clauses() {
+    let (dc, http) = provider([empty_page()]);
+    let mut q = SearchQuery::new("");
+    q.author = Some("Vaswani".into());
+    q.title = Some("Attention: all you need".into());
+    block_on(dc.search(&q)).unwrap();
+    let params = query(&http, 0);
+    assert_eq!(
+        params[0],
+        pair(
+            "query",
+            r"creators.name:(Vaswani) AND titles.title:(Attention\: all you need)"
+        )
+    );
+    assert!(params.contains(&pair("sort", "relevance")));
+}
+
+#[test]
+fn most_cited_first_is_the_only_other_sort() {
+    let (dc, http) = provider([empty_page()]);
+    let mut q = SearchQuery::new("transformer");
+    q.sort = Sort::MostCited;
+    block_on(dc.search(&q)).unwrap();
+    assert!(query(&http, 0).contains(&pair("sort", "-citation-count")));
+
+    q.sort = Sort::Newest;
+    assert!(matches!(
+        block_on(dc.search(&q)),
+        Err(Error::Unsupported(_))
+    ));
+    assert_eq!(http.requests().len(), 1);
 }
 
 #[test]

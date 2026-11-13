@@ -305,6 +305,16 @@ impl Person {
         }
     }
 
+    /// The name as BibTeX and RIS write it: "LeCun, Yann"; an organisation
+    /// as written.
+    pub fn inverted(&self) -> Option<String> {
+        match self.parts() {
+            Some((family, Some(given))) => Some(format!("{family}, {given}")),
+            Some((family, None)) => Some(family),
+            None => self.display_name(),
+        }
+    }
+
     /// The best single-string name: "Given Family", or the literal.
     pub fn display_name(&self) -> Option<String> {
         match (&self.given, &self.family, &self.literal) {
@@ -408,6 +418,16 @@ pub fn tidy_abstract(text: &str) -> String {
         }
     }
     text.to_owned()
+}
+
+/// A bare ORCID iD, as [`Person::orcid`] holds it, from one written bare
+/// or as an `orcid.org` URL. `None` if nothing is left.
+pub fn orcid(raw: &str) -> Option<String> {
+    let bare = ["https://orcid.org/", "http://orcid.org/"]
+        .iter()
+        .find_map(|p| raw.strip_prefix(p))
+        .unwrap_or(raw);
+    (!bare.is_empty()).then(|| bare.to_owned())
 }
 
 /// Years a work could have been published in: a four-digit number in
@@ -607,6 +627,29 @@ mod tests {
     }
 
     #[test]
+    fn names_invert_family_first() {
+        let inverted = |p: Person| p.inverted();
+        assert_eq!(
+            inverted(Person::new("Ada", "Lovelace")).as_deref(),
+            Some("Lovelace, Ada")
+        );
+        assert_eq!(
+            inverted(Person::literal("Vincent van Gogh")).as_deref(),
+            Some("van Gogh, Vincent")
+        );
+        let family_only = Person {
+            family: Some("Plato".into()),
+            ..Person::default()
+        };
+        assert_eq!(inverted(family_only).as_deref(), Some("Plato"));
+        assert_eq!(
+            inverted(Person::literal("World Health Organization")).as_deref(),
+            Some("World Health Organization")
+        );
+        assert_eq!(inverted(Person::default()), None);
+    }
+
+    #[test]
     fn partial_dates_parse_validate_and_round_trip() {
         for s in ["2017", "2017-06", "2017-06-12", "2024-02-29"] {
             assert_eq!(s.parse::<PartialDate>().unwrap().to_string(), s);
@@ -669,6 +712,19 @@ mod tests {
             "Abstraction is useful"
         );
         assert_eq!(tidy_abstract("We show"), "We show");
+    }
+
+    #[test]
+    fn orcid_drops_the_url() {
+        for raw in [
+            "0000-0002-1825-0097",
+            "https://orcid.org/0000-0002-1825-0097",
+            "http://orcid.org/0000-0002-1825-0097",
+        ] {
+            assert_eq!(orcid(raw).as_deref(), Some("0000-0002-1825-0097"), "{raw}");
+        }
+        assert_eq!(orcid("https://orcid.org/"), None);
+        assert_eq!(orcid(""), None);
     }
 
     #[test]

@@ -28,9 +28,6 @@ pub const DEFAULT_BASE_URL: &str = "https://doi.org";
 
 const CSL_JSON: &str = "application/vnd.citationstyles.csl+json";
 
-/// arXiv's DataCite prefix: `10.48550/arXiv.<id>`.
-const ARXIV_DOI_PREFIX: &str = "10.48550";
-
 #[derive(Debug, Clone)]
 #[non_exhaustive]
 pub struct DoiConfig {
@@ -114,10 +111,7 @@ fn ids(asked: &Doi, item: &CslItem) -> Vec<WorkId> {
         .as_deref()
         .and_then(|d| d.parse::<Doi>().ok())
         .unwrap_or_else(|| asked.clone());
-    let arxiv = (doi.prefix() == ARXIV_DOI_PREFIX)
-        .then(|| doi.suffix().strip_prefix("arxiv.")?.parse().ok())
-        .flatten()
-        .map(WorkId::Arxiv);
+    let arxiv = doi.arxiv().map(WorkId::Arxiv);
     std::iter::once(WorkId::Doi(doi)).chain(arxiv).collect()
 }
 
@@ -147,9 +141,7 @@ impl aspero_core::Provider for DoiOrg {
         for id in ids {
             let doi = match id {
                 WorkId::Doi(doi) => doi.clone(),
-                WorkId::Arxiv(arxiv) => {
-                    format!("{ARXIV_DOI_PREFIX}/arxiv.{}", arxiv.id()).parse()?
-                }
+                WorkId::Arxiv(arxiv) => arxiv.doi(),
                 _ => return Err(Error::Unsupported("doi.org lookup of non-DOI identifiers")),
             };
             lookups.push(Lookup {

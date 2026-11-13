@@ -1,13 +1,16 @@
 use std::borrow::Cow;
 use std::fmt;
 
-use super::IdKind;
 use super::syntax::{
     IdSyntax, clean_pasted, impl_id_traits, is_digits, strip_kind_prefix, strip_prefix_ci,
 };
 use super::url::Url;
+use super::{ArxivId, IdKind};
 
 const INFO_PREFIX: &str = "info:doi/";
+
+/// arXiv's DataCite prefix.
+const ARXIV_DOI_PREFIX: &str = "10.48550";
 
 /// Sentence punctuation that clings to DOIs copied from prose ("see
 /// 10.1145/3368089."). Not `)`: SICI-style suffixes can legitimately end in one.
@@ -42,6 +45,27 @@ impl Doi {
 
     fn split(&self) -> (&str, &str) {
         self.0.split_once('/').expect("canonical DOI contains '/'")
+    }
+
+    /// Whether this is under arXiv's DataCite prefix.
+    pub fn is_arxiv(&self) -> bool {
+        self.prefix() == ARXIV_DOI_PREFIX
+    }
+
+    /// The arXiv ID behind an arXiv DataCite DOI, version kept if it has one.
+    pub fn arxiv(&self) -> Option<ArxivId> {
+        if !self.is_arxiv() {
+            return None;
+        }
+        self.suffix().strip_prefix("arxiv.")?.parse().ok()
+    }
+}
+
+impl ArxivId {
+    /// arXiv's DataCite DOI, `10.48550/arxiv.<id>`, which has no version.
+    pub fn doi(&self) -> Doi {
+        // Already canonical: arXiv IDs are lowercase.
+        Doi(format!("{ARXIV_DOI_PREFIX}/arxiv.{}", self.id()))
     }
 }
 
@@ -300,6 +324,47 @@ mod tests {
         let d = doi("10.48550/arXiv.1706.03762").unwrap();
         assert_eq!(d.prefix(), "10.48550");
         assert_eq!(d.suffix(), "arxiv.1706.03762");
+    }
+
+    #[test]
+    fn arxiv_doi_to_arxiv_id() {
+        let arxiv = |s: &str| doi(s).unwrap().arxiv().map(|a| a.to_string());
+        assert_eq!(
+            arxiv("10.48550/arXiv.1706.03762").as_deref(),
+            Some("1706.03762")
+        );
+        assert_eq!(
+            arxiv("10.48550/arxiv.1706.03762v2").as_deref(),
+            Some("1706.03762v2")
+        );
+        assert_eq!(
+            arxiv("10.48550/arXiv.hep-th/9901001").as_deref(),
+            Some("hep-th/9901001")
+        );
+        assert!(doi("10.48550/arxiv.x").unwrap().is_arxiv());
+        assert_eq!(arxiv("10.48550/arxiv.x"), None);
+        assert_eq!(arxiv("10.48550/zenodo.1706.03762"), None);
+        assert!(!doi("10.1038/nature14539").unwrap().is_arxiv());
+        assert_eq!(arxiv("10.1038/nature14539"), None);
+    }
+
+    #[test]
+    fn arxiv_id_to_doi() {
+        let to_doi = |s: &str| s.parse::<ArxivId>().unwrap().doi();
+        for (id, expected) in [
+            ("1706.03762", "10.48550/arxiv.1706.03762"),
+            ("1706.03762v5", "10.48550/arxiv.1706.03762"),
+            ("hep-th/9901001", "10.48550/arxiv.hep-th/9901001"),
+            ("Hep-Th/9901001v2", "10.48550/arxiv.hep-th/9901001"),
+        ] {
+            let d = to_doi(id);
+            assert_eq!(d.as_str(), expected, "{id}");
+            assert_eq!(doi(expected).unwrap(), d, "{id} is canonical");
+            assert_eq!(
+                d.arxiv(),
+                Some(id.parse::<ArxivId>().unwrap().unversioned())
+            );
+        }
     }
 
     #[test]

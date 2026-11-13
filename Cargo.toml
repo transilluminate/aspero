@@ -13,7 +13,7 @@ members = [
 ]
 
 [workspace.package]
-version = "0.14.0"
+version = "0.15.0"
 edition = "2024"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/transilluminate/aspero"
@@ -21,18 +21,18 @@ homepage = "https://github.com/transilluminate/aspero"
 authors = ["Adrian Robinson"]
 
 [workspace.dependencies]
-aspero-core = { path = "crates/core", version = "0.14.0" }
-aspero-bib = { path = "crates/bib", version = "0.14.0" }
-aspero-store = { path = "crates/store", version = "0.14.0" }
-aspero-engine = { path = "crates/engine", version = "0.14.0" }
-aspero-json = { path = "crates/json", version = "0.14.0" }
-aspero-mcp = { path = "crates/mcp", version = "0.14.0" }
-aspero-openalex = { path = "crates/providers/openalex", version = "0.14.0" }
-aspero-crossref = { path = "crates/providers/crossref", version = "0.14.0" }
-aspero-datacite = { path = "crates/providers/datacite", version = "0.14.0" }
-aspero-doi = { path = "crates/providers/doi", version = "0.14.0" }
-aspero-europepmc = { path = "crates/providers/europepmc", version = "0.14.0" }
-aspero-openlibrary = { path = "crates/providers/openlibrary", version = "0.14.0" }
+aspero-core = { path = "crates/core", version = "0.15.0" }
+aspero-bib = { path = "crates/bib", version = "0.15.0" }
+aspero-store = { path = "crates/store", version = "0.15.0" }
+aspero-engine = { path = "crates/engine", version = "0.15.0" }
+aspero-json = { path = "crates/json", version = "0.15.0" }
+aspero-mcp = { path = "crates/mcp", version = "0.15.0" }
+aspero-openalex = { path = "crates/providers/openalex", version = "0.15.0" }
+aspero-crossref = { path = "crates/providers/crossref", version = "0.15.0" }
+aspero-datacite = { path = "crates/providers/datacite", version = "0.15.0" }
+aspero-doi = { path = "crates/providers/doi", version = "0.15.0" }
+aspero-europepmc = { path = "crates/providers/europepmc", version = "0.15.0" }
+aspero-openlibrary = { path = "crates/providers/openlibrary", version = "0.15.0" }
 
 async-trait = "0.1.92"
 biblatex = "0.12.0"

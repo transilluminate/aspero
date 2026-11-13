@@ -353,6 +353,45 @@ async fn records_sharing_an_identifier_merge_into_one_candidate() {
 }
 
 #[tokio::test]
+async fn a_record_linking_two_candidates_merges_them() {
+    // The citation match finds the DOI's record, then a search the
+    // PMID's, then one with both.
+    let doi = work(
+        "crossref",
+        &["10.1038/nature14539"],
+        "Deep learning",
+        &["LeCun"],
+        2015,
+    );
+    let pmid = work(
+        "openalex",
+        &["pmid:26017442"],
+        "Deep learning",
+        &["LeCun"],
+        2015,
+    );
+    let both = work(
+        "openalex",
+        &["10.1038/nature14539", "pmid:26017442"],
+        "Deep learning",
+        &["LeCun"],
+        2015,
+    );
+    let openalex = Arc::new(Scripted::new("openalex").keyword().with(vec![pmid, both]));
+    let crossref = Arc::new(Scripted::new("crossref").matcher(vec![doi]));
+    let engine = engine(vec![openalex, crossref]);
+
+    let report = engine
+        .resolve(&Claim::from_text("Deep learning, LeCun 2015"), 5)
+        .await;
+
+    assert_eq!(report.candidates.len(), 1, "{:#?}", report.candidates);
+    let c = &report.candidates[0];
+    assert_eq!(c.ids.len(), 2);
+    assert_eq!(c.sightings.len(), 3);
+}
+
+#[tokio::test]
 async fn provider_failures_make_an_empty_result_unverifiable() {
     struct Down(Capabilities);
     #[async_trait]

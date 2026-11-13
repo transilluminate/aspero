@@ -99,6 +99,41 @@ impl Candidate {
     }
 }
 
+/// Merges another record of the same work into a candidate: its
+/// identifiers and notices, every year reported, a free copy's location,
+/// and the record itself if it matches the claim better.
+fn absorb(
+    claim: &Claim,
+    c: &mut Candidate,
+    ids: &[WorkId],
+    updates: &[Update],
+    mut record: SourceRecord,
+) {
+    for id in ids.iter().chain(&record.ids) {
+        if !c.ids.iter().any(|known| same_work_id(known, id)) {
+            c.ids.push(id.clone());
+        }
+    }
+    merge_updates(&mut c.updates, updates);
+    merge_updates(&mut c.updates, &record.work.updates);
+    // Pool the years every source reports (online-first vs print,
+    // editions), then keep the better-matching record.
+    let pooled: Vec<i16> = years(&c.record).chain(years(&record)).collect();
+    add_years(&mut c.record, &pooled);
+    add_years(&mut record, &pooled);
+    // And keep a free copy's location, whichever record wins.
+    let oa = |r: &SourceRecord| r.work.open_access.clone();
+    let known = oa(&c.record).or_else(|| oa(&record));
+    c.record.work.open_access.clone_from(&known);
+    record.work.open_access = record.work.open_access.take().or(known);
+    c.assessment = matching::assess(claim, &c.record);
+    let assessment = matching::assess(claim, &record);
+    if assessment.confidence > c.assessment.confidence {
+        c.record = record;
+        c.assessment = assessment;
+    }
+}
+
 /// Adds notices not already known. A detailed notice (with the notice's
 /// identifier) replaces a bare one of the same kind, such as OpenAlex's
 /// `is_retracted` flag.
@@ -431,40 +466,19 @@ struct Accumulator<'a> {
 
 impl Accumulator<'_> {
     /// Adds a record, merging it into an existing candidate that shares an
-    /// identifier.
-    fn add(&mut self, mut record: SourceRecord, sighting: Sighting) {
+    /// identifier, and then any other candidate the record links it to.
+    fn add(&mut self, record: SourceRecord, sighting: Sighting) {
+        let claim = self.claim;
         let candidates = &mut self.report.candidates;
-        let existing = candidates.iter_mut().find(|c| {
-            c.ids
-                .iter()
-                .any(|a| record.ids.iter().any(|b| same_work_id(a, b)))
-        });
-        let candidate = match existing {
-            Some(c) => {
-                for id in &record.ids {
-                    if !c.ids.iter().any(|known| same_work_id(known, id)) {
-                        c.ids.push(id.clone());
-                    }
-                }
+        let shares = |c: &Candidate, ids: &[WorkId]| {
+            c.ids.iter().any(|a| ids.iter().any(|b| same_work_id(a, b)))
+        };
+        let mut at = match candidates.iter().position(|c| shares(c, &record.ids)) {
+            Some(i) => {
+                let c = &mut candidates[i];
                 c.sightings.push(sighting);
-                merge_updates(&mut c.updates, &record.work.updates);
-                // Pool the years every source reports (online-first vs
-                // print, editions), then keep the better-matching record.
-                let pooled: Vec<i16> = years(&c.record).chain(years(&record)).collect();
-                add_years(&mut c.record, &pooled);
-                add_years(&mut record, &pooled);
-                // And keep a free copy's location, whichever record wins.
-                let oa = |r: &SourceRecord| r.work.open_access.clone();
-                let known = oa(&c.record).or_else(|| oa(&record));
-                c.record.work.open_access.clone_from(&known);
-                record.work.open_access = record.work.open_access.take().or(known);
-                c.assessment = matching::assess(self.claim, &c.record);
-                let assessment = matching::assess(self.claim, &record);
-                if assessment.confidence > c.assessment.confidence {
-                    c.record = record;
-                    c.assessment = assessment;
-                }
-                c
+                absorb(claim, c, &[], &[], record);
+                i
             }
             None => {
                 let mut updates = Vec::new();
@@ -473,14 +487,27 @@ impl Accumulator<'_> {
                     ids: record.ids.clone(),
                     updates,
                     sightings: vec![sighting],
-                    assessment: matching::assess(self.claim, &record),
+                    assessment: matching::assess(claim, &record),
                     record,
                 });
-                candidates.last_mut().expect("just pushed")
+                candidates.len() - 1
             }
         };
+        // A record carrying two candidates' identifiers (a DOI one source
+        // knows, a PMID another does) makes them one work.
+        while let Some(j) =
+            (0..candidates.len()).find(|&j| j != at && shares(&candidates[j], &candidates[at].ids))
+        {
+            let (keep, gone) = (at.min(j), at.max(j));
+            let gone = candidates.remove(gone);
+            let c = &mut candidates[keep];
+            c.sightings.extend(gone.sightings);
+            absorb(claim, c, &gone.ids, &gone.updates, gone.record);
+            at = keep;
+        }
         // Judge claimed identifiers against everything known about the work.
-        candidate.assessment.ids = id_agreement(&self.claim.ids, &candidate.ids);
+        let candidate = &mut candidates[at];
+        candidate.assessment.ids = id_agreement(&claim.ids, &candidate.ids);
     }
 
     /// Adds one search's hits; returns the hits' titles.

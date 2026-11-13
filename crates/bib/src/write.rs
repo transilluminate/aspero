@@ -60,6 +60,8 @@ const STOP: [&str; 9] = ["a", "an", "the", "on", "of", "in", "and", "for", "to"]
 pub(crate) enum Name {
     Person {
         family: String,
+        // Read by citation styles' CSL-JSON.
+        #[cfg_attr(not(feature = "styles"), allow(dead_code))]
         given: Option<String>,
     },
     Whole(String),

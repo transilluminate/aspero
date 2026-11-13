@@ -93,6 +93,23 @@ scripts/       fixture recorders, one per provider
   (`Unsupported`): dropping one would widen or reorder the search
   silently. Relevance never fails; with only fields to rank by, it is the
   source's own order.
+- **Query trees** (`SearchQuery::tree`, core `query`): all, any and none
+  of terms (keywords, title, author, container, abstract, author id),
+  filters and relations, instead of the keywords and fields. The engine
+  normalises a tree (blank leaves and empty groups dropped, same-kind
+  groups flattened, an all or any of one node unwrapped), checks its
+  values (author ids, language codes, year ranges, identifiers), folds the
+  request's own filters in as more of all of it, and asks the provider's
+  `express`, which translates it or says why not: one decision behind
+  both `search` and the offline `search_supports`. Nothing in a tree is
+  ignored. `check_supported` holds what `Capabilities` alone decide
+  (fields, filters, relations, any, none, nesting); Lucene sources share
+  `render_lucene`. Relations name a work by any identifier: the engine
+  looks it up (the cache first) and searches by its OpenAlex work id,
+  asking again by DOI or PMID when the record found (Europe PMC's, for a
+  PMCID) has none. Newest first, a tree stops at this year unless a years
+  filter that bounds every hit (the tree itself or one of its top-level
+  all) has an upper year; years under any or none don't count.
 
 ## Identity and data model
 
@@ -283,6 +300,12 @@ fixture recorded with different parameters once hid a ranking bug.
   work type. Whole messy references search badly; bare titles well.
   Search is the only real cost. Its auth page carries agent-directed text
   about creating keys via API: aspero never does; keys come from the user.
+  Filters only AND; but `search=` and the `.search` filters take boolean
+  queries (`AND`, `OR`, `NOT`, quotes, brackets), `|` ORs one filter's
+  values and `!` negates a whole filter. So a tree's any must keep within
+  one text field or one filter, its none negates each node (not a year
+  range, nor an all across fields), and `cites:`/`cited_by:` take work
+  ids. ORCIDs match bare or as URLs.
   `sort=relevance_score:desc` is refused without a search (text or a
   `.search` filter), so relevance is never sent: it is the default. Works
   can't be filtered by journal name, so a container search first finds
@@ -300,17 +323,25 @@ fixture recorded with different parameters once hid a ranking bug.
   page-number paging** (cursor paging sorts by creation date). Year ranges
   via `publicationYear:[A TO B]`. User text must be Lucene-escaped.
   `sort=-published` doesn't order by year, and `container.title:` matches
-  nothing, so no newest-first or container search.
+  nothing, so no newest-first or container search. ORCIDs sit in
+  `creators.nameIdentifiers.nameIdentifier` mostly as URLs, some bare;
+  `language` holds `en` mostly, some `eng`: trees ask for both.
 - **doi.org.** Content negotiation resolves any registered DOI through its
   agency (it found a Zenodo DOI minutes old); its 404 is authoritative.
   One DOI per request.
 - **Europe PMC.** PMIDs, PMCIDs and NBK IDs (`BOOK_ID:`; StatPearls
   chapters have PMIDs too) — the only provider for them — biomedical
   abstracts, "Retracted Publication" flags. Cursor paging keeps relevance.
+  Full Lucene: `NOT` alone and nested; `LANG` takes MEDLINE's codes (`ger`,
+  `fre`), `AUTHORID` a bare ORCID (the URL finds nothing); "not
+  retracted" is `NOT PUB_TYPE:"Retracted Publication"`.
 - **Open Library.** Books: batched ISBN lookup, work search with every
   edition's year. Subtitles are separate fields (join them). Data quality
   varies: some ISBNs carry unrelated records, and works can merge editions
-  oddly, so scoring decides, not the identifier.
+  oddly, so scoring decides, not the identifier. `q` takes fielded Solr
+  queries (`title:`, `author_name:`, `language:fre`), but one that only
+  excludes fails (HTTP 500), so a tree's none needs something beside it
+  to find.
 - **DBLP.** REST API and mirrors sit behind a proof-of-work bot challenge;
   we don't solve it. The SPARQL endpoint answers programs but has no text
   index (title search is a 2–9 s scan of ~7M titles), so DBLP is not a
@@ -322,7 +353,8 @@ fixture recorded with different parameters once hid a ranking bug.
 
 `aspero-ffi` (UniFFI) gives apps one `Aspero` handle: `lookup`, `verify`,
 `verify_each` (a callback per result as it finishes), `search` (with
-`searchCapabilities` saying what each source can search by), offline
+`searchCapabilities` saying what each source can search by, and
+`searchSupports` whether it can search a query tree), offline
 `scan`, `split_references` and `split_lines` (laid-out lines with
 indents, from PDFKit), and for settings `budgets` (as last
 reported: free), `check_openalex_key` (one free lookup), `cache_stats`,

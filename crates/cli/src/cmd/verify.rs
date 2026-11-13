@@ -5,12 +5,12 @@ use std::io::IsTerminal;
 
 use aspero_core::{ProviderId, Usage};
 use aspero_engine::{Engine, Verdict, Verification};
-use aspero_json::ClaimInput;
+use aspero_json::{ClaimInput, InputClaim};
 use futures::StreamExt;
 use serde_json::{Value, json};
 
 use super::claim::claims;
-use super::{Failure, Out, merge_usage, print, print_line};
+use super::{Failure, Out, print, print_line};
 use crate::args::{ClaimArgs, Format};
 use crate::exit::Exit;
 use crate::output::{self, Level};
@@ -24,20 +24,7 @@ pub async fn run(engine: &Engine, args: ClaimArgs, out: Out) -> Result<Exit, Fai
         return Err(Failure::usage("no claims given"));
     }
 
-    let mut usage: Vec<(ProviderId, Usage)> = Vec::new();
-    // One batched lookup of every claimed identifier first; with the cache
-    // warm, claims are then verified several at a time.
-    let (positions, valid): (Vec<usize>, Vec<_>) = claims
-        .iter()
-        .enumerate()
-        .filter_map(|(i, c)| Some((i, c.claim.as_ref().ok()?.clone())))
-        .unzip();
-    if valid.len() > 1 {
-        for (p, u) in engine.prefetch(&valid).await.usage {
-            merge_usage(&mut usage, &p, u);
-        }
-    }
-
+    let (positions, valid) = InputClaim::valid(&claims);
     let total = claims.len();
     let show_progress = out.format == Format::Table && total > 1 && std::io::stderr().is_terminal();
     let mut results = Results::new(out.format, total, show_progress);
@@ -46,16 +33,20 @@ pub async fn run(engine: &Engine, args: ClaimArgs, out: Out) -> Result<Exit, Fai
         if let Err(e) = &claim.claim {
             let item = aspero_json::invalid_claim(claim.echo(), e);
             let text = format!("INVALID  {}\n  {e}\n", claim.input);
-            results.add(i, item, text, Exit::Usage);
+            results.add(
+                i,
+                Done {
+                    item,
+                    text,
+                    verdict: None,
+                },
+            );
         }
     }
-    let mut verified = std::pin::pin!(engine.verify_many(&valid, limit));
+    let mut verified = engine.verify_batch(&valid, limit);
     while let Some((k, v)) = verified.next().await {
         let i = positions[k];
         let claim = &claims[i];
-        for (p, u) in &v.report.usage {
-            merge_usage(&mut usage, p, *u);
-        }
         let mut item = aspero_json::verification(claim.echo(), &v, out.full);
         if out.format.is_export() {
             // The work the citation refers to, when that's known: verified,
@@ -70,7 +61,14 @@ pub async fn run(engine: &Engine, args: ClaimArgs, out: Out) -> Result<Exit, Fai
                     String::new()
                 }
             };
-            results.add(i, item, text, exit_for(v.verdict));
+            results.add(
+                i,
+                Done {
+                    item,
+                    text,
+                    verdict: Some(v.verdict),
+                },
+            );
             continue;
         }
         let mut text = verdict_text(&claim.input, &v);
@@ -78,22 +76,33 @@ pub async fn run(engine: &Engine, args: ClaimArgs, out: Out) -> Result<Exit, Fai
             && let Some(best) = v.best.map(|i| &v.report.candidates[i])
         {
             // Search under every identifier merged into the match.
-            let mut record = best.record.clone();
-            record.ids = best.ids.clone();
-            let fetched = engine.abstracts(&[&record]).await;
-            for (p, u) in &fetched.usage {
-                merge_usage(&mut usage, p, *u);
-            }
+            let fetched = engine.abstracts(&[&best.merged_record()]).await;
+            verified.add_usage(&fetched.usage);
             let found = fetched.found.into_iter().next().flatten();
             aspero_json::set_abstract(&mut item["match"]["work"], found.as_ref());
             text.push_str(&output::abstract_text(found.as_ref(), "  "));
             text.push('\n');
         }
-        results.add(i, item, text, exit_for(v.verdict));
+        results.add(
+            i,
+            Done {
+                item,
+                text,
+                verdict: Some(v.verdict),
+            },
+        );
     }
-    let exit = results.finish(&usage);
+    let exit = results.finish(verified.usage());
     print!("{}", export.finish());
     exit
+}
+
+/// One claim's result: its JSON, its text, and its verdict (`None` when
+/// the claim couldn't be read).
+struct Done {
+    item: Value,
+    text: String,
+    verdict: Option<Verdict>,
 }
 
 /// Results as claims complete: JSON lines at once, in any order (each
@@ -101,7 +110,7 @@ pub async fn run(engine: &Engine, args: ClaimArgs, out: Out) -> Result<Exit, Fai
 /// next; tables and documents at the end.
 struct Results {
     format: Format,
-    slots: Vec<Option<(Value, String)>>,
+    slots: Vec<Option<Done>>,
     /// The next claim to print as text.
     next: usize,
     done: usize,
@@ -121,22 +130,22 @@ impl Results {
         }
     }
 
-    fn add(&mut self, i: usize, item: Value, text: String, exit: Exit) {
-        self.exit = self.exit.worst(exit);
+    fn add(&mut self, i: usize, done: Done) {
+        self.exit = self.exit.worst(done.verdict.map_or(Exit::Usage, exit_for));
         self.done += 1;
         match self.format {
-            Format::Jsonl => print_line(&item),
+            Format::Jsonl => print_line(&done.item),
             Format::Text | Format::Bibtex | Format::Ris | Format::Cite => {
-                self.slots[i] = Some((item, text));
-                while let Some(Some((_, text))) = self.slots.get(self.next) {
-                    if !text.is_empty() {
-                        println!("{text}");
+                self.slots[i] = Some(done);
+                while let Some(Some(done)) = self.slots.get(self.next) {
+                    if !done.text.is_empty() {
+                        println!("{}", done.text);
                     }
                     self.next += 1;
                 }
             }
             _ => {
-                self.slots[i] = Some((item, text));
+                self.slots[i] = Some(done);
                 if self.show_progress {
                     eprint!("\rverified {}/{}…", self.done, self.slots.len());
                 }
@@ -157,14 +166,14 @@ impl Results {
                 }
             }
             Format::Table => {
-                let done: Vec<(Value, String)> = done.collect();
+                let done: Vec<Done> = done.collect();
                 // One claim is detail, not rows: show it as text.
-                if let [(_, text)] = &done[..] {
-                    println!("{text}");
+                if let [one] = &done[..] {
+                    println!("{}", one.text);
                 } else {
                     let mut table = output::table(&["Verdict", "Conf", "Citation", "Reason"]);
-                    for (item, _) in &done {
-                        table.add_row(row(item));
+                    for d in &done {
+                        table.add_row(row(&d.item, d.verdict));
                     }
                     println!("{table}");
                 }
@@ -173,7 +182,7 @@ impl Results {
                 }
             }
             Format::Json | Format::Auto => {
-                let items: Vec<Value> = done.map(|(item, _)| item).collect();
+                let items: Vec<Value> = done.map(|d| d.item).collect();
                 print(&json!({"results": items, "usage": output::usage(usage)}));
             }
         }
@@ -197,14 +206,14 @@ pub fn split(args: ClaimArgs) -> (Option<String>, ClaimInput) {
 }
 
 /// One verification as a table row: verdict, confidence, citation, reason.
-fn row(item: &Value) -> Vec<comfy_table::Cell> {
+fn row(item: &Value, verdict: Option<Verdict>) -> Vec<comfy_table::Cell> {
     use comfy_table::Cell;
-    let verdict = item["verdict"].as_str().unwrap_or("?");
     let level = match verdict {
-        "verified" => Level::Good,
-        "plausible" | "unverifiable" => Level::Warning,
+        Some(Verdict::Verified) => Level::Good,
+        Some(Verdict::Plausible | Verdict::Unverifiable) => Level::Warning,
         _ => Level::Error,
     };
+    let verdict = item["verdict"].as_str().unwrap_or("?");
     let confidence = item["match"]["confidence"]
         .as_f64()
         .map(|c| format!("{c:.2}"))

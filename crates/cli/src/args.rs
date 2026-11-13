@@ -279,7 +279,7 @@ Examples:
         #[arg(long, value_enum, default_value_t = FailOn::Error)]
         fail_on: FailOn,
         /// Results per provider search.
-        #[arg(long, default_value_t = 5)]
+        #[arg(long, default_value_t = aspero_engine::SEARCH_LIMIT)]
         limit: u32,
     },
 
@@ -409,7 +409,7 @@ pub struct ClaimArgs {
     #[arg(long = "id")]
     pub ids: Vec<String>,
     /// Results per provider search.
-    #[arg(long, default_value_t = 5)]
+    #[arg(long, default_value_t = aspero_engine::SEARCH_LIMIT)]
     pub limit: u32,
     /// Split the text (or stdin, with `-`) into references, as pasted from
     /// a reference list: numbered, bulleted, one per paragraph or line,

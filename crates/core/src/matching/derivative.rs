@@ -46,6 +46,16 @@ pub enum WorkKind {
 }
 
 impl WorkKind {
+    /// Every kind, for front ends to test their mappings.
+    pub const ALL: &[WorkKind] = &[
+        WorkKind::Reply,
+        WorkKind::Correction,
+        WorkKind::Comment,
+        WorkKind::Retraction,
+        WorkKind::ExpressionOfConcern,
+        WorkKind::Recommendation,
+    ];
+
     /// "reply", "correction", "comment", "retraction", "expression of
     /// concern" or "recommendation".
     pub fn as_str(self) -> &'static str {
@@ -107,6 +117,23 @@ pub fn claim_mentions_derivative(claim: &Claim) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn all_has_every_kind() {
+        // Exhaustive: a new kind fails to compile here; list it in ALL too.
+        let position = |k: WorkKind| match k {
+            WorkKind::Reply => 0,
+            WorkKind::Correction => 1,
+            WorkKind::Comment => 2,
+            WorkKind::Retraction => 3,
+            WorkKind::ExpressionOfConcern => 4,
+            WorkKind::Recommendation => 5,
+        };
+        for (i, k) in WorkKind::ALL.iter().enumerate() {
+            assert_eq!(position(*k), i);
+        }
+        assert_eq!(WorkKind::ALL.len(), position(WorkKind::Recommendation) + 1);
+    }
 
     fn text(t: &str) -> Claim {
         Claim {

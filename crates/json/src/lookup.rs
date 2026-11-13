@@ -69,21 +69,13 @@ pub fn item(input: &str, result: &LookupResult, full: bool) -> Value {
     let mut item = json!({"input": input, "id": result.id, "status": status.as_str()});
     if let Some(record) = &result.record {
         // Say when the answer didn't come live from the provider.
-        let served = result
-            .attempts
-            .iter()
-            .rfind(|a| matches!(a.outcome, Outcome::Found))
-            .map(|a| a.served);
-        if let Some(s) = served.filter(|s| *s != Served::Live) {
+        if let Some(s) = result.served().filter(|s| *s != Served::Live) {
             item["served"] = json!(s.as_str());
         }
         item["work"] = work::work(record, full);
     }
-    if status == Status::Unsupported {
-        item["error"] = json!(format!(
-            "no enabled provider looks up {} identifiers",
-            result.id.kind()
-        ));
+    if let Some(why) = result.unsupported() {
+        item["error"] = json!(why);
     }
     if result.record.is_none() || full {
         let attempts: Vec<Value> = result

@@ -13,10 +13,7 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 use std::sync::Arc;
 
-use aspero_engine::{
-    CrossrefConfig, DataciteConfig, DoiConfig, Engine, EuropePmcConfig, OpenAlexConfig,
-    OpenLibraryConfig, SecretString, SqliteCache, StandardConfig, standard,
-};
+use aspero_engine::{Engine, SecretString, SqliteCache, StandardConfig, standard};
 use clap::Parser;
 use serde_json::json;
 
@@ -58,7 +55,7 @@ async fn main() -> ExitCode {
             if format.is_human() || format.is_export() {
                 eprintln!("error: {}", failure.message);
             } else {
-                let category = format!("{:?}", failure.exit).to_lowercase();
+                let category = failure.exit.as_str();
                 eprintln!(
                     "{}",
                     json!({"error": {"category": category, "message": failure.message}})
@@ -146,18 +143,10 @@ fn open_cache() -> Option<Arc<SqliteCache>> {
 /// `file` paces requests across processes (parallel agents), and caches
 /// answers unless `no_cache`.
 fn engine(file: Option<Arc<SqliteCache>>, no_cache: bool) -> Result<Engine, Failure> {
-    let mut config = StandardConfig::default();
+    let mut config = StandardConfig::all(env("OPENALEX_API_KEY").map(SecretString::from));
     config.mailto = env("ASPERO_MAILTO");
     config.pacing = file.clone().map(|c| c as _);
     config.cache = file.filter(|_| !no_cache).map(|c| c as _);
-    let mut openalex = OpenAlexConfig::default();
-    openalex.api_key = env("OPENALEX_API_KEY").map(SecretString::from);
-    config.openalex = Some(openalex);
-    config.crossref = Some(CrossrefConfig::default());
-    config.datacite = Some(DataciteConfig::default());
-    config.doi = Some(DoiConfig::default());
-    config.europepmc = Some(EuropePmcConfig::default());
-    config.openlibrary = Some(OpenLibraryConfig::default());
     standard(config).map_err(|e| Failure {
         exit: Exit::Internal,
         message: format!("could not set up HTTP client: {e}"),

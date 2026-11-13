@@ -271,7 +271,7 @@ impl WorkId {
 /// identifiers it was found through: a DOI (other than arXiv's DataCite
 /// one), then arXiv, PMID, PMCID, ISBN, NBK, any DOI, any other.
 pub fn canonical(ids: &[WorkId]) -> Option<&WorkId> {
-    let arxiv_doi = |id: &&WorkId| matches!(id, WorkId::Doi(d) if d.prefix() == "10.48550");
+    let arxiv_doi = |id: &&WorkId| matches!(id, WorkId::Doi(d) if d.is_arxiv());
     let of = |kind: IdKind| ids.iter().find(move |id| id.kind() == kind);
     ids.iter()
         .find(|id| id.kind() == IdKind::Doi && !arxiv_doi(id))

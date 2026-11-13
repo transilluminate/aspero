@@ -28,7 +28,26 @@
 //!
 //! Not yet: fan-out search.
 
+/// An enum's `ALL`: each variant once, with sample fields. An exhaustive
+/// match over the same list makes a new variant fail to compile until it's
+/// listed.
+macro_rules! every_variant {
+    ($ty:ident: $($variant:ident $({ $($field:ident: $value:expr),* })?),* $(,)?) => {
+        /// Every value (with sample fields), for front ends to test their
+        /// mappings.
+        pub const ALL: &[$ty] = &[$($ty::$variant $({ $($field: $value),* })?),*];
+
+        #[allow(dead_code)]
+        const fn listed(&self) {
+            match self {
+                $($ty::$variant { .. } => {})*
+            }
+        }
+    };
+}
+
 mod abstracts;
+mod batch;
 mod budget;
 mod check;
 mod enrich;
@@ -36,6 +55,7 @@ mod health;
 mod identify;
 mod inflight;
 mod inputs;
+mod keys;
 mod lookup;
 mod options;
 mod registry;
@@ -49,9 +69,16 @@ mod versions;
 
 pub use abstracts::{Abstract, AbstractsReport};
 pub use aspero_core::matching::WorkKind;
+pub use batch::Batch;
 pub use budget::Budget;
-pub use check::{Checked, Finding, Severity, duplicates, findings};
+pub use check::{
+    BibliographyReport, CheckReport, CheckSummary, Checked, CheckedEntry, Finding, Severity,
+    bare_doi, duplicates, findings,
+};
 pub use identify::{Decision, Identified, MAX_IDENTIFIERS};
+#[cfg(feature = "openalex")]
+pub use keys::check_openalex_key;
+pub use keys::{KeyCheck, KeyStatus};
 pub use registry::{Disagreement, disagreements};
 pub use resolve::{Candidate, ResolveReport, Sighting, Via};
 /// Re-exported for credentials in provider configs.
@@ -76,7 +103,8 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use aspero_core::{
-    Error, ErrorCategory, ErrorKind, Provider, ProviderId, ResiliencePolicy, Response, Usage,
+    Error, ErrorCategory, ErrorKind, Provider, ProviderId, ResiliencePolicy, Response,
+    SourceRecord, Usage,
 };
 pub use aspero_store::{Cache, Pacing, SqliteCache, Stats as CacheStats, StoreError};
 pub use inputs::{Extras, InputLookup, InputsReport, Looked};
@@ -89,6 +117,10 @@ use crate::budget::Budgets;
 use crate::health::Health;
 use crate::inflight::InFlight;
 use crate::retry::{Jitter, random_jitter, with_retries};
+
+/// Results per provider search when resolving, verifying or checking, unless
+/// the caller asks for another number.
+pub const SEARCH_LIMIT: u32 = 5;
 
 /// A clock, injectable so cache expiry is testable.
 pub type Clock = fn() -> Timestamp;
@@ -127,6 +159,8 @@ pub enum Served {
 }
 
 impl Served {
+    every_variant!(Served: Live, Cache, Stale);
+
     pub fn as_str(self) -> &'static str {
         match self {
             Served::Live => "live",
@@ -314,6 +348,17 @@ impl Engine {
     }
 }
 
+impl Candidate {
+    /// Its best record with every identifier and notice the merged records
+    /// gave.
+    pub fn merged_record(&self) -> SourceRecord {
+        let mut record = self.record.clone();
+        record.ids = self.ids.clone();
+        record.work.updates = self.updates.clone();
+        record
+    }
+}
+
 /// Locks `mutex`, poisoned or not: the maps behind the engine's locks stay
 /// consistent if a holder panics, and a second panic (in a `Drop`) would abort.
 pub(crate) fn lock<T>(mutex: &std::sync::Mutex<T>) -> std::sync::MutexGuard<'_, T> {
@@ -322,7 +367,8 @@ pub(crate) fn lock<T>(mutex: &std::sync::Mutex<T>) -> std::sync::MutexGuard<'_, 
         .unwrap_or_else(std::sync::PoisonError::into_inner)
 }
 
-fn add_usage(totals: &mut Vec<(ProviderId, Usage)>, provider: &ProviderId, usage: Usage) {
+/// Adds `usage` to a per-provider total.
+pub fn add_usage(totals: &mut Vec<(ProviderId, Usage)>, provider: &ProviderId, usage: Usage) {
     match totals.iter_mut().find(|(p, _)| p == provider) {
         Some((_, total)) => *total = total.then(usage),
         None => totals.push((provider.clone(), usage)),

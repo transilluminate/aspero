@@ -13,13 +13,9 @@
 
 use std::sync::Arc;
 
-use aspero_core::{
-    Claim, Cursor, Error, ErrorKind, FieldSet, ProviderId, SearchQuery, Usage, WorkId, WorkType,
-    YearRange,
-};
+use aspero_core::{Cursor, Error, SearchQuery, WorkType, YearRange};
 use aspero_engine::{
-    CallOptions, CrossrefConfig, DataciteConfig, DoiConfig, Engine, EuropePmcConfig, Extras,
-    OpenAlexConfig, OpenLibraryConfig, SecretString, SqliteCache, StandardConfig, standard,
+    CallOptions, Engine, Extras, SecretString, SqliteCache, StandardConfig, standard,
 };
 use aspero_json::InputClaim;
 use futures::StreamExt;
@@ -30,18 +26,12 @@ pub mod records;
 
 use records::{
     Bibliography, Budget, CacheStats, CitationStyle, CiteFormat, CitedEntry, Claim as ClaimRecord,
-    DocxReferences, ExportFormat, Identification, KeyCheck, KeyStatus, Line, LineReference, Lookup,
-    Lookups, Mention, ProviderUsage, ReadError, Reference, SearchRequest, SearchResults,
-    StyleError, StyleSource, Unavailable, Utf16Offsets, Verification, Verifications, Work,
+    DocxReferences, ExportFormat, Identification, KeyCheck, Line, LineReference, Lookup, Lookups,
+    Mention, ProviderUsage, ReadError, Reference, SearchRequest, SearchResults, StyleError,
+    StyleSource, Unavailable, Utf16Offsets, Verification, Verifications, Work,
 };
 
 uniffi::setup_scaffolding!();
-
-/// Results per call at most from each provider search when verifying.
-const SEARCH_LIMIT: u32 = 5;
-
-/// A work every OpenAlex key can look up, free: for checking keys.
-const KNOWN_WORK: &str = "doi:10.1038/nature14539";
 
 #[derive(Debug, Clone, uniffi::Record)]
 pub struct Config {
@@ -144,21 +134,11 @@ impl Aspero {
             None => None,
         };
         let mailto = config.mailto.filter(|m| !m.trim().is_empty());
-        let mut standard_config = StandardConfig::default();
+        let key = config.openalex_key.filter(|k| !k.trim().is_empty());
+        let mut standard_config = StandardConfig::all(key.map(SecretString::from));
         standard_config.mailto = mailto.clone();
         standard_config.pacing = cache.clone().map(|c| c as _);
         standard_config.cache = cache.clone().map(|c| c as _);
-        let mut openalex = OpenAlexConfig::default();
-        openalex.api_key = config
-            .openalex_key
-            .filter(|k| !k.trim().is_empty())
-            .map(SecretString::from);
-        standard_config.openalex = Some(openalex);
-        standard_config.crossref = Some(CrossrefConfig::default());
-        standard_config.datacite = Some(DataciteConfig::default());
-        standard_config.doi = Some(DoiConfig::default());
-        standard_config.europepmc = Some(EuropePmcConfig::default());
-        standard_config.openlibrary = Some(OpenLibraryConfig::default());
         let engine = standard(standard_config).map_err(|e| setup(e.to_string()))?;
         let runtime = tokio::runtime::Builder::new_multi_thread()
             .worker_threads(2)
@@ -447,49 +427,20 @@ impl Aspero {
         key: String,
         cancel: Option<Arc<CallToken>>,
     ) -> Result<KeyCheck, AsperoError> {
-        if key.trim().is_empty() {
-            return Ok(KeyCheck {
-                status: KeyStatus::Rejected,
-                message: Some("no key given".into()),
-                budget: None,
-            });
-        }
-        let mut config = StandardConfig::default();
-        config.mailto = self.mailto.clone();
-        config.pacing = self.cache.clone().map(|c| c as _);
-        let mut openalex = OpenAlexConfig::default();
-        openalex.api_key = Some(SecretString::from(key.trim().to_owned()));
-        config.openalex = Some(openalex);
-        let engine = standard(config)
-            .map_err(|e| AsperoError::Setup(e.to_string()))?
-            .with_options(CallOptions::interactive());
-        self.run(
-            async move {
-                let id: WorkId = KNOWN_WORK.parse().expect("a valid identifier");
-                let report = engine.lookup(&[id], FieldSet::DEFAULT).await;
-                let failure = report.results[0]
-                    .attempts
-                    .iter()
-                    .find_map(|a| match &a.outcome {
-                        aspero_engine::Outcome::Failed(e) => Some(e.clone()),
-                        _ => None,
-                    });
-                let status = match failure.as_ref().map(Error::kind) {
-                    None | Some(ErrorKind::BudgetSpent) => KeyStatus::Valid,
-                    Some(ErrorKind::KeyRejected) => KeyStatus::Rejected,
-                    Some(_) => KeyStatus::Unreachable,
-                };
-                KeyCheck {
-                    status,
-                    message: failure
-                        .filter(|_| status != KeyStatus::Valid)
-                        .map(|e| e.to_string()),
-                    budget: engine.budgets().first().map(|(p, b)| Budget::new(p, b)),
-                }
-            },
-            cancel,
-        )
-        .await
+        let mailto = self.mailto.clone();
+        let pacing = self.cache.clone().map(|c| c as _);
+        let checked = self
+            .run(
+                async move { aspero_engine::check_openalex_key(&key, mailto, pacing).await },
+                cancel,
+            )
+            .await?;
+        let check = checked.map_err(|e| AsperoError::Setup(e.to_string()))?;
+        Ok(KeyCheck {
+            status: check.status.into(),
+            message: check.message,
+            budget: check.budget.map(|(p, b)| Budget::new(&p, &b)),
+        })
     }
 
     /// What the cache holds; `None` without one.
@@ -605,36 +556,16 @@ async fn verify_all(
     mut each: impl FnMut(Verification),
 ) -> Vec<ProviderUsage> {
     let claims: Vec<InputClaim> = claims.into_iter().map(ClaimRecord::into_input).collect();
-    let (positions, valid): (Vec<usize>, Vec<Claim>) = claims
-        .iter()
-        .enumerate()
-        .filter_map(|(i, c)| Some((i, c.claim.as_ref().ok()?.clone())))
-        .unzip();
+    let (positions, valid) = InputClaim::valid(&claims);
     for (i, claim) in claims.iter().enumerate() {
         if let Err(e) = &claim.claim {
             each(Verification::invalid(i, claim, e));
         }
     }
-    let mut usage = Vec::new();
-    if valid.len() > 1 {
-        for (p, u) in engine.prefetch(&valid).await.usage {
-            add_usage(&mut usage, &p, u);
-        }
-    }
-    let mut verified = std::pin::pin!(engine.verify_many(&valid, SEARCH_LIMIT));
+    let mut verified = engine.verify_batch(&valid, aspero_engine::SEARCH_LIMIT);
     while let Some((k, v)) = verified.next().await {
-        for (p, u) in &v.report.usage {
-            add_usage(&mut usage, p, *u);
-        }
         let i = positions[k];
         each(Verification::new(i, &claims[i], &v, full));
     }
-    records::usage(&usage)
-}
-
-fn add_usage(totals: &mut Vec<(ProviderId, Usage)>, provider: &ProviderId, usage: Usage) {
-    match totals.iter_mut().find(|(p, _)| p == provider) {
-        Some((_, total)) => *total = total.then(usage),
-        None => totals.push((provider.clone(), usage)),
-    }
+    records::usage(verified.usage())
 }

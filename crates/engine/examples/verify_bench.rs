@@ -17,10 +17,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use aspero_core::{Claim, WorkId};
-use aspero_engine::{
-    CrossrefConfig, DataciteConfig, DoiConfig, EuropePmcConfig, OpenAlexConfig, OpenLibraryConfig,
-    SecretString, SqliteCache, StandardConfig, Verification, standard,
-};
+use aspero_engine::{SecretString, SqliteCache, StandardConfig, Verification, standard};
 use serde::Deserialize;
 
 #[derive(Deserialize)]
@@ -95,17 +92,9 @@ async fn main() -> std::process::ExitCode {
     let env = |name: &str| std::env::var(name).ok().filter(|v| !v.trim().is_empty());
     let cache =
         SqliteCache::open(&root.join("target/bench-cache/cache.sqlite")).expect("bench cache");
-    let mut config = StandardConfig::default();
+    let mut config = StandardConfig::all(env("OPENALEX_API_KEY").map(SecretString::from));
     config.mailto = env("ASPERO_MAILTO");
     config.cache = Some(Arc::new(cache));
-    let mut openalex = OpenAlexConfig::default();
-    openalex.api_key = env("OPENALEX_API_KEY").map(SecretString::from);
-    config.openalex = Some(openalex);
-    config.crossref = Some(CrossrefConfig::default());
-    config.datacite = Some(DataciteConfig::default());
-    config.doi = Some(DoiConfig::default());
-    config.europepmc = Some(EuropePmcConfig::default());
-    config.openlibrary = Some(OpenLibraryConfig::default());
     let engine = standard(config).expect("engine");
 
     let claims: Vec<Claim> = cases.iter().map(|c| c.claim.claim()).collect();

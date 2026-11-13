@@ -31,8 +31,6 @@ pub const ID: ProviderId = ProviderId::from_static("datacite");
 
 pub const DEFAULT_BASE_URL: &str = "https://api.datacite.org";
 
-pub(crate) const ARXIV_DOI_PREFIX: &str = "10.48550";
-
 /// DOIs per batched `query=doi:(…)` lookup.
 const MAX_BATCH: usize = 50;
 
@@ -152,7 +150,7 @@ struct MissingData;
 fn to_doi(id: &WorkId) -> Result<Doi> {
     match id {
         WorkId::Doi(doi) => Ok(doi.clone()),
-        WorkId::Arxiv(arxiv) => Ok(format!("{ARXIV_DOI_PREFIX}/arxiv.{}", arxiv.id()).parse()?),
+        WorkId::Arxiv(arxiv) => Ok(arxiv.doi()),
         _ => Err(Error::Unsupported("DataCite lookup of non-DOI identifiers")),
     }
 }

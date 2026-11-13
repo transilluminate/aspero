@@ -24,6 +24,8 @@ pub enum Verdict {
 }
 
 impl Verdict {
+    every_variant!(Verdict: Verified, Plausible, Mismatch, NotFound, Unverifiable);
+
     pub fn as_str(self) -> &'static str {
         match self {
             Verdict::Verified => "verified",
@@ -103,6 +105,22 @@ pub enum Reason {
 }
 
 impl Reason {
+    every_variant!(Reason:
+        Matches,
+        PartlyMatches { differs: Vec::new() },
+        Unconfirmed,
+        Closest { differs: Vec::new() },
+        NoMatch,
+        IdExists,
+        IdAgrees,
+        IdPartlyMatches { differs: Vec::new() },
+        IdElsewhere { cited: 0 },
+        IdDisagrees,
+        IdMissingElsewhere,
+        IdMissing,
+        ProvidersFailed,
+    );
+
     /// A short machine-friendly name.
     pub fn as_str(&self) -> &'static str {
         match self {
@@ -164,6 +182,8 @@ pub enum CitedField {
 }
 
 impl CitedField {
+    every_variant!(CitedField: Title, Authors, Year, Journal, Volume, FirstPage, Kind);
+
     pub fn as_str(self) -> &'static str {
         match self {
             CitedField::Title => "title",

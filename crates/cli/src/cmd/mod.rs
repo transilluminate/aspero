@@ -13,11 +13,12 @@ pub mod resolve;
 pub mod scan;
 pub mod search;
 pub mod styles;
+#[cfg(test)]
+mod testing;
 pub mod verify;
 
 use std::io::Read;
 
-use aspero_core::{ProviderId, Usage};
 use aspero_engine::EngineError;
 pub use aspero_json::merged;
 use serde_json::Value;
@@ -69,6 +70,14 @@ pub fn read_stdin() -> Result<String, Failure> {
     Ok(buf)
 }
 
+/// The lines of `text` worth reading, trimmed: blank lines and `#`
+/// comments skipped.
+pub fn lines(text: &str) -> impl Iterator<Item = &str> {
+    text.lines()
+        .map(str::trim)
+        .filter(|l| !l.is_empty() && !l.starts_with('#'))
+}
+
 /// Quotes `s` for a POSIX shell, leaving plain words as they are.
 pub fn shell_quote(s: &str) -> String {
     let plain = |c: char| c.is_ascii_alphanumeric() || "-_./:=+,@%".contains(c);
@@ -90,12 +99,4 @@ pub fn print(value: &Value) {
 /// One JSON Lines record.
 pub fn print_line(value: &Value) {
     println!("{value}");
-}
-
-/// Adds `usage` to a per-provider total.
-pub fn merge_usage(totals: &mut Vec<(ProviderId, Usage)>, provider: &ProviderId, usage: Usage) {
-    match totals.iter_mut().find(|(p, _)| p == provider) {
-        Some((_, total)) => *total = total.then(usage),
-        None => totals.push((provider.clone(), usage)),
-    }
 }

@@ -3,8 +3,8 @@
 use std::io::IsTerminal;
 
 use aspero_bib::BibEntry;
-use aspero_engine::{Checked, Engine, Finding, Severity, Verdict, describe_update};
-use serde_json::{Value, json};
+use aspero_engine::{BibliographyReport, CheckSummary, CheckedEntry, Engine, Severity};
+use aspero_json::check::keys;
 
 use super::{Failure, Out, print, print_line, read_stdin};
 use crate::args::{FailOn, Format};
@@ -19,6 +19,11 @@ pub async fn run(
     out: Out,
 ) -> Result<Exit, Failure> {
     let source = if path == "-" {
+        if std::io::stdin().is_terminal() {
+            return Err(Failure::usage(
+                "no file given (pass one, or pipe a .bib file)",
+            ));
+        }
         read_stdin()?.into_bytes()
     } else {
         std::fs::read(&path).map_err(|e| Failure::usage(format!("could not read {path}: {e}")))?
@@ -28,13 +33,11 @@ pub async fn run(
         return Err(Failure::usage(format!("{path}: no entries")));
     }
 
-    let checkable: Vec<&BibEntry> = entries.iter().filter(|e| e.is_checkable()).collect();
-    let claims: Vec<_> = checkable.iter().map(|e| e.claim.clone()).collect();
     let show_progress = out.format.is_human() && std::io::stderr().is_terminal();
-    let total = claims.len();
+    let total = entries.iter().filter(|e| e.is_checkable()).count();
     let mut done = 0;
-    let checked = engine
-        .check(&claims, limit, |_| {
+    let report = engine
+        .check_entries(&entries, limit, |_| {
             done += 1;
             if show_progress {
                 eprint!("\rchecking {done}/{total}…");
@@ -45,55 +48,35 @@ pub async fn run(
         eprint!("\r\x1b[K");
     }
 
-    // Reports in file order, skipped entries included.
-    let mut by_entry = checked.iter();
-    let keys: Vec<&str> = checkable.iter().map(|e| e.key.as_str()).collect();
-    let mut reports = Vec::new();
-    for entry in &entries {
-        let checked = entry
-            .is_checkable()
-            .then(|| by_entry.next().expect("one per checkable"));
-        reports.push(Report::new(entry, checked, &keys));
-    }
-
-    let summary = Summary::of(&reports);
-    let failed = reports.iter().any(|r| fails(r.severity, fail_on));
-    let usage = checked
-        .iter()
-        .flat_map(|c| &c.verification.report.usage)
-        .fold(Vec::new(), |mut acc, (p, u)| {
-            super::merge_usage(&mut acc, p, *u);
-            acc
-        });
-
+    let failed = report.entries.iter().any(|e| fails(e.severity(), fail_on));
+    let keys = keys(&entries);
+    let checked = || entries.iter().zip(&report.entries);
     match out.format {
         Format::Table => {
             let mut table = output::table(&["Status", "Key", "Verdict", "Findings"]);
-            for report in &reports {
-                table.add_row(report.row());
+            for (entry, c) in checked() {
+                table.add_row(row(entry, c, &keys));
             }
-            println!("{table}\n{}", summary.text(&path));
-            if let Some(text) = output::usage_text(&usage) {
+            println!("{table}\n{}", summary_text(&path, &report.summary()));
+            if let Some(text) = output::usage_text(&report.usage) {
                 eprintln!("{text}");
             }
         }
         Format::Text => {
-            for report in &reports {
-                print!("{}", report.text());
-            }
-            println!("\n{}", summary.text(&path));
-            if let Some(text) = output::usage_text(&usage) {
+            print!("{}", text(&path, &entries, &report));
+            if let Some(text) = output::usage_text(&report.usage) {
                 eprintln!("{text}");
             }
         }
-        Format::Jsonl => reports.iter().for_each(|r| print_line(&r.json(out.full))),
+        Format::Jsonl => {
+            for (entry, c) in checked() {
+                print_line(&aspero_json::check::entry(entry, c, &keys, out.full));
+            }
+        }
         Format::Bibtex | Format::Ris | Format::Cite => unreachable!("rejected in main"),
-        Format::Json | Format::Auto => print(&json!({
-            "file": path,
-            "summary": summary.json(),
-            "entries": reports.iter().map(|r| r.json(out.full)).collect::<Vec<_>>(),
-            "usage": output::usage(&usage),
-        })),
+        Format::Json | Format::Auto => print(&aspero_json::check::report(
+            &path, &entries, &report, out.full,
+        )),
     }
     Ok(if failed { Exit::Unverified } else { Exit::Ok })
 }
@@ -129,211 +112,114 @@ fn fails(severity: Option<Severity>, fail_on: FailOn) -> bool {
     severity.is_some_and(|s| s >= threshold)
 }
 
-/// One finding, ready to show.
-struct Line {
-    kind: &'static str,
-    severity: Severity,
-    message: String,
-    detail: Value,
+/// The verdict as shown: `skipped` when there was nothing to check.
+fn verdict(checked: &CheckedEntry) -> String {
+    checked
+        .verdict()
+        .map_or("skipped", |v| v.as_str())
+        .replace('_', " ")
 }
 
-struct Report<'a> {
-    entry: &'a BibEntry,
-    checked: Option<&'a Checked>,
-    lines: Vec<Line>,
-    severity: Option<Severity>,
-}
-
-impl<'a> Report<'a> {
-    fn new(entry: &'a BibEntry, checked: Option<&'a Checked>, keys: &[&str]) -> Self {
-        let mut lines: Vec<Line> = entry
-            .notes
-            .iter()
-            .map(|note| Line {
-                kind: "entry",
-                severity: Severity::Warning,
-                message: note.to_string(),
-                detail: json!({
-                    "field": note.field,
-                    "value": note.value,
-                    "problem": note.problem.as_str(),
-                }),
-            })
-            .collect();
-        match checked {
-            None => lines.push(Line {
-                kind: "skipped",
-                severity: Severity::Warning,
-                message: "nothing to check: no title or identifier".into(),
-                detail: Value::Null,
-            }),
-            Some(c) => lines.extend(c.findings.iter().map(|f| line(f, keys))),
-        }
-        let severity = lines.iter().map(|l| l.severity).max();
-        Report {
-            entry,
-            checked,
-            lines,
-            severity,
-        }
-    }
-
-    fn verdict(&self) -> &'static str {
-        self.checked
-            .map_or("skipped", |c| c.verification.verdict.as_str())
-    }
-
-    /// Status, key, verdict, and one finding per line.
-    fn row(&self) -> Vec<comfy_table::Cell> {
-        let status = match self.severity {
-            None => output::status_cell("ok", Level::Good),
-            Some(Severity::Info) => output::status_cell("info", Level::Info),
-            Some(Severity::Warning) => output::status_cell("WARNING", Level::Warning),
-            Some(_) => output::status_cell("ERROR", Level::Error),
-        };
-        let findings: Vec<&str> = self.lines.iter().map(|l| l.message.as_str()).collect();
-        vec![
-            status,
-            comfy_table::Cell::new(&self.entry.key),
-            comfy_table::Cell::new(self.verdict().replace('_', " ")),
-            comfy_table::Cell::new(findings.join("\n")),
-        ]
-    }
-
-    fn text(&self) -> String {
-        let status = match self.severity {
-            None => return format!("ok       {}\n", self.entry.key),
-            Some(s) => s.as_str().to_uppercase(),
-        };
-        let mut out = format!(
-            "{status:<8} {}  ({})\n",
-            self.entry.key,
-            self.verdict().replace('_', " ")
-        );
-        for line in &self.lines {
-            out.push_str(&format!("         - {}\n", line.message));
-        }
-        out
-    }
-
-    fn json(&self, full: bool) -> Value {
-        let findings: Vec<Value> = self
-            .lines
-            .iter()
-            .map(|l| {
-                let mut f =
-                    json!({"kind": l.kind, "severity": l.severity.as_str(), "message": l.message});
-                if let Value::Object(detail) = &l.detail {
-                    for (k, v) in detail {
-                        f[k] = v.clone();
-                    }
-                }
-                f
-            })
-            .collect();
-        let mut doc = json!({
-            "key": self.entry.key,
-            "type": self.entry.entry_type,
-            "verdict": self.verdict(),
-            "severity": self.severity.map(Severity::as_str),
-            "findings": findings,
-        });
-        if let Some(m) = self.checked.and_then(Checked::matched) {
-            doc["match"] = output::candidate(m, full);
-        }
-        doc
-    }
-}
-
-fn line(finding: &Finding, keys: &[&str]) -> Line {
-    let (message, detail) = match finding {
-        Finding::Verdict { reason, .. } => (reason.clone(), Value::Null),
-        Finding::AddDoi { doi } => {
-            let bare = doi.to_string().trim_start_matches("doi:").to_owned();
-            (format!("add doi = {{{bare}}}"), json!({"doi": bare}))
-        }
-        Finding::ReplaceId { claimed, with } => match with {
-            Some(with) => (
-                format!("replace {claimed} with {with}"),
-                json!({"claimed": claimed, "with": with}),
-            ),
-            None => (
-                format!("{claimed} is not this work's identifier"),
-                json!({"claimed": claimed}),
-            ),
-        },
-        Finding::YearDiffers { claimed, actual } => (
-            if (claimed - actual).abs() == 1 {
-                format!(
-                    "year {claimed} → {actual} (often preprint vs published, or online vs print)"
-                )
-            } else {
-                format!("year {claimed} → {actual}")
-            },
-            json!({"claimed": claimed, "actual": actual}),
-        ),
-        Finding::Duplicate { of } => {
-            let key = keys.get(*of).copied().unwrap_or("?");
-            (format!("duplicate of {key}"), json!({"of": key}))
-        }
-        Finding::Updated { update } => (describe_update(update), json!({"update": update})),
-        _ => (format!("{finding:?}"), Value::Null),
+/// Status, key, verdict, and one finding per line.
+fn row(entry: &BibEntry, checked: &CheckedEntry, keys: &[&str]) -> Vec<comfy_table::Cell> {
+    let status = match checked.severity() {
+        None => output::status_cell("ok", Level::Good),
+        Some(Severity::Info) => output::status_cell("info", Level::Info),
+        Some(Severity::Warning) => output::status_cell("WARNING", Level::Warning),
+        Some(_) => output::status_cell("ERROR", Level::Error),
     };
-    Line {
-        kind: finding.kind(),
-        severity: finding.severity(),
-        message,
-        detail,
-    }
+    let findings: Vec<String> = checked.findings.iter().map(|f| f.message(keys)).collect();
+    vec![
+        status,
+        comfy_table::Cell::new(&entry.key),
+        comfy_table::Cell::new(verdict(checked)),
+        comfy_table::Cell::new(findings.join("\n")),
+    ]
 }
 
-#[derive(Default)]
-struct Summary {
-    entries: usize,
-    verified: usize,
-    errors: usize,
-    warnings: usize,
-    infos: usize,
-    skipped: usize,
+/// The whole check as text: each entry, then the summary.
+fn text(path: &str, entries: &[BibEntry], report: &BibliographyReport) -> String {
+    let keys = keys(entries);
+    let entries: String = entries
+        .iter()
+        .zip(&report.entries)
+        .map(|(entry, c)| entry_text(entry, c, &keys))
+        .collect();
+    format!("{entries}\n{}\n", summary_text(path, &report.summary()))
 }
 
-impl Summary {
-    fn of(reports: &[Report]) -> Self {
-        let mut s = Summary {
-            entries: reports.len(),
-            ..Summary::default()
-        };
-        for r in reports {
-            match r.checked {
-                None => s.skipped += 1,
-                Some(c) if c.verification.verdict == Verdict::Verified => s.verified += 1,
-                Some(_) => {}
-            }
-            match r.severity {
-                Some(Severity::Error) => s.errors += 1,
-                Some(Severity::Warning) => s.warnings += 1,
-                Some(Severity::Info) => s.infos += 1,
-                _ => {}
-            }
-        }
-        s
+fn entry_text(entry: &BibEntry, checked: &CheckedEntry, keys: &[&str]) -> String {
+    let status = match checked.severity() {
+        None => return format!("ok       {}\n", entry.key),
+        Some(s) => s.as_str().to_uppercase(),
+    };
+    let mut out = format!("{status:<8} {}  ({})\n", entry.key, verdict(checked));
+    for finding in &checked.findings {
+        out.push_str(&format!("         - {}\n", finding.message(keys)));
     }
+    out
+}
 
-    fn text(&self, path: &str) -> String {
-        format!(
-            "{path}: {} entries, {} verified; {} with errors, {} with warnings, {} with suggestions, {} skipped",
-            self.entries, self.verified, self.errors, self.warnings, self.infos, self.skipped
-        )
-    }
+fn summary_text(path: &str, s: &CheckSummary) -> String {
+    format!(
+        "{path}: {} entries, {} verified; {} with errors, {} with warnings, {} with suggestions, {} skipped",
+        s.entries, s.verified, s.errors, s.warnings, s.suggestions, s.skipped
+    )
+}
+#[cfg(test)]
+mod tests {
+    use aspero_core::{Update, UpdateKind};
 
-    fn json(&self) -> Value {
-        json!({
-            "entries": self.entries,
-            "verified": self.verified,
-            "errors": self.errors,
-            "warnings": self.warnings,
-            "suggestions": self.infos,
-            "skipped": self.skipped,
-        })
+    use super::*;
+    use crate::cmd::testing::{Scripted, engine, pinned, work};
+
+    /// What `check` prints, byte for byte: JSON (agents' contract), JSON
+    /// Lines with `--full`, and text.
+    #[tokio::test]
+    async fn output_is_pinned() {
+        let lecun = ["Yann LeCun", "Yoshua Bengio", "Geoffrey Hinton"];
+        let mut retracted = work(
+            &["10.1234/retracted"],
+            "A retracted study",
+            &["Jane Doe"],
+            2019,
+        );
+        let mut retraction = Update::new(UpdateKind::Retraction);
+        retraction.notice = Some("10.1234/notice".parse().unwrap());
+        retracted.work.updates = vec![retraction];
+        let works = vec![
+            work(&["10.1038/nature14539"], "Deep learning", &lecun, 2015),
+            work(&["10.1145/3448250"], "Deep learning for AI", &lecun, 2021),
+            work(
+                &[
+                    "W2626778328",
+                    "arXiv:1706.03762",
+                    "10.48550/arXiv.1706.03762",
+                ],
+                "Attention Is All You Need",
+                &["Ashish Vaswani", "Noam Shazeer", "Niki Parmar"],
+                2017,
+            ),
+            retracted,
+        ];
+        let engine = engine(vec![Scripted::new("openalex", works)]);
+
+        let path = "refs.bib";
+        let entries = entries(path, include_bytes!("../../tests/check/refs.bib")).unwrap();
+        let report = engine.check_entries(&entries, 5, |_| {}).await;
+
+        let json = aspero_json::check::report(path, &entries, &report, false);
+        pinned(
+            "check/expected.json",
+            &(serde_json::to_string_pretty(&json).unwrap() + "\n"),
+        );
+        let keys = keys(&entries);
+        let lines: String = entries
+            .iter()
+            .zip(&report.entries)
+            .map(|(e, c)| format!("{}\n", aspero_json::check::entry(e, c, &keys, true)))
+            .collect();
+        pinned("check/expected.jsonl", &lines);
+        pinned("check/expected.txt", &text(path, &entries, &report));
     }
 }

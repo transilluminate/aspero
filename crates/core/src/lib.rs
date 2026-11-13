@@ -43,5 +43,6 @@ pub use record::{Field, FieldSet, Raw, SourceRecord};
 pub use references::{IndentedLine, LineReference, Reference, split_lines, split_references};
 pub use resilience::ResiliencePolicy;
 pub use work::{
-    OpenAccess, PartialDate, Person, Update, UpdateKind, UpdateTo, Work, WorkType, tidy_abstract,
+    OpenAccess, PartialDate, Person, Update, UpdateKind, UpdateTo, Work, WorkType, orcid,
+    tidy_abstract,
 };

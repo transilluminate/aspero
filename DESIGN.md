@@ -14,8 +14,8 @@ Primary users are agents driving the CLI, then humans.
 
 ## Principles
 
-- **Library first.** The CLI (and any future TUI or MCP server) is a thin
-  adapter; anything useful lives in a library crate.
+- **Library first.** The CLI, the MCP server (and any future TUI) are thin
+  adapters; anything useful lives in a library crate.
 - **Agent-ergonomic.** JSON when stdout isn't a terminal, lean default
   fields, one-line reasons, distinct exit codes, `--help` with examples.
   Never silently drop part of a request: invalid inputs, ignored filters
@@ -49,6 +49,8 @@ crates/
   engine/      routing, caching, retries, pacing, resolve/verify/check
   json/        the JSON contract (works, lookups, verdicts, claims, checks),
                shared by every front end
+  mcp/         Model Context Protocol server: the engine's tools for agents
+               (via the official SDK, `rmcp`), served over stdio by the CLI
   cli/         clap front end: arguments, stdin, tables and text
   ffi/         UniFFI bindings for apps (Swift), shipped as an .xcframework
 bench/         verify benchmark data (known-answer citations)
@@ -351,6 +353,42 @@ fixture recorded with different parameters once hid a ranking bug.
 - **Semantic Scholar** (not built; key pending). Keyless requests mostly
   429 from an AWS gateway with no `Retry-After`; a fake key gets 403.
 
+## Agents (MCP)
+
+`aspero-mcp` makes the engine's work into MCP tools (#58). Two layers:
+
+- **`Tools`**, transport-free: each tool is a function over the engine
+  taking its arguments as JSON (serde types whose schemars schemas are the
+  input schemas) and answering with structured JSON in `aspero-json`'s
+  shapes plus a few lines of text, or a `ToolError` (kind and message).
+  Tools: `search` (a query tree, the `QueryTree` serde type in
+  `aspero-json` that `search --query` parses too, or keywords),
+  `search_supports`, `lookup`, `verify` (one citation or up to 25, results
+  in input order), `identify`, and `cites` / `cited_by` (a search by the
+  relation alone, at the first source with relations). Lean records unless
+  `full`; search pages by `cursor`. Output schemas are written by hand
+  (the shapes are built as JSON) and left open beyond the keys agents rely
+  on; tests check every result against them.
+- **The adapter**, the only code that sees `rmcp` (the official SDK,
+  pinned exactly): `ServerHandler` over `Tools`, served on any byte stream
+  (`serve`) or stdio (`serve_stdio`, which `aspero mcp` runs). Tool
+  failures are tool errors (`isError`) the agent reads, unknown tools
+  protocol errors. Descriptions and the server's instructions say results
+  are third-party data, not instructions.
+
+A **`Session`** is one connection: its `Caller` (empty over stdio; tokens
+will go there) and a spend cap in USD (`--budget`, provisional default
+$1.00). Tools that may spend are refused once the session has spent it,
+checked before each call; a call's cost is known only after it, so the
+last one can overshoot by its own cost. Spend is the engine's reported
+usage (OpenAlex's `cost`), as the CLI totals it; every result carries the
+call's `usage` and the session's `spent_usd`, `budget_usd` and `left_usd`.
+`search_supports` is offline and never refused.
+
+Later phases (#58): Streamable HTTP on loopback behind a feature, with
+bearer tokens, for embedding; host-provided tools; progress notifications
+(a batch's results as each finishes).
+
 ## Apps (FFI)
 
 `aspero-ffi` (UniFFI) gives apps one `Aspero` handle: `lookup`, `verify`,
@@ -412,14 +450,16 @@ its container; different schema versions would rebuild each other's).
 - **Discovery**: citations/references, snowballing (co-citation, coupling),
   watches ("new since last run"), history and sessions.
 - **Integration**: CSL-JSON export, DOI-as-citekey builds, Zotero
-  interop; an MCP adapter if ever wanted.
+  interop.
 - **hayagriva workarounds** in `bib/src/cite.rs` (a default `<name/>`;
   spaces before punctuation tidied): drop them once a release includes
   typst/hayagriva#520 and fixes empty date-part delimiters.
 
 ## Open questions
 
-- Whether to cap OpenAlex spend per command or session.
+- Whether to cap OpenAlex spend per CLI command, as MCP sessions are.
+- The MCP session budget's default (provisional $1.00), and a per-token
+  cap, before Streamable HTTP.
 - Whether a lookup should ever hedge (ask two providers at once) for
   latency.
 

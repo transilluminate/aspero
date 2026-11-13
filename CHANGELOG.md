@@ -1,5 +1,24 @@
 # Changelog
 
+## Unreleased
+
+Added:
+
+- `aspero mcp`: aspero's tools for AI agents over the Model Context
+  Protocol, on stdio (#58): `claude mcp add aspero -- aspero mcp`. Tools:
+  `search` (a query tree, as `search --query` takes it, or keywords),
+  `search_supports`, `lookup`, `verify` (one citation or a batch),
+  `identify`, `cites` and `cited_by`. Results are the JSON the commands
+  print, as structured content with output schemas, plus a short text
+  summary; `full` for every field. A new crate, `aspero-mcp`, holds them,
+  on the official Rust SDK (`rmcp`).
+- Each MCP session has a spend cap, `aspero mcp --budget <usd>` (default
+  $1.00, provisional); once spent, tools that may spend are refused with a
+  budget error. Every result reports the call's usage and the session's
+  spend.
+- `aspero-json`: `QueryTree`, the query tree's JSON form as a serde type,
+  and with the `schemars` feature, JSON Schemas for it and `ClaimInput`.
+
 ## 0.11.1
 
 Fixed:

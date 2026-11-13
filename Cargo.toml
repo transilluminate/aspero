@@ -7,6 +7,7 @@ members = [
     "crates/engine",
     "crates/json",
     "crates/ffi",
+    "crates/mcp",
     "crates/cli",
     "crates/providers/*",
 ]
@@ -25,6 +26,7 @@ aspero-bib = { path = "crates/bib", version = "0.11.1" }
 aspero-store = { path = "crates/store", version = "0.11.1" }
 aspero-engine = { path = "crates/engine", version = "0.11.1" }
 aspero-json = { path = "crates/json", version = "0.11.1" }
+aspero-mcp = { path = "crates/mcp", version = "0.11.1" }
 aspero-openalex = { path = "crates/providers/openalex", version = "0.11.1" }
 aspero-crossref = { path = "crates/providers/crossref", version = "0.11.1" }
 aspero-datacite = { path = "crates/providers/datacite", version = "0.11.1" }
@@ -45,8 +47,12 @@ futures = { version = "0.3.34", default-features = false, features = ["std", "as
 jiff = { version = "0.2.42", features = ["serde"] }
 percent-encoding = "2.3.2"
 proptest = "1.12.0"
+# The official MCP SDK, pinned exactly: it moves fast (3.0 to 3.10 in
+# four months).
+rmcp = { version = "=3.8.0", default-features = false }
 rusqlite = { version = "0.41.1", features = ["bundled"] }
 reqwest = { version = "0.13.5", default-features = false, features = ["rustls"] }
+schemars = "1.2.3"
 secrecy = "0.10.3"
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.154"

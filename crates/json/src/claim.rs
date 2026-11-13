@@ -10,30 +10,54 @@ const EMPTY: &str = "claim has no text, title, authors or identifiers";
 /// A claim as an agent would write it, one JSON object per stdin line.
 /// Unknown keys are rejected so typos aren't silently ignored.
 #[derive(Debug, Default, Deserialize)]
+#[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
+#[cfg_attr(
+    feature = "schemars",
+    schemars(description = "What a citation says, as fields. Unknown keys are refused.")
+)]
 #[serde(deny_unknown_fields)]
 pub struct ClaimInput {
+    /// The reference as written, in any style.
     pub text: Option<String>,
     pub title: Option<String>,
+    /// "Vaswani, A." or "Ashish Vaswani".
     #[serde(default)]
     pub authors: Vec<String>,
     pub year: Option<i16>,
+    /// The journal (full or abbreviated: "N Engl J Med"), or the book for a
+    /// chapter; `journal` also works.
     #[serde(alias = "journal")]
     pub container: Option<String>,
     #[serde(default, deserialize_with = "text_or_number")]
+    #[cfg_attr(feature = "schemars", schemars(schema_with = "text_or_number_schema"))]
     pub volume: Option<String>,
-    /// The first page, or a range.
+    /// The first page, or a range; `pages` also works.
     #[serde(default, alias = "pages", deserialize_with = "text_or_number")]
+    #[cfg_attr(feature = "schemars", schemars(schema_with = "text_or_number_schema"))]
     pub page: Option<String>,
     /// The caller's own reference for this claim, echoed back untouched;
     /// allowed here, read from the raw line (see [`InputClaim::from_line`]).
     #[serde(rename = "key")]
+    #[cfg_attr(
+        feature = "schemars",
+        schemars(
+            with = "Option<Value>",
+            description = "Your own reference for this claim, echoed back untouched."
+        )
+    )]
     pub _key: Option<serde::de::IgnoredAny>,
     pub doi: Option<String>,
     pub arxiv: Option<String>,
     /// Any identifier form `lookup` accepts.
     pub id: Option<String>,
+    /// More identifiers, in any form `lookup` accepts.
     #[serde(default)]
     pub ids: Vec<String>,
+}
+
+#[cfg(feature = "schemars")]
+fn text_or_number_schema(_: &mut schemars::SchemaGenerator) -> schemars::Schema {
+    schemars::json_schema!({"type": ["string", "integer"]})
 }
 
 /// Volumes and pages are written as numbers or strings ("e1234").

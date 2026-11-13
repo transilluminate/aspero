@@ -1,11 +1,11 @@
 //! `aspero search`: keyword search against one provider.
 
-use aspero_core::{Cursor, SearchQuery, SourceRecord, WorkType, YearRange};
+use aspero_core::{Cursor, SearchQuery, Sort, SourceRecord, WorkType, YearRange};
 use aspero_engine::Engine;
 use serde_json::{Value, json};
 
 use super::{Failure, Out, print, print_line, shell_quote};
-use crate::args::{Format, SearchOptions};
+use crate::args::{Format, SearchOptions, SortBy};
 use crate::exit::Exit;
 use crate::output;
 
@@ -156,7 +156,11 @@ fn next_command(
     cursor: &str,
     abstracts: bool,
 ) -> String {
-    let mut args = vec!["aspero".to_owned(), "search".to_owned(), shell_quote(text)];
+    let mut args = vec!["aspero".to_owned(), "search".to_owned()];
+    // Fields alone need no keywords.
+    if !text.is_empty() {
+        args.push(shell_quote(text));
+    }
     let mut flag = |name: &str, value: Option<String>| {
         args.push(name.to_owned());
         if let Some(v) = value {
@@ -173,6 +177,18 @@ fn next_command(
     if o.oa {
         flag("--oa", None);
     }
+    for (name, value) in [
+        ("--author", &o.author),
+        ("--title", &o.title),
+        ("--container", &o.container),
+    ] {
+        if let Some(v) = value {
+            flag(name, Some(v.clone()));
+        }
+    }
+    if o.sort != SortBy::Relevance {
+        flag("--sort", Some(sort(o.sort).as_str().replace('_', "-")));
+    }
     if abstracts {
         flag("--abstract", None);
     }
@@ -186,9 +202,21 @@ fn query(text: String, o: &SearchOptions) -> Result<SearchQuery, Failure> {
     q.years = o.year.as_deref().map(parse_years).transpose()?;
     q.work_type = o.work_type.as_deref().map(WorkType::from_csl);
     q.open_access = o.oa.then_some(true);
+    q.author = o.author.clone();
+    q.title = o.title.clone();
+    q.container = o.container.clone();
+    q.sort = sort(o.sort);
     q.page.limit = o.limit;
     q.page.cursor = o.cursor.clone().map(Cursor);
     Ok(q)
+}
+
+fn sort(by: SortBy) -> Sort {
+    match by {
+        SortBy::Relevance => Sort::Relevance,
+        SortBy::Newest => Sort::Newest,
+        SortBy::MostCited => Sort::MostCited,
+    }
 }
 
 /// `2017`, `2017..2020`, `2017..` or `..2020`.
@@ -226,6 +254,10 @@ mod tests {
             year: Some("2020..".into()),
             work_type: None,
             oa: true,
+            author: None,
+            title: None,
+            container: None,
+            sort: SortBy::Relevance,
             limit: 5,
             cursor: Some("old".into()),
         };
@@ -244,6 +276,18 @@ mod tests {
                 .split(" --")
                 .next(),
             Some(r#"aspero search 'Bishop'\''s book'"#)
+        );
+        let by_fields = SearchOptions {
+            year: None,
+            oa: false,
+            author: Some("LeCun".into()),
+            container: Some("Nature".into()),
+            sort: SortBy::MostCited,
+            ..options
+        };
+        assert_eq!(
+            next_command("", &by_fields, "crossref", "c", false),
+            "aspero search --source crossref --author LeCun --container Nature --sort most-cited --limit 5 --cursor c"
         );
     }
 

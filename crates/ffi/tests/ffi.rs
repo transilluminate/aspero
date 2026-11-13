@@ -474,7 +474,8 @@ fn the_first_searching_source_is_the_one_search_picks() {
         [
             SearchField::Author,
             SearchField::Title,
-            SearchField::Keywords
+            SearchField::Keywords,
+            SearchField::Identifier
         ]
     );
     assert_eq!(
@@ -601,6 +602,105 @@ fn search_supports_says_why_and_search_fails_the_same_way() {
     };
     let found = block_on(aspero.search(request, Patience::Offline, None)).unwrap();
     assert_eq!(found.failure.unwrap().kind, ErrorKind::NotCached);
+}
+
+#[test]
+fn identifiers_search_where_their_kind_is_taken() {
+    let aspero = aspero(None);
+    let at = |source: &str| Some(source.to_owned());
+    assert!(
+        aspero
+            .search_capabilities()
+            .iter()
+            .all(|s| s.fields.contains(&SearchField::Identifier))
+    );
+    let id = |value: &str| SearchNode::Term {
+        field: SearchField::Identifier,
+        value: value.into(),
+        phrase: false,
+    };
+    let unretracted = |node| SearchNode::All {
+        nodes: vec![
+            node,
+            SearchNode::Filter {
+                filter: SearchFilterValue::NotRetracted,
+            },
+        ],
+    };
+    let search = |source: Option<String>, query: SearchNode| {
+        let request = SearchRequest {
+            query: Some(query),
+            source,
+            ..search_request("")
+        };
+        block_on(aspero.search(request, Patience::Offline, None))
+            .unwrap()
+            .failure
+            .unwrap()
+    };
+    // OpenAlex, the default, takes a DOI beside a filter: the (empty)
+    // cache answers.
+    let doi = unretracted(id("10.1038/nature14539"));
+    assert_eq!(aspero.search_supports(None, doi.clone(), None), None);
+    assert_eq!(search(None, doi).kind, ErrorKind::NotCached);
+    // A kind a source can't take: refused, and the search fails the same.
+    for (source, value, reason) in [
+        (
+            "openalex",
+            "978-0-262-03561-3",
+            "OpenAlex has no ISBN filter",
+        ),
+        (
+            "crossref",
+            "pmid:26017442",
+            "Crossref finds works by DOI only",
+        ),
+        (
+            "datacite",
+            "PMC7254481",
+            "DataCite finds works by DOI or arXiv id only",
+        ),
+        (
+            "europepmc",
+            "W2919115771",
+            "Europe PMC can't find works by OpenAlex work id",
+        ),
+        (
+            "openlibrary",
+            "10.1038/nature14539",
+            "Open Library finds works by ISBN only",
+        ),
+    ] {
+        assert_eq!(
+            aspero
+                .search_supports(at(source), id(value), None)
+                .as_deref(),
+            Some(reason)
+        );
+        let failure = search(at(source), id(value));
+        assert_eq!(failure.kind, ErrorKind::Unsupported);
+        assert!(failure.message.ends_with(reason), "{}", failure.message);
+    }
+    let kinds = SearchNode::Any {
+        nodes: vec![id("10.1038/nature14539"), id("pmid:26017442")],
+    };
+    assert_eq!(
+        aspero.search_supports(None, kinds.clone(), None).as_deref(),
+        Some("OpenAlex can't combine DOI and PMID with any, only identifiers of one kind")
+    );
+    assert_eq!(aspero.search_supports(at("europepmc"), kinds, None), None);
+    // Not an identifier: the caller's to fix.
+    let reason =
+        r#"can't search by identifier "nature14539": unrecognised identifier "nature14539""#;
+    assert_eq!(
+        aspero
+            .search_supports(None, id("nature14539"), None)
+            .as_deref(),
+        Some(reason)
+    );
+    let failure = search(None, id("nature14539"));
+    assert_eq!(failure.kind, ErrorKind::BadRequest);
+    assert!(failure.message.ends_with(reason), "{}", failure.message);
 }
 
 #[test]

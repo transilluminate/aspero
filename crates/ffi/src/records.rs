@@ -1392,6 +1392,13 @@ pub enum SearchField {
     /// An ORCID (bare or as a URL) or an OpenAlex author id (`A…`);
     /// anything else fails (`badRequest`).
     AuthorId,
+    /// In a query tree only: the work an identifier names, any `lookup`
+    /// takes (a DOI, bare, `doi:` or as a URL; `pmid:`, `pmcid:`,
+    /// `arXiv:`, an OpenAlex `W…` id, an ISBN). One that isn't fails
+    /// (`badRequest`); `phrase` means nothing. Sources take some kinds
+    /// only (Crossref DOIs, Open Library ISBNs, …): `searchSupports` says
+    /// which, and why not.
+    Identifier,
 }
 
 impl SearchField {
@@ -1403,6 +1410,7 @@ impl SearchField {
             Filter::Keywords => Some(SearchField::Keywords),
             Filter::Abstract => Some(SearchField::Abstract),
             Filter::AuthorId => Some(SearchField::AuthorId),
+            Filter::Identifier => Some(SearchField::Identifier),
             _ => None,
         }
     }
@@ -1417,6 +1425,7 @@ impl From<SearchField> for TermField {
             SearchField::Keywords => TermField::Keywords,
             SearchField::Abstract => TermField::Abstract,
             SearchField::AuthorId => TermField::AuthorId,
+            SearchField::Identifier => TermField::Identifier,
         }
     }
 }

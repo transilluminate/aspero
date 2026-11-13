@@ -1,5 +1,37 @@
 # Changelog
 
+## 0.9.0
+
+Changed (library):
+
+- Batch verification has one engine path, `Engine::verify_batch`, used
+  by the CLI, the FFI and `check`. `Engine::check` returns a
+  `CheckReport` (findings and usage).
+- `check`'s findings and their severities (bib notes, skipped entries)
+  are the engine's (`check_entries`); its JSON shape is
+  `aspero_json::check`. The OpenAlex key check is the engine's
+  (`check_openalex_key`). The engine and json crates depend on
+  aspero-bib.
+- `CslItem.isbn` is `Option<OneOrMany>` (Crossref sends arrays); CSL
+  names read `name` as well as `literal`.
+- New helpers: `ArxivId::doi`, `Doi::arxiv`, `orcid`, `Person::inverted`,
+  `Candidate::merged_record`, `LookupResult::served`, `add_usage`,
+  `StandardConfig::all`, `SEARCH_LIMIT`, and `ALL` on the engine's enums.
+
+Fixed:
+
+- `aspero check` left the batched OpenAlex lookup out of its usage.
+- A record carrying two candidates' identifiers merged into the first
+  only, so one work could rank twice; candidates now merge transitively.
+- Crossref and doi.org mapped work types differently (`reference-entry`,
+  `book-set`, `report-component`, `database`); an abstract of tags alone
+  is none. ORCIDs from OpenAlex and DataCite given as `http://` URLs, or
+  empty, are normalised as elsewhere. The cache schema is rebuilt (9).
+- `aspero check -` on a terminal waited for input; it now says to pass a
+  file or pipe one.
+- FFI: a candidate's `Work.json` carries its merged identifiers and
+  notices, as JSON candidates do.
+
 ## 0.8.6
 
 Fixed:

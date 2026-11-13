@@ -774,9 +774,8 @@ impl Engine {
         let Some(cache) = &self.cache else {
             return none();
         };
-        let now = (self.clock)();
         let fresh = |stored: &aspero_store::Entry<Edges>, ttl| {
-            self.options.offline || stored.is_fresh(now, ttl)
+            self.options.offline || self.current(stored, ttl)
         };
         let ids: Vec<WorkId> = works.iter().map(|(w, _)| w.clone()).collect();
         let Ok(rows) = cache.get_edges(Direction::CitedBy, &ids) else {

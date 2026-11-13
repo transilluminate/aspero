@@ -1,5 +1,8 @@
 //! Engine caching: fresh hits skip providers, misses are remembered, expiry
-//! refetches, and failures fall back to stale answers.
+//! refetches, failures fall back to stale answers, and calls past the cache
+//! refresh it.
+
+mod common;
 
 use std::cell::Cell;
 use std::sync::Arc;
@@ -9,7 +12,7 @@ use aspero_core::{
     Capabilities, Error, FieldSet, Hit, IdKind, Lookup, Page, Provider, ProviderId, Raw,
     ResiliencePolicy, Response, Result, SearchQuery, SourceRecord, Work, WorkId,
 };
-use aspero_engine::{Engine, Outcome, Served, SqliteCache};
+use aspero_engine::{CallOptions, Engine, Outcome, Served, SqliteCache};
 use async_trait::async_trait;
 use jiff::Timestamp;
 
@@ -29,11 +32,15 @@ fn advance(seconds: i64) {
 
 const DAY: i64 = 86_400;
 
-/// Knows one work (10.1000/known); counts calls; can be switched off.
+/// Knows one work (10.1000/known), and another (10.1000/late) once
+/// registered; counts calls; can be switched off.
 struct Counting {
     caps: Capabilities,
     calls: AtomicUsize,
     down: AtomicBool,
+    /// The known work's title has since been corrected.
+    corrected: AtomicBool,
+    registered: AtomicBool,
     /// Fields its records cover.
     covers: FieldSet,
 }
@@ -48,6 +55,8 @@ impl Counting {
             caps,
             calls: AtomicUsize::new(0),
             down: AtomicBool::new(false),
+            corrected: AtomicBool::new(false),
+            registered: AtomicBool::new(false),
             covers,
         }
     }
@@ -57,11 +66,19 @@ impl Counting {
     }
 
     fn known(&self) -> SourceRecord {
+        let title = match self.corrected.load(Ordering::SeqCst) {
+            true => "Known (corrected)",
+            false => "Known",
+        };
+        self.record("10.1000/known", title)
+    }
+
+    fn record(&self, doi: &str, title: &str) -> SourceRecord {
         let mut work = Work::default();
-        work.title = Some("Known".into());
+        work.title = Some(title.into());
         SourceRecord::new(
             ProviderId::from_static("counting"),
-            vec!["10.1000/known".parse().unwrap()],
+            vec![doi.parse().unwrap()],
             work,
             self.covers,
             Raw {
@@ -93,12 +110,15 @@ impl Provider for Counting {
 
     async fn lookup(&self, ids: &[WorkId], _: FieldSet) -> Result<Response<Vec<Lookup>>> {
         self.call()?;
-        let known = self.known();
+        let mut works = vec![self.known()];
+        if self.registered.load(Ordering::SeqCst) {
+            works.push(self.record("10.1000/late", "Late"));
+        }
         let lookups = ids
             .iter()
             .map(|id| Lookup {
                 id: id.clone(),
-                record: known.ids.contains(id).then(|| known.clone()),
+                record: works.iter().find(|w| w.ids.contains(id)).cloned(),
             })
             .collect();
         Ok(Response::new(lookups))
@@ -247,4 +267,160 @@ async fn a_cached_record_lacking_requested_fields_is_refetched() {
     let report = engine.lookup(&wanted, FieldSet::ALL).await;
     assert_eq!(provider.calls(), 2, "abstract etc. not cached: refetched");
     assert_eq!(served(&report), [(true, Served::Live)]);
+}
+
+fn title(report: &aspero_engine::LookupReport) -> Option<&str> {
+    report.results[0].record.as_ref()?.work.title.as_deref()
+}
+
+#[tokio::test]
+async fn a_fresh_lookup_asks_past_the_cache_and_replaces_its_answer() {
+    let (engine, provider) = setup();
+    let fresh = engine.with_options(CallOptions::fresh());
+    let wanted = ids(&["10.1000/known"]);
+    engine.lookup(&wanted, FieldSet::DEFAULT).await;
+    provider.corrected.store(true, Ordering::SeqCst);
+
+    let cached = engine.lookup(&wanted, FieldSet::DEFAULT).await;
+    assert_eq!(served(&cached), [(true, Served::Cache)]);
+    assert_eq!(title(&cached), Some("Known"), "the cache can't know");
+    assert_eq!(provider.calls(), 1);
+
+    let report = fresh.lookup(&wanted, FieldSet::DEFAULT).await;
+    assert_eq!(served(&report), [(true, Served::Live)]);
+    assert_eq!(title(&report), Some("Known (corrected)"));
+    assert_eq!(provider.calls(), 2, "asked though the cache was fresh");
+
+    // Its answer replaced the cached one.
+    let later = engine.lookup(&wanted, FieldSet::DEFAULT).await;
+    assert_eq!(served(&later), [(true, Served::Cache)]);
+    assert_eq!(title(&later), Some("Known (corrected)"));
+    assert_eq!(provider.calls(), 2);
+}
+
+#[tokio::test]
+async fn a_fresh_lookup_asks_again_after_not_found_and_a_found_work_replaces_the_miss() {
+    let (engine, provider) = setup();
+    let wanted = ids(&["10.1000/late"]);
+    engine.lookup(&wanted, FieldSet::DEFAULT).await;
+    provider.registered.store(true, Ordering::SeqCst);
+    let cached = engine.lookup(&wanted, FieldSet::DEFAULT).await;
+    assert_eq!(served(&cached), [(false, Served::Cache)]);
+
+    let fresh = engine.with_options(CallOptions::fresh());
+    let report = fresh.lookup(&wanted, FieldSet::DEFAULT).await;
+    assert_eq!(served(&report), [(true, Served::Live)]);
+    assert_eq!(provider.calls(), 2);
+
+    let later = engine.lookup(&wanted, FieldSet::DEFAULT).await;
+    assert_eq!(served(&later), [(true, Served::Cache)]);
+    assert_eq!(title(&later), Some("Late"));
+    assert_eq!(provider.calls(), 2);
+}
+
+#[tokio::test]
+async fn a_fresh_search_asks_past_the_cache_and_replaces_its_page() {
+    let (engine, provider) = setup();
+    let query = SearchQuery::new("known");
+    engine.search(None, &query).await.unwrap();
+    provider.corrected.store(true, Ordering::SeqCst);
+
+    let fresh = engine.with_options(CallOptions::fresh());
+    let report = fresh.search(None, &query).await.unwrap();
+    assert_eq!(report.served, Served::Live);
+    assert_eq!(provider.calls(), 2);
+
+    let later = engine.search(None, &query).await.unwrap();
+    assert_eq!(later.served, Served::Cache);
+    let title = later.page.hits[0].record.work.title.as_deref();
+    assert_eq!(title, Some("Known (corrected)"));
+    assert_eq!(provider.calls(), 2);
+}
+
+/// Past the cache, a provider failing is no worse than asking normally:
+/// the cached answer, though within its lifetime, is served marked stale
+/// (it is not what was asked for: an answer from now).
+#[tokio::test]
+async fn a_fresh_call_whose_provider_fails_serves_the_cached_answer_as_stale() {
+    let (engine, provider) = setup();
+    let wanted = ids(&["10.1000/known", "10.1000/invented"]);
+    engine.lookup(&wanted, FieldSet::DEFAULT).await;
+    let query = SearchQuery::new("known");
+    engine.search(None, &query).await.unwrap();
+
+    provider.down.store(true, Ordering::SeqCst);
+    let fresh = engine.with_options(CallOptions::fresh());
+    let report = fresh
+        .lookup(
+            &ids(&["10.1000/known", "10.1000/invented", "10.1000/never-seen"]),
+            FieldSet::DEFAULT,
+        )
+        .await;
+    assert_eq!(
+        served(&report),
+        [
+            (true, Served::Stale),
+            (false, Served::Stale),
+            (false, Served::Live)
+        ]
+    );
+    assert!(report.results[1].is_not_found());
+    assert!(matches!(
+        report.results[2].attempts[0].outcome,
+        Outcome::Failed(Error::AuthRejected { .. })
+    ));
+    assert_eq!(provider.calls(), 1 + 1 + 1, "asked once more, not served");
+
+    let search = fresh.search(None, &query).await.unwrap();
+    assert_eq!(search.served, Served::Stale);
+    assert_eq!(search.page.hits.len(), 1);
+}
+
+#[tokio::test]
+async fn offline_wins_over_fresh() {
+    let (engine, provider) = setup();
+    let wanted = ids(&["10.1000/known"]);
+    engine.lookup(&wanted, FieldSet::DEFAULT).await;
+    let mut options = CallOptions::offline();
+    options.fresh = true;
+    let report = engine
+        .with_options(options)
+        .lookup(&wanted, FieldSet::DEFAULT)
+        .await;
+    assert_eq!(served(&report), [(true, Served::Cache)]);
+    assert_eq!(provider.calls(), 1);
+}
+
+#[tokio::test]
+async fn a_fresh_verify_runs_its_searches_again() {
+    use aspero_core::Claim;
+    use common::{Scripted, deep_learning};
+
+    let openalex = Arc::new(
+        Scripted::new("openalex")
+            .keyword()
+            .with(vec![deep_learning()]),
+    );
+    let crossref = Arc::new(Scripted::new("crossref").matcher(vec![deep_learning()]));
+    let engine = Engine::builder()
+        .provider(openalex.clone(), ResiliencePolicy::default(), 0)
+        .provider(crossref.clone(), ResiliencePolicy::default(), 1)
+        .cache(Arc::new(SqliteCache::open_in_memory().unwrap()))
+        .build();
+    let claim = Claim::from_text("LeCun Y, Bengio Y, Hinton G. Deep learning. 2015.");
+    let searches = || openalex.queries().len() + crossref.queries().len();
+
+    let first = engine.verify(&claim, 5).await;
+    let asked = searches();
+    assert!(asked > 0);
+    let again = engine.verify(&claim, 5).await;
+    assert_eq!(searches(), asked, "searches served from cache");
+    assert_eq!(again.verdict, first.verdict);
+
+    let fresh = engine
+        .with_options(CallOptions::fresh())
+        .verify(&claim, 5)
+        .await;
+    assert_eq!(searches(), 2 * asked, "every search asked again");
+    assert_eq!(fresh.verdict, first.verdict);
 }

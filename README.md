@@ -142,7 +142,11 @@ and pacing are the other commands'.
   asking all at once.
 - **Cached**: answers are kept (records 7 days, searches and "not found" 1
   day, references 30 days), so re-checking a bibliography is near-instant and free. `aspero
-  cache stats|clear|path`.
+  cache stats|clear|path`. Before submitting, `--fresh` checks again past
+  the cache (any retraction or correction since, a work registered since
+  it was "not found") and caches the new answers; where a source fails,
+  the cached answer is served, marked stale. `--no-cache` neither reads
+  nor writes the cache.
 
 ## Library
 

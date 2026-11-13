@@ -55,6 +55,23 @@ pub enum Patience {
     Interactive,
     /// The cache only, however old.
     Offline,
+    /// Asks the sources again, past the cache, and caches their answers:
+    /// for checking again before submitting. Falls back to the cached
+    /// answer, marked stale, where a source fails.
+    Fresh,
+}
+
+impl Patience {
+    /// The engine's options for this patience.
+    fn options(self) -> CallOptions {
+        match self {
+            Patience::Batch => CallOptions::default(),
+            Patience::Interactive => CallOptions::interactive(),
+            Patience::Offline => CallOptions::offline(),
+            // Batch deadlines and retries, past the cache.
+            Patience::Fresh => CallOptions::fresh(),
+        }
+    }
 }
 
 #[derive(Debug, thiserror::Error, uniffi::Error)]
@@ -610,11 +627,7 @@ impl Aspero {
 
 impl Aspero {
     fn engine(&self, patience: Patience) -> Engine {
-        self.engine.with_options(match patience {
-            Patience::Batch => CallOptions::default(),
-            Patience::Interactive => CallOptions::interactive(),
-            Patience::Offline => CallOptions::offline(),
-        })
+        self.engine.with_options(patience.options())
     }
 
     /// Runs `work` on the handle's runtime until it finishes or `cancel`
@@ -673,4 +686,33 @@ async fn verify_all(
         each(Verification::new(i, &claims[i], &v, full));
     }
     records::usage(verified.usage())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn each_patience_has_its_options() {
+        let batch = CallOptions::default();
+        for patience in [
+            Patience::Batch,
+            Patience::Interactive,
+            Patience::Offline,
+            Patience::Fresh,
+        ] {
+            let options = patience.options();
+            match patience {
+                Patience::Batch => assert_eq!(options, batch),
+                Patience::Interactive => assert_eq!(options, CallOptions::interactive()),
+                Patience::Offline => assert!(options.offline && !options.fresh),
+                Patience::Fresh => {
+                    assert!(options.fresh && !options.offline);
+                    // Waits as a batch does.
+                    assert_eq!(options.deadline, batch.deadline);
+                    assert_eq!(options.max_retries, batch.max_retries);
+                }
+            }
+        }
+    }
 }

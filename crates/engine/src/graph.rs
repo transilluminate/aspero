@@ -859,7 +859,8 @@ impl Engine {
         let pending_ids: Vec<WorkId> = pending.iter().map(|&k| asks[k].1.clone()).collect();
         let chunks = batches(&pending_ids, &pending, entry);
         if spend.estimating {
-            if self.cache.is_none() {
+            // Without a cache, or past it, the run won't find them there.
+            if self.cache.is_none() || !self.options.reads_cache() {
                 spend.requests += chunks.iter().filter(|c| c.len() > 1).count() as u64;
             }
             let lookups = futures::stream::iter(pending_ids.into_iter().zip(pending).map(
@@ -1137,7 +1138,8 @@ impl Engine {
         Section::new(items, incomplete)
     }
 
-    /// A work's references cached within their time to live.
+    /// A work's references cached within their time to live (none, past
+    /// the cache).
     fn cached_references(&self, work: &WorkId) -> Option<Vec<WorkId>> {
         let entry = self
             .cache
@@ -1145,8 +1147,7 @@ impl Engine {
             .get_edges(Direction::References, std::slice::from_ref(work))
             .ok()?
             .pop()??;
-        entry
-            .is_fresh((self.clock)(), self.cache_policy.references)
+        self.current(&entry, self.cache_policy.references)
             .then_some(entry.value.ids)
     }
 

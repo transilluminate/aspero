@@ -386,14 +386,15 @@ impl Engine {
         }
     }
 
-    /// A cached page and whether it is still fresh.
+    /// A cached page and whether it is still fresh (never, past the
+    /// cache).
     pub(crate) fn cached_search(
         &self,
         provider: &ProviderId,
         query: &SearchQuery,
     ) -> Option<(Page, bool)> {
         let entry = self.cache.as_ref()?.get_search(provider, query).ok()??;
-        let fresh = entry.is_fresh((self.clock)(), self.cache_policy.searches);
+        let fresh = self.current(&entry, self.cache_policy.searches);
         Some((entry.value, fresh))
     }
 

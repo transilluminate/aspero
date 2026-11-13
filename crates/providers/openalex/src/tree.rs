@@ -296,6 +296,7 @@ pub(crate) fn work_type(t: &WorkType) -> Result<&str, String> {
         WorkType::Thesis => "dissertation",
         WorkType::Report => "report",
         WorkType::Dataset => "dataset",
+        WorkType::Review => "review",
         WorkType::Other(other) => other.as_str(),
         _ => {
             return Err(format!("{NAME} has no work type matching {:?}", t.as_csl()));
@@ -506,5 +507,10 @@ mod tests {
             reason(QueryNode::filter(FilterValue::WorkType(WorkType::Software))),
             "OpenAlex has no work type matching \"software\""
         );
+    }
+
+    #[test]
+    fn reviews_are_a_type_openalex_filters_on() {
+        assert_eq!(work_type(&WorkType::Review), Ok("review"));
     }
 }

@@ -17,10 +17,57 @@
 //! - filters: `years` (`{"from": 2017, "to": 2020}`, either optional, or a
 //!   year), `type` (a CSL type), `open_access` (a boolean), `language` (ISO
 //!   639-1), and `not_retracted` and `has_abstract` (`true`);
-//! - relations: `cites` and `cited_by`, any identifier.
+//! - relations: `cites` (works citing it) and `cited_by` (works it cites),
+//!   any identifier.
+//!
+//! [`QueryTree`] is the same form as a serde type, for typed arguments.
 
 use aspero_core::{FilterValue, QueryNode, Relation, TermField, WorkType, YearRange};
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use serde_json::{Map, Value, json};
+
+/// A query tree in its JSON form, as a serde type: it reads with
+/// [`parse_query`] (so mistakes are explained the same way) and writes with
+/// [`query_json`]. With the `schemars` feature, it describes itself as a
+/// JSON Schema.
+#[derive(Debug, Clone, PartialEq)]
+pub struct QueryTree(pub QueryNode);
+
+impl Serialize for QueryTree {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        query_json(&self.0).serialize(serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for QueryTree {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = Value::deserialize(deserializer)?;
+        parse_query(&value)
+            .map(QueryTree)
+            .map_err(serde::de::Error::custom)
+    }
+}
+
+/// Every node's key (`journal` is `container`'s alias).
+const KEYS: &[&str] = &[
+    "all",
+    "any",
+    "none",
+    "keywords",
+    "title",
+    "author",
+    "container",
+    "abstract",
+    "author_id",
+    "years",
+    "type",
+    "open_access",
+    "language",
+    "not_retracted",
+    "has_abstract",
+    "cites",
+    "cited_by",
+];
 
 /// A tree from its JSON form, or why not, in English.
 pub fn parse_query(value: &Value) -> Result<QueryNode, String> {
@@ -78,11 +125,7 @@ pub fn parse_query(value: &Value) -> Result<QueryNode, String> {
         "cites" => QueryNode::relation(Relation::Cites, string(key, value)?),
         "cited_by" => QueryNode::relation(Relation::CitedBy, string(key, value)?),
         other => {
-            return Err(format!(
-                "unknown query key {other:?} (all, any, none, keywords, title, author, \
-                 container, abstract, author_id, years, type, open_access, language, \
-                 not_retracted, has_abstract, cites, cited_by)"
-            ));
+            return Err(format!("unknown query key {other:?} ({})", KEYS.join(", ")));
         }
     })
 }
@@ -126,6 +169,107 @@ pub fn query_json(node: &QueryNode) -> Value {
         },
         QueryNode::Relation(r) => one(r.relation.as_str(), json!(r.id)),
         _ => one("unknown", Value::Null),
+    }
+}
+
+/// One alternative per node key, each an object with that key alone (and
+/// `phrase`, for a term); groups refer back to the node.
+#[cfg(feature = "schemars")]
+impl schemars::JsonSchema for QueryTree {
+    fn schema_name() -> std::borrow::Cow<'static, str> {
+        "QueryNode".into()
+    }
+
+    fn json_schema(generator: &mut schemars::SchemaGenerator) -> schemars::Schema {
+        let node = generator.subschema_for::<Self>().to_value();
+        let one = |key: &str, value: Value, description: &str| {
+            json!({
+                "type": "object",
+                "description": description,
+                "properties": {key: value},
+                "required": [key],
+                "additionalProperties": false,
+            })
+        };
+        let term = |key: &str, description: &str| {
+            json!({
+                "type": "object",
+                "description": description,
+                "properties": {
+                    key: {"type": "string"},
+                    "phrase": {"type": "boolean", "description": "the words together, in order"},
+                },
+                "required": [key],
+                "additionalProperties": false,
+            })
+        };
+        let nodes = json!({"type": "array", "items": node});
+        let text = json!({"type": "string"});
+        let year = json!({"type": "integer"});
+        let alternatives = [
+            one("all", nodes.clone(), "every node matches"),
+            one("any", nodes.clone(), "at least one node matches"),
+            one("none", nodes, "no node matches"),
+            term("keywords", "words anywhere in the record"),
+            term("title", "words of the title"),
+            term("author", "an author's name"),
+            term(
+                "container",
+                "where the work appeared: the journal, or the book for a chapter",
+            ),
+            term("journal", "the same as container"),
+            term("abstract", "words of the abstract"),
+            term("author_id", "an author's ORCID, or OpenAlex author id"),
+            one(
+                "years",
+                json!({"anyOf": [
+                    year.clone(),
+                    {
+                        "type": "object",
+                        "properties": {"from": year.clone(), "to": year},
+                        "additionalProperties": false,
+                    },
+                ]}),
+                "publication years, inclusive: one year, or from and to (either optional)",
+            ),
+            one(
+                "type",
+                text.clone(),
+                "a CSL work type: article-journal, book, chapter, paper-conference, \
+                 article (a preprint), …",
+            ),
+            one(
+                "open_access",
+                json!({"type": "boolean"}),
+                "whether a free, legal copy is known",
+            ),
+            one("language", text.clone(), "an ISO 639-1 code: en, de, fr, …"),
+            one(
+                "not_retracted",
+                json!({"const": true}),
+                "leaves out retracted works",
+            ),
+            one(
+                "has_abstract",
+                json!({"const": true}),
+                "only works with an abstract",
+            ),
+            one(
+                "cites",
+                text.clone(),
+                "works citing this work, named by any identifier (DOI, PMID, arXiv, …)",
+            ),
+            one(
+                "cited_by",
+                text,
+                "works this work cites (its references), named by any identifier",
+            ),
+        ];
+        schemars::Schema::try_from(json!({
+            "description": "A query tree: each node an object with one key.",
+            "anyOf": alternatives,
+        }))
+        .expect("an object is a schema")
     }
 }
 
@@ -223,6 +367,50 @@ mod tests {
             query_json(&nodes[1]).to_string(),
             r#"{"any":[{"title":"alphafold"},{"container":"structure prediction","phrase":true}]}"#
         );
+    }
+
+    #[test]
+    fn query_trees_are_serde_types() {
+        let text = r#"{"all":[{"title":"alphafold","phrase":true},{"cites":"W1"}]}"#;
+        let tree: QueryTree = serde_json::from_str(text).unwrap();
+        assert_eq!(
+            tree.0,
+            parse_query(&serde_json::from_str(text).unwrap()).unwrap()
+        );
+        assert_eq!(
+            serde_json::to_value(&tree).unwrap(),
+            serde_json::from_str::<Value>(text).unwrap()
+        );
+        let err = serde_json::from_str::<QueryTree>(r#"{"titel": "x"}"#).unwrap_err();
+        assert!(err.to_string().starts_with("unknown query key \"titel\""));
+    }
+
+    /// The schema has one alternative per key the parser reads, and every
+    /// one it describes parses.
+    #[cfg(feature = "schemars")]
+    #[test]
+    fn the_schema_describes_what_parses() {
+        let schema = schemars::schema_for!(QueryTree).to_value();
+        let alternatives = schema["anyOf"].as_array().unwrap();
+        let keys: Vec<&str> = alternatives
+            .iter()
+            .map(|a| a["required"][0].as_str().unwrap())
+            .collect();
+        let mut expected = KEYS.to_vec();
+        expected.insert(7, "journal");
+        assert_eq!(keys, expected);
+        let sample = |key: &str| match key {
+            "all" | "any" | "none" => json!([{"title": "x"}]),
+            "years" => json!({"from": 2020}),
+            "open_access" | "not_retracted" | "has_abstract" => json!(true),
+            "language" => json!("en"),
+            _ => json!("10.1038/nature14539"),
+        };
+        for key in keys {
+            let mut node = Map::new();
+            node.insert(key.into(), sample(key));
+            parse_query(&Value::Object(node)).unwrap();
+        }
     }
 
     #[test]

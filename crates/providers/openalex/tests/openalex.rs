@@ -374,7 +374,7 @@ fn container_searches_the_sources_so_named_first() {
         query(&http, 0),
         [
             ("filter", "display_name.search:nature machine"),
-            ("select", "id"),
+            ("select", "id,display_name"),
             ("per-page", "100"),
         ]
         .map(|(k, v)| (k.to_owned(), v.to_owned()))
@@ -387,6 +387,29 @@ fn container_searches_the_sources_so_named_first() {
     assert_eq!(filter, "primary_location.source.id:S2912241403|S7407104579");
     // Both searches are paid for.
     assert_eq!(resp.usage.unwrap().cost, Some(0.002));
+}
+
+#[test]
+fn a_journal_phrase_keeps_the_source_so_named_exactly() {
+    let sources = r#"{"meta": {"count": 3}, "results": [
+        {"id": "https://openalex.org/S64187185", "display_name": "Nature Communications"},
+        {"id": "https://openalex.org/S137773608", "display_name": "Nature"},
+        {"id": "https://openalex.org/S106963461", "display_name": "Nature Biotechnology"}
+    ]}"#;
+    let empty = r#"{"meta": {"count": 0}, "results": []}"#;
+    let (oa, http) = provider([
+        response(200, &[("x-ratelimit-cost-usd", "0.001")], sources),
+        response(200, &[("x-ratelimit-cost-usd", "0.001")], empty),
+    ]);
+    let mut q = SearchQuery::new("");
+    q.tree = Some(QueryNode::phrase(TermField::Container, "Nature"));
+    block_on(oa.search(&q)).unwrap();
+    let filter = query(&http, 1)
+        .into_iter()
+        .find(|(k, _)| k == "filter")
+        .unwrap()
+        .1;
+    assert_eq!(filter, "primary_location.source.id:S137773608");
 }
 
 #[test]

@@ -19,6 +19,12 @@ aspero-core.workspace = true
 aspero-engine.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+schemars = { workspace = true, optional = true }
+
+[features]
+# JSON Schemas for the input types (query trees, claims), for front ends
+# that describe their arguments (the MCP server).
+schemars = ["dep:schemars"]
 
 [dev-dependencies]
 jiff.workspace = true

@@ -1969,9 +1969,13 @@ pub enum AnalysisKind {
     OddOneOut,
     /// The best `limit` works several seeds cite that the set lacks.
     ProbablyMissing { limit: u32 },
-    /// Works around the set: not built yet (listed in `notYet`).
+    /// The best 20 works around the set, by co-citation and bibliographic
+    /// coupling (`related`).
     Related,
 }
+
+/// Related works listed: as many as `aspero analyse` lists by default.
+const RELATED_LIMIT: u32 = 20;
 
 impl From<AnalysisKind> for engine::AnalysisKind {
     fn from(k: AnalysisKind) -> Self {
@@ -1981,7 +1985,9 @@ impl From<AnalysisKind> for engine::AnalysisKind {
             AnalysisKind::ProbablyMissing { limit } => {
                 engine::AnalysisKind::ProbablyMissing { limit }
             }
-            AnalysisKind::Related => engine::AnalysisKind::Related,
+            AnalysisKind::Related => engine::AnalysisKind::Related {
+                limit: RELATED_LIMIT,
+            },
         }
     }
 }
@@ -1994,7 +2000,7 @@ impl From<engine::AnalysisKind> for AnalysisKind {
             engine::AnalysisKind::ProbablyMissing { limit } => {
                 AnalysisKind::ProbablyMissing { limit }
             }
-            engine::AnalysisKind::Related => AnalysisKind::Related,
+            engine::AnalysisKind::Related { .. } => AnalysisKind::Related,
             _ => AnalysisKind::Related,
         }
     }
@@ -2070,7 +2076,8 @@ impl Seed {
 /// What stopped part of an analysis.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Enum)]
 pub enum IncompleteKind {
-    /// A fixed cap (sampling).
+    /// A fixed cap: related works read a sample of a much cited work's
+    /// citing works.
     Capped,
     /// The budget ran out.
     Budget,
@@ -2089,8 +2096,8 @@ impl From<engine::IncompleteKind> for IncompleteKind {
 }
 
 /// How far a stopped step got: `done` of `total` (seeds looked up,
-/// references checked, works looked up), to word as "checked 1,200 of
-/// 4,300".
+/// references checked, works looked up, citing works read), to word as
+/// "checked 1,200 of 4,300".
 #[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Record)]
 pub struct Incomplete {
     pub kind: IncompleteKind,
@@ -2176,13 +2183,44 @@ pub struct ProbablyMissing {
     pub incomplete: Option<Incomplete>,
 }
 
+/// A work around the set, and why: co-cited with it, sharing its
+/// references, or both.
+#[derive(Debug, Clone, uniffi::Record)]
+pub struct RelatedWork {
+    /// Its OpenAlex id.
+    pub id: String,
+    /// Every OpenAlex id merged into it (preprint and published versions).
+    pub ids: Vec<String>,
+    /// When looked up.
+    pub work: Option<Work>,
+    /// From 0 to 1: the mean of its co-citation and coupling counts, each
+    /// as a share of the highest among the works found.
+    pub score: f64,
+    /// Citing works read that cite it and at least one seed.
+    pub co_cited_with: u32,
+    /// The seeds' references it cites too (counted from two).
+    pub shared_references: u32,
+    /// The seeds linking it, one per work of the set.
+    pub seeds: Vec<u32>,
+}
+
+#[derive(Debug, Clone, uniffi::Record)]
+pub struct RelatedWorks {
+    pub items: Vec<RelatedWork>,
+    /// What stopped it: `capped` when a much cited seed's citing works
+    /// were sampled; `done` of `total` citing works read.
+    pub incomplete: Option<Incomplete>,
+}
+
 /// What an analysis would cost.
 #[derive(Debug, Clone, Copy, PartialEq, uniffi::Record)]
 pub struct Estimate {
     /// Paid requests.
     pub requests: u64,
     pub usd: f64,
-    /// Whether the counts are known; otherwise a floor.
+    /// Whether the counts are known: otherwise a floor (seeds not
+    /// resolved), or with related works a ceiling (their citing works'
+    /// pages are exact; coupling's pages and the lookups at most).
     pub exact: bool,
 }
 
@@ -2197,7 +2235,7 @@ pub struct Analysis {
     pub retracted_references: Option<RetractedReferences>,
     pub odd_one_out: Option<OddOnesOut>,
     pub probably_missing: Option<ProbablyMissing>,
-    /// Kinds asked for that aren't built yet.
+    /// Kinds asked for that aren't built yet (none, now).
     pub not_yet: Vec<AnalysisKind>,
     /// With `estimateOnly`: the cost of running it, in place of findings.
     pub estimate: Option<Estimate>,
@@ -2208,6 +2246,9 @@ pub struct Analysis {
     /// Why there's no analysis at all (no OpenAlex).
     pub failure: Option<Failure>,
     pub usage: Vec<ProviderUsage>,
+    /// Works around the set, when asked for (`related`).
+    #[uniffi(default = None)]
+    pub related: Option<RelatedWorks>,
 }
 
 impl Analysis {
@@ -2227,6 +2268,7 @@ impl Analysis {
                     incomplete: None,
                     failure: Some(Failure::from(&e)),
                     usage: Vec::new(),
+                    related: None,
                 };
             }
         };
@@ -2289,6 +2331,22 @@ impl Analysis {
             incomplete: incomplete(a.incomplete),
             failure: None,
             usage: usage(&a.usage),
+            related: a.related.as_ref().map(|s| RelatedWorks {
+                items: s
+                    .items
+                    .iter()
+                    .map(|r| RelatedWork {
+                        id: r.id.to_string(),
+                        ids: r.ids.iter().map(ToString::to_string).collect(),
+                        work: r.record.as_ref().map(Work::from_record),
+                        score: r.score,
+                        co_cited_with: r.co_cited_with as u32,
+                        shared_references: r.shared_references as u32,
+                        seeds: r.seeds.iter().map(|&i| i as u32).collect(),
+                    })
+                    .collect(),
+                incomplete: incomplete(s.incomplete),
+            }),
         }
     }
 }

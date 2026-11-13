@@ -1,8 +1,5 @@
 {
   "complete": true,
-  "not_yet": [
-    "related"
-  ],
   "odd_one_out": {
     "complete": true,
     "items": [
@@ -65,6 +62,106 @@
       }
     ]
   },
+  "related": {
+    "complete": true,
+    "items": [
+      {
+        "co_cited_with": 2,
+        "id": "openalex:W10",
+        "score": 0.5,
+        "seeds": [
+          0,
+          1
+        ],
+        "shared_references": 0,
+        "work": {
+          "authors": [
+            {
+              "name": "Ed Rivers"
+            }
+          ],
+          "canonical": "openalex:W10",
+          "ids": [
+            "openalex:W10"
+          ],
+          "issued": "2001",
+          "source": "openalex",
+          "title": "Early goal-directed therapy"
+        }
+      },
+      {
+        "co_cited_with": 0,
+        "id": "openalex:W50",
+        "score": 0.5,
+        "seeds": [
+          0,
+          1
+        ],
+        "shared_references": 2,
+        "work": {
+          "authors": [
+            {
+              "name": "Gil Hart"
+            }
+          ],
+          "canonical": "openalex:W50",
+          "ids": [
+            "openalex:W50"
+          ],
+          "issued": "2023",
+          "source": "openalex",
+          "title": "Sepsis care, reviewed"
+        }
+      },
+      {
+        "co_cited_with": 1,
+        "id": "openalex:W11",
+        "score": 0.25,
+        "seeds": [
+          0
+        ],
+        "shared_references": 0,
+        "work": {
+          "authors": [
+            {
+              "name": "Fay Dell"
+            }
+          ],
+          "canonical": "openalex:W11",
+          "ids": [
+            "openalex:W11"
+          ],
+          "issued": "2016",
+          "source": "openalex",
+          "title": "Surviving sepsis"
+        }
+      },
+      {
+        "co_cited_with": 1,
+        "id": "openalex:W60",
+        "score": 0.25,
+        "seeds": [
+          0,
+          1
+        ],
+        "shared_references": 0,
+        "work": {
+          "authors": [
+            {
+              "name": "Hal Singer"
+            }
+          ],
+          "canonical": "openalex:W60",
+          "ids": [
+            "openalex:W60"
+          ],
+          "issued": "2016",
+          "source": "openalex",
+          "title": "Sepsis definitions"
+        }
+      }
+    ]
+  },
   "retracted_references": {
     "complete": true,
     "items": [
@@ -112,6 +209,7 @@
           }
         ],
         "canonical": "doi:10.1234/a",
+        "cited_by_count": 2,
         "ids": [
           "openalex:W1",
           "doi:10.1234/a"
@@ -134,6 +232,7 @@
           }
         ],
         "canonical": "doi:10.1234/b",
+        "cited_by_count": 1,
         "ids": [
           "openalex:W2",
           "doi:10.1234/b"
@@ -204,7 +303,7 @@
   ],
   "usage": {
     "openalex": {
-      "cost": 0.625
+      "cost": 1.6875
     }
   },
   "with_references": 3

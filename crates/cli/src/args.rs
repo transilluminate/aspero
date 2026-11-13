@@ -353,7 +353,17 @@ Analyses (--kinds, comma-separated):
   probably-missing  works at least two seeds cite that the set lacks, most
                     cited first, the best --limit looked up in one request:
                     `cited_by` (seed indexes) and `count`
-  related           not yet
+  related           works around the set, the best --limit: co-cited with it
+                    (`co_cited_with`: citing works read that cite it and a
+                    seed) and sharing its references (`shared_references`,
+                    from two), each as a share of the highest, averaged
+                    into `score`; `seeds` link it. From the works citing
+                    the set, 200 per $0.0001 page: a seed cited more than
+                    1,000 times is sampled (its 1,000 most cited citing
+                    works; `incomplete: {kind: capped}`), at most 75 pages
+                    in all, plus 5 of works citing the set's most shared
+                    references. A set of 25 works cited 300 times each
+                    costs about $0.006. Not run unless asked for
 
 Costs are fractions of a cent for a set of 50: --estimate says what a run
 would cost without paid requests (seeds are resolved from the cache and
@@ -366,6 +376,7 @@ Examples:
   aspero analyse 10.1038/nature14539 10.1145/3065386 W2194775991
   aspero analyse refs.bib --kinds retracted,odd-one-out
   aspero analyse refs.bib --estimate
+  aspero analyse refs.bib --kinds related --limit 10
   aspero analyse --budget 0.01 --limit 50 - < dois.txt"
     )]
     Analyse {
@@ -380,7 +391,7 @@ Examples:
             default_values_t = [AnalysisArg::Retracted, AnalysisArg::OddOneOut, AnalysisArg::ProbablyMissing]
         )]
         kinds: Vec<AnalysisArg>,
-        /// Probably-missing works to list.
+        /// Probably-missing and related works to list.
         #[arg(long, default_value_t = 20)]
         limit: u32,
         /// The most to spend, in US dollars (OpenAlex).
@@ -523,7 +534,7 @@ pub enum AnalysisArg {
     OddOneOut,
     /// Works several seeds cite that the set lacks.
     ProbablyMissing,
-    /// Works around the set (not yet).
+    /// Works around the set, by co-citation and bibliographic coupling.
     Related,
 }
 

@@ -161,7 +161,7 @@ pub async fn analyse(
             AnalysisArg::Retracted => AnalysisKind::RetractedReferences,
             AnalysisArg::OddOneOut => AnalysisKind::OddOneOut,
             AnalysisArg::ProbablyMissing => AnalysisKind::ProbablyMissing { limit },
-            AnalysisArg::Related => AnalysisKind::Related,
+            AnalysisArg::Related => AnalysisKind::Related { limit },
         })
         .collect();
     let analysis = engine
@@ -223,6 +223,7 @@ fn exit_for(a: &Analysis) -> Exit {
         a.retracted_references.as_ref().and_then(|s| s.incomplete),
         a.odd_one_out.as_ref().and_then(|s| s.incomplete),
         a.probably_missing.as_ref().and_then(|s| s.incomplete),
+        a.related.as_ref().and_then(|s| s.incomplete),
     ];
     let failed = stopped
         .into_iter()
@@ -362,6 +363,27 @@ fn analysis_text(a: &Analysis, doc: &Value) -> String {
             out.push_str(&stopped(i, "works looked up"));
         }
     }
+    if let Some(found) = &a.related {
+        out.push_str("\nRelated works (score: co-cited with the set, sharing its references)\n");
+        if found.items.is_empty() {
+            out.push_str("  none found\n");
+        }
+        for r in &found.items {
+            let seeds: Vec<String> = r.seeds.iter().map(|i| format!("[{i}]")).collect();
+            let work = r.record.as_ref().map(one_line).unwrap_or_default();
+            out.push_str(&format!(
+                "  {:.2}  {}  {work}  co-cited {}, shares {}; with {}\n",
+                r.score,
+                r.id,
+                r.co_cited_with,
+                r.shared_references,
+                seeds.join(" ")
+            ));
+        }
+        if let Some(i) = &found.incomplete {
+            out.push_str(&stopped(i, "citing works read"));
+        }
+    }
     for kind in &a.not_yet {
         out.push_str(&format!("\n{}: not yet\n", kind.as_str().replace('_', " ")));
     }
@@ -401,24 +423,34 @@ mod tests {
         let mut retraction = Update::new(UpdateKind::Retraction);
         retraction.source = Some("openalex".into());
         retracted.work.updates = vec![retraction];
+        let cited = |mut record: SourceRecord, times| {
+            record.work.cited_by_count = Some(times);
+            record
+        };
         vec![
-            cites(
-                work(
-                    &["W1", "10.1234/a"],
-                    "Fluids in sepsis",
-                    &["Ann Smith", "Bo Chen"],
-                    2020,
+            cited(
+                cites(
+                    work(
+                        &["W1", "10.1234/a"],
+                        "Fluids in sepsis",
+                        &["Ann Smith", "Bo Chen"],
+                        2020,
+                    ),
+                    &["W10", "W11", "W40"],
                 ),
-                &["W10", "W11", "W40"],
+                2,
             ),
-            cites(
-                work(
-                    &["W2", "10.1234/b"],
-                    "Vasopressors in sepsis",
-                    &["Bo Chen"],
-                    2021,
+            cited(
+                cites(
+                    work(
+                        &["W2", "10.1234/b"],
+                        "Vasopressors in sepsis",
+                        &["Bo Chen"],
+                        2021,
+                    ),
+                    &["W1", "W10", "W11"],
                 ),
-                &["W1", "W10", "W11"],
+                1,
             ),
             work(
                 &["W3", "10.1234/book"],
@@ -438,6 +470,12 @@ mod tests {
             ),
             work(&["W11"], "Surviving sepsis", &["Fay Dell"], 2016),
             retracted,
+            // Citing the set, and a work it doesn't cite.
+            cites(
+                work(&["W50"], "Sepsis care, reviewed", &["Gil Hart"], 2023),
+                &["W1", "W2", "W10", "W60"],
+            ),
+            work(&["W60"], "Sepsis definitions", &["Hal Singer"], 2016),
         ]
     }
 
@@ -468,7 +506,7 @@ mod tests {
             AnalysisKind::RetractedReferences,
             AnalysisKind::OddOneOut,
             AnalysisKind::ProbablyMissing { limit: 5 },
-            AnalysisKind::Related,
+            AnalysisKind::Related { limit: 5 },
         ];
         let analysis = engine.analyse(&inputs, &kinds, None, false).await.unwrap();
         let json = aspero_json::graph::analysis(&analysis, false);

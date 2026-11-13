@@ -5,12 +5,13 @@ use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
 
 use aspero_core::{
-    Capabilities, Error, FieldSet, Hit, IdKind, Lookup, Page, PartialDate, Person, Provider,
-    ProviderId, Raw, ResiliencePolicy, Response, Result, SearchQuery, SourceRecord, Update,
-    UpdateKind, Usage, Work, WorkId,
+    Capabilities, Cursor, Error, FieldSet, Hit, IdKind, Lookup, Page, PartialDate, Person,
+    Provider, ProviderId, Raw, ResiliencePolicy, Response, Result, SearchQuery, SourceRecord,
+    Update, UpdateKind, Usage, Work, WorkId,
 };
 use aspero_engine::{
-    AnalysisKind, Cache, Engine, IncompleteKind, OddOne, OddReason, SeedProblem, SqliteCache,
+    Analysis, AnalysisKind, Cache, Engine, IncompleteKind, OddOne, OddReason, SeedProblem,
+    SqliteCache,
 };
 use async_trait::async_trait;
 use jiff::Timestamp;
@@ -67,6 +68,62 @@ impl Alex {
     fn searches(&self) -> Vec<String> {
         self.searches.lock().unwrap().clone()
     }
+
+    /// A page of the works citing any of `cited` (`W1|W2`), as OpenAlex
+    /// answers `select=id,referenced_works`: lean works, most cited first
+    /// (ties by id), a cursor to the next page.
+    fn citing(&self, cited: &str, query: &SearchQuery) -> Page {
+        assert_eq!(
+            query.extra.get("select").map(String::as_str),
+            Some("id,referenced_works")
+        );
+        assert_eq!(
+            query.extra.get("sort").map(String::as_str),
+            Some("cited_by_count:desc")
+        );
+        assert_eq!(query.page.limit, 200);
+        let cited: Vec<WorkId> = cited.split('|').map(|w| w.parse().unwrap()).collect();
+        let mut citing: Vec<&SourceRecord> = self
+            .works
+            .iter()
+            .filter(|w| w.references.iter().flatten().any(|r| cited.contains(r)))
+            .collect();
+        citing.sort_by(|a, b| {
+            let count = |w: &SourceRecord| w.work.cited_by_count.unwrap_or(0);
+            count(b).cmp(&count(a)).then(a.ids[0].cmp(&b.ids[0]))
+        });
+        let start: usize = query
+            .page
+            .cursor
+            .as_ref()
+            .map_or(0, |c| c.0.parse().unwrap());
+        let end = (start + query.page.limit as usize).min(citing.len());
+        let hits = citing[start..end]
+            .iter()
+            .map(|w| {
+                let lean = SourceRecord::new(
+                    OPENALEX,
+                    vec![w.ids[0].clone()],
+                    Work::default(),
+                    FieldSet::ALL,
+                    Raw::json(&serde_json::Value::Null),
+                    Timestamp::UNIX_EPOCH,
+                )
+                .with_references(w.references.clone());
+                Hit::new(lean, None)
+            })
+            .collect();
+        let next = (end < citing.len()).then(|| Cursor(end.to_string()));
+        Page::new(hits, Some(citing.len() as u64), next)
+    }
+
+    /// The `cites:` filters asked for, in order.
+    fn citing_pages(&self) -> Vec<String> {
+        self.searches()
+            .into_iter()
+            .filter(|f| f.starts_with("cites:"))
+            .collect()
+    }
 }
 
 fn usage(cost: f64) -> Usage {
@@ -108,6 +165,15 @@ impl Provider for Alex {
     async fn search(&self, query: &SearchQuery) -> Result<Response<Page>> {
         let filter = query.extra.get("filter").cloned().unwrap_or_default();
         self.searches.lock().unwrap().push(filter.clone());
+        if let Some(e) = self.failures.lock().unwrap().pop_front() {
+            return Err(e);
+        }
+        if let Some(cited) = filter.strip_prefix("cites:") {
+            return Ok(Response::with_usage(
+                self.citing(cited, query),
+                usage(0.0001),
+            ));
+        }
         let ids = filter
             .strip_prefix("openalex:")
             .and_then(|f| f.strip_suffix(",is_retracted:true"))
@@ -752,6 +818,390 @@ async fn estimates_agree_with_spend_on_a_mixed_set() {
         );
         // Without a cache, the seeds' batches are paid again by the run.
         let expected = if cached { 2 } else { 4 };
+        assert_eq!(estimate.requests, expected, "cached: {cached}");
+    }
+}
+
+// Related works.
+
+/// Sets each work's `cited_by_count` to the works of `works` citing it,
+/// unless it has one (a classic cited far more often than listed).
+fn counted(mut works: Vec<SourceRecord>) -> Vec<SourceRecord> {
+    let counts: Vec<u64> = works
+        .iter()
+        .map(|w| {
+            works
+                .iter()
+                .filter(|c| c.references.iter().flatten().any(|r| r == &w.ids[0]))
+                .count() as u64
+        })
+        .collect();
+    for (w, n) in works.iter_mut().zip(counts) {
+        w.work.cited_by_count.get_or_insert(n);
+    }
+    works
+}
+
+fn spent(a: &Analysis) -> f64 {
+    a.usage.iter().filter_map(|(_, u)| u.cost).sum()
+}
+
+/// Three papers (W1–W3), the works citing them (W101–W106) and what those
+/// cite, works citing the papers' shared references (W201, W202), and
+/// works around them: W60 (and W67, its preprint), W61 (whose own
+/// references overlap the set's), W64 (retracted), W65 (a version of W1)
+/// and W66 (carrying the DOI of a seed OpenAlex can't find).
+fn around() -> Vec<SourceRecord> {
+    let mut works = vec![
+        work(
+            &["W1", "10.1000/one"],
+            "Fluids in sepsis",
+            "Ann Smith",
+            2018,
+            Some(&["W50", "W51", "W52"]),
+        ),
+        work(
+            &["W2", "10.1000/two"],
+            "Vasopressors in sepsis",
+            "Bo Chen",
+            2019,
+            Some(&["W50", "W51", "W53"]),
+        ),
+        work(
+            &["W3", "10.1000/three"],
+            "Steroids in sepsis",
+            "Cy Dee",
+            2020,
+            Some(&["W51", "W54"]),
+        ),
+        // Citing the set.
+        work(
+            &["W101"],
+            "C1",
+            "A",
+            2021,
+            Some(&["W1", "W2", "W60", "W61", "W50"]),
+        ),
+        work(
+            &["W102"],
+            "C2",
+            "A",
+            2021,
+            Some(&["W1", "W60", "W62", "W50", "W51"]),
+        ),
+        work(&["W103"], "C3", "A", 2021, Some(&["W3", "W60", "W63"])),
+        work(&["W104"], "C4", "A", 2021, Some(&["W2", "W61", "W64"])),
+        work(&["W105"], "C5", "A", 2021, Some(&["W3", "W65", "W66"])),
+        work(&["W106"], "C6", "A", 2021, Some(&["W1", "W67"])),
+        // Citing the shared references, not the set.
+        work(&["W201"], "K1", "A", 2017, Some(&["W50", "W51", "W68"])),
+        work(&["W202"], "K2", "A", 2017, Some(&["W51"])),
+        // Around the set.
+        work(
+            &["W60", "10.1000/sixty"],
+            "Early sepsis care",
+            "Di Rivers",
+            2019,
+            None,
+        ),
+        work(
+            &["W67", "10.1101/sixty"],
+            "Early sepsis care",
+            "Di Rivers",
+            2018,
+            None,
+        ),
+        work(
+            &["W61"],
+            "Sepsis definitions",
+            "Ed Singer",
+            2016,
+            Some(&["W50", "W51", "W99"]),
+        ),
+        retracted(
+            work(&["W64"], "A retracted trial", "Fay Fake", 2015, None),
+            "openalex",
+        ),
+        work(
+            &["W65", "10.1101/one"],
+            "Fluids in sepsis",
+            "Ann Smith",
+            2017,
+            None,
+        ),
+        work(
+            &["W66", "10.1000/gone"],
+            "A seed by a DOI OpenAlex misses",
+            "Gil Gone",
+            2014,
+            None,
+        ),
+    ];
+    for (n, title) in [(50, "Fifty"), (51, "Fifty-one"), (62, "C"), (63, "D")] {
+        works.push(work(&[&format!("W{n}")], title, "Z", 2010, None));
+    }
+    counted(works)
+}
+
+const AROUND: [&str; 4] = [
+    "10.1000/one",
+    "10.1000/two",
+    "10.1000/three",
+    "10.1000/gone",
+];
+
+fn around_engine(cache: Option<Arc<SqliteCache>>) -> (Engine, Arc<Alex>) {
+    let alex = Arc::new(Alex::new(around()).blind(&["10.1000/gone"]));
+    (engine(alex.clone(), cache), alex)
+}
+
+/// (id, score, co-cited with, shared references, seeds) of each work.
+type Found = (String, f64, usize, usize, Vec<usize>);
+
+fn found(a: &Analysis) -> Vec<Found> {
+    a.related
+        .as_ref()
+        .unwrap()
+        .items
+        .iter()
+        .map(|r| {
+            (
+                r.id.to_string().replace("openalex:", ""),
+                r.score,
+                r.co_cited_with,
+                r.shared_references,
+                r.seeds.clone(),
+            )
+        })
+        .collect()
+}
+
+#[tokio::test(start_paused = true)]
+async fn related_works_rank_by_co_citation_and_coupling() {
+    let (engine, alex) = around_engine(None);
+    let kinds = [AnalysisKind::Related { limit: 20 }];
+    let analysis = engine
+        .analyse(&inputs(&AROUND), &kinds, None, false)
+        .await
+        .unwrap();
+    assert_eq!(analysis.seeds[3].problem, Some(SeedProblem::NotFound));
+    let related = analysis.related.as_ref().unwrap();
+    assert!(related.complete(), "{:?}", related.incomplete);
+    assert!(analysis.complete());
+    let s = |n: &[usize]| n.to_vec();
+    assert_eq!(
+        found(&analysis),
+        [
+            // Co-cited twice (by W101, W104), and its own references share
+            // two of the set's: the highest of both counts' mean.
+            ("W61".into(), 0.75, 2, 2, s(&[0, 1, 2])),
+            // Co-cited by four, with its preprint (W67): the most.
+            ("W60".into(), 0.5, 4, 0, s(&[0, 1, 2])),
+            // Coupled: they cite two of the set's references.
+            ("W102".into(), 0.5, 0, 2, s(&[0, 1, 2])),
+            ("W201".into(), 0.5, 0, 2, s(&[0, 1, 2])),
+            ("W50".into(), 0.25, 2, 0, s(&[0, 1])),
+            ("W51".into(), 0.125, 1, 0, s(&[0])),
+            ("W62".into(), 0.125, 1, 0, s(&[0])),
+            ("W63".into(), 0.125, 1, 0, s(&[2])),
+            // Left out: W64 (retracted), W65 (W1's preprint), W66 (the
+            // missing seed's DOI); W202 shares one reference only.
+        ]
+    );
+    let w60 = &related.items[1];
+    let ids: Vec<String> = w60.ids.iter().map(ToString::to_string).collect();
+    assert_eq!(ids, ["openalex:W60", "openalex:W67"]);
+    assert!(w60.record.is_some());
+
+    // The three works of the set share a page (cited 3, 2 and 2 times);
+    // the works citing their shared references (W51 by all three, W50 by
+    // two) come from one filter.
+    assert_eq!(alex.citing_pages(), ["cites:W1|W2|W3", "cites:W51|W50"]);
+    // Seeds in a batch, the candidates in another.
+    assert_eq!(alex.lookups(), [4, 12]);
+    assert!(
+        (spent(&analysis) - 0.0004).abs() < 1e-12,
+        "{}",
+        spent(&analysis)
+    );
+}
+
+#[tokio::test(start_paused = true)]
+async fn related_works_are_the_same_every_time_and_reuse_the_cache() {
+    let cache = Arc::new(SqliteCache::open_in_memory().unwrap());
+    let (engine, alex) = around_engine(Some(cache));
+    let kinds = [AnalysisKind::Related { limit: 3 }];
+    // Not the missing seed: the cache would find it by the DOI W66 carries.
+    let seeds = inputs(&AROUND[..3]);
+    let first = engine.analyse(&seeds, &kinds, None, false).await.unwrap();
+    // Ties by id: W60, W102 and W201 score 0.5.
+    let ids: Vec<String> = found(&first).into_iter().map(|f| f.0).collect();
+    assert_eq!(ids, ["W61", "W60", "W102"]);
+    let pages = alex.citing_pages().len();
+
+    let again = engine.analyse(&seeds, &kinds, None, false).await.unwrap();
+    assert_eq!(found(&again), found(&first));
+    // Citing works, coupling's page and the candidates all cached.
+    assert_eq!(
+        alex.citing_pages().len(),
+        pages,
+        "{:?}",
+        alex.citing_pages()
+    );
+    assert_eq!(spent(&again), 0.0);
+}
+
+/// A classic (cited 50,000 times, as its record says) among ordinary
+/// papers; 1,200 of its citing works are listed, each also citing W51 (a
+/// reference the papers share) and one of seven works.
+fn with_classic() -> Vec<SourceRecord> {
+    let mut works = around();
+    let mut classic = work(
+        &["W9000", "10.1038/classic"],
+        "Deep learning",
+        "Yann LeCun",
+        2015,
+        Some(&["W51", "W52"]),
+    );
+    classic.work.cited_by_count = Some(50_000);
+    works.push(classic);
+    for k in 0..1_200u64 {
+        let mut citing = work(
+            &[&format!("W{}", 10_000 + k)],
+            "Citing the classic",
+            "A",
+            2020,
+            Some(&["W9000", "W51", &format!("W{}", 20_000 + k % 7)]),
+        );
+        citing.work.cited_by_count = Some(k % 50);
+        works.push(citing);
+    }
+    works
+}
+
+const CLASSIC: [&str; 4] = [
+    "10.1000/one",
+    "10.1000/two",
+    "10.1000/three",
+    "10.1038/classic",
+];
+
+#[tokio::test(start_paused = true)]
+async fn a_classic_is_sampled_and_says_how_much() {
+    let alex = Arc::new(Alex::new(with_classic()));
+    let engine = engine(alex.clone(), None);
+    let kinds = [AnalysisKind::Related { limit: 5 }];
+    let analysis = engine
+        .analyse(&inputs(&CLASSIC), &kinds, None, false)
+        .await
+        .unwrap();
+    let related = analysis.related.as_ref().unwrap();
+    let stop = related.incomplete.unwrap();
+    assert_eq!(stop.kind, IncompleteKind::Capped);
+    // The three papers' 7 citing works, and the classic's 1,000 most cited
+    // of its 50,000.
+    assert_eq!((stop.done, stop.total), (1_007, 50_007));
+    assert!(!analysis.complete());
+    // One page for the papers, five for the classic; five of the works
+    // citing the shared references (W51 by all four, W50 and W52 by two).
+    let pages = alex.citing_pages();
+    assert_eq!(pages.iter().filter(|p| *p == "cites:W1|W2|W3").count(), 1);
+    assert_eq!(pages.iter().filter(|p| *p == "cites:W9000").count(), 5);
+    assert_eq!(
+        pages.iter().filter(|p| *p == "cites:W51|W50|W52").count(),
+        5
+    );
+    // W51 is co-cited by each of the classic's citing works read, and by
+    // W102.
+    let w51 = found(&analysis).into_iter().find(|f| f.0 == "W51").unwrap();
+    assert_eq!(w51.2, 1_001);
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_budget_shares_out_pages_and_says_how_far_they_got() {
+    let alex = Arc::new(Alex::new(with_classic()));
+    let engine = engine(alex.clone(), None);
+    let kinds = [AnalysisKind::Related { limit: 5 }];
+    // The seeds' batch, the lookup kept back, and two pages: each
+    // filter's first.
+    let analysis = engine
+        .analyse(&inputs(&CLASSIC), &kinds, Some(0.0004), false)
+        .await
+        .unwrap();
+    let related = analysis.related.as_ref().unwrap();
+    let stop = related.incomplete.unwrap();
+    assert_eq!(stop.kind, IncompleteKind::Budget);
+    assert_eq!((stop.done, stop.total), (207, 50_007));
+    let mut pages = alex.citing_pages();
+    pages.sort();
+    assert_eq!(pages, ["cites:W1|W2|W3", "cites:W9000"]);
+    // Found all the same, and looked up (in the lookup kept back).
+    assert!(!related.items.is_empty());
+    assert_eq!(alex.lookups().len(), 2);
+    assert!((spent(&analysis) - 0.0004).abs() < 1e-12);
+}
+
+#[tokio::test(start_paused = true)]
+async fn failing_pages_say_so() {
+    let cache = Arc::new(SqliteCache::open_in_memory().unwrap());
+    let (engine, alex) = around_engine(Some(cache));
+    let seeds = inputs(&AROUND[..3]);
+    // The seeds resolve (and are cached) first; then OpenAlex fails.
+    engine
+        .analyse(&seeds, &[AnalysisKind::OddOneOut], None, false)
+        .await
+        .unwrap();
+    alex.failures.lock().unwrap().extend(
+        std::iter::repeat_with(|| Error::Server {
+            status: 503,
+            message: None,
+        })
+        .take(50),
+    );
+    let analysis = engine
+        .analyse(&seeds, &[AnalysisKind::Related { limit: 5 }], None, false)
+        .await
+        .unwrap();
+    let related = analysis.related.unwrap();
+    let stop = related.incomplete.unwrap();
+    assert_eq!(stop.kind, IncompleteKind::ProviderFailed);
+    assert_eq!((stop.done, stop.total), (0, 7));
+    assert!(related.items.is_empty());
+}
+
+/// What `estimate_only` counts is what the run spends: the citing works'
+/// pages exactly (one for the papers, the classic's five), coupling's five
+/// and the lookup as a ceiling, which a set this big fills.
+#[tokio::test(start_paused = true)]
+async fn related_estimates_agree_with_spend_on_a_mixed_set() {
+    let kinds = [
+        AnalysisKind::ProbablyMissing { limit: 20 },
+        AnalysisKind::Related { limit: 20 },
+    ];
+    for cache in [Some(Arc::new(SqliteCache::open_in_memory().unwrap())), None] {
+        let cached = cache.is_some();
+        let alex = Arc::new(Alex::new(with_classic()));
+        let engine = engine(alex.clone(), cache);
+        let estimate = engine
+            .analyse(&inputs(&CLASSIC), &kinds, None, true)
+            .await
+            .unwrap()
+            .estimate
+            .unwrap();
+        assert!(!estimate.exact, "coupling and lookups are a ceiling");
+        assert!(alex.citing_pages().is_empty());
+        let run = engine
+            .analyse(&inputs(&CLASSIC), &kinds, None, false)
+            .await
+            .unwrap();
+        assert!(
+            (spent(&run) - estimate.usd).abs() < 1e-12,
+            "cached: {cached}, estimated {estimate:?}, spent {}",
+            spent(&run)
+        );
+        // 1 + 5 citing pages, 5 coupling, a lookup each for probably
+        // missing and related; and the seeds' batch without a cache.
+        let expected = if cached { 13 } else { 14 };
         assert_eq!(estimate.requests, expected, "cached: {cached}");
     }
 }

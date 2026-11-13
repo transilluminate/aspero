@@ -8,7 +8,8 @@
 //!
 //! Costs are OpenAlex's: a lookup of one id is free, a batch of up to 100
 //! ids (an `openalex:`/`doi:`/`pmid:` filter) costs [`LIST_PRICE`], as does
-//! each check of 100 references for retractions (`openalex:…,is_retracted:true`).
+//! each check of 100 references for retractions (`openalex:…,is_retracted:true`)
+//! and each page of 200 citing works (`cites:…`, for related works).
 //! An analysis spends within its budget: before each paid call, it stops if
 //! the call could take the spend past the budget.
 
@@ -22,6 +23,10 @@ use aspero_store::{Direction, Edges};
 use futures::StreamExt;
 
 use crate::{CallOptions, Engine, EngineError, Entry, LookupResult, Outcome, Served, add_usage};
+
+mod related;
+
+pub use related::RelatedWork;
 
 /// The provider citation links come from.
 const OPENALEX: &str = "openalex";
@@ -98,8 +103,9 @@ pub enum AnalysisKind {
     OddOneOut,
     /// Works that several seeds cite but the set lacks: the best `limit`.
     ProbablyMissing { limit: u32 },
-    /// Works around the set by co-citation and coupling: not built yet.
-    Related,
+    /// Works around the set by co-citation and bibliographic coupling:
+    /// the best `limit`.
+    Related { limit: u32 },
 }
 
 impl AnalysisKind {
@@ -107,7 +113,7 @@ impl AnalysisKind {
         RetractedReferences,
         OddOneOut,
         ProbablyMissing { limit: 20 },
-        Related,
+        Related { limit: 20 },
     );
 
     pub fn as_str(self) -> &'static str {
@@ -115,7 +121,7 @@ impl AnalysisKind {
             AnalysisKind::RetractedReferences => "retracted_references",
             AnalysisKind::OddOneOut => "odd_one_out",
             AnalysisKind::ProbablyMissing { .. } => "probably_missing",
-            AnalysisKind::Related => "related",
+            AnalysisKind::Related { .. } => "related",
         }
     }
 }
@@ -201,7 +207,8 @@ impl Seed {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum IncompleteKind {
-    /// Stopped at a fixed cap (sampling, in later analyses).
+    /// Stopped at a fixed cap: related works read a sample of a much
+    /// cited work's citing works.
     Capped,
     /// The budget ran out.
     Budget,
@@ -222,7 +229,7 @@ impl IncompleteKind {
 }
 
 /// How much of a step was done: `done` of `total` (seeds resolved,
-/// references checked, works looked up).
+/// references checked, works looked up, citing works read).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct Incomplete {
@@ -338,8 +345,9 @@ pub struct Estimate {
     pub requests: u64,
     /// At [`LIST_PRICE`] each.
     pub usd: f64,
-    /// Whether the counts are known (every seed resolved or settled);
-    /// otherwise a floor.
+    /// Whether the counts are known: every seed resolved or settled (else
+    /// a floor), and no related works asked for (whose coupling pages and
+    /// lookups are a ceiling; their citing works' pages are exact).
     pub exact: bool,
 }
 
@@ -357,7 +365,8 @@ pub struct Analysis {
     pub retracted_references: Option<Section<RetractedReference>>,
     pub odd_one_out: Option<Section<OddOne>>,
     pub probably_missing: Option<Section<Missing>>,
-    /// Kinds asked for that aren't built yet.
+    pub related: Option<Section<RelatedWork>>,
+    /// Kinds asked for that aren't built yet (none, now).
     pub not_yet: Vec<AnalysisKind>,
     /// With `estimate_only`: the cost of running it, in place of the
     /// analyses.
@@ -383,6 +392,7 @@ impl Analysis {
                 .is_none_or(Section::complete)
             && self.odd_one_out.as_ref().is_none_or(Section::complete)
             && self.probably_missing.as_ref().is_none_or(Section::complete)
+            && self.related.as_ref().is_none_or(Section::complete)
     }
 }
 
@@ -398,6 +408,8 @@ struct Spend {
     /// Paid requests counted, when estimating.
     requests: u64,
     estimating: bool,
+    /// Some of `requests` are a ceiling, not an exact count.
+    ceiling: bool,
     usage: Vec<(ProviderId, Usage)>,
 }
 
@@ -407,6 +419,14 @@ impl Spend {
         // A hair over, so rounding doesn't refuse the last call that fits.
         self.budget
             .is_none_or(|b| self.spent + calls as f64 * LIST_PRICE <= b + LIST_PRICE * 1e-6)
+    }
+
+    /// How many more paid calls fit the budget.
+    fn affordable(&self) -> usize {
+        match self.budget {
+            None => usize::MAX,
+            Some(b) => ((b - self.spent) / LIST_PRICE + 1e-6).max(0.0).floor() as usize,
+        }
     }
 
     /// Adds a step's usage; `calls` paid calls were made, and count at
@@ -569,8 +589,8 @@ impl Engine {
     /// why. Seeds that are one work (shared DOI, PMID or arXiv ID; else
     /// the same title and first author, years at most one apart) count
     /// once. The analyses then run cheapest first (odd one out, probably
-    /// missing, retracted references) within `budget` (US dollars), each
-    /// saying what stopped it, if anything.
+    /// missing, retracted references, related works) within `budget` (US
+    /// dollars), each saying what stopped it, if anything.
     ///
     /// With `estimate_only`, nothing paid is asked: seeds resolve from the
     /// cache and free lookups of one id each (which the run then finds
@@ -588,6 +608,7 @@ impl Engine {
             spent: 0.0,
             requests: 0,
             estimating: estimate_only,
+            ceiling: false,
             usage: Vec::new(),
         };
         let (mut seeds, incomplete) = self.resolve_seeds(entry, seeds, &mut spend).await;
@@ -607,12 +628,8 @@ impl Engine {
             retracted_references: None,
             odd_one_out: None,
             probably_missing: None,
-            not_yet: kinds
-                .iter()
-                .filter(|k| matches!(k, AnalysisKind::Related))
-                .copied()
-                .take(1)
-                .collect(),
+            related: None,
+            not_yet: Vec::new(),
             estimate: None,
             usage: Vec::new(),
         };
@@ -633,6 +650,16 @@ impl Engine {
             let found = self.retracted_references(&analysis.seeds, &mut spend).await;
             analysis.retracted_references = (!estimate_only).then_some(found);
         }
+        let limit = kinds.iter().find_map(|k| match k {
+            AnalysisKind::Related { limit } => Some(*limit),
+            _ => None,
+        });
+        if let Some(limit) = limit {
+            let found = self
+                .related(entry, &analysis.seeds, &groups, limit, &mut spend)
+                .await;
+            analysis.related = (!estimate_only).then_some(found);
+        }
         if estimate_only {
             let settled = analysis.seeds.iter().all(|s| {
                 !matches!(
@@ -643,7 +670,7 @@ impl Engine {
             analysis.estimate = Some(Estimate {
                 requests: spend.requests,
                 usd: spend.requests as f64 * LIST_PRICE,
-                exact: settled,
+                exact: settled && !spend.ceiling,
             });
         }
         analysis.usage = spend.usage;
@@ -956,25 +983,10 @@ impl Engine {
         // Merge: works that are a seed leave (one work, or sharing any
         // identifier with any seed, resolved or not: its input, or any id
         // its record carries); works that are one work join.
-        let seed_records: Vec<&SourceRecord> =
-            seeds.iter().filter_map(|s| s.record.as_ref()).collect();
-        let seed_ids: Vec<WorkId> = seeds
-            .iter()
-            .flat_map(|s| {
-                let given = s.input.parse::<WorkId>().ok();
-                let carried = s.record.iter().flat_map(|r| r.ids.iter().cloned());
-                given.into_iter().chain(carried)
-            })
-            .collect();
-        let is_seed = |id: &WorkId| seed_ids.iter().any(|s| same_work_id(s, id));
+        let set = TheSet::new(seeds);
         let mut found: Vec<(Missing, BTreeSet<usize>)> = Vec::new();
         for ((id, by), record) in ranked.into_iter().take(fetch).zip(records) {
-            if is_seed(id) {
-                continue;
-            }
-            if let Some(r) = &record
-                && (r.ids.iter().any(is_seed) || seed_records.iter().any(|s| same_work(s, r)))
-            {
+            if set.has(id, record.as_ref()) {
                 continue;
             }
             let same = record.as_ref().and_then(|r| {
@@ -1147,6 +1159,39 @@ impl Engine {
             let rows: Vec<(&WorkId, &Edges)> = links.iter().map(|(w, _)| *w).zip(&edges).collect();
             let _ = cache.put_edges(Direction::References, &rows, (self.clock)());
         }
+    }
+}
+
+/// What makes a work one of the set: sharing any identifier with any seed,
+/// resolved or not (its input, or any id its record carries), or being one
+/// work with a seed's record (a preprint and its published version).
+struct TheSet<'a> {
+    ids: Vec<WorkId>,
+    records: Vec<&'a SourceRecord>,
+}
+
+impl<'a> TheSet<'a> {
+    fn new(seeds: &'a [Seed]) -> Self {
+        let ids = seeds
+            .iter()
+            .flat_map(|s| {
+                let given = s.input.parse::<WorkId>().ok();
+                let carried = s.record.iter().flat_map(|r| r.ids.iter().cloned());
+                given.into_iter().chain(carried)
+            })
+            .collect();
+        let records = seeds.iter().filter_map(|s| s.record.as_ref()).collect();
+        TheSet { ids, records }
+    }
+
+    /// Whether the work `id` (with its record, when looked up) is one of
+    /// the set.
+    fn has(&self, id: &WorkId, record: Option<&SourceRecord>) -> bool {
+        let is_seed = |id: &WorkId| self.ids.iter().any(|s| same_work_id(s, id));
+        is_seed(id)
+            || record.is_some_and(|r| {
+                r.ids.iter().any(is_seed) || self.records.iter().any(|s| same_work(s, r))
+            })
     }
 }
 

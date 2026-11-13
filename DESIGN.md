@@ -397,9 +397,27 @@ Two SQLite stores, split by whether data can be refetched:
   citation links. WAL, busy timeout, batch reads and single-transaction
   writes. No migrations: bump `SCHEMA_VERSION` on any schema *or
   record-shape/mapping* change and it rebuilds (a table added beside the
-  schema, like `edges`, needs no rebuild). TTLs: records 7d, misses 1d,
-  searches 1d, references 30d. A cached record counts only if it covers
-  the requested fields. Failed providers fall back to stale entries.
+  schema, like `edges`, needs no rebuild). Lifetimes (`CachePolicy`):
+  records (with their notices: retractions, corrections) 7 days; "not
+  found" 1 day; search pages 1 day; references 30 days; `cited_by` pages
+  1 day. Provider failures and verdicts are never cached: a failure is
+  asked again next time, and a verdict is worked out again from the
+  cached answers. A cached record counts only if it covers the requested
+  fields. Failed providers fall back to stale entries: any cached record,
+  however old, or search page; never an expired "not found".
+- **Fresh** (`CallOptions::fresh`, CLI `--fresh`, FFI `Patience.fresh`),
+  for checking again before submitting: no cached answer is served as it
+  is, however recent (lookups, "not found", searches, and the `edges`
+  references and citing works `references` and `analyse` read), so the
+  providers are asked; every answer is still written, replacing the
+  cached one, so later ordinary calls see it. Where a provider fails, the
+  cached answer is served as `stale`, never `cache`: it isn't the answer
+  from now that was asked for (a record of any age, a "not found" within
+  its day), so a fresh pass is never worse than an ordinary one. Pacing,
+  the cross-process slots, deadlines and retries are unchanged (the FFI's
+  `fresh` waits like `batch`); `offline` wins over fresh. The CLI refuses
+  `--fresh` with `--no-cache` (a usage error): one refreshes the cache,
+  the other leaves it alone.
 - **Durable store** (`aspero.sqlite`, data dir; not built yet): history and
   derived data (embeddings, extracted text) keyed by
   `(work id, kind, producer, version)`, with forward-only numbered
@@ -420,7 +438,8 @@ already in flight for the same provider, identifier and fields is joined,
 not repeated, and a cancelled leader's joiners ask themselves. Each caller
 sets its patience (`CallOptions`): `interactive()` caps deadlines and
 retries so someone waiting gets a fallback within seconds; `offline()`
-answers from the cache only, however old.
+answers from the cache only, however old; `fresh()` asks past the cache
+and refreshes it (see Storage).
 
 The engine remembers providers that can't answer, across calls: a spent
 quota until it resets, rejected credentials for its life (new credentials
@@ -558,7 +577,7 @@ indents, from PDFKit), `references` and `analyse` (citation links), and
 for settings `budgets` (as last
 reported: free), `check_openalex_key` (one free lookup), `cache_stats`,
 `clear_cache` and `unavailable`. Network calls take a `Patience` (batch,
-interactive, offline).
+interactive, offline, fresh).
 They return typed records (`Lookup`, `Verification`, `Work`, …), mirrors
 of the engine's types converted in `aspero-ffi` so the engine stays free
 of UniFFI. Reasons and failures are data (`Reason`, `ErrorKind`) as well

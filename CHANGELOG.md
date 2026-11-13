@@ -4,6 +4,24 @@
 
 Added:
 
+- Checking again past the cache (#67), for before submitting: any
+  retraction or correction since shows, and a work "not found" before
+  but registered since is found. `CallOptions::fresh` (the engine's
+  `fresh` option, independent of deadlines and retries), the CLI's global
+  `--fresh` and the FFI's `Patience.fresh` (waiting like `batch`) skip
+  every cached answer (lookups, "not found", searches, the citation links
+  `references` and `analyse` read) and cache the providers' answers in
+  their place, so later ordinary calls see them. Where a provider fails,
+  the cached answer is served marked `stale`, even one within its
+  lifetime. `--fresh` with `--no-cache` is a usage error.
+- DESIGN's cache section gives every lifetime: records (and their
+  notices) 7 days, "not found" 1 day, searches 1 day, references 30 days,
+  citing works 1 day; provider failures and verdicts are never cached.
+
+## Unreleased
+
+Added:
+
 - Query trees find works by identifier (#65), to combine with anything
   else a tree says: `{"all": [{"id": "10.1038/nature14539"},
   {"not_retracted": true}]}` is that work if it isn't retracted. The

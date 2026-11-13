@@ -355,6 +355,34 @@ Examples:
         title_hint: Option<String>,
     },
 
+    /// Serve aspero's tools to an AI agent over the Model Context Protocol.
+    #[command(after_help = "\
+Speaks MCP on stdin and stdout (logs go to stderr), for an agent to launch.
+With Claude Code, for example:
+  claude mcp add aspero -- aspero mcp
+  claude mcp add aspero -- aspero mcp --budget 0.5
+
+Tools: search (a query tree, as `search --query` takes, or keywords),
+search_supports, lookup, verify (one citation or a batch), identify (a
+first page's text), cites and cited_by (works citing a work, and its
+references). Each answers in the JSON shapes the other commands print, with
+a short text summary; `full` gives every field.
+
+Spending: OpenAlex searches cost $0.001 each (lookups are free). Each
+session, one connection, may spend up to --budget (USD); once it has, tools
+that may spend are refused with a budget error. Every result reports its
+own usage and the session's spend so far. The default budget is
+provisional.
+
+Same environment (keys and contact address, as the agent passes them on),
+cache and pacing as the other commands; -v logs requests to stderr. Exits
+when stdin closes.")]
+    Mcp {
+        /// The most one session may spend, in USD (provisional default).
+        #[arg(long, value_name = "USD", default_value_t = aspero_mcp::DEFAULT_BUDGET_USD, value_parser = budget)]
+        budget: f64,
+    },
+
     /// Inspect or empty the answer cache.
     Cache {
         #[command(subcommand)]
@@ -377,6 +405,14 @@ Examples:
         #[arg(long)]
         credits: bool,
     },
+}
+
+/// `--budget`: a positive number of dollars.
+fn budget(s: &str) -> Result<f64, String> {
+    match s.parse::<f64>() {
+        Ok(usd) if usd.is_finite() && usd > 0.0 => Ok(usd),
+        _ => Err(format!("{s:?} is not a positive amount of USD")),
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]

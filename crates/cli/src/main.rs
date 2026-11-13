@@ -176,6 +176,7 @@ async fn run(cli: Cli, out: Out) -> Result<Exit, Failure> {
             fail_on,
             limit,
         } => cmd::check::run(&engine, path, fail_on, limit, out).await,
+        Command::Mcp { budget } => cmd::mcp::run(engine, budget).await,
         Command::Cache { .. } | Command::Scan { .. } | Command::Styles { .. } => {
             unreachable!("handled above")
         }

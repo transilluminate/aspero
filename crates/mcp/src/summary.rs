@@ -8,19 +8,48 @@ const SHOWN: usize = 10;
 
 pub fn of(tool: &str, v: &Value) -> String {
     match tool {
-        "search" | "cites" | "cited_by" => search(v),
+        "search" | "citing_works" | "references" => search(v),
         "search_supports" => match v["supported"].as_bool() {
             Some(true) => "Supported: the source can search this tree.".into(),
             _ => format!("Not supported: {}", str(&v["reason"])),
         },
         "lookup" => list(&v["results"], lookup_line),
-        "verify" => list(&v["results"], verdict_lines),
+        "verify" => {
+            let mut text = list(&v["results"], verdict_lines);
+            let verdicts = v["results"]
+                .as_array()
+                .map(Vec::as_slice)
+                .unwrap_or_default();
+            if verdicts.iter().any(|r| r["verdict"] == "not_found") {
+                text.push_str(
+                    "\nNot found means no source indexes a matching work: books, reports and \
+                     grey literature are often missing, so it's not proof a citation is made up.",
+                );
+            }
+            text
+        }
         "identify" => format!(
-            "IDENTIFIED by {}\n{}",
-            str(&v["decided_by"]).replace('_', " "),
+            "IDENTIFIED {}\n{}",
+            decided(str(&v["decided_by"])),
             verdict_lines(v)
         ),
         _ => String::new(),
+    }
+}
+
+/// How `identify` decided, in words.
+fn decided(by: &str) -> String {
+    match by {
+        "identifier_and_title" => "by an identifier on the page, confirmed by the title".into(),
+        "identifier_and_page" => {
+            "by an identifier on the page, confirmed by the title and first author on the page"
+                .into()
+        }
+        "only_identifier" => {
+            "by the only identifier on the page (no title to check it against)".into()
+        }
+        "title_search" => "by searching for the top of the page as a citation".into(),
+        other => format!("by {}", other.replace('_', " ")),
     }
 }
 

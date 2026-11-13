@@ -1,7 +1,8 @@
 //! The engine tools, independent of any transport.
 
 use aspero_core::{
-    Cursor, ErrorCategory, ErrorKind, ProviderId, QueryNode, Relation, SearchQuery, Usage,
+    Cursor, ErrorCategory, ErrorKind, FilterValue, ProviderId, QueryNode, Relation, SearchQuery,
+    Usage, WorkType, YearRange,
 };
 use aspero_engine::{Engine, EngineError, Extras, SEARCH_LIMIT};
 use aspero_json::InputClaim;
@@ -196,19 +197,23 @@ impl Tools {
         if spec.spends {
             session.admit()?;
         }
+        let full = arguments["full"].as_bool().unwrap_or(false);
         let (mut structured, usage) = match name {
             "search" => self.search(parse(name, arguments)?).await,
             "search_supports" => self.supports(parse(name, arguments)?),
             "lookup" => self.lookup(parse(name, arguments)?).await,
             "verify" => self.verify(parse(name, arguments)?).await,
             "identify" => self.identify(parse(name, arguments)?).await,
-            "cites" => self.related(Relation::Cites, parse(name, arguments)?).await,
-            "cited_by" => {
+            "citing_works" => self.related(Relation::Cites, parse(name, arguments)?).await,
+            "references" => {
                 self.related(Relation::CitedBy, parse(name, arguments)?)
                     .await
             }
             _ => unreachable!("every spec has a tool"),
         }?;
+        if !full {
+            trim_authors(&mut structured);
+        }
         let cost = session.charge(&usage);
         structured["usage"] = aspero_json::usage(&usage);
         structured["session"] = session.json();
@@ -367,8 +372,28 @@ impl Tools {
                     ),
                 )
             })?;
+        let mut nodes = vec![QueryNode::relation(relation, a.id)];
+        if let Some(t) = a
+            .work_type
+            .as_deref()
+            .map(str::trim)
+            .filter(|t| !t.is_empty())
+        {
+            nodes.push(QueryNode::filter(FilterValue::WorkType(
+                WorkType::from_csl(t),
+            )));
+        }
+        if a.from_year.is_some() || a.to_year.is_some() {
+            nodes.push(QueryNode::filter(FilterValue::Years(YearRange {
+                from: a.from_year,
+                to: a.to_year,
+            })));
+        }
         let mut query = SearchQuery::new("");
-        query.tree = Some(QueryNode::relation(relation, a.id));
+        query.tree = Some(match nodes.len() {
+            1 => nodes.remove(0),
+            _ => QueryNode::All(nodes),
+        });
         page(&mut query, a.sort, a.limit, a.cursor)?;
         self.run_search(Some(source.as_str()), &query, a.full).await
     }
@@ -469,7 +494,10 @@ fn specs(sources: &[String]) -> Vec<ToolSpec> {
         format!(
             "{what}, by any identifier aspero can look up (DOI, PMID, PMCID, arXiv ID, \
              OpenAlex ID, …), from the first source that indexes citations (OpenAlex). A \
-             search: pages with `cursor`, sorts with `sort`. The work is looked up first \
+             search: narrows by `type` (e.g. review) and `from_year`/`to_year`, pages with \
+             `cursor`, sorts with `sort`; for anything more, use `search` with a `cites` or \
+             `cited_by` term. Totals are OpenAlex's own and can differ slightly from a \
+             record's `cited_by_count`. The work is looked up first \
              (free); the search costs as `search` does."
         )
     };
@@ -479,8 +507,10 @@ fn specs(sources: &[String]) -> Vec<ToolSpec> {
             "Search scholarly works",
             "Search one source for works: by a query tree (`query`: all, any and none of \
              keywords, title, author, journal, abstract and author id terms, filters for \
-             years, type, language, open access, retraction and abstracts, and citation \
-             relations), or by keywords (`text`). One source answers (`source`, or the first \
+             years, type (article-journal, review, book, chapter, paper-conference, article \
+             for preprints, thesis, report, dataset), language, open access, retraction and \
+             abstracts, and citation relations: `cites` X for works citing X, `cited_by` X \
+             for X's references), or by keywords (`text`). One source answers (`source`, or the first \
              that can); a tree it can't search fails with the reason, as `search_supports` \
              says. Pages with `cursor`. OpenAlex searches cost $0.001 each (a journal term \
              one more). Lean records by default; `full` for every field.",
@@ -514,9 +544,10 @@ fn specs(sources: &[String]) -> Vec<ToolSpec> {
         spec(
             "verify",
             "Verify citations",
-            "Check that citations refer to real works, with matching details: free text in \
-             any style, or fields (title, authors, year, journal, volume, page, doi, …: more \
-             reliable). Verdicts: verified, plausible (check the details), mismatch (the \
+            "Check that citations refer to real works, with matching details. Pass a \
+             reference exactly as written, in any style, as `text`: aspero reads it best \
+             whole, so don't also split it into fields. Use fields (title, authors, year, \
+             journal, volume, page, doi, …) only when there's no written reference. Verdicts: verified, plausible (check the details), mismatch (the \
              identifier is missing or another work's; the reason names the work the citation \
              matches), not_found, unverifiable (providers failed). Retractions are noted \
              whatever the verdict. One `citation`, or several as `citations`, results in the \
@@ -531,27 +562,76 @@ fn specs(sources: &[String]) -> Vec<ToolSpec> {
             "Which work a document is, from its first page's text: each identifier on the \
              page is looked up and must be confirmed by its title (`title_hint`, `title`) or \
              its title and first author on the page; otherwise the top of the page is \
-             verified as a citation. `decided_by` says which. Fails as not found when \
-             nothing is sure enough.",
+             verified as a citation. `decided_by` says which; the match's `checks` compare \
+             the identifier alone. Fails as not found when nothing is sure enough. `full` \
+             adds volume, issue, pages and the abstract.",
             input_schema::<IdentifyArgs>(),
             schema::identify(),
             true,
         ),
         spec(
-            "cites",
+            "citing_works",
             "Works citing a work",
-            &relation("Find the works that cite a work"),
+            &relation("Find the works that cite a given work (who cites it)"),
             input_schema::<RelationArgs>(),
             schema::search(),
             true,
         ),
         spec(
-            "cited_by",
-            "Works a work cites",
-            &relation("Find the works a work cites (its references)"),
+            "references",
+            "A work's references",
+            &relation("Find the works a given work cites (its reference list)"),
             input_schema::<RelationArgs>(),
             schema::search(),
             true,
         ),
     ]
+}
+
+/// Authors a lean record lists; the rest are counted in `authors_more`.
+const LEAN_AUTHORS: usize = 5;
+
+/// Cuts every work's author list in `v` to [`LEAN_AUTHORS`]: a paper with
+/// hundreds of authors would otherwise fill an agent's context.
+fn trim_authors(v: &mut Value) {
+    match v {
+        Value::Object(map) => {
+            let more = match map.get_mut("authors") {
+                // A work's (objects), not a claim's names as cited.
+                Some(Value::Array(authors))
+                    if authors.len() > LEAN_AUTHORS && authors[0].is_object() =>
+                {
+                    let more = authors.len() - LEAN_AUTHORS;
+                    authors.truncate(LEAN_AUTHORS);
+                    Some(more)
+                }
+                _ => None,
+            };
+            if let Some(more) = more {
+                map.insert("authors_more".into(), json!(more));
+            }
+            map.values_mut().for_each(trim_authors);
+        }
+        Value::Array(items) => items.iter_mut().for_each(trim_authors),
+        _ => {}
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn lean_works_list_five_authors_and_count_the_rest() {
+        let authors: Vec<Value> = (0..8).map(|i| json!({"name": format!("A{i}")})).collect();
+        let mut v = json!({
+            "hits": [{"work": {"title": "T", "authors": authors}}],
+            "claim": {"authors": ["a", "b", "c", "d", "e", "f"]},
+        });
+        trim_authors(&mut v);
+        assert_eq!(v["hits"][0]["work"]["authors"].as_array().unwrap().len(), 5);
+        assert_eq!(v["hits"][0]["work"]["authors_more"], 3);
+        // A claim's names as cited are left whole.
+        assert_eq!(v["claim"]["authors"].as_array().unwrap().len(), 6);
+    }
 }

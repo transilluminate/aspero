@@ -137,6 +137,14 @@ pub struct RelationArgs {
     pub limit: u32,
     /// A previous page's `next_cursor`, for the next page.
     pub cursor: Option<String>,
+    /// Only works of this type: article-journal, review, book, chapter,
+    /// paper-conference, article (preprints), thesis, report, dataset.
+    #[serde(rename = "type")]
+    pub work_type: Option<String>,
+    /// Only works published in or after this year.
+    pub from_year: Option<i16>,
+    /// Only works published in or before this year.
+    pub to_year: Option<i16>,
     /// Every known field of each work, not just the lean set.
     #[serde(default)]
     pub full: bool,

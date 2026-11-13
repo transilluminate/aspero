@@ -35,6 +35,7 @@ fn work() -> Value {
                 "type": "array",
                 "items": object(json!({"name": {"type": "string"}, "orcid": {"type": "string"}}), &["name"]),
             },
+            "authors_more": {"type": "integer", "description": "authors left out of a lean record's list (`full` lists them all)"},
             "issued": {"type": "string", "description": "the publication date: 2015, 2015-05 or 2015-05-27"},
             "type": {"type": "string", "description": "a CSL type"},
             "container": {"type": "string", "description": "the journal, or the book for a chapter"},

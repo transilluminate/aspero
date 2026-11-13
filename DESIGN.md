@@ -364,7 +364,7 @@ fixture recorded with different parameters once hid a ranking bug.
   Tools: `search` (a query tree, the `QueryTree` serde type in
   `aspero-json` that `search --query` parses too, or keywords),
   `search_supports`, `lookup`, `verify` (one citation or up to 25, results
-  in input order), `identify`, and `cites` / `cited_by` (a search by the
+  in input order), `identify`, and `citing_works` / `references` (a search by the
   relation alone, at the first source with relations). Lean records unless
   `full`; search pages by `cursor`. Output schemas are written by hand
   (the shapes are built as JSON) and left open beyond the keys agents rely

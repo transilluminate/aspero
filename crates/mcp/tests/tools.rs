@@ -48,8 +48,8 @@ fn every_tool_is_listed_with_its_schemas() {
             "lookup",
             "verify",
             "identify",
-            "cites",
-            "cited_by"
+            "citing_works",
+            "references"
         ]
     );
     for spec in tools.specs() {
@@ -355,8 +355,9 @@ async fn identify_names_the_work_a_page_is() {
     assert_eq!(out.structured["decided_by"], "identifier_and_title");
     assert_eq!(out.structured["match"]["work"]["title"], "Deep learning");
     assert!(
-        out.summary
-            .starts_with("IDENTIFIED by identifier and title\nVERIFIED"),
+        out.summary.starts_with(
+            "IDENTIFIED by an identifier on the page, confirmed by the title\nVERIFIED"
+        ),
         "{}",
         out.summary
     );
@@ -381,7 +382,7 @@ async fn cites_and_cited_by_search_by_the_works_openalex_id() {
     let citing = ok(
         &tools,
         &session,
-        "cites",
+        "citing_works",
         json!({"id": "10.1038/nature14539", "limit": 3}),
     )
     .await;
@@ -392,7 +393,7 @@ async fn cites_and_cited_by_search_by_the_works_openalex_id() {
     let cited = ok(
         &tools,
         &session,
-        "cited_by",
+        "references",
         json!({"id": "doi:10.1038/nature14539"}),
     )
     .await;
@@ -413,7 +414,13 @@ async fn cites_and_cited_by_search_by_the_works_openalex_id() {
         ]
     );
 
-    let e = err(&tools, &session, "cites", json!({"id": "10.1000/missing"})).await;
+    let e = err(
+        &tools,
+        &session,
+        "citing_works",
+        json!({"id": "10.1000/missing"}),
+    )
+    .await;
     assert_eq!(e.kind, ToolErrorKind::NotFound);
     assert_eq!(
         e.message,
@@ -428,7 +435,7 @@ async fn cites_and_cited_by_search_by_the_works_openalex_id() {
     let e = err(
         &plain,
         &session,
-        "cited_by",
+        "references",
         json!({"id": "10.1038/nature14539"}),
     )
     .await;

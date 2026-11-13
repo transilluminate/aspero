@@ -106,8 +106,8 @@ claude mcp add aspero -- aspero mcp
 
 The tools: `search` (a query tree, the JSON that `search --query` takes, or
 keywords), `search_supports`, `lookup`, `verify` (one citation, text or
-fields, or a batch), `identify` (a first page's text), and `cites` and
-`cited_by` (the works citing a work, and its references). Results are the
+fields, or a batch), `identify` (a first page's text), and `citing_works` and
+`references` (the works citing a work, and its references). Results are the
 JSON the commands print, as structured content with a short text summary;
 `full: true` gives every field.
 

@@ -120,23 +120,34 @@ impl OpenAlex {
 
     /// The IDs of the sources (journals, repositories, …) best matching
     /// `name`, at most as many as one filter can OR.
-    async fn sources_named(&self, name: &str) -> Result<(Vec<String>, Usage)> {
+    /// The sources (journals) so named, best first: with `exact`, only those
+    /// named exactly that (ignoring case), if any are ("Nature", not Nature
+    /// Communications).
+    async fn sources_named(&self, name: &str, exact: Option<&str>) -> Result<(Vec<String>, Usage)> {
         let base = format!("{}/sources", self.config.base_url.trim_end_matches('/'));
         let params = [
             (
                 "filter",
                 format!("display_name.search:{}", filter_value(name)),
             ),
-            ("select", "id".to_owned()),
+            ("select", "id,display_name".to_owned()),
             ("per-page", MAX_PAGE.to_string()),
         ];
         let url = url::Url::parse_with_params(&base, &params)
             .map_err(|e| Error::BadRequest(format!("invalid OpenAlex base URL: {e}")))?;
         let (resp, usage) = self.send(url.into()).await?;
         let list: WireList = serde_json::from_slice(&resp.body).map_err(Error::decode)?;
-        let ids = list
-            .results
-            .iter()
+        let named = |v: &serde_json::Value| {
+            let shown = v.get("display_name").and_then(|n| n.as_str()).unwrap_or("");
+            exact.is_some_and(|e| shown.trim().eq_ignore_ascii_case(e.trim()))
+        };
+        let exactly: Vec<&serde_json::Value> = list.results.iter().filter(|v| named(v)).collect();
+        let chosen = match exactly.is_empty() {
+            true => list.results.iter().collect(),
+            false => exactly,
+        };
+        let ids = chosen
+            .into_iter()
             .filter_map(|v| v.get("id")?.as_str())
             .map(|id| id.rsplit('/').next().unwrap_or(id).to_owned())
             .collect();
@@ -374,11 +385,12 @@ impl Provider for OpenAlex {
             let share = (MAX_FILTER_VALUES / container.names.len().max(1)).max(1);
             let mut sources = Vec::new();
             for (name, phrase) in container.names {
-                let name = match phrase {
-                    true => format!("\"{}\"", name.replace('"', "")),
-                    false => name,
+                let exact = phrase.then(|| name.replace('"', ""));
+                let name = match &exact {
+                    Some(exact) => format!("\"{exact}\""),
+                    None => name,
                 };
-                let (found, u) = self.sources_named(&name).await?;
+                let (found, u) = self.sources_named(&name, exact.as_deref()).await?;
                 usage = Some(usage.map_or(u, |s: Usage| s.then(u)));
                 for source in found.into_iter().take(share) {
                     if !sources.contains(&source) {

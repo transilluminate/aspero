@@ -364,7 +364,7 @@ With Claude Code, for example:
 
 Tools: search (a query tree, as `search --query` takes, or keywords),
 search_supports, lookup, verify (one citation or a batch), identify (a
-first page's text), cites and cited_by (works citing a work, and its
+first page's text), citing_works and references (works citing a work, and its
 references). Each answers in the JSON shapes the other commands print, with
 a short text summary; `full` gives every field.
 

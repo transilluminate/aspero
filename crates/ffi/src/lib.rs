@@ -335,11 +335,9 @@ impl Aspero {
 
     /// Analyses of the set of works `seeds` names (identifiers as
     /// written): retracted references, odd ones out, probably missing
-    /// works, related works (the best 20). Each seed resolves cheaply
-    /// (asked once) or says why not; paid requests stop before
-    /// `budget_usd` would be passed, and what stopped says how far it got
-    /// (`related` reads works' citing works in pages before the
-    /// lookups, a page each first). With `estimate_only`, nothing paid is
+    /// works. Each seed resolves cheaply (asked once) or says why not;
+    /// paid requests stop before `budget_usd` would be passed, and what
+    /// stopped says how far it got. With `estimate_only`, nothing paid is
     /// asked: `estimate` says what a run would cost.
     #[uniffi::method(default(budget_usd = None, cancel = None))]
     pub async fn analyse(

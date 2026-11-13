@@ -28,6 +28,24 @@
 //!
 //! Not yet: fan-out search.
 
+/// An enum's `ALL`: each variant once, with sample fields. An exhaustive
+/// match over the same list makes a new variant fail to compile until it's
+/// listed.
+macro_rules! every_variant {
+    ($ty:ident: $($variant:ident $({ $($field:ident: $value:expr),* })?),* $(,)?) => {
+        /// Every value (with sample fields), for front ends to test their
+        /// mappings.
+        pub const ALL: &[$ty] = &[$($ty::$variant $({ $($field: $value),* })?),*];
+
+        #[allow(dead_code)]
+        const fn listed(&self) {
+            match self {
+                $($ty::$variant { .. } => {})*
+            }
+        }
+    };
+}
+
 mod abstracts;
 mod batch;
 mod budget;
@@ -141,6 +159,8 @@ pub enum Served {
 }
 
 impl Served {
+    every_variant!(Served: Live, Cache, Stale);
+
     pub fn as_str(self) -> &'static str {
         match self {
             Served::Live => "live",

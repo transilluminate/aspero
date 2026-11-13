@@ -16,6 +16,8 @@ pub enum KeyStatus {
 }
 
 impl KeyStatus {
+    every_variant!(KeyStatus: Valid, Rejected, Unreachable);
+
     /// What a probe's failure, if any, says about the key: a spent budget
     /// was still accepted.
     pub fn of(failure: Option<&Error>) -> KeyStatus {

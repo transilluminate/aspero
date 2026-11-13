@@ -645,9 +645,9 @@ impl From<aspero_core::matching::WorkKind> for WorkKind {
     }
 }
 
-impl From<&engine::Difference> for Difference {
-    fn from(d: &engine::Difference) -> Self {
-        let field = match d.field {
+impl From<engine::CitedField> for CitedField {
+    fn from(f: engine::CitedField) -> Self {
+        match f {
             engine::CitedField::Title => CitedField::Title,
             engine::CitedField::Authors => CitedField::Authors,
             engine::CitedField::Year => CitedField::Year,
@@ -655,9 +655,14 @@ impl From<&engine::Difference> for Difference {
             engine::CitedField::Volume => CitedField::Volume,
             engine::CitedField::Kind => CitedField::Kind,
             _ => CitedField::FirstPage,
-        };
+        }
+    }
+}
+
+impl From<&engine::Difference> for Difference {
+    fn from(d: &engine::Difference) -> Self {
         Difference {
-            field,
+            field: d.field.into(),
             actual: d.actual.clone(),
             cited: d.cited.clone(),
             kind: d.kind.map(Into::into),
@@ -712,9 +717,10 @@ pub enum Reason {
 }
 
 impl Reason {
-    fn new(v: &engine::Verification) -> Self {
-        let differs = || v.why.differs().iter().map(Into::into).collect();
-        match &v.why {
+    /// `why`, its cited candidate one of `candidates`.
+    fn new(why: &engine::Reason, candidates: &[CoreCandidate]) -> Self {
+        let differs = || why.differs().iter().map(Into::into).collect();
+        match why {
             engine::Reason::Matches => Reason::Matches,
             engine::Reason::PartlyMatches { .. } => Reason::PartlyMatches { differs: differs() },
             engine::Reason::Unconfirmed => Reason::Unconfirmed,
@@ -726,7 +732,7 @@ impl Reason {
                 Reason::IdPartlyMatches { differs: differs() }
             }
             engine::Reason::IdElsewhere { cited } => Reason::IdElsewhere {
-                cited: Candidate::from(&v.report.candidates[*cited]),
+                cited: Candidate::from(&candidates[*cited]),
             },
             engine::Reason::IdDisagrees => Reason::IdDisagrees,
             engine::Reason::IdMissingElsewhere => Reason::IdMissingElsewhere,
@@ -847,7 +853,7 @@ impl Verification {
             input: claim.input.clone(),
             key: key(claim),
             verdict: v.verdict.into(),
-            why: Reason::new(v),
+            why: Reason::new(&v.why, &v.report.candidates),
             reason: v.reason.clone(),
             notes: v.notes.iter().map(Notice::from).collect(),
             read: Some(Claim::read(&v.read, key(claim))),
@@ -1268,18 +1274,24 @@ pub enum BibProblem {
     NotAPmid,
 }
 
+impl From<aspero_bib::Problem> for BibProblem {
+    fn from(p: aspero_bib::Problem) -> Self {
+        use aspero_bib::Problem;
+        match p {
+            Problem::NotADoi => BibProblem::NotADoi,
+            Problem::NotAnArxivId => BibProblem::NotAnArxivId,
+            Problem::NotAPmid => BibProblem::NotAPmid,
+            _ => BibProblem::NotAnIsbn,
+        }
+    }
+}
+
 impl From<&aspero_bib::Note> for BibNote {
     fn from(n: &aspero_bib::Note) -> Self {
-        use aspero_bib::Problem;
         BibNote {
             field: n.field.clone(),
             value: n.value.clone(),
-            problem: match n.problem {
-                Problem::NotADoi => BibProblem::NotADoi,
-                Problem::NotAnArxivId => BibProblem::NotAnArxivId,
-                Problem::NotAPmid => BibProblem::NotAPmid,
-                _ => BibProblem::NotAnIsbn,
-            },
+            problem: n.problem.into(),
             message: n.to_string(),
         }
     }
@@ -1457,14 +1469,20 @@ pub struct DocxReferences {
     pub text: String,
 }
 
+impl From<aspero_bib::docx::Manager> for CitationManager {
+    fn from(m: aspero_bib::docx::Manager) -> Self {
+        match m {
+            aspero_bib::docx::Manager::Mendeley => CitationManager::Mendeley,
+            _ => CitationManager::Zotero,
+        }
+    }
+}
+
 impl From<aspero_bib::docx::DocxReferences> for DocxReferences {
     fn from(d: aspero_bib::docx::DocxReferences) -> Self {
         DocxReferences {
             entries: d.entries.into_iter().map(Into::into).collect(),
-            manager: d.manager.map(|m| match m {
-                aspero_bib::docx::Manager::Mendeley => CitationManager::Mendeley,
-                _ => CitationManager::Zotero,
-            }),
+            manager: d.manager.map(Into::into),
             citations: d.citations as u32,
             text: d.text,
         }
@@ -1507,7 +1525,93 @@ pub struct Identification {
 
 #[cfg(test)]
 mod tests {
+    use aspero_core::{Claim, FieldSet, ProviderId, Raw, Work as CoreWork};
+
     use super::*;
+
+    /// A value's variant in snake case, from its `Debug`: `PartlyMatches {
+    /// differs: [] }` is `partly_matches`.
+    fn name(value: impl std::fmt::Debug) -> String {
+        let debug = format!("{value:?}");
+        let mut name = String::new();
+        for c in debug.chars().take_while(char::is_ascii_alphanumeric) {
+            if c.is_ascii_uppercase() && !name.is_empty() {
+                name.push('_');
+            }
+            name.push(c.to_ascii_lowercase());
+        }
+        name
+    }
+
+    /// Engine values reach the app as the case of the same name, not a
+    /// catch-all's: each `ALL` lists every value, so a new one is checked
+    /// here as soon as it exists.
+    #[test]
+    fn values_keep_their_names() {
+        for v in engine::Verdict::ALL {
+            assert_eq!(name(Verdict::from(*v)), v.as_str());
+        }
+        for f in engine::CitedField::ALL {
+            assert_eq!(name(CitedField::from(*f)), f.as_str());
+        }
+        for d in engine::Decision::ALL {
+            assert_eq!(name(IdentifiedBy::from(*d)), d.as_str());
+        }
+        for s in engine::Served::ALL {
+            assert_eq!(name(Freshness::from(*s)), s.as_str());
+        }
+        for s in engine::KeyStatus::ALL {
+            assert_eq!(name(KeyStatus::from(*s)), s.as_str());
+        }
+        for k in aspero_core::matching::WorkKind::ALL {
+            assert_eq!(name(WorkKind::from(*k)), k.as_str().replace(' ', "_"));
+        }
+
+        // `IdElsewhere` cites a candidate.
+        let record = SourceRecord::new(
+            ProviderId::from_static("crossref"),
+            Vec::new(),
+            CoreWork::default(),
+            FieldSet::ALL,
+            Raw {
+                media_type: "application/json".into(),
+                body: "{}".into(),
+            },
+            Timestamp::UNIX_EPOCH,
+        );
+        let candidates = [CoreCandidate {
+            assessment: aspero_core::matching::assess(&Claim::default(), &record),
+            record,
+            ids: Vec::new(),
+            sightings: Vec::new(),
+            updates: Vec::new(),
+        }];
+        for r in engine::Reason::ALL {
+            assert_eq!(name(Reason::new(r, &candidates)), r.as_str());
+        }
+    }
+
+    /// aspero-bib's enums have no `ALL`, so only the values known now are
+    /// checked.
+    #[test]
+    fn bib_values_keep_their_names() {
+        use aspero_bib::{Format, Problem, docx::Manager};
+        for f in [Format::Bibtex, Format::Ris, Format::CslJson] {
+            assert_eq!(name(BibFormat::from(f)), f.as_str());
+        }
+        let problems = [
+            Problem::NotADoi,
+            Problem::NotAnArxivId,
+            Problem::NotAnIsbn,
+            Problem::NotAPmid,
+        ];
+        for p in problems {
+            assert_eq!(name(BibProblem::from(p)), p.as_str());
+        }
+        for m in [Manager::Zotero, Manager::Mendeley] {
+            assert_eq!(name(CitationManager::from(m)), name(m));
+        }
+    }
 
     #[test]
     fn utf16_offsets_match_counting_from_the_start() {

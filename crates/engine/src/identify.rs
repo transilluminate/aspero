@@ -44,6 +44,8 @@ pub enum Decision {
 }
 
 impl Decision {
+    every_variant!(Decision: IdentifierAndTitle, IdentifierAndPage, OnlyIdentifier, TitleSearch);
+
     pub fn as_str(self) -> &'static str {
         match self {
             Decision::IdentifierAndTitle => "identifier_and_title",

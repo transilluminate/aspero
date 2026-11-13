@@ -1,5 +1,32 @@
 # Changelog
 
+## Unreleased
+
+Added:
+
+- Search by author, title and container (the journal, or the book for a
+  chapter), ANDed with the keywords, which may then be left out; and a
+  sort: relevance, newest or most cited. `aspero search --author --title
+  --container --sort`; on the FFI's `SearchRequest`, with `extra` for
+  provider-specific parameters. A provider that can't search a field or
+  give the order asked for fails (`unsupported`) rather than widening
+  the search.
+
+  | Source | Author | Title | Container | Newest | Most cited |
+  | --- | --- | --- | --- | --- | --- |
+  | OpenAlex | yes | yes | yes ($0.001 more) | yes | yes |
+  | Crossref | yes | yes | yes | yes | yes |
+  | Europe PMC | yes | yes | yes | yes | yes |
+  | DataCite | yes | yes | no | no | yes |
+  | Open Library | yes | yes | no | yes | no |
+
+- FFI: `searchCapabilities()`, each searching source's fields, filters
+  and sorts, in the order `search` picks from; `Work.citedByCount`.
+- JSON: lean works carry `cited_by_count`.
+- Library: `SearchQuery` `author`, `title`, `container` and `sort`;
+  `Filter::Author`, `Title`, `Container`; `Sort`; `Capabilities.sorts`;
+  `Engine::search_providers`; `ALL` and `as_str` on `Filter` and `Sort`.
+
 ## 0.9.0
 
 Changed (library):

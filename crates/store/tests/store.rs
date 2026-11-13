@@ -1,7 +1,7 @@
 use std::time::Duration;
 
 use aspero_core::{FieldSet, Hit, Page, ProviderId, Raw, SearchQuery, SourceRecord, Work, WorkId};
-use aspero_store::{Cache, SqliteCache};
+use aspero_store::{Cache, Direction, Edges, SqliteCache};
 use jiff::Timestamp;
 
 const OA: ProviderId = ProviderId::from_static("openalex");
@@ -200,6 +200,67 @@ fn a_cache_from_another_schema_version_is_rebuilt() {
     cache
         .put_lookups(&OA, &[(&id("W1"), Some(&record(&["W1"], "new")))], at(0))
         .unwrap();
+}
+
+#[test]
+fn citation_links_round_trip_per_work_and_direction() {
+    let cache = SqliteCache::open_in_memory().unwrap();
+    let (a, b, unknown) = (id("W1"), id("W2"), id("W3"));
+    let cites = Edges::new(vec![id("W30"), id("W10"), id("W20")], true);
+    let page = Edges::new(vec![id("W40")], false);
+    cache
+        .put_edges(Direction::References, &[(&a, &cites)], at(0))
+        .unwrap();
+    cache
+        .put_edges(Direction::CitedBy, &[(&a, &page), (&b, &page)], at(5))
+        .unwrap();
+
+    let got = cache
+        .get_edges(Direction::References, &[unknown, a.clone(), b])
+        .unwrap();
+    assert!(got[0].is_none() && got[2].is_none());
+    let entry = got[1].as_ref().unwrap();
+    assert_eq!(entry.value, cites, "in the source's order");
+    assert_eq!(entry.stored_at, at(0));
+    let cited_by = cache.get_edges(Direction::CitedBy, &[a]).unwrap();
+    assert_eq!(cited_by[0].as_ref().unwrap().value, page);
+    assert_eq!(cache.stats().unwrap().edges, 3);
+}
+
+#[test]
+fn records_keep_the_works_they_cite() {
+    let cache = SqliteCache::open_in_memory().unwrap();
+    let r = record(&["W1"], "Cites two").with_references(Some(vec![id("W2"), id("W3")]));
+    cache
+        .put_lookups(&OA, &[(&id("W1"), Some(&r))], at(0))
+        .unwrap();
+    let cached = get(&cache, &OA, "W1").unwrap().value.unwrap();
+    assert_eq!(cached.references, Some(vec![id("W2"), id("W3")]));
+}
+
+/// The links table is added to a cache of the current version without
+/// dropping what it holds.
+#[test]
+fn links_are_added_to_a_cache_without_rebuilding_it() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("cache.sqlite");
+    {
+        let cache = SqliteCache::open(&path).unwrap();
+        cache
+            .put_lookups(&OA, &[(&id("W1"), Some(&record(&["W1"], "kept")))], at(0))
+            .unwrap();
+    }
+    rusqlite::Connection::open(&path)
+        .unwrap()
+        .execute_batch("DROP TABLE edges;")
+        .unwrap();
+    let cache = SqliteCache::open(&path).unwrap();
+    assert_eq!(cache.stats().unwrap().records, 1);
+    let links = Edges::new(vec![id("W2")], true);
+    cache
+        .put_edges(Direction::References, &[(&id("W1"), &links)], at(0))
+        .unwrap();
+    assert_eq!(cache.stats().unwrap().edges, 1);
 }
 
 #[test]

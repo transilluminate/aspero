@@ -1,9 +1,11 @@
 //! SQLite storage.
 //!
 //! [`SqliteCache`] is the **disposable** cache of provider answers: records,
-//! "not found" answers and search pages. Everything in it can be fetched
-//! again, so it lives in the platform cache directory (which the OS may
-//! wipe) and has no migrations: a schema mismatch simply rebuilds it.
+//! "not found" answers, search pages and citation links ([`Edges`]).
+//! Everything in it can be fetched again, so it lives in the platform cache
+//! directory (which the OS may wipe) and has no migrations: a schema
+//! mismatch simply rebuilds it. Tables added beside the versioned schema
+//! (`CREATE TABLE IF NOT EXISTS`, as the links are) need no rebuild.
 //!
 //! Durable data that is costly to recompute (history; derived data such as
 //! embeddings or extracted text) will live in a separate store in the data
@@ -33,7 +35,8 @@ use rusqlite::{Connection, OptionalExtension, TransactionBehavior, params};
 /// 5: `update_to` (what a notice updates). 6: `open_access`. 7: Crossref
 /// relations map to `new_version` updates. 8: notices are typed as such.
 /// 9: `http://` ORCIDs read everywhere; Crossref works read as CSL items.
-const SCHEMA_VERSION: i64 = 9;
+/// 10: records carry the works they cite (OpenAlex `referenced_works`).
+const SCHEMA_VERSION: i64 = 10;
 
 const SCHEMA: &str = "
 CREATE TABLE record (
@@ -74,6 +77,21 @@ CREATE TABLE IF NOT EXISTS pacing (
 );
 ";
 
+/// Citation links, added beside the versioned schema so that adding them
+/// keeps the rest of the cache (a rebuild drops and recreates them too).
+/// One row per work and direction: the ids it cites (`references`), or a
+/// page of those citing it (`cited_by`).
+const EDGES: &str = "
+CREATE TABLE IF NOT EXISTS edges (
+    work       TEXT NOT NULL,      -- the work's id (an OpenAlex work id)
+    direction  TEXT NOT NULL,      -- 'references' or 'cited_by'
+    ids        TEXT NOT NULL,      -- JSON list of work ids, in the source's order
+    complete   INTEGER NOT NULL,   -- 1 if `ids` is every link the source has
+    stored_at  INTEGER NOT NULL,   -- unix seconds
+    PRIMARY KEY (work, direction)
+);
+";
+
 /// A claimed slot further ahead than this means the clock went back (or a
 /// process misbehaved): start afresh rather than wait.
 const MAX_AHEAD: Duration = Duration::from_secs(300);
@@ -102,6 +120,41 @@ impl<T> Entry<T> {
     /// Whether the entry is at most `ttl` old at `now`.
     pub fn is_fresh(&self, now: Timestamp, ttl: Duration) -> bool {
         now.duration_since(self.stored_at).unsigned_abs() <= ttl
+    }
+}
+
+/// Which way a citation link points from a work.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
+pub enum Direction {
+    /// The works it cites.
+    References,
+    /// The works citing it.
+    CitedBy,
+}
+
+impl Direction {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Direction::References => "references",
+            Direction::CitedBy => "cited_by",
+        }
+    }
+}
+
+/// A work's links in one direction.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct Edges {
+    /// In the source's order.
+    pub ids: Vec<WorkId>,
+    /// Whether these are every link the source has (not a page of them).
+    pub complete: bool,
+}
+
+impl Edges {
+    pub fn new(ids: Vec<WorkId>, complete: bool) -> Self {
+        Edges { ids, complete }
     }
 }
 
@@ -142,6 +195,28 @@ pub trait Cache: Send + Sync {
         page: &Page,
         at: Timestamp,
     ) -> Result<()>;
+
+    /// The cached links of each of `works` in `direction`, in order;
+    /// `None` where nothing is cached. A cache without links has none.
+    fn get_edges(
+        &self,
+        direction: Direction,
+        works: &[WorkId],
+    ) -> Result<Vec<Option<Entry<Edges>>>> {
+        let _ = direction;
+        Ok(vec![None; works.len()])
+    }
+
+    /// Stores links in one transaction, replacing what was there.
+    fn put_edges(
+        &self,
+        direction: Direction,
+        edges: &[(&WorkId, &Edges)],
+        at: Timestamp,
+    ) -> Result<()> {
+        let _ = (direction, edges, at);
+        Ok(())
+    }
 }
 
 /// Request slots shared between processes, so parallel agents (and any
@@ -159,6 +234,8 @@ pub struct Stats {
     pub identifiers: u64,
     pub misses: u64,
     pub searches: u64,
+    /// Works with cached citation links (per direction).
+    pub edges: u64,
 }
 
 pub struct SqliteCache {
@@ -220,6 +297,7 @@ impl SqliteCache {
             tx.commit()?;
         }
         conn.execute_batch(PACING)?;
+        conn.execute_batch(EDGES)?;
         Ok(SqliteCache {
             conn: Mutex::new(conn),
         })
@@ -267,13 +345,15 @@ impl SqliteCache {
             identifiers: count("record_id")?,
             misses: count("miss")?,
             searches: count("search")?,
+            edges: count("edges")?,
         })
     }
 
     /// Empties the cache.
     pub fn clear(&self) -> Result<()> {
         self.conn().execute_batch(
-            "DELETE FROM record; DELETE FROM record_id; DELETE FROM miss; DELETE FROM search; VACUUM;",
+            "DELETE FROM record; DELETE FROM record_id; DELETE FROM miss; DELETE FROM search; \
+             DELETE FROM edges; VACUUM;",
         )?;
         Ok(())
     }
@@ -441,6 +521,76 @@ impl Cache for SqliteCache {
                 at.as_second()
             ],
         )?;
+        Ok(())
+    }
+
+    fn get_edges(
+        &self,
+        direction: Direction,
+        works: &[WorkId],
+    ) -> Result<Vec<Option<Entry<Edges>>>> {
+        let rows: Vec<Option<(String, bool, i64)>> = {
+            let mut conn = self.conn();
+            let tx = conn.transaction()?;
+            let mut get = tx.prepare_cached(
+                "SELECT ids, complete, stored_at FROM edges WHERE work = ?1 AND direction = ?2",
+            )?;
+            let mut rows = Vec::with_capacity(works.len());
+            for work in works {
+                let key = params![work.to_string(), direction.as_str()];
+                rows.push(
+                    get.query_row(key, |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
+                        .optional()?,
+                );
+            }
+            rows
+        };
+        // Parsed after the lock is released.
+        rows.into_iter()
+            .map(|row| {
+                row.map(|(json, complete, at)| {
+                    Ok(Entry {
+                        value: Edges {
+                            ids: serde_json::from_str(&json)?,
+                            complete,
+                        },
+                        stored_at: timestamp(at),
+                    })
+                })
+                .transpose()
+            })
+            .collect()
+    }
+
+    fn put_edges(
+        &self,
+        direction: Direction,
+        edges: &[(&WorkId, &Edges)],
+        at: Timestamp,
+    ) -> Result<()> {
+        // Serialised before the lock is taken.
+        let rows: Vec<(String, String, bool)> = edges
+            .iter()
+            .map(|(work, e)| Ok((work.to_string(), serde_json::to_string(&e.ids)?, e.complete)))
+            .collect::<Result<_>>()?;
+        let mut conn = self.conn();
+        let tx = conn.transaction()?;
+        {
+            let mut put = tx.prepare_cached(
+                "INSERT OR REPLACE INTO edges (work, direction, ids, complete, stored_at) \
+                 VALUES (?1, ?2, ?3, ?4, ?5)",
+            )?;
+            for (work, ids, complete) in rows {
+                put.execute(params![
+                    work,
+                    direction.as_str(),
+                    ids,
+                    complete,
+                    at.as_second()
+                ])?;
+            }
+        }
+        tx.commit()?;
         Ok(())
     }
 }

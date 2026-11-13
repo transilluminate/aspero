@@ -36,6 +36,7 @@ requests=(
   "works_retracted_batch /works?filter=openalex:W2158048826|W2919115771|W3010930696,is_retracted:true&per-page=100&cursor=*"
   "works_batch_reregistered /works?filter=doi:10.1197/j.aem.2003.09.015|10.1038/nature14539|10.5555/aspero-does-not-exist&per-page=100"
   "work_reregistered /works/doi:10.1197/j.aem.2003.09.015"
+  "works_cites_page  /works?select=id,referenced_works&sort=cited_by_count:desc&filter=cites:W2293082134|W2568812702&per-page=200&cursor=*"
 )
 
 for entry in "${requests[@]}"; do

@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+Fixed:
+
+- The OpenAlex request that crosses the budget could come back as a
+  server error; any failing response that says the budget is spent
+  (`not_enough_credits`, or none remaining) is now `QuotaExhausted`.
+
 ## 0.11.0
 
 Added:

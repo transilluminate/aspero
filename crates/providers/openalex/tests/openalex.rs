@@ -444,6 +444,34 @@ fn spent_budget_is_quota_exhausted_with_reset_time() {
 }
 
 #[test]
+fn the_request_crossing_the_budget_is_quota_exhausted_whatever_its_status() {
+    let crossing = |status| {
+        response(
+            status,
+            &[
+                ("x-ratelimit-remaining-usd", "0"),
+                ("x-ratelimit-reset", "3600"),
+            ],
+            "",
+        )
+    };
+    let worded = response(402, &[], r#"{"error":"not_enough_credits"}"#);
+    let (oa, _) = provider([crossing(500), crossing(503), worded]);
+    for _ in 0..3 {
+        let err = block_on(oa.search(&SearchQuery::new("x"))).unwrap_err();
+        assert!(matches!(err, Error::QuotaExhausted { .. }), "{err:?}");
+    }
+}
+
+#[test]
+fn a_server_error_with_budget_left_is_a_server_error() {
+    let fault = response(503, &[("x-ratelimit-remaining-usd", "0.5")], "");
+    let (oa, _) = provider([fault]);
+    let err = block_on(oa.search(&SearchQuery::new("x"))).unwrap_err();
+    assert!(matches!(err, Error::Server { status: 503, .. }), "{err:?}");
+}
+
+#[test]
 fn plain_429_is_rate_limited_with_retry_after() {
     let busy = response(
         429,

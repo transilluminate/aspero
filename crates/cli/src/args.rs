@@ -186,10 +186,12 @@ $0.001 each, and a --container search one more.
 
 --query takes the search as a JSON tree instead of keywords and fields: all,
 any and none of terms (keywords, title, author, container, abstract,
-author_id; \"phrase\": true for the words together), filters (years, type,
-open_access, language, not_retracted, has_abstract) and relations (cites,
-cited_by, any identifier: OpenAlex only). A provider that can't say the
-tree fails and says why.
+author_id; \"phrase\": true for the words together), works by identifier
+(id: a DOI, pmid:, pmcid:, arXiv:, an OpenAlex W… id or an ISBN, as each
+provider takes them), filters (years, type, open_access, language,
+not_retracted, has_abstract) and relations (cites, cited_by, any
+identifier: OpenAlex only). A provider that can't say the tree fails and
+says why.
 
 --since keeps works the provider added on or after a day (Crossref: first
 deposited; DataCite: registered; Europe PMC: first indexed), however old,
@@ -205,6 +207,8 @@ Examples:
   aspero search --query '{\"all\": [{\"title\": \"alphafold\"}, {\"not_retracted\": true}]}'
   aspero search --source europepmc --query '{\"any\": [{\"title\": \"sepsis\"}, {\"abstract\": \"septic shock\", \"phrase\": true}]}'
   aspero search --query '{\"all\": [{\"cites\": \"10.1038/nature14539\"}, {\"title\": \"survey\"}]}'
+  aspero search --query '{\"all\": [{\"id\": \"10.1038/nature14539\"}, {\"not_retracted\": true}]}'
+  aspero search --source europepmc --query '{\"all\": [{\"any\": [{\"id\": \"pmid:26017442\"}, {\"id\": \"PMC7254481\"}]}, {\"years\": 2015}]}'
   aspero search sepsis --since 2026-11-01 --source europepmc")]
     Search {
         /// Keywords; may be left out when --author, --title, --container or

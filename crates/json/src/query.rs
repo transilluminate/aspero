@@ -3,6 +3,7 @@
 //!
 //! ```json
 //! {"all": [
+//!   {"any": [{"id": "10.1038/nature14539"}, {"id": "pmid:31452104"}]},
 //!   {"keywords": "protein folding"},
 //!   {"any": [{"title": "alphafold"}, {"title": "structure prediction", "phrase": true}]},
 //!   {"none": [{"author_id": "0000-0002-1825-0097"}]},
@@ -13,7 +14,9 @@
 //! - groups: `all`, `any`, `none`, each an array of nodes;
 //! - terms: `keywords`, `title`, `author`, `container` (or `journal`),
 //!   `abstract`, `author_id`, each a string, with `"phrase": true` for the
-//!   words together;
+//!   words together; and `id` (or `identifier`), the work an identifier
+//!   names: a DOI, `pmid:`, `pmcid:`, `arXiv:`, an OpenAlex `W…` id, an
+//!   ISBN, …;
 //! - filters: `years` (`{"from": 2017, "to": 2020}`, either optional, or a
 //!   year), `type` (a CSL type), `open_access` (a boolean), `language` (ISO
 //!   639-1), and `not_retracted` and `has_abstract` (`true`);
@@ -59,6 +62,7 @@ const KEYS: &[&str] = &[
     "container",
     "abstract",
     "author_id",
+    "id",
     "years",
     "type",
     "open_access",
@@ -220,6 +224,12 @@ impl schemars::JsonSchema for QueryTree {
             term("journal", "the same as container"),
             term("abstract", "words of the abstract"),
             term("author_id", "an author's ORCID, or OpenAlex author id"),
+            term(
+                "id",
+                "the work an identifier names: a DOI, pmid:…, pmcid:…, arXiv:…, an \
+                 OpenAlex W… id, an ISBN; which kinds a source takes, search_supports says",
+            ),
+            term("identifier", "the same as id"),
             one(
                 "years",
                 json!({"anyOf": [
@@ -281,6 +291,7 @@ fn field(key: &str) -> Option<TermField> {
         "container" | "journal" => TermField::Container,
         "abstract" => TermField::Abstract,
         "author_id" => TermField::AuthorId,
+        "id" | "identifier" => TermField::Identifier,
         _ => return None,
     })
 }
@@ -292,6 +303,7 @@ fn field_key(field: TermField) -> &'static str {
         TermField::Author => "author",
         TermField::Container => "container",
         TermField::Abstract => "abstract",
+        TermField::Identifier => "id",
         _ => "author_id",
     }
 }
@@ -341,13 +353,25 @@ mod tests {
             {"none": [{"author_id": "0000-0002-1825-0097"}, {"not_retracted": true}]},
             {"years": {"from": 2020}}, {"years": 2019}, {"type": "article-journal"},
             {"open_access": false}, {"language": "en"}, {"has_abstract": true},
-            {"cites": "10.1038/nature14539"}, {"cited_by": "W1"}
+            {"cites": "10.1038/nature14539"}, {"cited_by": "W1"},
+            {"any": [{"id": "10.1038/nature14539"}, {"identifier": "pmid:1"}]}
         ]}"#;
         let tree = parse_query(&serde_json::from_str(text).unwrap()).unwrap();
         let QueryNode::All(nodes) = &tree else {
             panic!("{tree:?}")
         };
-        assert_eq!(nodes.len(), 11);
+        assert_eq!(nodes.len(), 12);
+        assert_eq!(
+            nodes[11],
+            QueryNode::Any(vec![
+                QueryNode::term(TermField::Identifier, "10.1038/nature14539"),
+                QueryNode::term(TermField::Identifier, "pmid:1"),
+            ])
+        );
+        assert_eq!(
+            query_json(&nodes[11]).to_string(),
+            r#"{"any":[{"id":"10.1038/nature14539"},{"id":"pmid:1"}]}"#
+        );
         assert_eq!(
             nodes[1],
             QueryNode::Any(vec![
@@ -398,6 +422,7 @@ mod tests {
             .collect();
         let mut expected = KEYS.to_vec();
         expected.insert(7, "journal");
+        expected.insert(11, "identifier");
         assert_eq!(keys, expected);
         let sample = |key: &str| match key {
             "all" | "any" | "none" => json!([{"title": "x"}]),

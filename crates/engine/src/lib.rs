@@ -264,6 +264,19 @@ pub enum EngineError {
     /// provider parameters.
     #[error("nothing to search for: give keywords, or an author, title or container")]
     NothingToSearch,
+    /// A query tree given with keywords or fields, or with a leaf that
+    /// can't be valid (an author id that's neither an ORCID nor an OpenAlex
+    /// id, an unknown language code, …). The reason is in English.
+    #[error("{0}")]
+    InvalidQuery(String),
+    /// A relation's work couldn't be found where the search needs it (an
+    /// OpenAlex work id).
+    #[error("can't search by citations of {id}: {reason}")]
+    Unresolved {
+        id: String,
+        reason: String,
+        kind: ErrorKind,
+    },
     #[error("{provider}: {error}")]
     Provider {
         provider: ProviderId,
@@ -277,7 +290,16 @@ impl EngineError {
         match self {
             EngineError::UnknownProvider(_) => ErrorCategory::Usage,
             EngineError::NoCapableProvider(_) => ErrorCategory::Unsupported,
-            EngineError::NothingToSearch => ErrorCategory::Usage,
+            EngineError::NothingToSearch | EngineError::InvalidQuery(_) => ErrorCategory::Usage,
+            EngineError::Unresolved { kind, .. } => match kind {
+                ErrorKind::NotFound => ErrorCategory::NotFound,
+                ErrorKind::BadRequest | ErrorKind::InvalidId => ErrorCategory::Usage,
+                ErrorKind::Unsupported => ErrorCategory::Unsupported,
+                ErrorKind::RateLimited | ErrorKind::BudgetSpent => ErrorCategory::Throttled,
+                ErrorKind::KeyRejected => ErrorCategory::Auth,
+                ErrorKind::Decode => ErrorCategory::Protocol,
+                _ => ErrorCategory::Unavailable,
+            },
             EngineError::Provider { error, .. } => error.category(),
         }
     }
@@ -286,7 +308,8 @@ impl EngineError {
         match self {
             EngineError::UnknownProvider(_) => ErrorKind::BadRequest,
             EngineError::NoCapableProvider(_) => ErrorKind::Unsupported,
-            EngineError::NothingToSearch => ErrorKind::BadRequest,
+            EngineError::NothingToSearch | EngineError::InvalidQuery(_) => ErrorKind::BadRequest,
+            EngineError::Unresolved { kind, .. } => *kind,
             EngineError::Provider { error, .. } => error.kind(),
         }
     }

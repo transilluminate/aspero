@@ -5,9 +5,9 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use aspero_core::{
-    Capabilities, Error, FieldSet, Filter, Hit, IdKind, Lookup, Page, Provider, ProviderId, Raw,
-    ResiliencePolicy, Response, Result, SearchMode, SearchQuery, Sort, SourceRecord, Usage, Work,
-    WorkId, YearRange,
+    BooleanSupport, Capabilities, Error, ErrorKind, FieldSet, Filter, FilterValue, Hit, IdKind,
+    Lookup, Page, Provider, ProviderId, QueryNode, Raw, Relation, ResiliencePolicy, Response,
+    Result, SearchMode, SearchQuery, Sort, SourceRecord, TermField, Usage, Work, WorkId, YearRange,
 };
 use aspero_engine::{Engine, EngineError, Outcome};
 use async_trait::async_trait;
@@ -19,6 +19,8 @@ struct Mock {
     id: ProviderId,
     caps: Capabilities,
     known: HashMap<WorkId, String>,
+    /// More identifiers a known work's record carries.
+    aliases: HashMap<WorkId, Vec<WorkId>>,
     failures: Mutex<VecDeque<Error>>,
     lookups: Mutex<Vec<Vec<WorkId>>>,
     searches: Mutex<Vec<SearchQuery>>,
@@ -34,6 +36,7 @@ impl Mock {
             id: ProviderId::from_static(id),
             caps,
             known: HashMap::new(),
+            aliases: HashMap::new(),
             failures: Mutex::default(),
             lookups: Mutex::default(),
             searches: Mutex::default(),
@@ -43,6 +46,14 @@ impl Mock {
 
     fn knows(mut self, id: &str, title: &str) -> Self {
         self.known.insert(id.parse().unwrap(), title.to_owned());
+        self
+    }
+
+    /// Knows `id`, and its record carries `alias` too.
+    fn knows_also(mut self, id: &str, alias: &str) -> Self {
+        let id: WorkId = id.parse().unwrap();
+        self.known.insert(id.clone(), "aliased".into());
+        self.aliases.insert(id, vec![alias.parse().unwrap()]);
         self
     }
 
@@ -115,10 +126,20 @@ impl Provider for Mock {
             .iter()
             .map(|id| Lookup {
                 id: id.clone(),
-                record: self.known.get(id).map(|t| self.record(id, t)),
+                record: self.known.get(id).map(|t| {
+                    let mut record = self.record(id, t);
+                    record
+                        .ids
+                        .extend(self.aliases.get(id).into_iter().flatten().cloned());
+                    record
+                }),
             })
             .collect();
         Ok(self.respond(lookups))
+    }
+
+    fn express(&self, tree: &QueryNode) -> std::result::Result<(), String> {
+        aspero_core::query::check_supported(tree, &self.caps, "Mock")
     }
 
     async fn search(&self, query: &SearchQuery) -> Result<Response<Page>> {
@@ -489,4 +510,250 @@ async fn newest_first_stops_at_this_year_unless_told_otherwise() {
             Some((None, Some(2030))),
         ]
     );
+}
+
+fn title(words: &str) -> QueryNode {
+    QueryNode::term(TermField::Title, words)
+}
+
+fn years(from: Option<i16>, to: Option<i16>) -> QueryNode {
+    QueryNode::filter(FilterValue::Years(YearRange { from, to }))
+}
+
+/// Searches every tree of keywords and titles, with years and open
+/// access; any and none anywhere, nested.
+fn tree_mock(id: &'static str, kinds: &[IdKind]) -> Mock {
+    let mut mock = Mock::new(id, kinds).searchable(
+        false,
+        &[
+            Filter::Keywords,
+            Filter::Title,
+            Filter::Years,
+            Filter::OpenAccess,
+        ],
+    );
+    mock.caps.search_any = BooleanSupport::Anywhere;
+    mock.caps.search_none = BooleanSupport::Anywhere;
+    mock.caps.search_nesting = true;
+    mock.caps.sorts = vec![Sort::Relevance, Sort::Newest];
+    mock
+}
+
+fn with_tree(tree: QueryNode) -> SearchQuery {
+    let mut q = SearchQuery::new("");
+    q.tree = Some(tree);
+    q
+}
+
+#[tokio::test(start_paused = true)]
+async fn trees_are_normalised_and_take_the_requests_filters() {
+    let mock = Arc::new(tree_mock("tree", &[]));
+    let engine = engine(vec![(mock.clone(), 10)]);
+    let mut q = with_tree(QueryNode::All(vec![
+        QueryNode::All(vec![title("a")]),
+        QueryNode::Any(vec![]),
+        QueryNode::Any(vec![QueryNode::Any(vec![title("b"), title("c")])]),
+    ]));
+    q.years = Some(YearRange {
+        from: Some(2017),
+        to: None,
+    });
+    q.open_access = Some(true);
+    // The mock can't filter by type: ignored, as without a tree.
+    q.work_type = Some(aspero_core::WorkType::Book);
+    let report = engine.search(None, &q).await.unwrap();
+    assert_eq!(report.ignored_filters, [Filter::WorkType]);
+    let sent = mock.searches.lock().unwrap()[0].clone();
+    assert_eq!(
+        sent.tree,
+        Some(QueryNode::All(vec![
+            title("a"),
+            QueryNode::Any(vec![title("b"), title("c")]),
+            years(Some(2017), None),
+            QueryNode::filter(FilterValue::OpenAccess(true)),
+        ]))
+    );
+    assert_eq!(
+        (sent.years, sent.open_access, sent.work_type),
+        (None, None, None)
+    );
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_tree_replaces_text_and_fields_and_must_hold_something() {
+    let mock = Arc::new(tree_mock("tree", &[]));
+    let engine = engine(vec![(mock.clone(), 10)]);
+    let invalid = |r: std::result::Result<_, EngineError>| match r {
+        Err(EngineError::InvalidQuery(reason)) => reason,
+        other => panic!("{other:?}"),
+    };
+    let mut q = with_tree(title("a"));
+    q.text = "keywords".into();
+    assert!(invalid(engine.search(None, &q).await).starts_with("a query replaces"));
+    let mut q = with_tree(title("a"));
+    q.author = Some("LeCun".into());
+    assert!(invalid(engine.search(None, &q).await).starts_with("a query replaces"));
+
+    let empty = with_tree(QueryNode::All(vec![QueryNode::None(vec![title(" ")])]));
+    let r = engine.search(None, &empty).await;
+    assert!(matches!(r, Err(EngineError::NothingToSearch)), "{r:?}");
+    assert_eq!(
+        engine.search_supports(None, empty.tree.as_ref().unwrap()),
+        Some(EngineError::NothingToSearch.to_string())
+    );
+    assert!(mock.searches.lock().unwrap().is_empty());
+    // As without a tree, an expert's own parameters are a search.
+    let mut q = empty.clone();
+    q.extra.insert("filter".into(), "is_oa:true".into());
+    engine.search(None, &q).await.unwrap();
+    assert_eq!(mock.searches.lock().unwrap()[0].tree, None);
+}
+
+#[tokio::test(start_paused = true)]
+async fn trees_a_source_cant_say_fail_as_search_supports_says() {
+    let mut mock = tree_mock("flat", &[]);
+    mock.caps.search_any = BooleanSupport::No;
+    let mock = Arc::new(mock);
+    let engine = engine(vec![(mock.clone(), 10)]);
+    let tree = QueryNode::Any(vec![title("a"), title("b")]);
+    let reason = "Mock can't combine terms with any";
+    assert_eq!(engine.search_supports(None, &tree).as_deref(), Some(reason));
+    assert_eq!(engine.search_supports(Some("flat"), &title("a")), None);
+    match engine.search(None, &with_tree(tree)).await {
+        Err(EngineError::Provider {
+            error: Error::UnsupportedQuery(r),
+            ..
+        }) => assert_eq!(r, reason),
+        other => panic!("{other:?}"),
+    }
+    let abstracts = QueryNode::term(TermField::Abstract, "x");
+    assert_eq!(
+        engine.search_supports(None, &abstracts).as_deref(),
+        Some("Mock can't search by abstract")
+    );
+    // Invalid values are the caller's to fix.
+    let language = QueryNode::filter(FilterValue::Language("english".into()));
+    assert_eq!(
+        engine.search_supports(None, &language).as_deref(),
+        Some("\"english\" is not an ISO 639-1 language code, like \"en\"")
+    );
+    assert_eq!(
+        engine
+            .search_supports(Some("nobody"), &title("a"))
+            .as_deref(),
+        Some("no enabled provider is named \"nobody\"")
+    );
+    assert!(mock.searches.lock().unwrap().is_empty());
+}
+
+#[tokio::test(start_paused = true)]
+async fn newest_trees_stop_at_this_year_unless_their_years_say_otherwise() {
+    let mock = Arc::new(tree_mock("dated", &[]));
+    let engine = Engine::builder()
+        .provider(mock.clone(), policy(), 10)
+        .jitter(|| 1.0)
+        .clock(|| "2026-11-13T12:00:00Z".parse().unwrap())
+        .build();
+    let newest = |tree| {
+        let mut q = with_tree(tree);
+        q.sort = Sort::Newest;
+        q
+    };
+    engine.search(None, &newest(title("a"))).await.unwrap();
+    let mut from = newest(title("a"));
+    from.years = Some(YearRange {
+        from: Some(2015),
+        to: None,
+    });
+    engine.search(None, &from).await.unwrap();
+    let later = QueryNode::All(vec![title("a"), years(None, Some(2030))]);
+    engine.search(None, &newest(later.clone())).await.unwrap();
+    // Years under none don't bound every hit.
+    let excluded = QueryNode::All(vec![
+        title("a"),
+        QueryNode::None(vec![years(None, Some(2000))]),
+    ]);
+    engine.search(None, &newest(excluded)).await.unwrap();
+
+    let sent: Vec<_> = mock
+        .searches
+        .lock()
+        .unwrap()
+        .iter()
+        .map(|q| q.tree.clone().unwrap())
+        .collect();
+    assert_eq!(
+        sent,
+        [
+            QueryNode::All(vec![title("a"), years(None, Some(2026))]),
+            QueryNode::All(vec![title("a"), years(Some(2015), Some(2026))]),
+            later,
+            QueryNode::All(vec![
+                title("a"),
+                QueryNode::None(vec![years(None, Some(2000))]),
+                years(None, Some(2026)),
+            ]),
+        ]
+    );
+}
+
+#[tokio::test(start_paused = true)]
+async fn relations_are_searched_by_their_openalex_work() {
+    // OpenAlex knows a DOI; Europe PMC knows a PMCID by its DOI, which
+    // OpenAlex then knows.
+    let mut openalex = tree_mock("openalex", &[IdKind::Doi, IdKind::Pmid, IdKind::OpenAlex])
+        .knows_also(DOI_A, "W1")
+        .knows_also(DOI_B, "W2");
+    openalex.caps.relations = vec![Relation::Cites, Relation::CitedBy];
+    let openalex = Arc::new(openalex);
+    let europepmc = Arc::new(Mock::new("europepmc", &[IdKind::Pmcid]).knows_also("PMC7", DOI_B));
+    let engine = engine(vec![(openalex.clone(), 10), (europepmc.clone(), 35)]);
+
+    let tree = QueryNode::All(vec![
+        QueryNode::relation(Relation::Cites, DOI_A),
+        QueryNode::None(vec![QueryNode::relation(Relation::CitedBy, "PMC7")]),
+        QueryNode::relation(Relation::Cites, "https://openalex.org/W3"),
+    ]);
+    engine.search(None, &with_tree(tree)).await.unwrap();
+    assert_eq!(
+        openalex.searches.lock().unwrap()[0].tree,
+        Some(QueryNode::All(vec![
+            QueryNode::relation(Relation::Cites, "W1"),
+            QueryNode::None(vec![QueryNode::relation(Relation::CitedBy, "W2")]),
+            QueryNode::relation(Relation::Cites, "W3"),
+        ]))
+    );
+    // An OpenAlex id is used as given, without a lookup.
+    assert_eq!(
+        *openalex.lookups.lock().unwrap(),
+        [ids(&[DOI_A]), ids(&[DOI_B])]
+    );
+    assert_eq!(*europepmc.lookups.lock().unwrap(), [ids(&["PMC7"])]);
+
+    // Nowhere to be found: the search fails, and says which.
+    let missing = QueryNode::relation(Relation::Cites, "10.1000/missing");
+    match engine.search(None, &with_tree(missing)).await {
+        Err(e @ EngineError::Unresolved { .. }) => {
+            assert_eq!(e.kind(), ErrorKind::NotFound);
+            assert_eq!(
+                e.to_string(),
+                "can't search by citations of 10.1000/missing: no such work found"
+            );
+        }
+        other => panic!("{other:?}"),
+    }
+    assert_eq!(openalex.searches.lock().unwrap().len(), 1);
+    // Only sources with relations can search by them.
+    let crossref = Arc::new(tree_mock("crossref", &[]));
+    let engine = engine_of(crossref);
+    assert_eq!(
+        engine
+            .search_supports(None, &QueryNode::relation(Relation::CitedBy, DOI_A))
+            .as_deref(),
+        Some("Mock can't find the works a work cites")
+    );
+}
+
+fn engine_of(mock: Arc<Mock>) -> Engine {
+    engine(vec![(mock, 10)])
 }

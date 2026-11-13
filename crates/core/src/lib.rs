@@ -20,6 +20,7 @@ pub mod id;
 pub mod matching;
 pub mod provider;
 pub mod publication;
+pub mod query;
 pub mod record;
 pub mod references;
 pub mod resilience;
@@ -38,6 +39,9 @@ pub use matching::{Agreement, Alternative, Assessment, Claim, FieldCheck};
 pub use provider::{
     Capabilities, Cursor, Filter, Hit, Lookup, Page, PageReq, Place, Provider, ProviderId,
     Response, SearchMode, SearchQuery, Sort, Usage, YearRange,
+};
+pub use query::{
+    AuthorId, BooleanSupport, FilterValue, QueryNode, Relation, RelationTerm, Term, TermField,
 };
 pub use record::{Field, FieldSet, Raw, SourceRecord};
 pub use references::{IndentedLine, LineReference, Reference, split_lines, split_references};

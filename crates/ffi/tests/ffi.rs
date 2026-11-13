@@ -6,8 +6,8 @@ use std::collections::HashMap;
 use aspero_ffi::records::ReadError;
 use aspero_ffi::records::{
     Author, BibFormat, BibProblem, CitationManager, CiteFormat, Claim, ErrorKind, ExportFormat,
-    KeyStatus, LookupStatus, Reason, SearchField, SearchFilter, SearchRequest, SearchSort,
-    StyleError, StyleSource, Verdict, Work,
+    KeyStatus, LookupStatus, Reason, SearchBoolean, SearchField, SearchFilter, SearchFilterValue,
+    SearchNode, SearchRelation, SearchRequest, SearchSort, StyleError, StyleSource, Verdict, Work,
 };
 use aspero_ffi::{Aspero, AsperoError, CallToken, Config, Patience};
 
@@ -400,6 +400,7 @@ fn search_request(text: &str) -> SearchRequest {
         container: None,
         sort: None,
         extra: HashMap::new(),
+        query: None,
     }
 }
 
@@ -435,13 +436,177 @@ fn the_first_searching_source_is_the_one_search_picks() {
     let openlibrary = &sources[4];
     assert_eq!(
         openlibrary.fields,
-        [SearchField::Author, SearchField::Title]
+        [
+            SearchField::Author,
+            SearchField::Title,
+            SearchField::Keywords
+        ]
     );
-    assert_eq!(openlibrary.filters, [SearchFilter::Years]);
+    assert_eq!(
+        openlibrary.filters,
+        [SearchFilter::Years, SearchFilter::Language]
+    );
     assert_eq!(
         openlibrary.sorts,
         [SearchSort::Relevance, SearchSort::Newest]
     );
+    // Every source takes keywords in a tree.
+    assert!(
+        sources
+            .iter()
+            .all(|s| s.fields.contains(&SearchField::Keywords))
+    );
+    let reach: Vec<_> = sources
+        .iter()
+        .map(|s| (s.any, s.none, s.nesting, s.relations.len()))
+        .collect();
+    use SearchBoolean::{Anywhere, No, WithinField};
+    assert_eq!(
+        reach,
+        [
+            (WithinField, Anywhere, true, 2),
+            (No, No, false, 0),
+            (Anywhere, Anywhere, true, 0),
+            (Anywhere, Anywhere, true, 0),
+            (Anywhere, Anywhere, true, 0),
+        ]
+    );
+    assert_eq!(
+        sources[0].relations,
+        [SearchRelation::Cites, SearchRelation::CitedBy]
+    );
+}
+
+fn term(field: SearchField, value: &str) -> SearchNode {
+    SearchNode::Term {
+        field,
+        value: value.into(),
+        phrase: false,
+    }
+}
+
+/// all of [keywords, any of [title, title], none of [retracted]].
+fn nested_tree() -> SearchNode {
+    SearchNode::All {
+        nodes: vec![
+            term(SearchField::Keywords, "protein folding"),
+            SearchNode::Any {
+                nodes: vec![
+                    term(SearchField::Title, "alphafold"),
+                    SearchNode::Term {
+                        field: SearchField::Title,
+                        value: "structure prediction".into(),
+                        phrase: true,
+                    },
+                ],
+            },
+            SearchNode::None {
+                nodes: vec![SearchNode::Filter {
+                    filter: SearchFilterValue::NotRetracted,
+                }],
+            },
+        ],
+    }
+}
+
+#[test]
+fn search_supports_says_why_and_search_fails_the_same_way() {
+    let aspero = aspero(None);
+    let at = |source: &str| Some(source.to_owned());
+    // Retraction in a none flips to retracted works only, which OpenAlex
+    // (the default) and Europe PMC can say; Crossref can't say any.
+    assert_eq!(aspero.search_supports(None, nested_tree()), None);
+    assert_eq!(aspero.search_supports(at("europepmc"), nested_tree()), None);
+    let crossref = aspero.search_supports(at("crossref"), nested_tree());
+    assert_eq!(
+        crossref.as_deref(),
+        Some("Crossref can't combine terms with any")
+    );
+    let across = SearchNode::Any {
+        nodes: vec![
+            term(SearchField::Title, "deep learning"),
+            term(SearchField::Author, "LeCun"),
+        ],
+    };
+    let reason = "OpenAlex can't combine title and author with any";
+    assert_eq!(
+        aspero.search_supports(None, across.clone()).as_deref(),
+        Some(reason)
+    );
+    let request = SearchRequest {
+        query: Some(across),
+        ..search_request("")
+    };
+    let failure = block_on(aspero.search(request, Patience::Offline, None))
+        .unwrap()
+        .failure
+        .unwrap();
+    assert_eq!(failure.kind, ErrorKind::Unsupported);
+    assert!(failure.message.ends_with(reason), "{}", failure.message);
+    // A tree a source can say reaches the (empty) cache.
+    let request = SearchRequest {
+        query: Some(nested_tree()),
+        source: at("datacite"),
+        ..search_request("")
+    };
+    let found = block_on(aspero.search(request, Patience::Offline, None)).unwrap();
+    assert_eq!(
+        found.failure.unwrap().kind,
+        ErrorKind::Unsupported,
+        "no retractions at DataCite"
+    );
+    let request = SearchRequest {
+        query: Some(nested_tree()),
+        ..search_request("")
+    };
+    let found = block_on(aspero.search(request, Patience::Offline, None)).unwrap();
+    assert_eq!(found.failure.unwrap().kind, ErrorKind::NotCached);
+}
+
+#[test]
+fn a_query_replaces_text_and_fields() {
+    let aspero = aspero(None);
+    let kind = |request| {
+        block_on(aspero.search(request, Patience::Offline, None))
+            .unwrap()
+            .failure
+            .unwrap()
+            .kind
+    };
+    let with_text = SearchRequest {
+        query: Some(nested_tree()),
+        ..search_request("transformers")
+    };
+    assert_eq!(kind(with_text), ErrorKind::BadRequest);
+    let with_field = SearchRequest {
+        query: Some(nested_tree()),
+        author: Some("LeCun".into()),
+        ..search_request("")
+    };
+    assert_eq!(kind(with_field), ErrorKind::BadRequest);
+    // Nothing searchable in the tree.
+    let empty = SearchRequest {
+        query: Some(SearchNode::All {
+            nodes: vec![SearchNode::Any { nodes: vec![] }],
+        }),
+        ..search_request("")
+    };
+    assert_eq!(kind(empty), ErrorKind::BadRequest);
+    // An author id that's neither an ORCID nor an OpenAlex id.
+    let bad_id = SearchNode::Term {
+        field: SearchField::AuthorId,
+        value: "Yann LeCun".into(),
+        phrase: false,
+    };
+    assert_eq!(
+        aspero.search_supports(None, bad_id.clone()).as_deref(),
+        Some("\"Yann LeCun\" is neither an ORCID nor an OpenAlex author id (A…)")
+    );
+    let request = SearchRequest {
+        query: Some(bad_id),
+        ..search_request("")
+    };
+    assert_eq!(kind(request), ErrorKind::BadRequest);
 }
 
 #[test]

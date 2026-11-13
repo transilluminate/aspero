@@ -193,6 +193,9 @@ fn next_command(
     if o.sort != SortBy::Relevance {
         flag("--sort", Some(sort(o.sort).as_str().replace('_', "-")));
     }
+    if let Some(since) = &o.since {
+        flag("--since", Some(since.clone()));
+    }
     if abstracts {
         flag("--abstract", None);
     }
@@ -211,6 +214,12 @@ fn query(text: String, o: &SearchOptions) -> Result<SearchQuery, Failure> {
     q.container = o.container.clone();
     q.tree = o.tree.as_deref().map(parse_tree).transpose()?;
     q.sort = sort(o.sort);
+    q.since = o
+        .since
+        .as_deref()
+        .map(SearchQuery::parse_since)
+        .transpose()
+        .map_err(|e| Failure::usage(format!("--since: {e}")))?;
     q.page.limit = o.limit;
     q.page.cursor = o.cursor.clone().map(Cursor);
     Ok(q)
@@ -271,6 +280,7 @@ mod tests {
             container: None,
             tree: None,
             sort: SortBy::Relevance,
+            since: None,
             limit: 5,
             cursor: Some("old".into()),
         };
@@ -311,6 +321,28 @@ mod tests {
         assert_eq!(
             next_command("", &by_tree, "openalex", "c", false),
             r#"aspero search --source openalex --query '{"title": "Bishop'\''s"}' --sort most-cited --limit 5 --cursor c"#
+        );
+        let watching = SearchOptions {
+            tree: None,
+            sort: SortBy::Relevance,
+            since: Some("2026-11-01".into()),
+            ..by_tree
+        };
+        assert_eq!(
+            next_command("sepsis", &watching, "crossref", "c", false),
+            "aspero search sepsis --source crossref --since 2026-11-01 --limit 5 --cursor c"
+        );
+        assert_eq!(
+            query("sepsis".into(), &watching).unwrap().since,
+            Some(jiff::civil::date(2026, 11, 1))
+        );
+        let bad = SearchOptions {
+            since: Some("2026-11".into()),
+            ..watching
+        };
+        assert_eq!(
+            query("sepsis".into(), &bad).unwrap_err().message,
+            "--since: invalid date \"2026-11\": expected YYYY-MM-DD"
         );
     }
 

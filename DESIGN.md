@@ -95,6 +95,21 @@ scripts/       fixture recorders, one per provider
   (`Unsupported`): dropping one would widen or reorder the search
   silently. Relevance never fails; with only fields to rank by, it is the
   source's own order.
+- **Since** (`SearchQuery::since`, a day): only works the source added
+  on or after it, whenever published, for watching a search; the caller
+  keeps what it has seen, and a page's `total` counts what's new. A
+  request option, not a tree leaf, so it bounds text, fields and trees
+  alike. Each source maps its own "added": Crossref `from-created-date`
+  (the first deposit; `from-index-date` moves with every re-index and
+  finds mostly old works), DataCite `created:[day TO *]`, Europe PMC
+  `FIRST_IDATE:[day TO *]` (first indexed), ANDed with the rest, a
+  tree bracketed. It is never ignored: a source without `Filter::Since`
+  fails (`UnsupportedQuery`, with the provider's `since_unsupported`
+  reason), as `search_supports_since` says beforehand. Without a source,
+  the first searching provider with `Since` answers. OpenAlex's
+  `from_created_date` and `sort=created_date` need a Member+ plan ("Plan
+  upgrade required", HTTP 429, checked 2026-11-13); Open Library has no
+  added date.
 - **Query trees** (`SearchQuery::tree`, core `query`): all, any and none
   of terms (keywords, title, author, container, abstract, author id),
   filters and relations, instead of the keywords and fields. The engine
@@ -463,7 +478,8 @@ bearer tokens, for embedding; host-provided tools; progress notifications
 `aspero-ffi` (UniFFI) gives apps one `Aspero` handle: `lookup`, `verify`,
 `verify_each` (a callback per result as it finishes), `search` (with
 `searchCapabilities` saying what each source can search by, and
-`searchSupports` whether it can search a query tree), offline
+`searchSupports` whether it can search a query tree, and optionally
+`since` a day), offline
 `scan`, `split_references` and `split_lines` (laid-out lines with
 indents, from PDFKit), `references` and `analyse` (citation links), and
 for settings `budgets` (as last

@@ -46,6 +46,16 @@ pub struct Term {
     pub phrase: bool,
 }
 
+impl Term {
+    /// A [`TermField::Identifier`] term's work, or why its value names
+    /// none, as [`QueryNode::validate`] says it.
+    pub fn work_id(&self) -> Result<WorkId, String> {
+        self.value
+            .parse::<WorkId>()
+            .map_err(|e| format!("can't search by identifier {:?}: {e}", self.value))
+    }
+}
+
 /// Where a [`Term`] is searched.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -61,6 +71,12 @@ pub enum TermField {
     Abstract,
     /// An ORCID (bare or as a URL) or an OpenAlex author id (`A…`).
     AuthorId,
+    /// The work an identifier names: anything [`WorkId`] parses (a DOI,
+    /// bare, `doi:` or as a URL; `pmid:`, `pmcid:`, `arXiv:`, an OpenAlex
+    /// `W…` id, an ISBN, …). [`Term::phrase`] means nothing here. Which
+    /// kinds a source can search by, its
+    /// [`Provider::express`](crate::Provider::express) says.
+    Identifier,
 }
 
 impl TermField {
@@ -71,6 +87,7 @@ impl TermField {
         TermField::Container,
         TermField::Abstract,
         TermField::AuthorId,
+        TermField::Identifier,
     ];
 
     /// The capability a source declares to search this field.
@@ -82,6 +99,7 @@ impl TermField {
             TermField::Container => Filter::Container,
             TermField::Abstract => Filter::Abstract,
             TermField::AuthorId => Filter::AuthorId,
+            TermField::Identifier => Filter::Identifier,
         }
     }
 
@@ -94,6 +112,7 @@ impl TermField {
             TermField::Container => "journal",
             TermField::Abstract => "abstract",
             TermField::AuthorId => "author id",
+            TermField::Identifier => "identifier",
         }
     }
 }
@@ -261,8 +280,8 @@ impl QueryNode {
         }
     }
 
-    /// Checks every leaf's value: author ids, language codes, year ranges
-    /// and relations' identifiers. The reason, in English, for the first
+    /// Checks every leaf's value: author ids, identifiers, language codes,
+    /// year ranges and relations' identifiers. The reason, in English, for the first
     /// that's invalid.
     pub fn validate(&self) -> Result<(), String> {
         match self {
@@ -277,6 +296,7 @@ impl QueryNode {
                     )
                 })
             }
+            QueryNode::Term(t) if t.field == TermField::Identifier => t.work_id().map(|_| ()),
             QueryNode::Term(_) => Ok(()),
             QueryNode::Filter(FilterValue::Language(code)) => language(code)
                 .map(|_| ())
@@ -896,6 +916,33 @@ mod tests {
                 .validate()
                 .is_ok()
         );
+        let id = |v| QueryNode::term(TermField::Identifier, v);
+        for good in [
+            "10.1038/nature14539",
+            "doi:10.1038/nature14539",
+            "https://doi.org/10.1038/nature14539",
+            "pmid:26017442",
+            "PMC7254481",
+            "arXiv:1706.03762",
+            "W2919115771",
+            "https://openalex.org/W2919115771",
+            "978-0-262-03561-3",
+        ] {
+            assert_eq!(id(good).validate(), Ok(()), "{good}");
+        }
+        assert_eq!(
+            QueryNode::All(vec![title("x"), id("nature14539")])
+                .validate()
+                .unwrap_err(),
+            r#"can't search by identifier "nature14539": unrecognised identifier "nature14539""#
+        );
+        // Bare digits could be a PMID or a CorpusId.
+        assert!(
+            id("26017442")
+                .validate()
+                .unwrap_err()
+                .contains("prefix it with one of pmid:")
+        );
     }
 
     #[test]
@@ -1033,12 +1080,13 @@ mod tests {
             TermField::Container => 3,
             TermField::Abstract => 4,
             TermField::AuthorId => 5,
+            TermField::Identifier => 6,
         };
         for (i, f) in TermField::ALL.iter().enumerate() {
             assert_eq!(position(*f), i);
             assert!(f.filter().is_field());
         }
-        assert_eq!(TermField::ALL.len(), 6);
+        assert_eq!(TermField::ALL.len(), 7);
         let position = |r: Relation| match r {
             Relation::Cites => 0,
             Relation::CitedBy => 1,
@@ -1067,11 +1115,12 @@ mod tests {
             QueryNode::phrase(TermField::Author, "b"),
             QueryNode::filter(FilterValue::NotRetracted),
             QueryNode::relation(Relation::CitedBy, "W1"),
+            QueryNode::term(TermField::Identifier, "pmid:1"),
         ]);
         let json = serde_json::to_string(&tree).unwrap();
         assert_eq!(
             json,
-            r#"{"all":[{"term":{"field":"title","value":"a"}},{"term":{"field":"author","value":"b","phrase":true}},{"filter":"not_retracted"},{"relation":{"relation":"cited_by","id":"W1"}}]}"#
+            r#"{"all":[{"term":{"field":"title","value":"a"}},{"term":{"field":"author","value":"b","phrase":true}},{"filter":"not_retracted"},{"relation":{"relation":"cited_by","id":"W1"}},{"term":{"field":"identifier","value":"pmid:1"}}]}"#
         );
         assert_eq!(serde_json::from_str::<QueryNode>(&json).unwrap(), tree);
     }

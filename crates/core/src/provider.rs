@@ -163,6 +163,9 @@ pub enum Filter {
     /// ([`SearchQuery::since`]). A source lacking it fails rather than
     /// ignoring it: a watch would otherwise see old works as new.
     Since,
+    /// Works named by an identifier, in a query tree. Which kinds a source
+    /// takes is said by [`Provider::express`] (for a kind it can't, why).
+    Identifier,
 }
 
 impl Filter {
@@ -182,6 +185,7 @@ impl Filter {
         Filter::Language,
         Filter::HasAbstract,
         Filter::Since,
+        Filter::Identifier,
     ];
 
     /// As serialized: `years`, `work_type`, ….
@@ -201,12 +205,13 @@ impl Filter {
             Filter::Language => "language",
             Filter::HasAbstract => "has_abstract",
             Filter::Since => "since",
+            Filter::Identifier => "identifier",
         }
     }
 
     /// Whether this filter narrows by a field of the work (keywords,
-    /// author, title, container, abstract, author id). A source lacking
-    /// one fails rather than ignoring it.
+    /// author, title, container, abstract, author id, identifier). A
+    /// source lacking one fails rather than ignoring it.
     pub fn is_field(self) -> bool {
         matches!(
             self,
@@ -216,6 +221,7 @@ impl Filter {
                 | Filter::Keywords
                 | Filter::Abstract
                 | Filter::AuthorId
+                | Filter::Identifier
         )
     }
 }
@@ -675,12 +681,13 @@ mod tests {
             Filter::Language => 11,
             Filter::HasAbstract => 12,
             Filter::Since => 13,
+            Filter::Identifier => 14,
         };
         for (i, f) in Filter::ALL.iter().enumerate() {
             assert_eq!(position(*f), i);
             assert_eq!(serde_json::to_value(f).unwrap(), f.as_str());
         }
-        assert_eq!(Filter::ALL.len(), position(Filter::Since) + 1);
+        assert_eq!(Filter::ALL.len(), position(Filter::Identifier) + 1);
         let position = |s: Sort| match s {
             Sort::Relevance => 0,
             Sort::Newest => 1,

@@ -5,8 +5,8 @@ use std::time::Duration;
 
 use aspero_core::testing::{FIXTURE_TIME, ReplayClient, block_on, fixture, response};
 use aspero_core::{
-    Error, FieldSet, HttpResponse, Page, Place, Provider, SearchQuery, Sort, SourceRecord, WorkId,
-    WorkType, YearRange,
+    Error, FieldSet, FilterValue, HttpResponse, Page, Place, Provider, QueryNode, Relation,
+    SearchQuery, Sort, SourceRecord, TermField, WorkId, WorkType, YearRange,
 };
 use aspero_openalex::{OpenAlex, OpenAlexConfig};
 use secrecy::SecretString;
@@ -567,4 +567,180 @@ fn open_access_comes_from_the_best_free_copy() {
     assert!(!closed.is_oa);
     assert_eq!(closed.status.as_deref(), Some("closed"));
     assert_eq!((closed.pdf_url, closed.url), (None, None));
+}
+
+fn tree_query(tree: QueryNode) -> SearchQuery {
+    let mut q = SearchQuery::new("");
+    q.tree = Some(tree);
+    q.page.limit = 3;
+    q
+}
+
+fn pairs<const N: usize>(list: [(&str, &str); N]) -> Vec<(String, String)> {
+    list.map(|(k, v)| (k.to_owned(), v.to_owned())).to_vec()
+}
+
+#[test]
+fn trees_search_keywords_and_and_filters_with_boolean_fields() {
+    let (oa, http) = provider([recorded("works_search_tree")]);
+    let tree = QueryNode::All(vec![
+        QueryNode::term(TermField::Keywords, "protein structure"),
+        QueryNode::Any(vec![
+            QueryNode::term(TermField::Title, "alphafold"),
+            QueryNode::phrase(TermField::Title, "structure prediction"),
+        ]),
+        QueryNode::None(vec![QueryNode::term(TermField::Author, "jumper")]),
+        QueryNode::filter(FilterValue::NotRetracted),
+        QueryNode::filter(FilterValue::Language("en".into())),
+        QueryNode::filter(FilterValue::Years(YearRange {
+            from: Some(2021),
+            to: None,
+        })),
+    ]);
+    assert_eq!(oa.express(&tree), Ok(()));
+    let page = block_on(oa.search(&tree_query(tree))).unwrap().value;
+    assert_eq!(
+        query(&http, 0),
+        pairs([
+            ("search", "protein structure"),
+            (
+                "filter",
+                r#"title.search:alphafold OR "structure prediction",raw_author_name.search:!jumper,is_retracted:false,language:en,from_publication_date:2021-01-01"#
+            ),
+            ("per-page", "3"),
+            ("cursor", "*"),
+        ])
+    );
+    for hit in &page.hits {
+        let w = &hit.record.work;
+        let title = w.title.as_deref().unwrap().to_lowercase();
+        assert!(title.contains("alphafold") || title.contains("structure prediction"));
+        assert!(w.issued.as_ref().unwrap().year() >= 2021);
+        assert!(
+            w.authors
+                .iter()
+                .all(|a| a.family.as_deref() != Some("Jumper"))
+        );
+    }
+}
+
+#[test]
+fn relations_and_any_of_one_filter_are_filters() {
+    let (oa, http) = provider([recorded("works_search_relation")]);
+    let tree = QueryNode::All(vec![
+        QueryNode::relation(Relation::Cites, "W2919115771"),
+        QueryNode::term(TermField::Title, "medical"),
+        QueryNode::Any(vec![
+            QueryNode::filter(FilterValue::WorkType(WorkType::JournalArticle)),
+            QueryNode::filter(FilterValue::WorkType(WorkType::Other("review".into()))),
+        ]),
+    ]);
+    let mut q = tree_query(tree);
+    q.sort = Sort::MostCited;
+    let page = block_on(oa.search(&q)).unwrap().value;
+    assert_eq!(
+        query(&http, 0),
+        pairs([
+            ("sort", "cited_by_count:desc"),
+            (
+                "filter",
+                "cites:W2919115771,title.search:medical,type:article|review"
+            ),
+            ("per-page", "3"),
+            ("cursor", "*"),
+        ])
+    );
+    assert_eq!(
+        page.hits[0].record.work.title.as_deref(),
+        Some("A survey on deep learning in medical image analysis")
+    );
+}
+
+#[test]
+fn author_ids_and_flags_are_filters() {
+    let (oa, http) = provider([recorded("works_search_orcid")]);
+    let tree = QueryNode::All(vec![
+        QueryNode::Any(vec![
+            QueryNode::term(TermField::AuthorId, "https://orcid.org/0000-0002-3271-7861"),
+            QueryNode::term(TermField::AuthorId, "0000-0001-6187-6610"),
+        ]),
+        QueryNode::filter(FilterValue::HasAbstract),
+        QueryNode::filter(FilterValue::OpenAccess(true)),
+    ]);
+    let page = block_on(oa.search(&tree_query(tree))).unwrap().value;
+    assert_eq!(
+        query(&http, 0),
+        pairs([
+            (
+                "filter",
+                "authorships.author.orcid:0000-0002-3271-7861|0000-0001-6187-6610,has_abstract:true,is_oa:true"
+            ),
+            ("per-page", "3"),
+            ("cursor", "*"),
+        ])
+    );
+    assert!(page.hits.iter().all(|h| {
+        let oa = h.record.work.open_access.as_ref().unwrap();
+        oa.is_oa && h.record.work.abstract_text.is_some()
+    }));
+}
+
+#[test]
+fn trees_openalex_cant_say_fail_before_sending() {
+    let (oa, http) = provider([]);
+    let across = QueryNode::Any(vec![
+        QueryNode::term(TermField::Title, "a"),
+        QueryNode::term(TermField::Author, "b"),
+    ]);
+    let reason = "OpenAlex can't combine title and author with any";
+    assert_eq!(oa.express(&across).unwrap_err(), reason);
+    match block_on(oa.search(&tree_query(across))) {
+        Err(Error::UnsupportedQuery(r)) => assert_eq!(r, reason),
+        other => panic!("{other:?}"),
+    }
+    // Relations name OpenAlex works by the time they're searched.
+    let doi = QueryNode::relation(Relation::Cites, "10.1038/nature14539");
+    assert_eq!(oa.express(&doi), Ok(()));
+    assert!(matches!(
+        block_on(oa.search(&tree_query(doi))),
+        Err(Error::BadRequest(_))
+    ));
+    assert!(http.requests().is_empty());
+}
+
+#[test]
+fn journals_in_trees_are_sources_kept_or_left_out() {
+    let empty = r#"{"meta": {"count": 0}, "results": []}"#;
+    let (oa, http) = provider([
+        recorded("sources_named"),
+        response(200, &[("x-ratelimit-cost-usd", "0.001")], empty),
+        response(200, &[("x-ratelimit-cost-usd", "0.001")], empty),
+    ]);
+    let tree = QueryNode::All(vec![
+        QueryNode::term(TermField::Keywords, "x"),
+        QueryNode::None(vec![QueryNode::phrase(
+            TermField::Container,
+            "nature machine",
+        )]),
+        // Named by no source: nothing to leave out.
+        QueryNode::None(vec![QueryNode::term(
+            TermField::Container,
+            "no such journal",
+        )]),
+    ]);
+    let resp = block_on(oa.search(&tree_query(tree))).unwrap();
+    assert_eq!(
+        query(&http, 0)[0],
+        pairs([("filter", r#"display_name.search:"nature machine""#)])[0]
+    );
+    let filter = query(&http, 2)
+        .into_iter()
+        .find(|(k, _)| k == "filter")
+        .unwrap()
+        .1;
+    assert_eq!(
+        filter,
+        "primary_location.source.id:!S2912241403|S7407104579"
+    );
+    assert_eq!(resp.usage.unwrap().cost, Some(0.003));
 }

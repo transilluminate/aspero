@@ -22,10 +22,12 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use aspero_core::http::{escape_lucene, path_segment, status_error};
+use aspero_core::query::{check_supported, lucene_term, lucene_years, render_lucene};
 use aspero_core::{
-    Capabilities, Cursor, Doi, Error, Field, FieldSet, Filter, Hit, HttpClient, HttpRequest,
-    HttpResponse, IdKind, Lookup, Page, Provider, ProviderId, ResiliencePolicy, Response, Result,
-    SearchMode, SearchQuery, Sort, SourceRecord, WorkId,
+    AuthorId, BooleanSupport, Capabilities, Cursor, Doi, Error, Field, FieldSet, Filter,
+    FilterValue, Hit, HttpClient, HttpRequest, HttpResponse, IdKind, Lookup, Page, Provider,
+    ProviderId, QueryNode, ResiliencePolicy, Response, Result, SearchMode, SearchQuery, Sort,
+    SourceRecord, TermField, WorkId,
 };
 use async_trait::async_trait;
 
@@ -77,8 +79,17 @@ impl Datacite {
             Filter::WorkType,
             Filter::Author,
             Filter::Title,
+            Filter::Keywords,
+            Filter::Abstract,
+            Filter::AuthorId,
+            Filter::Language,
+            Filter::HasAbstract,
         ];
         capabilities.sorts = vec![Sort::Relevance, Sort::MostCited];
+        // Elasticsearch's query string: AND, OR and NOT across fields.
+        capabilities.search_any = BooleanSupport::Anywhere;
+        capabilities.search_none = BooleanSupport::Anywhere;
+        capabilities.search_nesting = true;
         Datacite {
             config,
             http,
@@ -241,6 +252,9 @@ impl Provider for Datacite {
             return Err(Error::Unsupported("DataCite has no citation matcher"));
         }
         let mut clauses = Vec::new();
+        if let Some(tree) = &query.tree {
+            clauses.push(express(tree, &self.capabilities).map_err(Error::UnsupportedQuery)?);
+        }
         if !query.text.trim().is_empty() {
             clauses.push(format!("({})", escape_lucene(query.text.trim())));
         }
@@ -308,4 +322,62 @@ impl Provider for Datacite {
         let next = more.then(|| Cursor((page_number + 1).to_string()));
         Ok(Response::new(Page::new(hits, meta.total, next)))
     }
+
+    fn express(&self, tree: &QueryNode) -> std::result::Result<(), String> {
+        express(tree, &self.capabilities).map(|_| ())
+    }
+}
+
+/// A query tree in DataCite's query string (Elasticsearch, checked live
+/// 2026-11-13): `titles.title`, `creators.name`, abstracts as
+/// `descriptions.description` (and `descriptions.descriptionType:Abstract`
+/// for having one), ORCIDs in `creators.nameIdentifiers.nameIdentifier`
+/// (mostly as URLs, some bare, so both), `language` as deposited (mostly
+/// `en`, some `eng`, so both), and work types as `types.resourceTypeGeneral`.
+/// DataCite records no retractions and no OpenAlex ids.
+fn express(tree: &QueryNode, caps: &Capabilities) -> std::result::Result<String, String> {
+    const NAME: &str = "DataCite";
+    check_supported(tree, caps, NAME)?;
+    render_lucene(tree, &mut |leaf| match leaf {
+        QueryNode::Term(t) => {
+            let prefix = match t.field {
+                TermField::Keywords => None,
+                TermField::Title => Some("titles.title"),
+                TermField::Author => Some("creators.name"),
+                TermField::Abstract => Some("descriptions.description"),
+                TermField::AuthorId => {
+                    return match AuthorId::parse(&t.value) {
+                        Some(AuthorId::Orcid(orcid)) => Ok(format!(
+                            "creators.nameIdentifiers.nameIdentifier:(\"https://orcid.org/{orcid}\" OR \"{orcid}\")"
+                        )),
+                        _ => Err(format!(
+                            "{NAME} finds authors by ORCID, not OpenAlex author ids"
+                        )),
+                    };
+                }
+                _ => return Err(format!("{NAME} can't search by {}", t.field.name())),
+            };
+            Ok(lucene_term(prefix, &t.value, t.phrase))
+        }
+        QueryNode::Filter(f) => Ok(match f {
+            FilterValue::Years(years) => lucene_years("publicationYear", *years),
+            FilterValue::WorkType(t) => {
+                let general = wire::resource_type_general(t).ok_or_else(|| {
+                    format!("{NAME} has no resource type matching {:?}", t.as_csl())
+                })?;
+                format!("types.resourceTypeGeneral:{general}")
+            }
+            FilterValue::Language(code) => {
+                let (b, t) = aspero_core::query::language(code)
+                    .ok_or_else(|| format!("{code:?} is not an ISO 639-1 language code"))?;
+                match b == t {
+                    true => format!("language:({code} OR {b})"),
+                    false => format!("language:({code} OR {b} OR {t})"),
+                }
+            }
+            FilterValue::HasAbstract => "descriptions.descriptionType:Abstract".to_owned(),
+            _ => return Err(format!("{NAME} can't filter by {}", leaf.leaf_name())),
+        }),
+        other => Err(format!("{NAME} can't search by {}", other.leaf_name())),
+    })
 }

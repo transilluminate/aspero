@@ -19,10 +19,12 @@ use std::time::Duration;
 
 use aspero_core::csl::null_default;
 use aspero_core::http::{escape_lucene, status_error};
+use aspero_core::query::{check_supported, lucene_term, lucene_years, render_lucene};
 use aspero_core::{
-    Capabilities, Cursor, Error, FieldSet, Filter, Hit, HttpClient, HttpRequest, HttpResponse,
-    IdKind, Isbn, Lookup, Page, PartialDate, Person, Provider, ProviderId, Raw, ResiliencePolicy,
-    Response, Result, SearchMode, SearchQuery, Sort, SourceRecord, Work, WorkId, WorkType,
+    BooleanSupport, Capabilities, Cursor, Error, FieldSet, Filter, FilterValue, Hit, HttpClient,
+    HttpRequest, HttpResponse, IdKind, Isbn, Lookup, Page, PartialDate, Person, Provider,
+    ProviderId, QueryNode, Raw, ResiliencePolicy, Response, Result, SearchMode, SearchQuery, Sort,
+    SourceRecord, TermField, Work, WorkId, WorkType,
 };
 use async_trait::async_trait;
 use jiff::Timestamp;
@@ -79,8 +81,19 @@ impl OpenLibrary {
             aspero_core::Field::Url,
         ]);
         capabilities.search = true;
-        capabilities.search_filters = vec![Filter::Years, Filter::Author, Filter::Title];
+        capabilities.search_filters = vec![
+            Filter::Years,
+            Filter::Author,
+            Filter::Title,
+            Filter::Keywords,
+            Filter::Language,
+        ];
         capabilities.sorts = vec![Sort::Relevance, Sort::Newest];
+        // Solr: AND, OR and NOT across fields, nested; a NOT needs
+        // something beside it to find (see `express`).
+        capabilities.search_any = BooleanSupport::Anywhere;
+        capabilities.search_none = BooleanSupport::Anywhere;
+        capabilities.search_nesting = true;
         OpenLibrary {
             config,
             http,
@@ -352,6 +365,9 @@ impl Provider for OpenLibrary {
             )));
         }
         let mut clauses = Vec::new();
+        if let Some(tree) = &query.tree {
+            clauses.push(express(tree, &self.capabilities).map_err(Error::UnsupportedQuery)?);
+        }
         if !query.text.trim().is_empty() {
             clauses.push(format!("({})", escape_lucene(query.text.trim())));
         }
@@ -405,5 +421,59 @@ impl Provider for OpenLibrary {
             .filter(|_| more)
             .map(|n| Cursor(n.to_string()));
         Ok(Response::new(Page::new(hits, results.num_found, next)))
+    }
+
+    fn express(&self, tree: &QueryNode) -> std::result::Result<(), String> {
+        express(tree, &self.capabilities).map(|_| ())
+    }
+}
+
+const NAME: &str = "Open Library";
+
+/// A query tree as Open Library's `q` (Solr, checked live 2026-11-13):
+/// `title`, `author_name`, `first_publish_year` and `language` (MARC's
+/// three-letter codes: `fre`, `ger`) take AND, OR and NOT, nested. A
+/// query that only leaves things out fails (HTTP 500), alone or as one
+/// side of an OR, so a none must sit in an all beside something to find.
+fn express(tree: &QueryNode, caps: &Capabilities) -> std::result::Result<String, String> {
+    check_supported(tree, caps, NAME)?;
+    check_negations(tree, false)?;
+    render_lucene(tree, &mut |leaf| match leaf {
+        QueryNode::Term(t) => {
+            let prefix = match t.field {
+                TermField::Keywords => None,
+                TermField::Title => Some("title"),
+                TermField::Author => Some("author_name"),
+                _ => return Err(format!("{NAME} can't search by {}", t.field.name())),
+            };
+            Ok(lucene_term(prefix, &t.value, t.phrase))
+        }
+        QueryNode::Filter(f) => Ok(match f {
+            FilterValue::Years(years) => lucene_years("first_publish_year", *years),
+            FilterValue::Language(code) => {
+                let (marc, _) = aspero_core::query::language(code)
+                    .ok_or_else(|| format!("{code:?} is not an ISO 639-1 language code"))?;
+                format!("language:{marc}")
+            }
+            _ => return Err(format!("{NAME} can't filter by {}", leaf.leaf_name())),
+        }),
+        other => Err(format!("{NAME} can't search by {}", other.leaf_name())),
+    })
+}
+
+/// Every none is in an all beside a node that isn't a none.
+fn check_negations(node: &QueryNode, beside_positive: bool) -> std::result::Result<(), String> {
+    match node {
+        QueryNode::None(_) if !beside_positive => Err(format!(
+            "{NAME} can only leave out terms beside something to find, in an all"
+        )),
+        QueryNode::All(nodes) => {
+            let positive = nodes.iter().any(|n| !matches!(n, QueryNode::None(_)));
+            nodes.iter().try_for_each(|n| check_negations(n, positive))
+        }
+        QueryNode::Any(nodes) | QueryNode::None(nodes) => {
+            nodes.iter().try_for_each(|n| check_negations(n, false))
+        }
+        _ => Ok(()),
     }
 }

@@ -4,7 +4,8 @@ use std::sync::Arc;
 
 use aspero_core::testing::{ReplayClient, block_on, fixture, response};
 use aspero_core::{
-    Cursor, Error, FieldSet, HttpResponse, Provider, SearchQuery, Sort, WorkId, WorkType, YearRange,
+    Cursor, Error, FieldSet, FilterValue, HttpResponse, Provider, QueryNode, SearchQuery, Sort,
+    TermField, WorkId, WorkType, YearRange,
 };
 use aspero_datacite::{Datacite, DataciteConfig};
 
@@ -237,4 +238,82 @@ fn errors_map_with_datacite_messages() {
         Err(Error::Unsupported(_))
     ));
     assert!(http.requests().is_empty());
+}
+
+fn tree_query(tree: QueryNode) -> SearchQuery {
+    let mut q = SearchQuery::new("");
+    q.tree = Some(tree);
+    q.page.limit = 3;
+    q
+}
+
+#[test]
+fn trees_are_query_strings_across_fields() {
+    let (dc, http) = provider([recorded("search_tree")]);
+    let tree = QueryNode::All(vec![
+        QueryNode::Any(vec![
+            QueryNode::term(TermField::Title, "transformer"),
+            QueryNode::phrase(TermField::Abstract, "attention mechanism"),
+        ]),
+        QueryNode::filter(FilterValue::WorkType(WorkType::Dataset)),
+        QueryNode::filter(FilterValue::HasAbstract),
+        QueryNode::None(vec![QueryNode::term(TermField::Author, "smith")]),
+        QueryNode::filter(FilterValue::Years(YearRange {
+            from: Some(2020),
+            to: None,
+        })),
+    ]);
+    let page = block_on(dc.search(&tree_query(tree))).unwrap().value;
+    assert_eq!(
+        query(&http, 0),
+        [
+            pair(
+                "query",
+                r#"(titles.title:(transformer) OR descriptions.description:"attention mechanism") AND types.resourceTypeGeneral:Dataset AND descriptions.descriptionType:Abstract AND (NOT creators.name:(smith)) AND publicationYear:[2020 TO *]"#
+            ),
+            pair("sort", "relevance"),
+            pair("page[number]", "1"),
+            pair("page[size]", "3"),
+        ]
+    );
+    assert_eq!(page.hits.len(), 3);
+    assert!(
+        page.hits
+            .iter()
+            .all(|h| h.record.work.work_type == Some(WorkType::Dataset))
+    );
+}
+
+#[test]
+fn orcids_match_as_urls_or_bare_and_languages_both_ways() {
+    let (dc, http) = provider([recorded("search_tree_orcid")]);
+    let tree = QueryNode::All(vec![
+        QueryNode::term(TermField::AuthorId, "0000-0001-6187-6610"),
+        QueryNode::filter(FilterValue::Language("en".into())),
+    ]);
+    let page = block_on(dc.search(&tree_query(tree))).unwrap().value;
+    assert_eq!(
+        query(&http, 0)[0],
+        pair(
+            "query",
+            r#"creators.nameIdentifiers.nameIdentifier:("https://orcid.org/0000-0001-6187-6610" OR "0000-0001-6187-6610") AND language:(en OR eng)"#
+        )
+    );
+    assert_eq!(page.total, Some(8));
+    let (dc, _) = provider([]);
+    assert_eq!(
+        dc.express(&QueryNode::term(TermField::AuthorId, "A5023888391"))
+            .unwrap_err(),
+        "DataCite finds authors by ORCID, not OpenAlex author ids"
+    );
+    assert_eq!(
+        dc.express(&QueryNode::filter(FilterValue::NotRetracted))
+            .unwrap_err(),
+        "DataCite can't leave out retracted works"
+    );
+    assert_eq!(
+        dc.express(&QueryNode::term(TermField::Container, "Nature"))
+            .unwrap_err(),
+        "DataCite can't search by journal"
+    );
 }

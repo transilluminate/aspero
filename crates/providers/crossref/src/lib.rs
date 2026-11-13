@@ -19,10 +19,12 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use aspero_core::http::path_segment;
+use aspero_core::query::check_supported;
 use aspero_core::{
-    Capabilities, Cursor, Doi, Error, Field, FieldSet, Filter, Hit, HttpClient, HttpRequest,
-    HttpResponse, IdKind, Lookup, Page, Provider, ProviderId, ResiliencePolicy, Response, Result,
-    SearchMode, SearchQuery, Sort, SourceRecord, WorkId,
+    AuthorId, Capabilities, Cursor, Doi, Error, Field, FieldSet, Filter, FilterValue, Hit,
+    HttpClient, HttpRequest, HttpResponse, IdKind, Lookup, Page, Provider, ProviderId, QueryNode,
+    ResiliencePolicy, Response, Result, SearchMode, SearchQuery, Sort, SourceRecord, TermField,
+    WorkId, YearRange,
 };
 use async_trait::async_trait;
 
@@ -82,8 +84,12 @@ impl Crossref {
             Filter::Author,
             Filter::Title,
             Filter::Container,
+            Filter::Keywords,
+            Filter::AuthorId,
+            Filter::HasAbstract,
         ];
         capabilities.sorts = vec![Sort::Relevance, Sort::Newest, Sort::MostCited];
+        // Queries are bags of words, ANDed with filters: all of, only.
         Crossref {
             config,
             http,
@@ -227,6 +233,12 @@ impl Provider for Crossref {
     }
 
     async fn search(&self, query: &SearchQuery) -> Result<Response<Page>> {
+        let tree = query
+            .tree
+            .as_ref()
+            .map(|t| express(t, &self.capabilities))
+            .transpose()
+            .map_err(Error::UnsupportedQuery)?;
         let mut filters = Vec::new();
         if let Some(years) = query.years {
             if let Some(from) = years.from {
@@ -278,6 +290,10 @@ impl Provider for Crossref {
             if let Some(value) = query.field(field) {
                 params.push((param, value.to_owned()));
             }
+        }
+        if let Some(tree) = tree {
+            params.extend(tree.params);
+            filters.extend(tree.filters);
         }
         if !filters.is_empty() {
             params.push(("filter", filters.join(",")));
@@ -338,4 +354,103 @@ impl Provider for Crossref {
         };
         Ok(Response::new(Page::new(hits, list.total_results, next)))
     }
+
+    fn express(&self, tree: &QueryNode) -> std::result::Result<(), String> {
+        express(tree, &self.capabilities).map(|_| ())
+    }
+}
+
+/// A query tree as Crossref parameters.
+#[derive(Debug, Default, PartialEq, Eq)]
+struct Tree {
+    /// `query`, `query.title`, …: one each, the terms' words together.
+    params: Vec<(&'static str, String)>,
+    filters: Vec<String>,
+}
+
+/// A query tree in Crossref's terms: all of words in its query fields
+/// (`query`, `query.title`, `query.author`, `query.container-title`),
+/// and of filters (years, one work type, one ORCID, `has-abstract`).
+/// Its queries rank a bag of words, so there are no phrases, and filters
+/// of one name OR (two ORCIDs would mean either). Crossref has no filter
+/// for retracted works themselves (`update-type:retraction` finds the
+/// notices), nor for language.
+fn express(tree: &QueryNode, caps: &Capabilities) -> std::result::Result<Tree, String> {
+    const NAME: &str = "Crossref";
+    check_supported(tree, caps, NAME)?;
+    let leaves = match tree {
+        QueryNode::All(nodes) => nodes.iter().collect(),
+        leaf => vec![leaf],
+    };
+    let mut out = Tree::default();
+    let mut years: Option<YearRange> = None;
+    let (mut work_type, mut orcid) = (None, None);
+    for leaf in leaves {
+        match leaf {
+            QueryNode::Term(t) if t.phrase => {
+                return Err(format!("{NAME} can't search for phrases"));
+            }
+            QueryNode::Term(t) if t.field == TermField::AuthorId => {
+                let Some(AuthorId::Orcid(id)) = AuthorId::parse(&t.value) else {
+                    return Err(format!(
+                        "{NAME} finds authors by ORCID, not OpenAlex author ids"
+                    ));
+                };
+                if orcid.replace(id).is_some() {
+                    return Err(format!("{NAME} can't require two ORCIDs at once"));
+                }
+            }
+            QueryNode::Term(t) => {
+                let param = match t.field {
+                    TermField::Keywords => "query",
+                    TermField::Title => "query.title",
+                    TermField::Author => "query.author",
+                    TermField::Container => "query.container-title",
+                    _ => return Err(format!("{NAME} can't search by {}", t.field.name())),
+                };
+                match out.params.iter_mut().find(|(p, _)| *p == param) {
+                    Some((_, words)) => {
+                        words.push(' ');
+                        words.push_str(&t.value);
+                    }
+                    None => out.params.push((param, t.value.clone())),
+                }
+            }
+            QueryNode::Filter(FilterValue::Years(y)) => {
+                // All of several ranges: where they overlap.
+                let both = |a: Option<i16>, b: Option<i16>, pick: fn(i16, i16) -> i16| match (a, b)
+                {
+                    (Some(a), Some(b)) => Some(pick(a, b)),
+                    (a, b) => a.or(b),
+                };
+                years = Some(match years {
+                    None => *y,
+                    Some(prev) => YearRange {
+                        from: both(prev.from, y.from, i16::max),
+                        to: both(prev.to, y.to, i16::min),
+                    },
+                });
+            }
+            QueryNode::Filter(FilterValue::WorkType(t)) => {
+                let crossref = wire::crossref_type(t)
+                    .ok_or_else(|| format!("{NAME} has no work type matching {:?}", t.as_csl()))?;
+                if work_type.replace(crossref).is_some() {
+                    return Err(format!("{NAME} can't require two work types at once"));
+                }
+            }
+            QueryNode::Filter(FilterValue::HasAbstract) => {
+                out.filters.push("has-abstract:true".into());
+            }
+            other => return Err(format!("{NAME} can't search by {}", other.leaf_name())),
+        }
+    }
+    if let Some(years) = years {
+        out.filters
+            .extend(years.from.map(|y| format!("from-pub-date:{y:04}")));
+        out.filters
+            .extend(years.to.map(|y| format!("until-pub-date:{y:04}")));
+    }
+    out.filters.extend(work_type.map(|t| format!("type:{t}")));
+    out.filters.extend(orcid.map(|o| format!("orcid:{o}")));
+    Ok(out)
 }

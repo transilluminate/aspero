@@ -264,3 +264,20 @@ pub(crate) fn resource_type_id(t: &WorkType) -> Option<&str> {
         _ => return None,
     })
 }
+
+/// The `resourceTypeGeneral` (in a query: `types.resourceTypeGeneral:…`)
+/// for a [`WorkType`].
+pub(crate) fn resource_type_general(t: &WorkType) -> Option<&str> {
+    Some(match t {
+        WorkType::JournalArticle => "JournalArticle",
+        WorkType::ConferencePaper => "ConferencePaper",
+        WorkType::Preprint => "Preprint",
+        WorkType::Book => "Book",
+        WorkType::Chapter => "BookChapter",
+        WorkType::Thesis => "Dissertation",
+        WorkType::Report => "Report",
+        WorkType::Dataset => "Dataset",
+        WorkType::Software => "Software",
+        _ => return None,
+    })
+}

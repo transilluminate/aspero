@@ -12,6 +12,7 @@
 //! works from the best 100 of them.
 
 mod http;
+mod tree;
 mod wire;
 
 use std::sync::Arc;
@@ -19,9 +20,10 @@ use std::time::Duration;
 
 use aspero_core::http::path_segment;
 use aspero_core::{
-    Capabilities, Cursor, Doi, Error, FieldSet, Filter, Hit, HttpClient, HttpRequest, HttpResponse,
-    IdKind, Lookup, Page, PageReq, Provider, ProviderId, Raw, ResiliencePolicy, Response, Result,
-    SearchMode, SearchQuery, Sort, SourceRecord, Usage, WorkId, WorkType,
+    BooleanSupport, Capabilities, Cursor, Doi, Error, FieldSet, Filter, Hit, HttpClient,
+    HttpRequest, HttpResponse, IdKind, Lookup, OpenAlexId, Page, PageReq, Provider, ProviderId,
+    QueryNode, Raw, Relation, ResiliencePolicy, Response, Result, SearchMode, SearchQuery, Sort,
+    SourceRecord, Usage, WorkId, WorkType,
 };
 use async_trait::async_trait;
 use secrecy::{ExposeSecret, SecretString};
@@ -74,8 +76,20 @@ impl OpenAlex {
             Filter::Author,
             Filter::Title,
             Filter::Container,
+            Filter::Keywords,
+            Filter::Abstract,
+            Filter::AuthorId,
+            Filter::NotRetracted,
+            Filter::Language,
+            Filter::HasAbstract,
         ];
         capabilities.sorts = vec![Sort::Relevance, Sort::Newest, Sort::MostCited];
+        // Filters only AND; within one text field a value is a boolean
+        // query, and any filter negates (see `tree`).
+        capabilities.search_any = BooleanSupport::WithinField;
+        capabilities.search_none = BooleanSupport::Anywhere;
+        capabilities.search_nesting = true;
+        capabilities.relations = vec![Relation::Cites, Relation::CitedBy];
         OpenAlex {
             config,
             http,
@@ -239,23 +253,7 @@ impl Key {
 }
 
 fn type_filter(t: &WorkType) -> Result<String> {
-    let openalex = match t {
-        WorkType::JournalArticle => "article",
-        WorkType::ConferencePaper => "conference-paper",
-        WorkType::Preprint => "preprint",
-        WorkType::Book => "book",
-        WorkType::Chapter => "book-chapter",
-        WorkType::Thesis => "dissertation",
-        WorkType::Report => "report",
-        WorkType::Dataset => "dataset",
-        WorkType::Other(other) => other.as_str(),
-        _ => {
-            return Err(Error::BadRequest(format!(
-                "OpenAlex has no work type matching {:?}",
-                t.as_csl()
-            )));
-        }
-    };
+    let openalex = tree::work_type(t).map_err(Error::BadRequest)?;
     Ok(format!("type:{openalex}"))
 }
 
@@ -344,44 +342,54 @@ impl Provider for OpenAlex {
             return Err(Error::Unsupported("OpenAlex has no citation matcher"));
         }
         let mut filters = Vec::new();
-        if let Some(years) = query.years {
-            if let Some(from) = years.from {
-                filters.push(format!("from_publication_date:{from:04}-01-01"));
+        let (search, containers) = match &query.tree {
+            Some(tree) => {
+                let plan =
+                    tree::translate(tree, &self.capabilities).map_err(Error::UnsupportedQuery)?;
+                if let Some(id) = unresolved_relation(tree) {
+                    return Err(Error::BadRequest(format!(
+                        "OpenAlex searches relations by OpenAlex work id, not {id:?}"
+                    )));
+                }
+                filters = plan.filters;
+                (plan.search, plan.containers)
             }
-            if let Some(to) = years.to {
-                filters.push(format!("to_publication_date:{to:04}-12-31"));
+            None => {
+                flat_filters(query, &mut filters)?;
+                let container = query.field(Filter::Container).map(|name| tree::Container {
+                    name: name.to_owned(),
+                    phrase: false,
+                    negated: false,
+                });
+                let text = query.text.trim();
+                let search = (!text.is_empty()).then(|| text.to_owned());
+                (search, container.into_iter().collect())
             }
-        }
-        if let Some(t) = &query.work_type {
-            filters.push(type_filter(t)?);
-        }
-        if let Some(oa) = query.open_access {
-            filters.push(format!("is_oa:{oa}"));
-        }
-        if let Some(place) = &query.place {
-            filters.push(format!("biblio.volume:{}", filter_value(&place.volume)));
-            filters.push(format!(
-                "biblio.first_page:{}",
-                filter_value(&place.first_page)
-            ));
-        }
-        if let Some(author) = query.field(Filter::Author) {
-            filters.push(format!("raw_author_name.search:{}", filter_value(author)));
-        }
-        if let Some(title) = query.field(Filter::Title) {
-            filters.push(format!("title.search:{}", filter_value(title)));
-        }
+        };
         let mut usage = None;
-        if let Some(container) = query.field(Filter::Container) {
-            let (sources, u) = self.sources_named(container).await?;
-            usage = Some(u);
-            if sources.is_empty() {
-                return Ok(Response::with_usage(
-                    Page::new(Vec::new(), Some(0), None),
-                    u,
-                ));
+        for container in containers {
+            let name = match container.phrase {
+                true => format!("\"{}\"", container.name.replace('"', "")),
+                false => container.name,
+            };
+            let (sources, u) = self.sources_named(&name).await?;
+            let spent = usage.map_or(u, |s: Usage| s.then(u));
+            usage = Some(spent);
+            match (sources.is_empty(), container.negated) {
+                // No source so named: nothing to find (or to leave out).
+                (true, false) => {
+                    return Ok(Response::with_usage(
+                        Page::new(Vec::new(), Some(0), None),
+                        spent,
+                    ));
+                }
+                (true, true) => {}
+                (false, negated) => filters.push(format!(
+                    "primary_location.source.id:{}{}",
+                    if negated { "!" } else { "" },
+                    sources.join("|")
+                )),
             }
-            filters.push(format!("primary_location.source.id:{}", sources.join("|")));
         }
 
         let mut params: Vec<(&str, String)> = Vec::new();
@@ -407,8 +415,8 @@ impl Provider for OpenAlex {
                 }
             }
         }
-        if !query.text.trim().is_empty() {
-            params.push(("search", query.text.trim().to_owned()));
+        if let Some(search) = search {
+            params.push(("search", search));
         }
         if !filters.is_empty() {
             params.push(("filter", filters.join(",")));
@@ -422,6 +430,52 @@ impl Provider for OpenAlex {
             usage.map_or(u, |s: Usage| s.then(u)),
         ))
     }
+
+    fn express(&self, tree: &QueryNode) -> std::result::Result<(), String> {
+        tree::translate(tree, &self.capabilities).map(|_| ())
+    }
+}
+
+/// A search's filters without a tree: years, type, open access, place,
+/// author and title. A container needs a source lookup first.
+fn flat_filters(query: &SearchQuery, filters: &mut Vec<String>) -> Result<()> {
+    if let Some(years) = query.years {
+        if let Some(from) = years.from {
+            filters.push(format!("from_publication_date:{from:04}-01-01"));
+        }
+        if let Some(to) = years.to {
+            filters.push(format!("to_publication_date:{to:04}-12-31"));
+        }
+    }
+    if let Some(t) = &query.work_type {
+        filters.push(type_filter(t)?);
+    }
+    if let Some(oa) = query.open_access {
+        filters.push(format!("is_oa:{oa}"));
+    }
+    if let Some(place) = &query.place {
+        filters.push(format!("biblio.volume:{}", filter_value(&place.volume)));
+        filters.push(format!(
+            "biblio.first_page:{}",
+            filter_value(&place.first_page)
+        ));
+    }
+    if let Some(author) = query.field(Filter::Author) {
+        filters.push(format!("raw_author_name.search:{}", filter_value(author)));
+    }
+    if let Some(title) = query.field(Filter::Title) {
+        filters.push(format!("title.search:{}", filter_value(title)));
+    }
+    Ok(())
+}
+
+/// A relation in `tree` whose work isn't named by an OpenAlex work id:
+/// the engine resolves those before searching.
+fn unresolved_relation(tree: &QueryNode) -> Option<&str> {
+    tree.leaves().into_iter().find_map(|leaf| match leaf {
+        QueryNode::Relation(r) if r.id.parse::<OpenAlexId>().is_err() => Some(r.id.as_str()),
+        _ => None,
+    })
 }
 
 /// Cursor paging (needs a key; unlimited depth, unlike `page=`).

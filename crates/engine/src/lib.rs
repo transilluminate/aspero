@@ -16,6 +16,10 @@
 //! - **Resolve / verify** turn a citation claim into scored candidates and a
 //!   verdict (see [`resolve`](crate::Engine::resolve)).
 //!
+//! - **Citation links** ([`references`](crate::Engine::references),
+//!   [`analyse`](crate::Engine::analyse)): a work's references, and
+//!   analyses of a set of works over them, from OpenAlex.
+//!
 //! - **Caching**: provider answers (records, "not found", search pages) are
 //!   cached with per-kind TTLs ([`CachePolicy`]) and served stale if a
 //!   provider fails; every answer says how it was [`Served`].
@@ -51,6 +55,7 @@ mod batch;
 mod budget;
 mod check;
 mod enrich;
+mod graph;
 mod health;
 mod identify;
 mod inflight;
@@ -74,6 +79,10 @@ pub use budget::Budget;
 pub use check::{
     BibliographyReport, CheckReport, CheckSummary, Checked, CheckedEntry, Finding, Severity,
     bare_doi, duplicates, findings,
+};
+pub use graph::{
+    Analysis, AnalysisKind, Coverage, Estimate, Incomplete, IncompleteKind, LIST_PRICE, Missing,
+    OddOne, OddReason, ReferencesPage, RetractedReference, Section, Seed, SeedProblem,
 };
 pub use identify::{Decision, Identified, MAX_IDENTIFIERS};
 #[cfg(feature = "openalex")]
@@ -106,7 +115,9 @@ use aspero_core::{
     Error, ErrorCategory, ErrorKind, Provider, ProviderId, ResiliencePolicy, Response,
     SourceRecord, Usage,
 };
-pub use aspero_store::{Cache, Pacing, SqliteCache, Stats as CacheStats, StoreError};
+pub use aspero_store::{
+    Cache, Direction, Edges, Pacing, SqliteCache, Stats as CacheStats, StoreError,
+};
 pub use inputs::{Extras, InputLookup, InputsReport, Looked};
 use jiff::Timestamp;
 pub use lookup::{Attempt, LookupReport, LookupResult, Outcome};
@@ -134,6 +145,11 @@ pub struct CachePolicy {
     /// "Not found" answers: short, since works get registered.
     pub misses: Duration,
     pub searches: Duration,
+    /// The works a work cites: they change only when the source corrects
+    /// them.
+    pub references: Duration,
+    /// Pages of the works citing a work, which grow.
+    pub cited_by: Duration,
 }
 
 impl Default for CachePolicy {
@@ -143,6 +159,8 @@ impl Default for CachePolicy {
             records: Duration::from_secs(7 * DAY),
             misses: Duration::from_secs(DAY),
             searches: Duration::from_secs(DAY),
+            references: Duration::from_secs(30 * DAY),
+            cited_by: Duration::from_secs(DAY),
         }
     }
 }

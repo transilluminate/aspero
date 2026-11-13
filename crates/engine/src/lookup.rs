@@ -253,7 +253,7 @@ impl Engine {
     /// For each ID, a fresh cached answer covering `fields`:
     /// `Some(Some(record))`, `Some(None)` for a fresh "not found", or `None`
     /// to ask the provider.
-    fn cached_lookups(
+    pub(crate) fn cached_lookups(
         &self,
         provider: &ProviderId,
         ids: &[WorkId],
@@ -306,7 +306,11 @@ impl Engine {
     }
 
     /// For each ID, any cached record, however old.
-    fn stale_lookups(&self, provider: &ProviderId, ids: &[WorkId]) -> Vec<Option<SourceRecord>> {
+    pub(crate) fn stale_lookups(
+        &self,
+        provider: &ProviderId,
+        ids: &[WorkId],
+    ) -> Vec<Option<SourceRecord>> {
         self.cache_entries(provider, ids)
             .into_iter()
             .map(|entry| entry.and_then(|e| e.value))

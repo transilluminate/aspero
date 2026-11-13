@@ -282,7 +282,7 @@ impl Engine {
     /// The OpenAlex work id of the work `id` names: as given, or looked up
     /// (through the cache), and if the record found carries no OpenAlex id,
     /// looked up again by its DOI or PMID.
-    async fn openalex_work(
+    pub(crate) async fn openalex_work(
         &self,
         id: &str,
         usage: &mut Vec<(ProviderId, Usage)>,
@@ -358,7 +358,11 @@ impl Engine {
     }
 
     /// A cached page and whether it is still fresh.
-    fn cached_search(&self, provider: &ProviderId, query: &SearchQuery) -> Option<(Page, bool)> {
+    pub(crate) fn cached_search(
+        &self,
+        provider: &ProviderId,
+        query: &SearchQuery,
+    ) -> Option<(Page, bool)> {
         let entry = self.cache.as_ref()?.get_search(provider, query).ok()??;
         let fresh = entry.is_fresh((self.clock)(), self.cache_policy.searches);
         Some((entry.value, fresh))

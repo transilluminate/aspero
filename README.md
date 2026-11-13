@@ -79,10 +79,12 @@ aspero search --query '{"all": [{"cites": "10.1038/nature14539"}, {"title": "sur
 aspero resolve --abstract "Jumper J et al. Highly accurate protein structure prediction with AlphaFold. Nature 2021"
 
 # Citation links: a work's references; and a set of works checked for
-# retracted references, odd ones out and works probably missing from it
+# retracted references, odd ones out, works probably missing from it, and
+# related works
 aspero references 10.1038/nature14539 --limit 50
 aspero analyse refs.bib --estimate          # what it would cost, free
 aspero analyse refs.bib --budget 0.01       # fractions of a cent for 50 works
+aspero analyse refs.bib --kinds related     # works around the set, ~$0.006
 aspero analyse 10.1056/nejmoa010307 10.1056/nejmoa1401602 10.1056/nejmoa1500896
 
 # Watch the requests (and concurrency) as they happen
@@ -101,8 +103,9 @@ wrong work, nonexistent DOIs (with the right one suggested), wrong years,
 misattributed authors, retracted papers, duplicates, and missing DOIs.
 Lookalike re-deposits of famous papers are told apart by year and authors.
 `analyse` reads the citation links between a set of works (from OpenAlex):
-which cite retracted work, which are linked to none of the others, and
-which works most of them cite but the set lacks. A work whose references
+which cite retracted work, which are linked to none of the others,
+which works most of them cite but the set lacks, and (`--kinds related`)
+which works around them are read with them or share their references. A work whose references
 OpenAlex doesn't have (often a book) is reported as such, never as
 unlinked.
 

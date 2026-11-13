@@ -1,5 +1,34 @@
 # Changelog
 
+## Unreleased
+
+Added:
+
+- Related works (#60, phase G2): `aspero analyse --kinds related`
+  (`--limit`, default 20) lists works around a set, by co-citation (citing
+  works read that cite the work and a seed) and bibliographic coupling
+  (the set's references it cites too), scored 0.8 and 0.2 of each as a
+  share of the highest, each with `co_cited_with`, `shared_references` and
+  the `seeds` linking it. They come from OpenAlex's citing works, 200 a
+  page ($0.0001): seeds cited at most 200 times share a page, a seed cited
+  more than 1,000 times is sampled (its 1,000 most cited citing works:
+  `incomplete: {kind: capped, done, total}` in citing works), at most 75
+  pages a set, plus five pages of works citing the set's most shared
+  references. Works of the set (by any identifier), retracted works and
+  versions drop or merge. Eleven sepsis trials cost $0.006 and 16 s; a
+  rerun within a day is free (citing works are cached in `edges`).
+  `--estimate` counts the citing pages exactly and the rest as a ceiling
+  ("at most").
+- `AnalysisKind::Related { limit }` and `Analysis::related` in the
+  engine; `related` in `aspero_json::graph`; on the FFI,
+  `Analysis.related` (`RelatedWorks`, `RelatedWork`; defaulted to `nil`)
+  for `AnalysisKind.related`, the best 20.
+- OpenAlex lists take `select`, and read up to 200 works a page.
+
+Changed:
+
+- `analyse` no longer reports `related` under `not_yet`.
+
 ## 0.13.0
 
 Added:

@@ -76,6 +76,7 @@ aspero scan --format jsonl page.md | aspero lookup -   # each result echoes its 
 aspero search "protein folding" --year 2020.. --source europepmc
 aspero search --author lecun --title "deep learning" --sort most-cited
 aspero search --query '{"all": [{"cites": "10.1038/nature14539"}, {"title": "survey"}, {"not_retracted": true}]}'
+aspero search --query '{"all": [{"id": "10.1038/nature14539"}, {"not_retracted": true}]}'   # that work, if not retracted
 aspero search sepsis --since 2026-11-01      # only works added since: watch a search
 aspero resolve --abstract "Jumper J et al. Highly accurate protein structure prediction with AlphaFold. Nature 2021"
 

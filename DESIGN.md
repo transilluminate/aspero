@@ -111,8 +111,8 @@ scripts/       fixture recorders, one per provider
   upgrade required", HTTP 429, checked 2026-11-13); Open Library has no
   added date.
 - **Query trees** (`SearchQuery::tree`, core `query`): all, any and none
-  of terms (keywords, title, author, container, abstract, author id),
-  filters and relations, instead of the keywords and fields. The engine
+  of terms (keywords, title, author, container, abstract, author id,
+  identifier), filters and relations, instead of the keywords and fields. The engine
   normalises a tree (blank leaves and empty groups dropped, same-kind
   groups flattened, an all or any of one node unwrapped), checks its
   values (author ids, language codes, year ranges, identifiers), folds the
@@ -127,6 +127,21 @@ scripts/       fixture recorders, one per provider
   PMCID) has none. Newest first, a tree stops at this year unless a years
   filter that bounds every hit (the tree itself or one of its top-level
   all) has an upper year; years under any or none don't count.
+- **Identifier terms** (#65) name works in a tree, beside anything else:
+  the value is any `WorkId` (else a bad query), and each source takes
+  the kinds its syntax can find, refusing others with the reason, so
+  `search_supports` and search agree. Checked live 2026-11-14: OpenAlex
+  `doi:` (arXiv as `10.48550/arxiv.…`), `ids.pmid:`, `ids.pmcid:PMC…`
+  (records hold the bare number; both forms match) and `openalex:`, ORed
+  with `|` within one key and negated with `!`, but any across keys can't
+  be said, and there is no ISBN filter. Crossref `doi:` filters: repeated
+  ones OR, so an any of DOIs is its one any, and all of two (or none) is
+  refused; it holds no arXiv DOIs. DataCite `doi:"…"` (arXiv by its DOI,
+  stored lowercase). Europe PMC the lookup clauses (`DOI:"…"`,
+  `(EXT_ID:… AND SRC:MED)`, `PMCID:`, `BOOK_ID:`), full boolean; its
+  arXiv preprints carry no DOI. Open Library `isbn:` in `q`, with
+  author and title alike. `searchCapabilities` lists the field for any
+  source that takes some kind; which kinds, only the reasons say.
 
 ## Identity and data model
 

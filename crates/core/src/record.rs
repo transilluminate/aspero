@@ -27,6 +27,13 @@ pub struct SourceRecord {
     pub fields: FieldSet,
     pub raw: Raw,
     pub fetched_at: Timestamp,
+    /// The works this one cites, in the source's order and by the
+    /// source's own identifiers (OpenAlex work ids). `None` means unknown:
+    /// the source has no reference data for the work, or doesn't carry
+    /// references at all. `Some(empty)` means the source says it cites
+    /// nothing.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub references: Option<Vec<WorkId>>,
 }
 
 impl SourceRecord {
@@ -47,7 +54,15 @@ impl SourceRecord {
             fields,
             raw,
             fetched_at,
+            references: None,
         }
+    }
+
+    /// This record with the works it cites (see
+    /// [`references`](Self::references)).
+    pub fn with_references(mut self, references: Option<Vec<WorkId>>) -> Self {
+        self.references = references;
+        self
     }
 
     /// The provider's own identifier for the work, if it gave any.

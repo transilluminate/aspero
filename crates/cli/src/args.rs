@@ -25,7 +25,8 @@ Environment:
   ASPERO_MAILTO     contact address for polite API pools (Crossref)
   ASPERO_CACHE_DIR  where to keep the answer cache (default: platform cache dir)
 
-Answers are cached (records 7 days, not-found 1 day, searches 1 day) and
+Answers are cached (records 7 days, not-found 1 day, searches 1 day,
+references 30 days) and
 served stale if a provider fails; JSON marks them \"served\": \"cache\"/\"stale\".";
 
 #[derive(Debug, Parser)]
@@ -299,6 +300,97 @@ Examples:
         limit: u32,
     },
 
+    /// A work's references: the works it cites, one step out.
+    #[command(after_help = "\
+References come from OpenAlex, by OpenAlex work id; the work may be named by
+any identifier `lookup` takes. Each page's works are looked up in batches
+of up to 100 (a batch costs $0.0001; a page of one is free).
+
+`coverage` is `known` when OpenAlex lists the work's references, `unknown`
+when it has no reference data for it (often books and older work, or
+publishers that deposit none). OpenAlex gives an empty list for both, so an
+empty list reads as unknown, never as \"cites nothing\". `total` is how many;
+the references come in OpenAlex's order (by id, not as the work lists them).
+
+References are cached for 30 days.
+
+Examples:
+  aspero references 10.1038/nature14539
+  aspero references W2919115771 --limit 100 --cursor 25")]
+    References {
+        /// The work: a DOI, PMID, arXiv ID, OpenAlex ID, ….
+        id: String,
+        /// References per page.
+        #[arg(long, default_value_t = 25)]
+        limit: u32,
+        /// Continue from a previous page's `next_cursor`.
+        #[arg(long)]
+        cursor: Option<String>,
+    },
+
+    /// Check and extend a set of works through their citation links.
+    #[command(
+        visible_alias = "analyze",
+        after_help = "\
+The set is identifiers (arguments, or one per stdin line), or a .bib, .ris
+or CSL-JSON file whose entries' identifiers are used (entries without one
+are listed as skipped seeds). Each seed is resolved to an OpenAlex work
+cheaply: from the cache, else in batches, asked once (no retries). Each
+reports its OpenAlex `id` and `references` (a count, or \"unknown\"), or
+why it didn't resolve: invalid_id, unsupported_id (OpenAlex can't look up
+ISBNs), not_found, provider_failed, over_budget. Seeds that are one work (a
+preprint and its published version: a shared DOI, PMID or arXiv ID, or the
+same title, first author and year ±1) count once (`same_as`).
+
+Analyses (--kinds, comma-separated):
+  retracted         which seed cites which retracted or withdrawn work: the
+                    seeds' references checked at OpenAlex, 100 per request
+                    ($0.0001), and against notices already cached (Crossref)
+  odd-one-out       seeds linked to no other seed: citing none, cited by
+                    none, sharing no references. `no_links`, or
+                    `no_reference_data` when its references are unknown
+                    (unless another seed cites it: then it isn't odd)
+  probably-missing  works at least two seeds cite that the set lacks, most
+                    cited first, the best --limit looked up in one request:
+                    `cited_by` (seed indexes) and `count`
+  related           not yet
+
+Costs are fractions of a cent for a set of 50: --estimate says what a run
+would cost without paid requests (seeds are resolved from the cache and
+free lookups, so the run finds them cached). --budget stops before any
+request that could spend more; what was stopped says how far it got:
+`complete: false`, `incomplete: {kind: budget|provider_failed|capped,
+done, total}`.
+
+Examples:
+  aspero analyse 10.1038/nature14539 10.1145/3065386 W2194775991
+  aspero analyse refs.bib --kinds retracted,odd-one-out
+  aspero analyse refs.bib --estimate
+  aspero analyse --budget 0.01 --limit 50 - < dois.txt"
+    )]
+    Analyse {
+        /// Identifiers, or one .bib/.ris/CSL-JSON file; `-` (or none, when
+        /// piped) reads identifiers from stdin, one per line.
+        inputs: Vec<String>,
+        /// The analyses to run.
+        #[arg(
+            long,
+            value_enum,
+            value_delimiter = ',',
+            default_values_t = [AnalysisArg::Retracted, AnalysisArg::OddOneOut, AnalysisArg::ProbablyMissing]
+        )]
+        kinds: Vec<AnalysisArg>,
+        /// Probably-missing works to list.
+        #[arg(long, default_value_t = 20)]
+        limit: u32,
+        /// The most to spend, in US dollars (OpenAlex).
+        #[arg(long, value_name = "USD")]
+        budget: Option<f64>,
+        /// Say what it would cost, without paid requests.
+        #[arg(long)]
+        estimate: bool,
+    },
+
     /// List the identifiers mentioned in documents, without looking them up.
     #[command(after_help = "\
 Finds DOIs, PMIDs, PMCIDs, NCBI Bookshelf IDs (NBK…), arXiv IDs and ISBNs
@@ -421,6 +513,18 @@ pub enum SortBy {
     /// Most recently published first.
     Newest,
     MostCited,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub enum AnalysisArg {
+    /// Which seed cites which retracted work.
+    Retracted,
+    /// Seeds linked to no other seed.
+    OddOneOut,
+    /// Works several seeds cite that the set lacks.
+    ProbablyMissing,
+    /// Works around the set (not yet).
+    Related,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]

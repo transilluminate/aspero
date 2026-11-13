@@ -1,5 +1,50 @@
 # Changelog
 
+## Unreleased
+
+Added:
+
+- Citation links, from OpenAlex's `referenced_works` (#60, phase G1).
+  `aspero references <id>` pages through the works a work cites, each
+  looked up (batches of 100, $0.0001 each), with `coverage`: `known`, or
+  `unknown` when OpenAlex has no reference data for the work. OpenAlex
+  lists none for those and for works citing nothing alike, so an empty
+  list reads as unknown.
+- `aspero analyse <ids…|file>` (`--kinds retracted,odd-one-out,probably-missing`,
+  `--limit`, `--budget`, `--estimate`): analyses of a set of works, given
+  as identifiers or a .bib, .ris or CSL-JSON file. Seeds resolve cheaply
+  (cached, else batched, asked once) or say why not (`invalid_id`,
+  `unsupported_id`, `not_found`, `provider_failed`, `over_budget`);
+  preprint and published versions count as one work. Retracted
+  references come from OpenAlex (100 per $0.0001 request) and notices
+  already cached; odd ones out are `no_links` or `no_reference_data`;
+  probably missing works are those two or more works of the set cite,
+  with which. Stopped steps say how far they got (`incomplete: {kind,
+  done, total}`); `--estimate` costs nothing. `related` is not yet.
+- On the FFI, `references(id:cursor:limit:patience:)` and
+  `analyse(seeds:kinds:budgetUsd:estimateOnly:patience:)`, with
+  `ReferencesPage`, `Analysis` and their records; the JSON contract's
+  shapes are in `aspero_json::graph`.
+- `SourceRecord::references`; the cache keeps citation links in a new
+  `edges` table (references 30 days, citing pages 1 day).
+
+Fixed:
+
+- OpenAlex batch lookups missed works found by a DOI their record no
+  longer carries (re-registered after a change of publisher, such as
+  Academic Emergency Medicine's `10.1197/…`), though a lookup of the DOI
+  alone found them; the record now answers that DOI. Seeds OpenAlex still
+  misses are looked up as `lookup` does and asked about again by the
+  OpenAlex id, DOI or PMID found, and works sharing any identifier with a
+  seed are never probably missing.
+- Estimates count the seeds' batches when there's no cache for the run
+  to find them in.
+
+Changed:
+
+- The cache is rebuilt once (schema 10): cached records now carry the
+  works they cite.
+
 ## 0.12.0
 
 Added:

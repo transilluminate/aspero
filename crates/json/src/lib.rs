@@ -1,5 +1,6 @@
 //! aspero's JSON contract: the shapes agents and apps read, shared by the
-//! CLI and any other front end so they can't drift.
+//! CLI and any other front end so they can't drift. [`graph`] has citation
+//! links: references pages and analyses of a set.
 //!
 //! Fields are omitted when unknown rather than `null`; the lean default set
 //! is enough to identify and cite, and `full` adds everything known. Every
@@ -8,6 +9,7 @@
 
 pub mod check;
 mod claim;
+pub mod graph;
 mod lookup;
 mod query;
 mod scan;

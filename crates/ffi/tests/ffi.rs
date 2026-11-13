@@ -5,9 +5,10 @@ use std::collections::HashMap;
 
 use aspero_ffi::records::ReadError;
 use aspero_ffi::records::{
-    Author, BibFormat, BibProblem, CitationManager, CiteFormat, Claim, ErrorKind, ExportFormat,
-    KeyStatus, LookupStatus, Reason, SearchBoolean, SearchField, SearchFilter, SearchFilterValue,
-    SearchNode, SearchRelation, SearchRequest, SearchSort, StyleError, StyleSource, Verdict, Work,
+    AnalysisKind, Author, BibFormat, BibProblem, CitationManager, CiteFormat, Claim, Coverage,
+    ErrorKind, ExportFormat, KeyStatus, LookupStatus, Reason, SearchBoolean, SearchField,
+    SearchFilter, SearchFilterValue, SearchNode, SearchRelation, SearchRequest, SearchSort,
+    SeedProblem, StyleError, StyleSource, Verdict, Work,
 };
 use aspero_ffi::{Aspero, AsperoError, CallToken, Config, Patience};
 
@@ -319,6 +320,36 @@ fn offline_lookups_answer_without_the_network() {
     assert!(found.results[1].error.is_some());
     drop(handle);
     std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn analyses_say_why_each_seed_is_unresolved() {
+    let handle = aspero(None);
+    let kinds = vec![
+        AnalysisKind::OddOneOut,
+        AnalysisKind::ProbablyMissing { limit: 5 },
+        AnalysisKind::Related,
+    ];
+    let seeds = vec!["10.1234/never-seen".into(), "not an id".into()];
+    let analysis =
+        block_on(handle.analyse(seeds, kinds, Some(0.01), false, Patience::Offline, None)).unwrap();
+    let problems: Vec<_> = analysis.seeds.iter().map(|s| s.problem).collect();
+    assert_eq!(
+        problems,
+        [
+            Some(SeedProblem::ProviderFailed),
+            Some(SeedProblem::InvalidId)
+        ]
+    );
+    assert_eq!(analysis.not_yet, [AnalysisKind::Related]);
+    assert!(analysis.odd_one_out.unwrap().items.is_empty());
+    assert!(!analysis.complete);
+    assert!(analysis.failure.is_none());
+
+    let page =
+        block_on(handle.references("not an id".into(), None, 25, Patience::Offline, None)).unwrap();
+    assert_eq!(page.failure.unwrap().kind, ErrorKind::InvalidId);
+    assert_eq!(page.coverage, Coverage::Unknown);
 }
 
 #[test]

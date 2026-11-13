@@ -78,6 +78,13 @@ aspero search --author lecun --title "deep learning" --sort most-cited
 aspero search --query '{"all": [{"cites": "10.1038/nature14539"}, {"title": "survey"}, {"not_retracted": true}]}'
 aspero resolve --abstract "Jumper J et al. Highly accurate protein structure prediction with AlphaFold. Nature 2021"
 
+# Citation links: a work's references; and a set of works checked for
+# retracted references, odd ones out and works probably missing from it
+aspero references 10.1038/nature14539 --limit 50
+aspero analyse refs.bib --estimate          # what it would cost, free
+aspero analyse refs.bib --budget 0.01       # fractions of a cent for 50 works
+aspero analyse 10.1056/nejmoa010307 10.1056/nejmoa1401602 10.1056/nejmoa1500896
+
 # Watch the requests (and concurrency) as they happen
 aspero verify -v "Bishop CM. Pattern Recognition and Machine Learning. 2006"
 ```
@@ -93,6 +100,11 @@ What `verify` and `check` catch: invented papers, real DOIs attached to the
 wrong work, nonexistent DOIs (with the right one suggested), wrong years,
 misattributed authors, retracted papers, duplicates, and missing DOIs.
 Lookalike re-deposits of famous papers are told apart by year and authors.
+`analyse` reads the citation links between a set of works (from OpenAlex):
+which cite retracted work, which are linked to none of the others, and
+which works most of them cite but the set lacks. A work whose references
+OpenAlex doesn't have (often a book) is reported as such, never as
+unlinked.
 
 ## Agents (MCP)
 
@@ -124,7 +136,7 @@ and pacing are the other commands'.
   in the user agent; lookups fall back provider by provider rather than
   asking all at once.
 - **Cached**: answers are kept (records 7 days, searches and "not found" 1
-  day), so re-checking a bibliography is near-instant and free. `aspero
+  day, references 30 days), so re-checking a bibliography is near-instant and free. `aspero
   cache stats|clear|path`.
 
 ## Library

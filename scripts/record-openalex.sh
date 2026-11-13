@@ -32,6 +32,10 @@ requests=(
   "sources_named     /sources?filter=display_name.search:nature%20machine&select=id&per-page=100"
   "bad_filter        /works?filter=no_such_field:1"
   "work_retracted    /works/doi:10.1016/S0140-6736(97)11096-0"
+  "work_no_references /works/doi:10.1176/appi.books.9780890425596"
+  "works_retracted_batch /works?filter=openalex:W2158048826|W2919115771|W3010930696,is_retracted:true&per-page=100&cursor=*"
+  "works_batch_reregistered /works?filter=doi:10.1197/j.aem.2003.09.015|10.1038/nature14539|10.5555/aspero-does-not-exist&per-page=100"
+  "work_reregistered /works/doi:10.1197/j.aem.2003.09.015"
 )
 
 for entry in "${requests[@]}"; do

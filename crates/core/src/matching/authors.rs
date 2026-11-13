@@ -53,7 +53,7 @@ fn is_initials(token: &str) -> bool {
 }
 
 /// The same family, give or take particles: "van der berg" and "berg".
-fn same_family(a: &str, b: &str) -> bool {
+pub(super) fn same_family(a: &str, b: &str) -> bool {
     let ends = |long: &str, short: &str| {
         long.strip_suffix(short)
             .is_some_and(|rest| rest.ends_with(' '))

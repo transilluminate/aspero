@@ -75,6 +75,17 @@ impl Engine {
     /// Looks up every ID, falling through providers by priority. Never fails
     /// as a whole: per-ID outcomes are in the report.
     pub async fn lookup(&self, ids: &[WorkId], fields: FieldSet) -> LookupReport {
+        self.lookup_skipping(ids, fields, None).await
+    }
+
+    /// As [`lookup`](Self::lookup), without asking `skip` (a provider
+    /// whose answer is already known).
+    pub(crate) async fn lookup_skipping(
+        &self,
+        ids: &[WorkId],
+        fields: FieldSet,
+        skip: Option<&ProviderId>,
+    ) -> LookupReport {
         let mut results: Vec<LookupResult> = ids
             .iter()
             .map(|id| LookupResult {
@@ -88,6 +99,9 @@ impl Engine {
         // Not found where that is final (doi.org for DOIs): ask no further.
         let mut settled = vec![false; results.len()];
         for entry in &self.entries {
+            if skip.is_some_and(|p| *p == entry.provider.id()) {
+                continue;
+            }
             let caps = entry.provider.capabilities();
             let eligible: Vec<usize> = (0..results.len())
                 .filter(|&i| results[i].record.is_none() && !settled[i])
@@ -253,7 +267,7 @@ impl Engine {
     /// For each ID, a fresh cached answer covering `fields`:
     /// `Some(Some(record))`, `Some(None)` for a fresh "not found", or `None`
     /// to ask the provider.
-    fn cached_lookups(
+    pub(crate) fn cached_lookups(
         &self,
         provider: &ProviderId,
         ids: &[WorkId],
@@ -306,7 +320,11 @@ impl Engine {
     }
 
     /// For each ID, any cached record, however old.
-    fn stale_lookups(&self, provider: &ProviderId, ids: &[WorkId]) -> Vec<Option<SourceRecord>> {
+    pub(crate) fn stale_lookups(
+        &self,
+        provider: &ProviderId,
+        ids: &[WorkId],
+    ) -> Vec<Option<SourceRecord>> {
         self.cache_entries(provider, ids)
             .into_iter()
             .map(|entry| entry.and_then(|e| e.value))

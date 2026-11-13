@@ -28,6 +28,18 @@ Added:
 - `SourceRecord::references`; the cache keeps citation links in a new
   `edges` table (references 30 days, citing pages 1 day).
 
+Fixed:
+
+- OpenAlex batch lookups missed works found by a DOI their record no
+  longer carries (re-registered after a change of publisher, such as
+  Academic Emergency Medicine's `10.1197/…`), though a lookup of the DOI
+  alone found them; the record now answers that DOI. Seeds OpenAlex still
+  misses are looked up as `lookup` does and asked about again by the
+  OpenAlex id, DOI or PMID found, and works sharing any identifier with a
+  seed are never probably missing.
+- Estimates count the seeds' batches when there's no cache for the run
+  to find them in.
+
 Changed:
 
 - The cache is rebuilt once (schema 10): cached records now carry the

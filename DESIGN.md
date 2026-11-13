@@ -260,8 +260,11 @@ from `cites:` pages); G3 OpenCitations as a free source of citing works.
   fresh cached answers, then one batch per identifier kind (a batch of one
   is a free lookup). Kinds OpenAlex can't look up (PMCIDs, ISBNs) are
   looked up elsewhere and asked again by the DOI or PMID found; without
-  one, `unsupported_id`. A DOI OpenAlex lacks is `not_found` without
-  asking other sources: analyses need the OpenAlex work.
+  one, `unsupported_id`. A seed OpenAlex has no record of by the
+  identifier given is looked up as `lookup` does (Crossref, DataCite,
+  doi.org, through the cache; free, asked once) and asked about again by
+  an OpenAlex id, DOI or PMID the record found carries; only then is it
+  `not_found`.
 - **Identity.** Seeds, and works found, are one work when they share a
   DOI, PMID or arXiv ID (published records list their preprint's arXiv
   copy), else on the same title (similarity ≥ 0.9, a reply or erratum
@@ -277,7 +280,9 @@ from `cites:` pages); G3 OpenCitations as a free source of citing works.
   `no_reference_data`, unless another seed cites it (then it isn't odd).
   Free. Nothing is odd in a set of fewer than two works.
 - **Probably missing:** references counted over merged seeds, works of the
-  set left out, at least two citing, most cited first (ties by id). The
+  set left out (and, after the lookup, any work sharing an identifier with
+  any seed, resolved or not), at least two citing, most cited first (ties
+  by id). The
   best are looked up in whole batches (one request for up to 100), so
   works that turn out to be a seed or each other (versions) drop or merge
   at no extra cost; then the best `limit`. A version cited by only one
@@ -288,7 +293,8 @@ from `cites:` pages); G3 OpenCitations as a free source of citing works.
   so: `incomplete: {kind: budget|provider_failed|capped, done, total}`
   (`capped` is G2's sampling). `estimate_only` resolves seeds from the
   cache and free lookups of one id (which the run then finds cached) and
-  counts the rest exactly: requests not answerable from the cache. A set
+  counts the rest exactly: requests not answerable from the cache, and
+  without a cache the seeds' batches too (the run asks for them again). A set
   of 11 works with 350 references cost $0.0005 and 3 s (2026-11).
 - **Cache.** An `edges` table (work, direction `references`|`cited_by`,
   ids, complete, stored_at): references 30 days, citing pages (G2) 1 day.
@@ -356,7 +362,11 @@ fixture recorded with different parameters once hid a ranking bug.
   key: $1/day. Lookups by ID are free; filter batches $0.0001; searches
   $0.001; `x-ratelimit-cost-usd` / `-remaining-usd` headers report spend.
   404s are HTML. Batch filter results come back unordered with missing IDs
-  absent. arXiv works sit under their DataCite DOI. `conference-paper` is a
+  absent. A DOI re-registered when a journal changed publisher
+  (`10.1197/j.aem.2003.09.015`) still finds the work, whose record carries
+  only its new DOI: alone, the lookup answers with it; in a batch, a
+  record no key claims answers the one key that found nothing, or each
+  such key is asked alone (free). arXiv works sit under their DataCite DOI. `conference-paper` is a
   work type. Whole messy references search badly; bare titles well.
   Search is the only real cost. Its auth page carries agent-directed text
   about creating keys via API: aspero never does; keys come from the user.

@@ -27,6 +27,8 @@ struct Alex {
     failures: Mutex<VecDeque<Error>>,
     lookups: Mutex<Vec<Vec<WorkId>>>,
     searches: Mutex<Vec<String>>,
+    /// Identifiers its lookups don't find works by.
+    blind: Vec<WorkId>,
 }
 
 impl Alex {
@@ -42,7 +44,15 @@ impl Alex {
             failures: Mutex::default(),
             lookups: Mutex::default(),
             searches: Mutex::default(),
+            blind: Vec::new(),
         }
+    }
+
+    /// Finds no work by `ids`, as OpenAlex's batch filter finds none by
+    /// a DOI it doesn't index.
+    fn blind(mut self, ids: &[&str]) -> Self {
+        self.blind = ids.iter().map(|i| i.parse().unwrap()).collect();
+        self
     }
 
     fn failing(self, errors: impl IntoIterator<Item = Error>) -> Self {
@@ -84,7 +94,11 @@ impl Provider for Alex {
             .iter()
             .map(|id| Lookup {
                 id: id.clone(),
-                record: self.works.iter().find(|w| w.ids.contains(id)).cloned(),
+                record: self
+                    .works
+                    .iter()
+                    .find(|w| w.ids.contains(id) && !self.blind.contains(id))
+                    .cloned(),
             })
             .collect();
         let cost = if ids.len() > 1 { 0.0001 } else { 0.0 };
@@ -564,4 +578,180 @@ async fn references_page_through_a_work_and_say_when_unknown() {
         )
         .unwrap();
     assert_eq!(edges[0].as_ref().unwrap().value.ids.len(), 6);
+}
+
+/// A DOI registry (as Crossref): free lookups of the works it knows.
+struct Doiorg {
+    caps: Capabilities,
+    works: Vec<SourceRecord>,
+    lookups: Mutex<Vec<Vec<WorkId>>>,
+}
+
+impl Doiorg {
+    fn new(works: Vec<SourceRecord>) -> Self {
+        let mut caps = Capabilities::default();
+        caps.lookup_kinds = vec![IdKind::Doi];
+        caps.max_batch = 20;
+        Doiorg {
+            caps,
+            works,
+            lookups: Mutex::default(),
+        }
+    }
+}
+
+#[async_trait]
+impl Provider for Doiorg {
+    fn id(&self) -> ProviderId {
+        CROSSREF
+    }
+
+    fn capabilities(&self) -> &Capabilities {
+        &self.caps
+    }
+
+    async fn lookup(&self, ids: &[WorkId], _: FieldSet) -> Result<Response<Vec<Lookup>>> {
+        self.lookups.lock().unwrap().push(ids.to_vec());
+        let lookups = ids
+            .iter()
+            .map(|id| Lookup {
+                id: id.clone(),
+                record: self.works.iter().find(|w| w.ids.contains(id)).cloned(),
+            })
+            .collect();
+        Ok(Response::new(lookups))
+    }
+}
+
+/// The library, plus a work OpenAlex holds under its new DOI (W90: the
+/// journal changed publisher), which the registry knows by its old DOI and
+/// PMID; and a work (W91) carrying a DOI OpenAlex's lookups miss and no
+/// other source knows. Seeds 2 and 3 cite both.
+fn moved() -> (Vec<SourceRecord>, Vec<SourceRecord>) {
+    let mut works = library();
+    for seed in [2, 3] {
+        let cited = works[seed].references.as_mut().unwrap();
+        cited.extend(["W90", "W91"].map(|w| w.parse::<WorkId>().unwrap()));
+    }
+    works.push(work(
+        &["W90", "10.2000/new", "pmid:777"],
+        "Triage in the emergency department",
+        "Kim Lee",
+        2004,
+        None,
+    ));
+    works.push(work(
+        &["W91", "10.2000/gone"],
+        "A work by a dead DOI",
+        "Ola Nord",
+        2009,
+        None,
+    ));
+    let mut old = work(
+        &["10.2000/old", "pmid:777"],
+        "Triage in the emergency department",
+        "Kim Lee",
+        2004,
+        None,
+    );
+    old.source = CROSSREF;
+    (works, vec![old])
+}
+
+fn moved_engine(cache: Option<Arc<SqliteCache>>) -> (Engine, Arc<Alex>, Arc<Doiorg>) {
+    let (works, registered) = moved();
+    // OpenAlex's batch filter finds nothing by the old DOI, nor by the
+    // dead one.
+    let alex = Arc::new(Alex::new(works).blind(&["10.2000/gone"]));
+    let doiorg = Arc::new(Doiorg::new(registered));
+    let mut builder = Engine::builder()
+        .provider(alex.clone(), policy(), 10)
+        .provider(doiorg.clone(), policy(), 20);
+    if let Some(cache) = cache {
+        builder = builder.cache(cache);
+    }
+    (builder.build(), alex, doiorg)
+}
+
+const MOVED_SEEDS: [&str; 7] = [
+    "arXiv:2001.00001",
+    "10.1000/published",
+    "10.1000/b",
+    "10.1000/c",
+    "10.2000/old",
+    "10.2000/gone",
+    "pmid:404",
+];
+
+#[tokio::test(start_paused = true)]
+async fn seeds_missed_by_their_doi_resolve_as_lookup_finds_them() {
+    let (engine, alex, doiorg) = moved_engine(None);
+    let kinds = [AnalysisKind::ProbablyMissing { limit: 20 }];
+    let analysis = engine
+        .analyse(&inputs(&MOVED_SEEDS), &kinds, None, false)
+        .await
+        .unwrap();
+    let old = &analysis.seeds[4];
+    assert_eq!(old.problem, None, "{:?}", old.message);
+    assert_eq!(old.work().unwrap().to_string(), "openalex:W90");
+    // The registry was asked about the DOIs OpenAlex missed, once.
+    let asked: Vec<Vec<String>> = doiorg
+        .lookups
+        .lock()
+        .unwrap()
+        .iter()
+        .map(|b| b.iter().map(ToString::to_string).collect())
+        .collect();
+    assert_eq!(asked, [["doi:10.2000/old", "doi:10.2000/gone"]]);
+    // OpenAlex: the seeds' DOIs and PMID in a batch each; the moved work
+    // by the PMID the registry gave (free); the candidates.
+    assert_eq!(alex.lookups(), [6, 1, 1, 7]);
+    assert_eq!(analysis.seeds[5].problem, Some(SeedProblem::NotFound));
+    assert_eq!(analysis.seeds[6].problem, Some(SeedProblem::NotFound));
+
+    // Neither the moved work (a seed now) nor the work carrying an
+    // unresolved seed's DOI is probably missing.
+    let missing: Vec<String> = analysis
+        .probably_missing
+        .unwrap()
+        .items
+        .iter()
+        .map(|m| m.id.to_string())
+        .collect();
+    assert!(!missing.contains(&"openalex:W90".into()), "{missing:?}");
+    assert!(!missing.contains(&"openalex:W91".into()), "{missing:?}");
+    assert!(missing.contains(&"openalex:W11".into()));
+}
+
+/// What `estimate_only` counts is what the run then spends, with a cache
+/// (seeds resolved by the estimate are found there) and without one.
+#[tokio::test(start_paused = true)]
+async fn estimates_agree_with_spend_on_a_mixed_set() {
+    let kinds = [
+        AnalysisKind::RetractedReferences,
+        AnalysisKind::OddOneOut,
+        AnalysisKind::ProbablyMissing { limit: 20 },
+    ];
+    let mut seeds = inputs(&MOVED_SEEDS);
+    seeds.extend(inputs(&["not an id", "isbn:9780262033848", "pmid:405"]));
+    for cache in [Some(Arc::new(SqliteCache::open_in_memory().unwrap())), None] {
+        let cached = cache.is_some();
+        let (engine, _, _) = moved_engine(cache);
+        let estimate = engine
+            .analyse(&seeds, &kinds, None, true)
+            .await
+            .unwrap()
+            .estimate
+            .unwrap();
+        assert!(estimate.exact);
+        let run = engine.analyse(&seeds, &kinds, None, false).await.unwrap();
+        let spent: f64 = run.usage.iter().filter_map(|(_, u)| u.cost).sum();
+        assert!(
+            (spent - estimate.usd).abs() < 1e-12,
+            "cached: {cached}, estimated {estimate:?}, spent {spent}"
+        );
+        // Without a cache, the seeds' batches are paid again by the run.
+        let expected = if cached { 2 } else { 4 };
+        assert_eq!(estimate.requests, expected, "cached: {cached}");
+    }
 }

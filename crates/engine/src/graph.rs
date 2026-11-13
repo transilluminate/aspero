@@ -14,7 +14,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use aspero_core::matching::same_work;
+use aspero_core::matching::{same_work, same_work_id};
 use aspero_core::{
     Cursor, FieldSet, IdKind, ProviderId, SearchQuery, SourceRecord, Update, Usage, WorkId,
 };
@@ -716,67 +716,55 @@ impl Engine {
             }
         }
 
-        // Fresh cached answers first, then the rest: in batches of one
-        // kind each (a batch of one is a free lookup), or, estimating,
-        // one at a time (free).
-        let provider = entry.provider.id();
-        let ids: Vec<WorkId> = asks.iter().map(|(_, id)| id.clone()).collect();
-        let cached = self.cached_lookups(&provider, &ids, FieldSet::DEFAULT);
-        let mut answers: Vec<Option<(Outcome, Option<SourceRecord>)>> = cached
-            .into_iter()
-            .map(|c| {
-                c.map(|record| match record {
-                    Some(r) => (Outcome::Found, Some(r)),
-                    None => (Outcome::NotFound, None),
-                })
-            })
-            .collect();
-        let pending: Vec<usize> = (0..asks.len()).filter(|&k| answers[k].is_none()).collect();
         let mut stopped = None;
-        if spend.estimating {
-            let owned: Vec<(usize, WorkId)> =
-                pending.iter().map(|&k| (k, asks[k].1.clone())).collect();
-            let quick = &quick;
-            let lookups = futures::stream::iter(owned.into_iter().map(|(k, id)| async move {
-                let mut usage = Vec::new();
-                let answer = quick
-                    .lookup_at(
-                        entry,
-                        std::slice::from_ref(&id),
-                        FieldSet::DEFAULT,
-                        &mut usage,
-                    )
-                    .await
-                    .pop()
-                    .expect("one answer per id");
-                (k, answer, usage)
-            }))
-            .buffered(ESTIMATE_LOOKUPS)
-            .collect::<Vec<_>>()
+        let mut answers = self
+            .ask_openalex(&quick, entry, &asks, spend, &mut stopped)
             .await;
-            for (k, (attempt, record), usage) in lookups {
-                spend.add(usage, 0);
-                answers[k] = Some((attempt.outcome, record));
+
+        // Seeds OpenAlex has no record of by the identifier given are
+        // looked up as `lookup` looks them up (Crossref, DataCite, doi.org,
+        // …, through the cache; free, asked once), then asked about again
+        // by an identifier the record found carries: an OpenAlex id, or
+        // another DOI or PMID.
+        let missed: Vec<usize> = (0..asks.len())
+            .filter(|&k| matches!(answers[k], Some((Outcome::NotFound, None))))
+            .collect();
+        if !missed.is_empty() {
+            let ids: Vec<WorkId> = missed.iter().map(|&k| asks[k].1.clone()).collect();
+            let provider = entry.provider.id();
+            let report = quick
+                .lookup_skipping(&ids, FieldSet::DEFAULT, Some(&provider))
+                .await;
+            spend.add(report.usage, 0);
+            let mut again: Vec<(usize, WorkId)> = Vec::new();
+            for (&k, result) in missed.iter().zip(&report.results) {
+                let Some(record) = &result.record else {
+                    continue;
+                };
+                let asked = &asks[k].1;
+                let other = record
+                    .ids
+                    .iter()
+                    .find(|x| x.kind() == IdKind::OpenAlex)
+                    .or_else(|| {
+                        record
+                            .ids
+                            .iter()
+                            .find(|x| accepts.contains(&x.kind()) && !same_work_id(x, asked))
+                    });
+                if let Some(other) = other {
+                    again.push((k, other.clone()));
+                }
             }
-        } else {
-            let pending_ids: Vec<WorkId> = pending.iter().map(|&k| asks[k].1.clone()).collect();
-            let mut done = asks.len() - pending.len();
-            for chunk in batches(&pending_ids, &pending, entry) {
-                let paid = usize::from(chunk.len() > 1);
-                if !spend.allows(paid) {
-                    stopped = Some(Incomplete::new(IncompleteKind::Budget, done, asks.len()));
-                    break;
-                }
-                let batch: Vec<WorkId> = chunk.iter().map(|&k| asks[k].1.clone()).collect();
-                let mut usage = Vec::new();
-                let found = quick
-                    .lookup_at(entry, &batch, FieldSet::DEFAULT, &mut usage)
+            if !again.is_empty() && stopped.is_none() {
+                let found = self
+                    .ask_openalex(&quick, entry, &again, spend, &mut stopped)
                     .await;
-                spend.add(usage, paid);
-                for (&k, (attempt, record)) in chunk.iter().zip(found) {
-                    answers[k] = Some((attempt.outcome, record));
+                for ((k, _), answer) in again.iter().zip(found) {
+                    if let Some((outcome, Some(record))) = answer {
+                        answers[*k] = Some((outcome, Some(record)));
+                    }
                 }
-                done += chunk.len();
             }
         }
 
@@ -812,6 +800,85 @@ impl Engine {
             .map(|s| s.expect("every seed resolved or settled"))
             .collect();
         (seeds, stopped)
+    }
+
+    /// OpenAlex's answer for each of `asks` (seed, identifier); `None`
+    /// where the budget stopped it, saying so in `stopped`. Fresh cached
+    /// answers first, then the rest in batches of one kind each (a batch of
+    /// one is a free lookup), asked once. Estimating, the rest are asked
+    /// one at a time (free), and the batches a run would pay for are
+    /// counted when there's no cache for the run to find them in.
+    async fn ask_openalex(
+        &self,
+        quick: &Engine,
+        entry: &Entry,
+        asks: &[(usize, WorkId)],
+        spend: &mut Spend,
+        stopped: &mut Option<Incomplete>,
+    ) -> Vec<Option<(Outcome, Option<SourceRecord>)>> {
+        let provider = entry.provider.id();
+        let ids: Vec<WorkId> = asks.iter().map(|(_, id)| id.clone()).collect();
+        let cached = self.cached_lookups(&provider, &ids, FieldSet::DEFAULT);
+        let mut answers: Vec<Option<(Outcome, Option<SourceRecord>)>> = cached
+            .into_iter()
+            .map(|c| {
+                c.map(|record| match record {
+                    Some(r) => (Outcome::Found, Some(r)),
+                    None => (Outcome::NotFound, None),
+                })
+            })
+            .collect();
+        let pending: Vec<usize> = (0..asks.len()).filter(|&k| answers[k].is_none()).collect();
+        let pending_ids: Vec<WorkId> = pending.iter().map(|&k| asks[k].1.clone()).collect();
+        let chunks = batches(&pending_ids, &pending, entry);
+        if spend.estimating {
+            if self.cache.is_none() {
+                spend.requests += chunks.iter().filter(|c| c.len() > 1).count() as u64;
+            }
+            let lookups = futures::stream::iter(pending_ids.into_iter().zip(pending).map(
+                |(id, k)| async move {
+                    let mut usage = Vec::new();
+                    let answer = quick
+                        .lookup_at(
+                            entry,
+                            std::slice::from_ref(&id),
+                            FieldSet::DEFAULT,
+                            &mut usage,
+                        )
+                        .await
+                        .pop()
+                        .expect("one answer per id");
+                    (k, answer, usage)
+                },
+            ))
+            .buffered(ESTIMATE_LOOKUPS)
+            .collect::<Vec<_>>()
+            .await;
+            for (k, (attempt, record), usage) in lookups {
+                spend.add(usage, 0);
+                answers[k] = Some((attempt.outcome, record));
+            }
+            return answers;
+        }
+        let mut done = asks.len() - pending.len();
+        for chunk in chunks {
+            let paid = usize::from(chunk.len() > 1);
+            if !spend.allows(paid) {
+                *stopped = Some(Incomplete::new(IncompleteKind::Budget, done, asks.len()));
+                break;
+            }
+            let batch: Vec<WorkId> = chunk.iter().map(|&k| asks[k].1.clone()).collect();
+            let mut usage = Vec::new();
+            let found = quick
+                .lookup_at(entry, &batch, FieldSet::DEFAULT, &mut usage)
+                .await;
+            spend.add(usage, paid);
+            for (&k, (attempt, record)) in chunk.iter().zip(found) {
+                answers[k] = Some((attempt.outcome, record));
+            }
+            done += chunk.len();
+        }
+        answers
     }
 
     /// The works cited by at least two works of the set and not in it,
@@ -886,13 +953,27 @@ impl Engine {
             }
         }
 
-        // Merge: works that are a seed leave; works that are one work join.
+        // Merge: works that are a seed leave (one work, or sharing any
+        // identifier with any seed, resolved or not: its input, or any id
+        // its record carries); works that are one work join.
         let seed_records: Vec<&SourceRecord> =
             seeds.iter().filter_map(|s| s.record.as_ref()).collect();
+        let seed_ids: Vec<WorkId> = seeds
+            .iter()
+            .flat_map(|s| {
+                let given = s.input.parse::<WorkId>().ok();
+                let carried = s.record.iter().flat_map(|r| r.ids.iter().cloned());
+                given.into_iter().chain(carried)
+            })
+            .collect();
+        let is_seed = |id: &WorkId| seed_ids.iter().any(|s| same_work_id(s, id));
         let mut found: Vec<(Missing, BTreeSet<usize>)> = Vec::new();
         for ((id, by), record) in ranked.into_iter().take(fetch).zip(records) {
+            if is_seed(id) {
+                continue;
+            }
             if let Some(r) = &record
-                && seed_records.iter().any(|s| same_work(s, r))
+                && (r.ids.iter().any(is_seed) || seed_records.iter().any(|s| same_work(s, r)))
             {
                 continue;
             }

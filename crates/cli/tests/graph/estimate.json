@@ -2,8 +2,8 @@
   "complete": true,
   "estimate": {
     "exact": true,
-    "requests": 2,
-    "usd": 0.0002
+    "requests": 3,
+    "usd": 0.00030000000000000003
   },
   "not_yet": [
     "related"

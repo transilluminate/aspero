@@ -30,6 +30,8 @@ record books_isbn /api/books 'bibkeys=ISBN:9780262035613,ISBN:9780000000002' 'fo
 record search /search.json 'q=(deep learning goodfellow)' "fields=$fields" 'limit=3' 'page=1'
 record search_filtered /search.json 'q=(deep learning) AND first_publish_year:[2016 TO 2016]' \
   "fields=$fields" 'limit=3' 'page=1'
+record search_fields /search.json 'q=' 'author=Goodfellow' 'title=deep learning' 'sort=new' \
+  "fields=$fields" 'limit=3' 'page=1'
 
 if grep -rqiF "$ASPERO_MAILTO" "$out"; then
   echo "mailto address found in fixtures; deleting them" >&2

@@ -35,6 +35,10 @@ pub const DEFAULT_BASE_URL: &str = "https://api.crossref.org";
 /// DOIs per batched `filter=doi:…,doi:…` call; keeps URLs a sane length.
 const MAX_BATCH: usize = 50;
 
+/// Sorts Crossref won't combine with cursor paging.
+const DATE_SORTS: [&str; 4] = ["issued", "published", "published-print", "published-online"];
+/// The deepest `offset` Crossref serves.
+const MAX_OFFSET: u64 = 10_000;
 /// Crossref's cap on `rows`.
 const MAX_ROWS: u32 = 1000;
 
@@ -294,14 +298,42 @@ impl Provider for Crossref {
             params.push(("sort", sort.into()));
             params.push(("order", "desc".into()));
         }
-        params.push(("rows", query.page.limit.clamp(1, MAX_ROWS).to_string()));
-        let cursor = query.page.cursor.as_ref().map_or("*", |c| c.0.as_str());
-        params.push(("cursor", cursor.to_owned()));
+        let rows = query.page.limit.clamp(1, MAX_ROWS);
+        params.push(("rows", rows.to_string()));
+        // Crossref refuses date sorts with a cursor, so those page by offset,
+        // carried in our cursor as `offset:N`.
+        let by_date = params
+            .iter()
+            .any(|(k, v)| *k == "sort" && DATE_SORTS.contains(&v.as_str()));
+        let offset = match &query.page.cursor {
+            Some(c) if by_date => {
+                c.0.strip_prefix("offset:")
+                    .and_then(|n| n.parse::<u64>().ok())
+                    .ok_or_else(|| Error::BadRequest("not a Crossref offset cursor".into()))?
+            }
+            _ => 0,
+        };
+        match by_date {
+            true => params.push(("offset", offset.to_string())),
+            false => {
+                let cursor = query.page.cursor.as_ref().map_or("*", |c| c.0.as_str());
+                params.push(("cursor", cursor.to_owned()));
+            }
+        }
 
         let (hits, list) = self.list(&params).await?;
         // Crossref keeps returning a cursor after the last page; an empty
         // page is the real end.
-        let next = list.next_cursor.filter(|_| !hits.is_empty()).map(Cursor);
+        let next = match by_date {
+            true => {
+                let next = offset + hits.len() as u64;
+                let more = !hits.is_empty()
+                    && list.total_results.is_none_or(|total| next < total)
+                    && next <= MAX_OFFSET;
+                more.then(|| Cursor(format!("offset:{next}")))
+            }
+            false => list.next_cursor.filter(|_| !hits.is_empty()).map(Cursor),
+        };
         Ok(Response::new(Page::new(hits, list.total_results, next)))
     }
 }

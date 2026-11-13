@@ -128,22 +128,32 @@ fn paging_ends_at_the_last_numbered_page() {
 
 #[test]
 fn authors_and_titles_are_parameters_and_newest_is_sort_new() {
-    let (ol, http) = provider([response(200, &[], r#"{"numFound": 0, "docs": []}"#)]);
+    let (ol, http) = provider([recorded("search_fields")]);
     let mut q = SearchQuery::new("");
     q.author = Some("Goodfellow".into());
-    // Open Library escapes these itself.
-    q.title = Some("Deep learning: (adaptive)".into());
+    q.title = Some("deep learning".into());
     q.sort = Sort::Newest;
-    block_on(ol.search(&q)).unwrap();
+    q.page.limit = 3;
+    let page = block_on(ol.search(&q)).unwrap().value;
     let params = query(&http, 0);
     assert_eq!(
         params[..4],
         [
             pair("q", ""),
             pair("author", "Goodfellow"),
-            pair("title", "Deep learning: (adaptive)"),
+            pair("title", "deep learning"),
             pair("sort", "new"),
         ]
+    );
+    assert!(params.contains(&pair("limit", "3")) && params.contains(&pair("page", "1")));
+    let years: Vec<i16> = page
+        .hits
+        .iter()
+        .filter_map(|h| Some(h.record.work.issued?.year()))
+        .collect();
+    assert!(
+        !years.is_empty() && years.is_sorted_by(|a, b| a >= b),
+        "{years:?}"
     );
 
     q.sort = Sort::MostCited;
@@ -152,6 +162,16 @@ fn authors_and_titles_are_parameters_and_newest_is_sort_new() {
         Err(Error::Unsupported(_))
     ));
     assert_eq!(http.requests().len(), 1);
+}
+
+#[test]
+fn field_values_are_sent_as_written() {
+    // Open Library escapes them itself.
+    let (ol, http) = provider([response(200, &[], r#"{"numFound": 0, "docs": []}"#)]);
+    let mut q = SearchQuery::new("");
+    q.title = Some("Deep learning: (adaptive)".into());
+    block_on(ol.search(&q)).unwrap();
+    assert!(query(&http, 0).contains(&pair("title", "Deep learning: (adaptive)")));
 }
 
 #[test]

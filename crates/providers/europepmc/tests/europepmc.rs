@@ -168,6 +168,35 @@ fn empty_page() -> HttpResponse {
 }
 
 #[test]
+fn fields_alone_are_field_clauses() {
+    let (epmc, http) = provider([recorded("search_fields")]);
+    let mut q = SearchQuery::new("");
+    q.author = Some("Jumper J".into());
+    q.title = Some("protein structure prediction".into());
+    q.container = Some("Nature".into());
+    q.page.limit = 3;
+    let page = block_on(epmc.search(&q)).unwrap().value;
+    assert_eq!(
+        query(&http, 0),
+        [
+            pair(
+                "query",
+                r#"AUTH:"Jumper J" AND TITLE:(protein structure prediction) AND JOURNAL:"Nature""#
+            ),
+            pair("resultType", "core"),
+            pair("format", "json"),
+            pair("pageSize", "3"),
+            pair("cursorMark", "*"),
+        ]
+    );
+    assert!(
+        page.hits
+            .iter()
+            .all(|h| h.record.work.container_title.as_deref() == Some("Nature")),
+    );
+}
+
+#[test]
 fn fields_are_escaped_field_clauses() {
     let (epmc, http) = provider([empty_page()]);
     let mut q = SearchQuery::new("");
@@ -187,17 +216,44 @@ fn fields_are_escaped_field_clauses() {
     assert!(!params.iter().any(|(k, _)| k == "sort"), "{params:?}");
 }
 
+/// The parameters of a sorted search for "alphafold", three a page.
+fn sorted_by(sort: &str) -> [(String, String); 6] {
+    [
+        pair("query", "(alphafold)"),
+        pair("resultType", "core"),
+        pair("format", "json"),
+        pair("pageSize", "3"),
+        pair("cursorMark", "*"),
+        pair("sort", sort),
+    ]
+}
+
 #[test]
-fn sorts_by_publication_date_or_citations() {
-    let (epmc, http) = provider([empty_page(), empty_page()]);
+fn newest_first_sorts_by_publication_date() {
+    let (epmc, http) = provider([recorded("search_newest")]);
     let mut q = SearchQuery::new("alphafold");
     q.sort = Sort::Newest;
-    block_on(epmc.search(&q)).unwrap();
+    q.page.limit = 3;
+    let page = block_on(epmc.search(&q)).unwrap().value;
+    assert_eq!(query(&http, 0), sorted_by("P_PDATE_D desc"));
+    // Sorted results still page by cursor.
+    assert!(matches!(page.next, Some(Cursor(ref c)) if c != "*"));
+}
+
+#[test]
+fn most_cited_first_sorts_by_citations() {
+    let (epmc, http) = provider([recorded("search_most_cited")]);
+    let mut q = SearchQuery::new("alphafold");
     q.sort = Sort::MostCited;
-    block_on(epmc.search(&q)).unwrap();
-    assert!(query(&http, 0).contains(&pair("sort", "P_PDATE_D desc")));
-    assert!(query(&http, 1).contains(&pair("sort", "CITED desc")));
-    assert!(query(&http, 1).contains(&pair("cursorMark", "*")));
+    q.page.limit = 3;
+    let page = block_on(epmc.search(&q)).unwrap().value;
+    assert_eq!(query(&http, 0), sorted_by("CITED desc"));
+    let counts: Vec<u64> = page
+        .hits
+        .iter()
+        .map(|h| h.record.work.cited_by_count.unwrap())
+        .collect();
+    assert!(counts.is_sorted_by(|a, b| a >= b), "{counts:?}");
 }
 
 #[test]

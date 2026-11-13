@@ -228,13 +228,17 @@ fn empty_page() -> HttpResponse {
 
 #[test]
 fn fields_become_field_queries_ranked_by_score() {
-    let (cr, http) = provider([empty_page()]);
+    let (cr, http) = provider([recorded("works_search_fields")]);
     let mut q = SearchQuery::new("");
     q.author = Some("LeCun".into());
     q.title = Some("Deep learning".into());
     q.container = Some(" Nature ".into());
     q.page.limit = 5;
-    block_on(cr.search(&q)).unwrap();
+    let page = block_on(cr.search(&q)).unwrap().value;
+    let first = &page.hits[0].record;
+    assert_eq!(first.ids, [id("10.1038/nature14539")]);
+    let scores: Vec<f64> = page.hits.iter().map(|h| h.score.unwrap()).collect();
+    assert!(scores.is_sorted_by(|a, b| a >= b), "{scores:?}");
     assert_eq!(
         query(&http, 0),
         [
@@ -251,31 +255,66 @@ fn fields_become_field_queries_ranked_by_score() {
 }
 
 #[test]
-fn sorts_map_to_crossref_fields_newest_and_most_cited_first() {
-    let (cr, http) = provider([empty_page(), empty_page(), empty_page()]);
+fn newest_first_sorts_by_published() {
+    let (cr, http) = provider([recorded("works_search_newest")]);
     let mut q = SearchQuery::new("deep learning");
     q.sort = Sort::Newest;
-    block_on(cr.search(&q)).unwrap();
-    q.sort = Sort::MostCited;
-    block_on(cr.search(&q)).unwrap();
-    // A sort given as an extra wins.
-    q.extra.insert("sort".into(), "deposited".into());
-    block_on(cr.search(&q)).unwrap();
-    let sort = |n| {
-        query(&http, n)
-            .into_iter()
-            .filter(|(k, _)| k == "sort" || k == "order")
-            .collect::<Vec<_>>()
-    };
-    assert_eq!(sort(0), [pair("sort", "published"), pair("order", "desc")]);
+    q.page.limit = 3;
+    let page = block_on(cr.search(&q)).unwrap().value;
     assert_eq!(
-        sort(1),
+        query(&http, 0),
         [
-            pair("sort", "is-referenced-by-count"),
-            pair("order", "desc")
+            pair("query", "deep learning"),
+            pair("sort", "published"),
+            pair("order", "desc"),
+            pair("rows", "3"),
+            pair("offset", "0"),
+            pair("mailto", "test@example.org"),
         ]
     );
-    assert_eq!(sort(2), [pair("sort", "deposited")]);
+    assert_eq!(page.hits.len(), 3);
+    // Crossref refuses date sorts with a cursor: the next page is by offset.
+    assert_eq!(page.next.map(|c| c.0).as_deref(), Some("offset:3"));
+}
+
+#[test]
+fn most_cited_first_sorts_by_references_to_the_work() {
+    let (cr, http) = provider([recorded("works_search_most_cited")]);
+    let mut q = SearchQuery::new("deep learning");
+    q.sort = Sort::MostCited;
+    q.page.limit = 3;
+    let page = block_on(cr.search(&q)).unwrap().value;
+    assert_eq!(
+        query(&http, 0),
+        [
+            pair("query", "deep learning"),
+            pair("sort", "is-referenced-by-count"),
+            pair("order", "desc"),
+            pair("rows", "3"),
+            pair("cursor", "*"),
+            pair("mailto", "test@example.org"),
+        ]
+    );
+    let counts: Vec<u64> = page
+        .hits
+        .iter()
+        .map(|h| h.record.work.cited_by_count.unwrap())
+        .collect();
+    assert!(counts.is_sorted_by(|a, b| a >= b), "{counts:?}");
+}
+
+#[test]
+fn a_sort_given_as_an_extra_wins() {
+    let (cr, http) = provider([empty_page()]);
+    let mut q = SearchQuery::new("deep learning");
+    q.sort = Sort::MostCited;
+    q.extra.insert("sort".into(), "deposited".into());
+    block_on(cr.search(&q)).unwrap();
+    let sort: Vec<_> = query(&http, 0)
+        .into_iter()
+        .filter(|(k, _)| k == "sort" || k == "order")
+        .collect();
+    assert_eq!(sort, [pair("sort", "deposited")]);
 }
 
 #[test]

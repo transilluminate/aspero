@@ -22,6 +22,9 @@ requests=(
   "works_bibliographic     /works?query.bibliographic=Vaswani%202017%20Attention%20is%20all%20you%20need&sort=score&order=desc&rows=5&cursor=*"
   "works_bibliographic_ref /works?query.bibliographic=LeCun%20Y%2C%20Bengio%20Y%2C%20Hinton%20G.%20Deep%20learning.%20Nature.%202015%3B521%3A436-444.&sort=score&order=desc&rows=3&cursor=*"
   "works_search_filtered   /works?query=transformer&filter=from-pub-date:2017,until-pub-date:2018,type:journal-article&sort=score&order=desc&rows=3&cursor=*"
+  "works_search_fields     /works?query.author=LeCun&query.title=Deep%20learning&query.container-title=Nature&sort=score&order=desc&rows=5&cursor=*"
+  "works_search_newest     /works?query=deep%20learning&sort=published&order=desc&rows=3&offset=0"
+  "works_search_most_cited /works?query=deep%20learning&sort=is-referenced-by-count&order=desc&rows=3&cursor=*"
   "bad_filter              /works?filter=no-such-filter:1"
   "work_retracted          /works/10.1016/S0140-6736(97)11096-0"
 )

@@ -690,3 +690,37 @@ fn another_edition_of_a_cited_book_is_plausible() {
     book.work.work_type = Some(crate::work::WorkType::JournalArticle);
     assert!(assess(&Claim::from_text(ATLS), &book).confidence < PLAUSIBLE);
 }
+
+#[test]
+fn a_preprint_and_its_published_version_are_one_work() {
+    // A shared arXiv ID: the published record lists its arXiv copy.
+    let preprint = attention(
+        &["W1", "arXiv:1706.03762", "10.48550/arXiv.1706.03762"],
+        2017,
+    );
+    let published = attention(&["W2", "10.5555/neurips.2017", "arXiv:1706.03762"], 2017);
+    assert!(same_work(&preprint, &published));
+
+    // No shared identifier: the same title, first author and near years.
+    let biorxiv = record(
+        &["W3", "10.1101/2020.01.01.1"],
+        "Sepsis in mice",
+        &["Jane Doe"],
+        2020,
+    );
+    let journal = record(
+        &["W4", "10.1038/x.2021"],
+        "Sepsis in Mice",
+        &["J. Doe", "A. N. Other"],
+        2021,
+    );
+    assert!(same_work(&biorxiv, &journal));
+
+    // Years two apart, another first author, or a reply: not the work.
+    let later = record(&["W5"], "Sepsis in mice", &["Jane Doe"], 2022);
+    assert!(!same_work(&biorxiv, &later));
+    let other = record(&["W6"], "Sepsis in mice", &["John Smith"], 2020);
+    assert!(!same_work(&biorxiv, &other));
+    let reply = record(&["W7"], "Reply to: Sepsis in mice", &["Jane Doe"], 2020);
+    assert!(!same_work(&biorxiv, &reply));
+}

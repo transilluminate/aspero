@@ -21,12 +21,12 @@ mod text;
 
 use serde::{Deserialize, Serialize};
 
-use crate::id::{WorkId, starts_with_ci};
+use crate::id::{IdKind, WorkId, starts_with_ci};
 use crate::provider::Place;
 use crate::publication::{self, first_page, journal_in, same_journal};
 use crate::record::SourceRecord;
 
-use authors::{author_overlap, family_name};
+use authors::{author_overlap, family_name, same_family};
 pub use derivative::{
     WorkKind, claim_mentions_derivative, derivative_kind, derivative_work_kind, is_derivative,
 };
@@ -608,6 +608,44 @@ pub fn same_work_id(a: &WorkId, b: &WorkId) -> bool {
         (WorkId::Arxiv(x), WorkId::Arxiv(y)) => x.unversioned() == y.unversioned(),
         _ => a == b,
     }
+}
+
+/// Title similarity at which two records' titles count as one title when
+/// telling whether they are the same work.
+const SAME_WORK_TITLE: f64 = 0.9;
+
+/// Whether two records are one work, as a preprint and its published
+/// version are: a shared DOI, PMID or arXiv ID (published records carry
+/// their preprint's arXiv ID); else the same title, the same first author
+/// and years at most one apart. A reply or erratum repeating a title is
+/// not the work it answers.
+pub fn same_work(a: &SourceRecord, b: &SourceRecord) -> bool {
+    let shared = a.ids.iter().any(|x| {
+        matches!(x.kind(), IdKind::Doi | IdKind::Pmid | IdKind::Arxiv)
+            && b.ids.iter().any(|y| same_work_id(x, y))
+    });
+    if shared {
+        return true;
+    }
+    let (wa, wb) = (&a.work, &b.work);
+    let (Some(ta), Some(tb)) = (&wa.title, &wb.title) else {
+        return false;
+    };
+    if title_similarity(ta, tb) < SAME_WORK_TITLE
+        || derivative_work_kind(ta) != derivative_work_kind(tb)
+    {
+        return false;
+    }
+    let first = |w: &crate::work::Work| w.authors.first().and_then(family_name);
+    let same_first = match (first(wa), first(wb)) {
+        (Some(x), Some(y)) => same_family(&x, &y),
+        _ => false,
+    };
+    let near_years = match (wa.issued, wb.issued) {
+        (Some(x), Some(y)) => (x.year() - y.year()).abs() <= 1,
+        _ => false,
+    };
+    same_first && near_years
 }
 
 /// The distinct identifiers mentioned in free text (see [`crate::id::scan`]).

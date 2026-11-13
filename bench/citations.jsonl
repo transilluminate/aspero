@@ -41,3 +41,4 @@
 {"why": "Nature running header (#23)", "claim": "Nature 521, 436–444 (2015)", "expect": ["verified"], "ids": ["doi:10.1038/nature14539"]}
 {"why": "control: a running header with the wrong volume (#23)", "claim": "Injury, Int. J. Care Injured 49 (2016) 797–804", "expect": ["not_found"]}
 {"why": "authors, journal and DOI without a title (#23, #33)", "claim": "Wittermans E, et al. ERJ Open Res. 2022. https:// doi. org/ 10. 1183/ 23120 541. 00489- 2021", "expect": ["verified", "plausible"], "ids": ["doi:10.1183/23120541.00489-2021"]}
+{"why": "a book cited by its organisation, another edition found (#52)", "claim": "American College of Surgeons. Advanced trauma life support student course manual. 9th ed. Chicago, IL: American College of Surgeons; 2012.", "expect": ["plausible", "verified"]}

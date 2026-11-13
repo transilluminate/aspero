@@ -61,6 +61,8 @@ const PLACED_YEAR_OFF: f64 = 0.8;
 /// cited: only a year or journal agreeing, or a short title found inside
 /// free text.
 const NO_EVIDENCE_CAP: f64 = 0.5;
+/// Another edition of a cited book: plausible, with the year a difference.
+const EDITION: f64 = PLAUSIBLE;
 /// Content words below which a title found inside free text is short: one
 /// or two words turn up in any text ("Aspero", "Deep learning").
 const SHORT_TITLE_WORDS: usize = 3;
@@ -479,6 +481,27 @@ pub fn assess(claim: &Claim, record: &SourceRecord) -> Assessment {
         || (placed && authors.score.is_some_and(|s| s >= CORROBORATING_AUTHORS));
     if untitled && !pinned {
         confidence = confidence.min(NO_EVIDENCE_CAP);
+    }
+    // A title that only partly agrees, with nothing else agreeing, is a
+    // few shared words: "Journal of the American College of Surgeons"
+    // inside a reference whose author is the College.
+    let agrees = |c: &FieldCheck| matches!(c.agreement, Agreement::Match | Agreement::Partial);
+    if title.agreement == Agreement::Partial
+        && ![authors, year, container].iter().any(agrees)
+        && ids != Agreement::Match
+        && !located
+    {
+        confidence = confidence.min(NO_EVIDENCE_CAP);
+    }
+    // Another edition of a book: the same title and authors, another year
+    // (a 9th edition cited, a later one found). The book is right; the
+    // year is a difference.
+    if work.work_type == Some(crate::work::WorkType::Book)
+        && title.agreement == Agreement::Match
+        && authors.score.is_some_and(|s| s >= CORROBORATING_AUTHORS)
+        && year.agreement == Agreement::Mismatch
+    {
+        confidence = confidence.max(EDITION);
     }
     // Journal, volume and first page together name one work, title or no
     // title ("Injury 47 (2016) 797–804"), unless something contradicts

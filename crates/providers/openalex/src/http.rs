@@ -33,7 +33,9 @@ pub(crate) fn check(resp: &HttpResponse) -> Result<(), Error> {
     let message = message(resp);
     Err(match resp.status {
         400 => Error::BadRequest(message.unwrap_or_else(|| "rejected by OpenAlex".into())),
-        429 if quota_exhausted(resp) => Error::QuotaExhausted {
+        // Whatever the status: the request that crosses the budget has come
+        // back as a server error, the ones after it as 429s.
+        _ if quota_exhausted(resp) => Error::QuotaExhausted {
             resets_at: usage(resp).resets_at,
         },
         401 | 403 => Error::AuthRejected { message },
@@ -41,8 +43,9 @@ pub(crate) fn check(resp: &HttpResponse) -> Result<(), Error> {
     })
 }
 
-/// A 429 means "budget spent" rather than "slow down" when OpenAlex says so
-/// in the body, or the remaining budget header is zero.
+/// A failure means "budget spent" (rather than "slow down" or a server
+/// fault) when OpenAlex says so in the body, or the remaining budget header
+/// is zero.
 fn quota_exhausted(resp: &HttpResponse) -> bool {
     let body_says = resp.text().contains("not_enough_credits");
     let budget_spent = resp

@@ -44,6 +44,9 @@ pub(crate) struct WireWork {
     /// Unpaywall's data.
     open_access: Option<WireOpenAccess>,
     best_oa_location: Option<WireLocation>,
+    /// The works this one cites, as OpenAlex work URLs.
+    #[serde(deserialize_with = "null_default")]
+    referenced_works: Vec<String>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -131,14 +134,10 @@ pub(crate) fn to_record(
     fetched_at: Timestamp,
 ) -> serde_json::Result<SourceRecord> {
     let w = WireWork::deserialize(value)?;
-    Ok(SourceRecord::new(
-        ID,
-        w.ids(),
-        w.work(),
-        FieldSet::ALL,
-        raw,
-        fetched_at,
-    ))
+    Ok(
+        SourceRecord::new(ID, w.ids(), w.work(), FieldSet::ALL, raw, fetched_at)
+            .with_references(w.references()),
+    )
 }
 
 impl WireWork {
@@ -187,6 +186,23 @@ impl WireWork {
             }
         }
         ids
+    }
+
+    /// The works cited, or `None` when OpenAlex has none listed. OpenAlex
+    /// gives the same empty `referenced_works` (and a
+    /// `referenced_works_count` of 0) for works it has no reference data for
+    /// (books, and works whose publisher deposited no references) as for
+    /// works citing nothing, and no other field tells them apart (seen
+    /// 2026-11: the DSM-5's record, indexed from Crossref, has none). Works
+    /// citing nothing are rare, so an empty list reads as unknown.
+    fn references(&self) -> Option<Vec<WorkId>> {
+        let cited: Vec<WorkId> = self
+            .referenced_works
+            .iter()
+            .filter_map(|url| url.parse::<OpenAlexId>().ok())
+            .map(WorkId::from)
+            .collect();
+        (!cited.is_empty()).then_some(cited)
     }
 
     fn work(&self) -> Work {

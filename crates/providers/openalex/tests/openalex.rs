@@ -772,3 +772,60 @@ fn journals_in_trees_are_sources_kept_or_left_out() {
     );
     assert_eq!(resp.usage.unwrap().cost, Some(0.003));
 }
+
+#[test]
+fn records_carry_the_works_they_cite() {
+    let (oa, _) = provider([recorded("work_by_doi")]);
+    let resp = block_on(oa.lookup(&[id("10.1038/nature14539")], FieldSet::DEFAULT)).unwrap();
+    let record = resp.value[0].record.as_ref().unwrap();
+    let cited = record.references.as_ref().unwrap();
+    // As `referenced_works_count` says, each as an OpenAlex work id.
+    assert_eq!(cited.len(), 62);
+    assert!(
+        cited
+            .iter()
+            .all(|w| w.to_string().starts_with("openalex:W"))
+    );
+}
+
+/// OpenAlex lists no references for works it has no reference data for
+/// (here, a book indexed from Crossref): unknown, not "cites nothing".
+#[test]
+fn works_without_listed_references_have_unknown_references() {
+    let (oa, _) = provider([recorded("work_no_references")]);
+    let doi = id("10.1176/appi.books.9780890425596");
+    let resp = block_on(oa.lookup(&[doi], FieldSet::DEFAULT)).unwrap();
+    let record = resp.value[0].record.as_ref().unwrap();
+    assert!(record.raw.body.contains(r#""referenced_works":[]"#));
+    assert_eq!(record.references, None);
+}
+
+/// The check of a hundred works for retractions: an id filter with
+/// `is_retracted:true`, answering only the retracted ones ($0.0001).
+#[test]
+fn retracted_works_among_ids_come_from_one_filter() {
+    let (oa, http) = provider([recorded("works_retracted_batch")]);
+    let mut q = SearchQuery::new("");
+    q.page.limit = 100;
+    let filter = "openalex:W2158048826|W2919115771|W3010930696,is_retracted:true";
+    q.extra.insert("filter".into(), filter.into());
+    let resp = block_on(oa.search(&q)).unwrap();
+    assert_eq!(
+        query(&http, 0),
+        pairs([("filter", filter), ("per-page", "100"), ("cursor", "*")])
+    );
+    let found: Vec<String> = resp
+        .value
+        .hits
+        .iter()
+        .map(|h| h.record.ids[0].to_string())
+        .collect();
+    assert_eq!(found, ["openalex:W2158048826", "openalex:W3010930696"]);
+    assert!(
+        resp.value
+            .hits
+            .iter()
+            .all(|h| h.record.work.retraction().is_some())
+    );
+    assert_eq!(resp.usage.unwrap().cost, Some(0.0001));
+}

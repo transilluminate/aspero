@@ -419,7 +419,18 @@ impl Lookup {
             }
             InputLookup::Looked(looked) => looked,
         };
-        let result: &LookupResult = &looked.result;
+        let mut lookup = Lookup::from_result(input, &looked.result);
+        if let (Some(work), Some(found)) = (&mut lookup.work, &looked.abstract_text) {
+            work.abstract_text = found.as_ref().map(|a| a.text.clone());
+        }
+        lookup.with_punctuation = looked.with_punctuation;
+        lookup.latest = looked.latest.as_ref().map(Work::from_record);
+        lookup.disagreements = looked.disagreements.iter().map(Into::into).collect();
+        lookup
+    }
+
+    /// One identifier's lookup, without extras.
+    pub(crate) fn from_result(input: &str, result: &LookupResult) -> Self {
         let status = match Status::of(result) {
             Status::Found => LookupStatus::Found,
             Status::Unsupported => LookupStatus::Unsupported,
@@ -445,10 +456,7 @@ impl Lookup {
                 }
             })
             .collect();
-        let mut work = result.record.as_ref().map(Work::from_record);
-        if let (Some(work), Some(found)) = (&mut work, &looked.abstract_text) {
-            work.abstract_text = found.as_ref().map(|a| a.text.clone());
-        }
+        let work = result.record.as_ref().map(Work::from_record);
         Lookup {
             input: input.to_owned(),
             id: Some(result.id.to_string()),
@@ -457,9 +465,9 @@ impl Lookup {
             freshness,
             attempts,
             error: result.unsupported(),
-            with_punctuation: looked.with_punctuation,
-            latest: looked.latest.as_ref().map(Work::from_record),
-            disagreements: looked.disagreements.iter().map(Into::into).collect(),
+            with_punctuation: false,
+            latest: None,
+            disagreements: Vec::new(),
         }
     }
 }
@@ -1872,6 +1880,419 @@ pub struct Identification {
     pub verification: Verification,
 }
 
+// Citation links.
+
+/// Whether a work's references are known.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Enum)]
+pub enum Coverage {
+    /// OpenAlex lists the work's references.
+    Known,
+    /// OpenAlex has no reference data for it (books, older work): it may
+    /// cite anything.
+    Unknown,
+}
+
+impl From<engine::Coverage> for Coverage {
+    fn from(c: engine::Coverage) -> Self {
+        match c {
+            engine::Coverage::Known => Coverage::Known,
+            engine::Coverage::Unknown => Coverage::Unknown,
+            _ => Coverage::Unknown,
+        }
+    }
+}
+
+/// A page of a work's references.
+#[derive(Debug, Clone, uniffi::Record)]
+pub struct ReferencesPage {
+    /// As given.
+    pub input: String,
+    /// The work's OpenAlex id (`openalex:W…`).
+    pub id: Option<String>,
+    /// The work, when it was looked up (not when its references were
+    /// cached).
+    pub work: Option<Work>,
+    pub coverage: Coverage,
+    /// How many works it cites; none when unknown.
+    pub total: Option<u64>,
+    /// This page, in OpenAlex's order (by id), each looked up.
+    pub references: Vec<Lookup>,
+    /// The cursor for the next page; none on the last.
+    pub next_cursor: Option<String>,
+    /// Why there's no page: the work couldn't be resolved.
+    pub failure: Option<Failure>,
+    pub usage: Vec<ProviderUsage>,
+}
+
+impl ReferencesPage {
+    pub(crate) fn new(
+        input: &str,
+        result: Result<engine::ReferencesPage, engine::EngineError>,
+    ) -> Self {
+        match result {
+            Err(e) => ReferencesPage {
+                input: input.to_owned(),
+                id: None,
+                work: None,
+                coverage: Coverage::Unknown,
+                total: None,
+                references: Vec::new(),
+                next_cursor: None,
+                failure: Some(Failure::from(&e)),
+                usage: Vec::new(),
+            },
+            Ok(page) => ReferencesPage {
+                input: input.to_owned(),
+                id: Some(page.work.to_string()),
+                work: page.record.as_ref().map(Work::from_record),
+                coverage: page.coverage.into(),
+                total: page.total.map(|t| t as u64),
+                references: page
+                    .references
+                    .iter()
+                    .map(|r| Lookup::from_result(&r.id.to_string(), r))
+                    .collect(),
+                next_cursor: page.next_cursor.map(|c| c.0),
+                failure: None,
+                usage: usage(&page.usage),
+            },
+        }
+    }
+}
+
+/// An analysis of a set of works.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Enum)]
+pub enum AnalysisKind {
+    /// Which seed cites which retracted or withdrawn work.
+    RetractedReferences,
+    /// Seeds linked to no other seed.
+    OddOneOut,
+    /// The best `limit` works several seeds cite that the set lacks.
+    ProbablyMissing { limit: u32 },
+    /// Works around the set: not built yet (listed in `notYet`).
+    Related,
+}
+
+impl From<AnalysisKind> for engine::AnalysisKind {
+    fn from(k: AnalysisKind) -> Self {
+        match k {
+            AnalysisKind::RetractedReferences => engine::AnalysisKind::RetractedReferences,
+            AnalysisKind::OddOneOut => engine::AnalysisKind::OddOneOut,
+            AnalysisKind::ProbablyMissing { limit } => {
+                engine::AnalysisKind::ProbablyMissing { limit }
+            }
+            AnalysisKind::Related => engine::AnalysisKind::Related,
+        }
+    }
+}
+
+impl From<engine::AnalysisKind> for AnalysisKind {
+    fn from(k: engine::AnalysisKind) -> Self {
+        match k {
+            engine::AnalysisKind::RetractedReferences => AnalysisKind::RetractedReferences,
+            engine::AnalysisKind::OddOneOut => AnalysisKind::OddOneOut,
+            engine::AnalysisKind::ProbablyMissing { limit } => {
+                AnalysisKind::ProbablyMissing { limit }
+            }
+            engine::AnalysisKind::Related => AnalysisKind::Related,
+            _ => AnalysisKind::Related,
+        }
+    }
+}
+
+/// Why a seed has no OpenAlex work.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Enum)]
+pub enum SeedProblem {
+    /// Not an identifier.
+    InvalidId,
+    /// OpenAlex can't look up this kind of identifier (an ISBN), and no
+    /// record found by it has a DOI or PMID it can.
+    UnsupportedId,
+    NotFound,
+    /// The lookup failed (asked once; seeds aren't retried).
+    ProviderFailed,
+    /// Not looked up: the budget ran out first.
+    OverBudget,
+}
+
+impl From<engine::SeedProblem> for SeedProblem {
+    fn from(p: engine::SeedProblem) -> Self {
+        match p {
+            engine::SeedProblem::InvalidId => SeedProblem::InvalidId,
+            engine::SeedProblem::UnsupportedId => SeedProblem::UnsupportedId,
+            engine::SeedProblem::NotFound => SeedProblem::NotFound,
+            engine::SeedProblem::ProviderFailed => SeedProblem::ProviderFailed,
+            engine::SeedProblem::OverBudget => SeedProblem::OverBudget,
+            _ => SeedProblem::ProviderFailed,
+        }
+    }
+}
+
+/// One work of the set.
+#[derive(Debug, Clone, uniffi::Record)]
+pub struct Seed {
+    /// Its place among the seeds given; findings name seeds by it.
+    pub index: u32,
+    /// As given.
+    pub input: String,
+    /// Its OpenAlex id, when resolved.
+    pub id: Option<String>,
+    pub work: Option<Work>,
+    /// For resolved seeds: whether its references are known.
+    pub coverage: Option<Coverage>,
+    /// How many works it cites, when known.
+    pub references: Option<u64>,
+    /// Why it isn't resolved.
+    pub problem: Option<SeedProblem>,
+    /// The problem in English.
+    pub message: Option<String>,
+    /// The earlier seed that is the same work (a preprint and its
+    /// published version): the two count as one.
+    pub same_as: Option<u32>,
+}
+
+impl Seed {
+    fn new(index: usize, s: &engine::Seed) -> Self {
+        Seed {
+            index: index as u32,
+            input: s.input.clone(),
+            id: s.work().map(ToString::to_string),
+            work: s.record.as_ref().map(Work::from_record),
+            coverage: s.coverage().map(Into::into),
+            references: s.references().map(|r| r.len() as u64),
+            problem: s.problem.map(Into::into),
+            message: s.message.clone(),
+            same_as: s.same_as.map(|i| i as u32),
+        }
+    }
+}
+
+/// What stopped part of an analysis.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Enum)]
+pub enum IncompleteKind {
+    /// A fixed cap (sampling).
+    Capped,
+    /// The budget ran out.
+    Budget,
+    ProviderFailed,
+}
+
+impl From<engine::IncompleteKind> for IncompleteKind {
+    fn from(k: engine::IncompleteKind) -> Self {
+        match k {
+            engine::IncompleteKind::Capped => IncompleteKind::Capped,
+            engine::IncompleteKind::Budget => IncompleteKind::Budget,
+            engine::IncompleteKind::ProviderFailed => IncompleteKind::ProviderFailed,
+            _ => IncompleteKind::ProviderFailed,
+        }
+    }
+}
+
+/// How far a stopped step got: `done` of `total` (seeds looked up,
+/// references checked, works looked up), to word as "checked 1,200 of
+/// 4,300".
+#[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Record)]
+pub struct Incomplete {
+    pub kind: IncompleteKind,
+    pub done: u64,
+    pub total: u64,
+}
+
+impl From<&engine::Incomplete> for Incomplete {
+    fn from(i: &engine::Incomplete) -> Self {
+        Incomplete {
+            kind: i.kind.into(),
+            done: i.done,
+            total: i.total,
+        }
+    }
+}
+
+/// A seed citing a retracted or withdrawn work.
+#[derive(Debug, Clone, uniffi::Record)]
+pub struct RetractedReference {
+    pub seed: u32,
+    pub cites: Work,
+    /// Who says so: `openalex`, or a cached notice's source (`crossref`,
+    /// `retraction-watch`, `publisher`).
+    pub source: String,
+}
+
+#[derive(Debug, Clone, uniffi::Record)]
+pub struct RetractedReferences {
+    pub items: Vec<RetractedReference>,
+    /// What stopped the check, if anything.
+    pub incomplete: Option<Incomplete>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Enum)]
+pub enum OddReason {
+    /// It cites no other seed, none cites it, and it shares no
+    /// references with any.
+    NoLinks,
+    /// Its references are unknown and no other seed cites it.
+    NoReferenceData,
+}
+
+impl From<engine::OddReason> for OddReason {
+    fn from(r: engine::OddReason) -> Self {
+        match r {
+            engine::OddReason::NoLinks => OddReason::NoLinks,
+            engine::OddReason::NoReferenceData => OddReason::NoReferenceData,
+            _ => OddReason::NoReferenceData,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Record)]
+pub struct OddOne {
+    pub seed: u32,
+    pub reason: OddReason,
+}
+
+#[derive(Debug, Clone, uniffi::Record)]
+pub struct OddOnesOut {
+    pub items: Vec<OddOne>,
+    pub incomplete: Option<Incomplete>,
+}
+
+/// A work several seeds cite that the set lacks.
+#[derive(Debug, Clone, uniffi::Record)]
+pub struct MissingWork {
+    /// Its OpenAlex id.
+    pub id: String,
+    /// Every OpenAlex id merged into it (preprint and published versions).
+    pub ids: Vec<String>,
+    /// When looked up.
+    pub work: Option<Work>,
+    /// The seeds citing it, one per work of the set.
+    pub cited_by: Vec<u32>,
+    pub count: u32,
+}
+
+#[derive(Debug, Clone, uniffi::Record)]
+pub struct ProbablyMissing {
+    pub items: Vec<MissingWork>,
+    pub incomplete: Option<Incomplete>,
+}
+
+/// What an analysis would cost.
+#[derive(Debug, Clone, Copy, PartialEq, uniffi::Record)]
+pub struct Estimate {
+    /// Paid requests.
+    pub requests: u64,
+    pub usd: f64,
+    /// Whether the counts are known; otherwise a floor.
+    pub exact: bool,
+}
+
+/// Analyses of a set of works.
+#[derive(Debug, Clone, uniffi::Record)]
+pub struct Analysis {
+    /// One per seed given, in order.
+    pub seeds: Vec<Seed>,
+    /// Works of the set (seeds merged) with known references: what "cited
+    /// by k of n" counts out of.
+    pub with_references: u32,
+    pub retracted_references: Option<RetractedReferences>,
+    pub odd_one_out: Option<OddOnesOut>,
+    pub probably_missing: Option<ProbablyMissing>,
+    /// Kinds asked for that aren't built yet.
+    pub not_yet: Vec<AnalysisKind>,
+    /// With `estimateOnly`: the cost of running it, in place of findings.
+    pub estimate: Option<Estimate>,
+    /// Every seed settled and every analysis run to the end.
+    pub complete: bool,
+    /// Resolving the seeds stopped early.
+    pub incomplete: Option<Incomplete>,
+    /// Why there's no analysis at all (no OpenAlex).
+    pub failure: Option<Failure>,
+    pub usage: Vec<ProviderUsage>,
+}
+
+impl Analysis {
+    pub(crate) fn new(result: Result<engine::Analysis, engine::EngineError>) -> Self {
+        let a = match result {
+            Ok(a) => a,
+            Err(e) => {
+                return Analysis {
+                    seeds: Vec::new(),
+                    with_references: 0,
+                    retracted_references: None,
+                    odd_one_out: None,
+                    probably_missing: None,
+                    not_yet: Vec::new(),
+                    estimate: None,
+                    complete: false,
+                    incomplete: None,
+                    failure: Some(Failure::from(&e)),
+                    usage: Vec::new(),
+                };
+            }
+        };
+        let incomplete = |i: Option<engine::Incomplete>| i.as_ref().map(Incomplete::from);
+        Analysis {
+            seeds: a
+                .seeds
+                .iter()
+                .enumerate()
+                .map(|(i, s)| Seed::new(i, s))
+                .collect(),
+            with_references: a.with_references as u32,
+            retracted_references: a
+                .retracted_references
+                .as_ref()
+                .map(|s| RetractedReferences {
+                    items: s
+                        .items
+                        .iter()
+                        .map(|r| RetractedReference {
+                            seed: r.seed as u32,
+                            cites: Work::from_record(&r.cites),
+                            source: r.source.clone(),
+                        })
+                        .collect(),
+                    incomplete: incomplete(s.incomplete),
+                }),
+            odd_one_out: a.odd_one_out.as_ref().map(|s| OddOnesOut {
+                items: s
+                    .items
+                    .iter()
+                    .map(|o| OddOne {
+                        seed: o.seed as u32,
+                        reason: o.reason.into(),
+                    })
+                    .collect(),
+                incomplete: incomplete(s.incomplete),
+            }),
+            probably_missing: a.probably_missing.as_ref().map(|s| ProbablyMissing {
+                items: s
+                    .items
+                    .iter()
+                    .map(|m| MissingWork {
+                        id: m.id.to_string(),
+                        ids: m.ids.iter().map(ToString::to_string).collect(),
+                        work: m.record.as_ref().map(Work::from_record),
+                        cited_by: m.cited_by.iter().map(|&i| i as u32).collect(),
+                        count: m.count() as u32,
+                    })
+                    .collect(),
+                incomplete: incomplete(s.incomplete),
+            }),
+            not_yet: a.not_yet.iter().map(|&k| k.into()).collect(),
+            estimate: a.estimate.map(|e| Estimate {
+                requests: e.requests,
+                usd: e.usd,
+                exact: e.exact,
+            }),
+            complete: a.complete(),
+            incomplete: incomplete(a.incomplete),
+            failure: None,
+            usage: usage(&a.usage),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use aspero_core::{Claim, FieldSet, ProviderId, Raw, Work as CoreWork};
@@ -1949,6 +2370,24 @@ mod tests {
         }
         for b in BooleanSupport::ALL {
             assert_eq!(name(SearchBoolean::from_core(*b)), b.as_str());
+        }
+        // Citation links.
+        for k in engine::AnalysisKind::ALL {
+            let kind = AnalysisKind::from(*k);
+            assert_eq!(name(kind), k.as_str());
+            assert_eq!(engine::AnalysisKind::from(kind), *k);
+        }
+        for c in engine::Coverage::ALL {
+            assert_eq!(name(Coverage::from(*c)), c.as_str());
+        }
+        for p in engine::SeedProblem::ALL {
+            assert_eq!(name(SeedProblem::from(*p)), p.as_str());
+        }
+        for k in engine::IncompleteKind::ALL {
+            assert_eq!(name(IncompleteKind::from(*k)), k.as_str());
+        }
+        for r in engine::OddReason::ALL {
+            assert_eq!(name(OddReason::from(*r)), r.as_str());
         }
 
         // `IdElsewhere` cites a candidate.

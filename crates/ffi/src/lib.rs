@@ -25,11 +25,11 @@ use tokio::task::JoinHandle;
 pub mod records;
 
 use records::{
-    Bibliography, Budget, CacheStats, CitationStyle, CiteFormat, CitedEntry, Claim as ClaimRecord,
-    DocxReferences, ExportFormat, Identification, KeyCheck, Line, LineReference, Lookup, Lookups,
-    Mention, ProviderUsage, ReadError, Reference, SearchNode, SearchRequest, SearchResults,
-    SourceSearch, StyleError, StyleSource, Unavailable, Utf16Offsets, Verification, Verifications,
-    Work,
+    Analysis, AnalysisKind, Bibliography, Budget, CacheStats, CitationStyle, CiteFormat,
+    CitedEntry, Claim as ClaimRecord, DocxReferences, ExportFormat, Identification, KeyCheck, Line,
+    LineReference, Lookup, Lookups, Mention, ProviderUsage, ReadError, Reference, ReferencesPage,
+    SearchNode, SearchRequest, SearchResults, SourceSearch, StyleError, StyleSource, Unavailable,
+    Utf16Offsets, Verification, Verifications, Work,
 };
 
 uniffi::setup_scaffolding!();
@@ -301,6 +301,63 @@ impl Aspero {
                 query.extra = request.extra.into_iter().collect();
                 query.tree = request.query.map(Into::into);
                 SearchResults::new(engine.search(request.source.as_deref(), &query).await)
+            },
+            cancel,
+        )
+        .await
+    }
+
+    /// A page of the works `id` (any identifier `lookup` takes) cites: up
+    /// to `limit` from `cursor` (a previous page's `nextCursor`), each
+    /// looked up, in OpenAlex's order. `coverage` is `unknown` when
+    /// OpenAlex has no reference data for the work. A work that can't be
+    /// resolved gives a `failure`.
+    #[uniffi::method(default(cursor = None, cancel = None))]
+    pub async fn references(
+        &self,
+        id: String,
+        cursor: Option<String>,
+        limit: u32,
+        patience: Patience,
+        cancel: Option<Arc<CallToken>>,
+    ) -> Result<ReferencesPage, AsperoError> {
+        let engine = self.engine(patience);
+        self.run(
+            async move {
+                let cursor = cursor.map(Cursor);
+                let page = engine.references(&id, cursor.as_ref(), limit).await;
+                ReferencesPage::new(&id, page)
+            },
+            cancel,
+        )
+        .await
+    }
+
+    /// Analyses of the set of works `seeds` names (identifiers as
+    /// written): retracted references, odd ones out, probably missing
+    /// works. Each seed resolves cheaply (asked once) or says why not;
+    /// paid requests stop before `budget_usd` would be passed, and what
+    /// stopped says how far it got. With `estimate_only`, nothing paid is
+    /// asked: `estimate` says what a run would cost.
+    #[uniffi::method(default(budget_usd = None, cancel = None))]
+    pub async fn analyse(
+        &self,
+        seeds: Vec<String>,
+        kinds: Vec<AnalysisKind>,
+        budget_usd: Option<f64>,
+        estimate_only: bool,
+        patience: Patience,
+        cancel: Option<Arc<CallToken>>,
+    ) -> Result<Analysis, AsperoError> {
+        let engine = self.engine(patience);
+        self.run(
+            async move {
+                let kinds: Vec<aspero_engine::AnalysisKind> =
+                    kinds.into_iter().map(Into::into).collect();
+                let analysis = engine
+                    .analyse(&seeds, &kinds, budget_usd, estimate_only)
+                    .await;
+                Analysis::new(analysis)
             },
             cancel,
         )

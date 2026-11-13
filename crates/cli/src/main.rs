@@ -176,6 +176,16 @@ async fn run(cli: Cli, out: Out) -> Result<Exit, Failure> {
             fail_on,
             limit,
         } => cmd::check::run(&engine, path, fail_on, limit, out).await,
+        Command::References { id, limit, cursor } => {
+            cmd::graph::references(&engine, id, limit, cursor, out).await
+        }
+        Command::Analyse {
+            inputs,
+            kinds,
+            limit,
+            budget,
+            estimate,
+        } => cmd::graph::analyse(&engine, inputs, kinds, limit, budget, estimate, out).await,
         Command::Cache { .. } | Command::Scan { .. } | Command::Styles { .. } => {
             unreachable!("handled above")
         }

@@ -22,7 +22,7 @@ pub struct Scripted {
 impl Scripted {
     pub fn new(id: &'static str, works: Vec<SourceRecord>) -> Self {
         let mut caps = Capabilities::default();
-        caps.lookup_kinds = vec![IdKind::Doi, IdKind::Arxiv];
+        caps.lookup_kinds = vec![IdKind::Doi, IdKind::Arxiv, IdKind::OpenAlex];
         caps.max_batch = 10;
         caps.fields = FieldSet::ALL;
         caps.search = true;
@@ -74,6 +74,22 @@ impl Provider for Scripted {
     }
 
     async fn search(&self, query: &SearchQuery) -> Result<Response<Page>> {
+        // OpenAlex's retraction check: `openalex:W1|W2,is_retracted:true`.
+        if let Some(filter) = query.extra.get("filter") {
+            let ids: Vec<WorkId> = filter
+                .trim_start_matches("openalex:")
+                .trim_end_matches(",is_retracted:true")
+                .split('|')
+                .filter_map(|w| w.parse().ok())
+                .collect();
+            let hits = self
+                .works
+                .iter()
+                .filter(|w| w.ids.iter().any(|i| ids.contains(i)) && w.work.retraction().is_some())
+                .map(|w| Hit::new(w.clone(), None))
+                .collect();
+            return Ok(costing(Page::new(hits, None, None), 0.5));
+        }
         let title = |w: &SourceRecord| w.work.title.as_deref().map(str::to_lowercase);
         let hits = self
             .works

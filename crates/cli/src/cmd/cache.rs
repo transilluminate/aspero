@@ -32,12 +32,14 @@ pub fn run(path: PathBuf, action: CacheAction, out: Out) -> Result<Exit, Failure
     let bytes = std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
     match out.format {
         Format::Text | Format::Table => println!(
-            "{}\n  {} records ({} identifiers), {} not-found answers, {} searches, {:.1} MB",
+            "{}\n  {} records ({} identifiers), {} not-found answers, {} searches, \
+             {} works' citation links, {:.1} MB",
             path.display(),
             stats.records,
             stats.identifiers,
             stats.misses,
             stats.searches,
+            stats.edges,
             bytes as f64 / 1_048_576.0
         ),
         _ => print(&json!({
@@ -46,6 +48,7 @@ pub fn run(path: PathBuf, action: CacheAction, out: Out) -> Result<Exit, Failure
             "identifiers": stats.identifiers,
             "misses": stats.misses,
             "searches": stats.searches,
+            "edges": stats.edges,
             "bytes": bytes,
         })),
     }

@@ -1,0 +1,124 @@
+{
+  "complete": true,
+  "estimate": {
+    "exact": true,
+    "requests": 2,
+    "usd": 0.0002
+  },
+  "not_yet": [
+    "related"
+  ],
+  "seeds": [
+    {
+      "id": "openalex:W1",
+      "index": 0,
+      "input": "10.1234/a",
+      "references": 3,
+      "status": "resolved",
+      "work": {
+        "authors": [
+          {
+            "name": "Ann Smith"
+          },
+          {
+            "name": "Bo Chen"
+          }
+        ],
+        "canonical": "doi:10.1234/a",
+        "ids": [
+          "openalex:W1",
+          "doi:10.1234/a"
+        ],
+        "issued": "2020",
+        "source": "openalex",
+        "title": "Fluids in sepsis"
+      }
+    },
+    {
+      "id": "openalex:W2",
+      "index": 1,
+      "input": "10.1234/b",
+      "references": 3,
+      "status": "resolved",
+      "work": {
+        "authors": [
+          {
+            "name": "Bo Chen"
+          }
+        ],
+        "canonical": "doi:10.1234/b",
+        "ids": [
+          "openalex:W2",
+          "doi:10.1234/b"
+        ],
+        "issued": "2021",
+        "source": "openalex",
+        "title": "Vasopressors in sepsis"
+      }
+    },
+    {
+      "id": "openalex:W3",
+      "index": 2,
+      "input": "10.1234/book",
+      "references": "unknown",
+      "status": "resolved",
+      "work": {
+        "authors": [
+          {
+            "name": "Cy Dee"
+          }
+        ],
+        "canonical": "doi:10.1234/book",
+        "ids": [
+          "openalex:W3",
+          "doi:10.1234/book"
+        ],
+        "issued": "2001",
+        "source": "openalex",
+        "title": "A book on sepsis"
+      }
+    },
+    {
+      "id": "openalex:W4",
+      "index": 3,
+      "input": "10.1234/knitting",
+      "references": 1,
+      "status": "resolved",
+      "work": {
+        "authors": [
+          {
+            "name": "Di Wool"
+          }
+        ],
+        "canonical": "doi:10.1234/knitting",
+        "ids": [
+          "openalex:W4",
+          "doi:10.1234/knitting"
+        ],
+        "issued": "2022",
+        "source": "openalex",
+        "title": "Knitting"
+      }
+    },
+    {
+      "error": "OpenAlex has no record of doi:10.1234/missing",
+      "index": 4,
+      "input": "10.1234/missing",
+      "reason": "not_found",
+      "status": "unresolved"
+    },
+    {
+      "error": "no enabled provider looks up isbn identifiers",
+      "index": 5,
+      "input": "isbn:9780262033848",
+      "reason": "unsupported_id",
+      "status": "unresolved"
+    }
+  ],
+  "usage": {
+    "openalex": {
+      "cost": 0.3125
+    }
+  },
+  "with_references": 3
+}

@@ -1,0 +1,68 @@
+{
+  "coverage": "known",
+  "id": "openalex:W1",
+  "input": "10.1234/a",
+  "next_cursor": "2",
+  "references": [
+    {
+      "id": "openalex:W10",
+      "status": "found",
+      "work": {
+        "authors": [
+          {
+            "name": "Ed Rivers"
+          }
+        ],
+        "canonical": "openalex:W10",
+        "ids": [
+          "openalex:W10"
+        ],
+        "issued": "2001",
+        "source": "openalex",
+        "title": "Early goal-directed therapy"
+      }
+    },
+    {
+      "id": "openalex:W11",
+      "status": "found",
+      "work": {
+        "authors": [
+          {
+            "name": "Fay Dell"
+          }
+        ],
+        "canonical": "openalex:W11",
+        "ids": [
+          "openalex:W11"
+        ],
+        "issued": "2016",
+        "source": "openalex",
+        "title": "Surviving sepsis"
+      }
+    }
+  ],
+  "total": 3,
+  "usage": {
+    "openalex": {
+      "cost": 0.1875
+    }
+  },
+  "work": {
+    "authors": [
+      {
+        "name": "Ann Smith"
+      },
+      {
+        "name": "Bo Chen"
+      }
+    ],
+    "canonical": "doi:10.1234/a",
+    "ids": [
+      "openalex:W1",
+      "doi:10.1234/a"
+    ],
+    "issued": "2020",
+    "source": "openalex",
+    "title": "Fluids in sepsis"
+  }
+}

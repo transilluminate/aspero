@@ -1,0 +1,3 @@
+openalex:W1 "Fluids in sepsis": cites 3 works
+  openalex:W10  "Early goal-directed therapy" — Rivers 2001
+  openalex:W11  "Surviving sepsis" — Dell 2016

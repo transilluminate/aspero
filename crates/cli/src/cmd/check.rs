@@ -83,7 +83,7 @@ pub async fn run(
 
 /// A bibliography file's entries, or a Word document's citations (a zip
 /// file, as .docx files are).
-fn entries(path: &str, source: &[u8]) -> Result<Vec<BibEntry>, Failure> {
+pub fn entries(path: &str, source: &[u8]) -> Result<Vec<BibEntry>, Failure> {
     if source.starts_with(b"PK") {
         let read = aspero_bib::docx::read_docx(source)
             .map_err(|_| Failure::usage(format!("{path}: not a .docx file")))?;

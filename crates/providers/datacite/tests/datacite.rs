@@ -111,6 +111,13 @@ fn search_ranks_by_relevance_with_page_number_paging() {
         titles.iter().all(|t| t == "attention is all you need"),
         "{titles:?}"
     );
+    // DataCite's 0 is "no citations it tracks", so none.
+    let counts: Vec<Option<u64>> = page
+        .hits
+        .iter()
+        .map(|h| h.record.work.cited_by_count)
+        .collect();
+    assert_eq!(counts, [None, None, Some(69)]);
 }
 
 #[test]

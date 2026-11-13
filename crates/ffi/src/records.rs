@@ -64,7 +64,8 @@ pub struct Work {
     pub notice_for: Vec<NoticeFor>,
     pub open_access: Option<OpenAccess>,
     /// Works citing this one, as the source counts them (counts differ
-    /// between sources).
+    /// between sources). DataCite counts only the citations it tracks, so
+    /// gives none rather than 0.
     #[uniffi(default = None)]
     pub cited_by_count: Option<u64>,
     pub fetched_at: SystemTime,

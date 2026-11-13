@@ -200,7 +200,9 @@ impl Attributes {
             .map(|d| tidy_abstract(&strip_markup(d)))
             .filter(|d| !d.is_empty());
         work.url = self.url.clone();
-        work.cited_by_count = self.citation_count;
+        // DataCite counts only citations it tracks (between DOIs it
+        // registers), so its 0 means "none seen here", not "never cited".
+        work.cited_by_count = self.citation_count.filter(|&n| n > 0);
         work
     }
 }

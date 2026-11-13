@@ -36,6 +36,14 @@ impl Engine {
         query: &SearchQuery,
     ) -> Result<SearchReport, EngineError> {
         let citation = query.mode == SearchMode::Citation;
+        // Keywords, a field, or (verifying) a place: something to find.
+        let fields = [Filter::Author, Filter::Title, Filter::Container];
+        if query.text.trim().is_empty()
+            && query.place.is_none()
+            && !fields.iter().any(|f| query.field(*f).is_some())
+        {
+            return Err(EngineError::NothingToSearch);
+        }
         let entry = match source {
             Some(name) => self
                 .entries
@@ -87,6 +95,18 @@ impl Engine {
             }));
         }
         let mut sent = query.clone();
+        // Newest first, records dated ahead (deposits, issues printed early,
+        // typos like 2115) would lead: unless the caller says otherwise,
+        // newest means up to this year.
+        if sent.sort == Sort::Newest
+            && caps.search_filters.contains(&Filter::Years)
+            && sent.years.is_none_or(|y| y.to.is_none())
+        {
+            let year = (self.clock)().to_zoned(jiff::tz::TimeZone::UTC).year();
+            let mut years = sent.years.unwrap_or_default();
+            years.to = Some(year);
+            sent.years = Some(years);
+        }
         for filter in &ignored_filters {
             match filter {
                 Filter::Years => sent.years = None,

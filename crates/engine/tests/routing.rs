@@ -435,3 +435,52 @@ async fn search_errors_name_the_provider() {
         EngineError::NoCapableProvider("citation search")
     ));
 }
+
+#[tokio::test(start_paused = true)]
+async fn a_search_for_nothing_is_refused() {
+    let mock = Arc::new(Mock::new("any", &[]).searchable(false, &[]));
+    let engine = engine(vec![(mock.clone(), 10)]);
+    let r = engine.search(None, &SearchQuery::new("  ")).await;
+    assert!(matches!(r, Err(EngineError::NothingToSearch)), "{r:?}");
+    assert!(mock.searches.lock().unwrap().is_empty());
+}
+
+#[tokio::test(start_paused = true)]
+async fn newest_first_stops_at_this_year_unless_told_otherwise() {
+    let mut mock = Mock::new("dated", &[]).searchable(false, &[Filter::Years]);
+    mock.caps.sorts = vec![Sort::Newest];
+    let mock = Arc::new(mock);
+    let engine = Engine::builder()
+        .provider(mock.clone(), policy(), 10)
+        .jitter(|| 1.0)
+        .clock(|| "2026-11-13T12:00:00Z".parse().unwrap())
+        .build();
+
+    let mut q = SearchQuery::new("deep learning");
+    q.sort = Sort::Newest;
+    engine.search(None, &q).await.unwrap();
+    q.years = Some(YearRange {
+        from: Some(2015),
+        to: None,
+    });
+    engine.search(None, &q).await.unwrap();
+    q.years = Some(YearRange {
+        from: None,
+        to: Some(2030),
+    });
+    engine.search(None, &q).await.unwrap();
+
+    let sent = mock.searches.lock().unwrap();
+    let years: Vec<_> = sent
+        .iter()
+        .map(|q| q.years.map(|y| (y.from, y.to)))
+        .collect();
+    assert_eq!(
+        years,
+        [
+            Some((None, Some(2026))),
+            Some((Some(2015), Some(2026))),
+            Some((None, Some(2030))),
+        ]
+    );
+}

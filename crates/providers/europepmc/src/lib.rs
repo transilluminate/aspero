@@ -76,6 +76,7 @@ impl EuropePmc {
             Filter::NotRetracted,
             Filter::Language,
             Filter::HasAbstract,
+            Filter::Since,
         ];
         capabilities.sorts = vec![Sort::Relevance, Sort::Newest, Sort::MostCited];
         // Lucene: AND, OR and NOT across fields, nested.
@@ -510,6 +511,16 @@ impl Provider for EuropePmc {
         }
         if let Some(journal) = query.field(Filter::Container) {
             clauses.push(format!("JOURNAL:\"{}\"", escape_lucene(journal)));
+        }
+        // When Europe PMC first indexed the record (checked live
+        // 2026-11-13).
+        if let Some(since) = query.since {
+            clauses.push(format!("FIRST_IDATE:[{since} TO *]"));
+            // A tree's top-level any is bare `a OR b`: bracketed, the
+            // date bounds all of it.
+            if query.tree.is_some() {
+                clauses[0] = format!("({})", clauses[0]);
+            }
         }
         let cursor = query.page.cursor.as_ref().map_or("*", |c| c.0.as_str());
         let mut params = vec![

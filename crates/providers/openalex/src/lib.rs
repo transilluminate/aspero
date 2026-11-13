@@ -393,6 +393,9 @@ impl Provider for OpenAlex {
         if query.mode != SearchMode::Keywords {
             return Err(Error::Unsupported("OpenAlex has no citation matcher"));
         }
+        if query.since.is_some() {
+            return Err(Error::UnsupportedQuery(self.since_unsupported()));
+        }
         let mut filters = Vec::new();
         let (search, containers) = match &query.tree {
             Some(tree) => {
@@ -498,6 +501,13 @@ impl Provider for OpenAlex {
 
     fn express(&self, tree: &QueryNode) -> std::result::Result<(), String> {
         tree::translate(tree, &self.capabilities).map(|_| ())
+    }
+
+    /// `from_created_date` and `sort=created_date` are "daily sync", for
+    /// Member+ and Partner plans: a free key gets "Plan upgrade required"
+    /// (checked live 2026-11-13).
+    fn since_unsupported(&self) -> String {
+        "OpenAlex can't search by date added (it needs a paid plan)".into()
     }
 }
 

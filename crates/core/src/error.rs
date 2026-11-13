@@ -69,7 +69,9 @@ pub enum Error {
     #[error("unsupported: {0}")]
     Unsupported(&'static str),
 
-    /// The provider can't say this query tree; the reason is in English.
+    /// The provider can't say this query: its tree, or its date added
+    /// ([`SearchQuery::since`](crate::SearchQuery::since)). The reason is
+    /// in English.
     #[error("unsupported: {0}")]
     UnsupportedQuery(String),
 

@@ -84,6 +84,7 @@ impl Datacite {
             Filter::AuthorId,
             Filter::Language,
             Filter::HasAbstract,
+            Filter::Since,
         ];
         capabilities.sorts = vec![Sort::Relevance, Sort::MostCited];
         // Elasticsearch's query string: AND, OR and NOT across fields.
@@ -271,6 +272,16 @@ impl Provider for Datacite {
         }
         if let Some(title) = query.field(Filter::Title) {
             clauses.push(format!("titles.title:({})", escape_lucene(title)));
+        }
+        // When the DOI was registered with DataCite (checked live
+        // 2026-11-13).
+        if let Some(since) = query.since {
+            clauses.push(format!("created:[{since} TO *]"));
+            // A tree's top-level any is bare `a OR b`: bracketed, the
+            // date bounds all of it.
+            if query.tree.is_some() {
+                clauses[0] = format!("({})", clauses[0]);
+            }
         }
         let sort = match query.sort {
             Sort::Relevance => "relevance",

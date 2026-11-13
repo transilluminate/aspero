@@ -24,6 +24,18 @@ Added:
   `Analysis.related` (`RelatedWorks`, `RelatedWork`; defaulted to `nil`)
   for `AnalysisKind.related`, the best 20.
 - OpenAlex lists take `select`, and read up to 200 works a page.
+- Searches for only works added since a day, for watching a search
+  (#62): `aspero search --since 2026-11-01`, `SearchQuery::since`, and on
+  the FFI `SearchRequest.since` (`YYYY-MM-DD`; any other text fails as
+  `badRequest`). "Added" is when the source took the work, whenever it
+  was published: Crossref's first deposit (`from-created-date`), DataCite's
+  registration (`created`), Europe PMC's first indexing (`FIRST_IDATE`).
+  OpenAlex (it needs a paid plan) and Open Library can't, and fail
+  (`unsupported`) saying why, rather than ignoring it; without a source,
+  the first that can answers (Crossref). `Filter::Since` and
+  `SearchFilter.since` say which sources can, and `searchSupports` takes
+  an optional `since` to ask beforehand (`Engine::search_supports_since`).
+  A search's `total` already counts what's new.
 
 Changed:
 

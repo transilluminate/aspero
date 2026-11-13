@@ -87,6 +87,7 @@ impl Crossref {
             Filter::Keywords,
             Filter::AuthorId,
             Filter::HasAbstract,
+            Filter::Since,
         ];
         capabilities.sorts = vec![Sort::Relevance, Sort::Newest, Sort::MostCited];
         // Queries are bags of words, ANDed with filters: all of, only.
@@ -256,6 +257,12 @@ impl Provider for Crossref {
                 ))
             })?;
             filters.push(format!("type:{crossref}"));
+        }
+        // When the DOI was first deposited. `from-index-date` moves with
+        // every re-index, so it mostly finds old works (checked live
+        // 2026-11-13).
+        if let Some(since) = query.since {
+            filters.push(format!("from-created-date:{since}"));
         }
 
         let mut params: Vec<(&str, String)> = Vec::new();

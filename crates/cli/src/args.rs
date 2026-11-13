@@ -191,6 +191,12 @@ open_access, language, not_retracted, has_abstract) and relations (cites,
 cited_by, any identifier: OpenAlex only). A provider that can't say the
 tree fails and says why.
 
+--since keeps works the provider added on or after a day (Crossref: first
+deposited; DataCite: registered; Europe PMC: first indexed), however old,
+so a search run again finds what's new. Without --source, the first
+provider that can answers; OpenAlex (it needs a paid plan) and Open
+Library can't, and fail rather than ignore it.
+
 Examples:
   aspero search \"retrieval augmented generation\" --year 2020.. --limit 5
   aspero search transformer --source crossref --type article-journal
@@ -198,7 +204,8 @@ Examples:
   aspero search \"protein folding\" --oa --cursor <next_cursor from last page>
   aspero search --query '{\"all\": [{\"title\": \"alphafold\"}, {\"not_retracted\": true}]}'
   aspero search --source europepmc --query '{\"any\": [{\"title\": \"sepsis\"}, {\"abstract\": \"septic shock\", \"phrase\": true}]}'
-  aspero search --query '{\"all\": [{\"cites\": \"10.1038/nature14539\"}, {\"title\": \"survey\"}]}'")]
+  aspero search --query '{\"all\": [{\"cites\": \"10.1038/nature14539\"}, {\"title\": \"survey\"}]}'
+  aspero search sepsis --since 2026-11-01 --source europepmc")]
     Search {
         /// Keywords; may be left out when --author, --title, --container or
         /// --query is given.
@@ -623,6 +630,10 @@ pub struct SearchOptions {
     /// Order of the hits.
     #[arg(long, value_enum, default_value_t = SortBy::Relevance)]
     pub sort: SortBy,
+    /// Only works the provider added on or after this day, whenever
+    /// published: for watching a search (see below).
+    #[arg(long, value_name = "YYYY-MM-DD")]
+    pub since: Option<String>,
     /// Results per page.
     #[arg(long, default_value_t = 10)]
     pub limit: u32,

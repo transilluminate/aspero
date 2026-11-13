@@ -964,3 +964,22 @@ fn citing_works_come_lean_from_a_cites_filter() {
     assert!(page.hits.iter().all(|h| h.record.work.issued.is_some()));
     assert_eq!(resp.usage.unwrap().cost, Some(0.0001));
 }
+
+#[test]
+fn since_is_refused_without_asking() {
+    let (oa, http) = provider([]);
+    assert!(
+        !oa.capabilities()
+            .search_filters
+            .contains(&aspero_core::Filter::Since)
+    );
+    let reason = "OpenAlex can't search by date added (it needs a paid plan)";
+    assert_eq!(oa.since_unsupported(), reason);
+    let mut q = SearchQuery::new("sepsis");
+    q.since = Some(jiff::civil::date(2026, 11, 1));
+    match block_on(oa.search(&q)) {
+        Err(Error::UnsupportedQuery(r)) => assert_eq!(r, reason),
+        other => panic!("{other:?}"),
+    }
+    assert!(http.requests().is_empty());
+}

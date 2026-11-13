@@ -912,7 +912,8 @@ fn batches_find_works_by_dois_they_no_longer_carry() {
 
 /// The works citing any of a few works, as `related` reads them: a
 /// `cites:` filter, most cited first, 200 a page ($0.0001), each work only
-/// its id and references. Which of the two each cites is in its references.
+/// its id, year and references. Which of the two each cites is in its
+/// references.
 #[test]
 fn citing_works_come_lean_from_a_cites_filter() {
     let (oa, http) = provider([recorded("works_cites_page")]);
@@ -920,15 +921,17 @@ fn citing_works_come_lean_from_a_cites_filter() {
     q.page.limit = 500;
     let filter = "cites:W2293082134|W2568812702";
     q.extra.insert("filter".into(), filter.into());
-    q.extra
-        .insert("select".into(), "id,referenced_works".into());
+    q.extra.insert(
+        "select".into(),
+        "id,publication_year,referenced_works".into(),
+    );
     q.extra.insert("sort".into(), "cited_by_count:desc".into());
     let resp = block_on(oa.search(&q)).unwrap();
     // Capped at OpenAlex's 200 a page.
     assert_eq!(
         query(&http, 0),
         pairs([
-            ("select", "id,referenced_works"),
+            ("select", "id,publication_year,referenced_works"),
             ("sort", "cited_by_count:desc"),
             ("filter", filter),
             ("per-page", "200"),
@@ -955,8 +958,9 @@ fn citing_works_come_lean_from_a_cites_filter() {
         .collect();
     assert_eq!(citing.iter().filter(|(_, a, _)| *a).count(), 4);
     assert_eq!(citing.iter().filter(|(_, _, b)| *b).count(), 3);
-    // Only the id: a lean record.
+    // Only the id and year: a lean record.
     assert_eq!(citing[0].0, "openalex:W2952073233");
     assert!(page.hits.iter().all(|h| h.record.work.title.is_none()));
+    assert!(page.hits.iter().all(|h| h.record.work.issued.is_some()));
     assert_eq!(resp.usage.unwrap().cost, Some(0.0001));
 }

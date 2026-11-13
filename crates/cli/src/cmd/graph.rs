@@ -177,7 +177,10 @@ pub async fn analyse(
     match out.format {
         Format::Jsonl => print_line(&doc),
         Format::Table | Format::Text => {
-            print!("{}", analysis_text(&analysis, &doc));
+            let related = kinds
+                .iter()
+                .any(|k| matches!(k, AnalysisKind::Related { .. }));
+            print!("{}", analysis_text(&analysis, &doc, related));
             if let Some(text) = output::usage_text(&analysis.usage) {
                 eprintln!("{text}");
             }
@@ -260,8 +263,9 @@ fn stopped(i: &Incomplete, what: &str) -> String {
     )
 }
 
-/// The analysis as a readable report.
-fn analysis_text(a: &Analysis, doc: &Value) -> String {
+/// The analysis as a readable report; `related` when related works were
+/// asked for (an estimate of them is a ceiling).
+fn analysis_text(a: &Analysis, doc: &Value, related: bool) -> String {
     let label = |i: usize| {
         let seed = &doc["seeds"][i];
         seed["key"]
@@ -391,9 +395,22 @@ fn analysis_text(a: &Analysis, doc: &Value) -> String {
         out.push_str(&format!("\nSeeds{}", stopped(i, "looked up")));
     }
     if let Some(e) = &a.estimate {
-        let floor = if e.exact { "" } else { " at least" };
+        // Seeds not settled make it a floor; related works' coupling and
+        // lookups, a ceiling.
+        let settled = a.seeds.iter().all(|s| {
+            !matches!(
+                s.problem,
+                Some(SeedProblem::ProviderFailed | SeedProblem::OverBudget)
+            )
+        });
+        let bound = match (e.exact, settled, related) {
+            (true, ..) => "",
+            (false, false, false) => " at least",
+            (false, true, true) => " at most",
+            (false, ..) => " about",
+        };
         out.push_str(&format!(
-            "\nEstimate:{floor} {} paid requests, ${:.4}\n",
+            "\nEstimate:{bound} {} paid requests, ${:.4}\n",
             thousands(e.requests),
             e.usd
         ));
@@ -514,7 +531,7 @@ mod tests {
             "graph/analysis.json",
             &(serde_json::to_string_pretty(&json).unwrap() + "\n"),
         );
-        pinned("graph/analysis.txt", &analysis_text(&analysis, &json));
+        pinned("graph/analysis.txt", &analysis_text(&analysis, &json, true));
         // An ISBN that doesn't resolve is reported, not a failure.
         assert_eq!(exit_for(&analysis), Exit::Ok);
 

@@ -70,12 +70,12 @@ impl Alex {
     }
 
     /// A page of the works citing any of `cited` (`W1|W2`), as OpenAlex
-    /// answers `select=id,referenced_works`: lean works, most cited first
-    /// (ties by id), a cursor to the next page.
+    /// answers `select=id,publication_year,referenced_works`: lean works,
+    /// most cited first (ties by id), a cursor to the next page.
     fn citing(&self, cited: &str, query: &SearchQuery) -> Page {
         assert_eq!(
             query.extra.get("select").map(String::as_str),
-            Some("id,referenced_works")
+            Some("id,publication_year,referenced_works")
         );
         assert_eq!(
             query.extra.get("sort").map(String::as_str),
@@ -101,10 +101,12 @@ impl Alex {
         let hits = citing[start..end]
             .iter()
             .map(|w| {
+                let mut year = Work::default();
+                year.issued = w.work.issued.map(|d| PartialDate::from_year(d.year()));
                 let lean = SourceRecord::new(
                     OPENALEX,
                     vec![w.ids[0].clone()],
-                    Work::default(),
+                    year,
                     FieldSet::ALL,
                     Raw::json(&serde_json::Value::Null),
                     Timestamp::UNIX_EPOCH,
@@ -850,7 +852,8 @@ fn spent(a: &Analysis) -> f64 {
 /// cite, works citing the papers' shared references (W201, W202), and
 /// works around them: W60 (and W67, its preprint), W61 (whose own
 /// references overlap the set's), W64 (retracted), W65 (a version of W1)
-/// and W66 (carrying the DOI of a seed OpenAlex can't find).
+/// and W66 (carrying the DOI of a seed OpenAlex can't find). W107, dated
+/// before the paper it cites, has another work's references.
 fn around() -> Vec<SourceRecord> {
     let mut works = vec![
         work(
@@ -893,6 +896,13 @@ fn around() -> Vec<SourceRecord> {
         work(&["W104"], "C4", "A", 2021, Some(&["W2", "W61", "W64"])),
         work(&["W105"], "C5", "A", 2021, Some(&["W3", "W65", "W66"])),
         work(&["W106"], "C6", "A", 2021, Some(&["W1", "W67"])),
+        work(
+            &["W107"],
+            "Mustard",
+            "A",
+            2001,
+            Some(&["W1", "W50", "W51", "W70"]),
+        ),
         // Citing the shared references, not the set.
         work(&["W201"], "K1", "A", 2017, Some(&["W50", "W51", "W68"])),
         work(&["W202"], "K2", "A", 2017, Some(&["W51"])),
@@ -992,23 +1002,25 @@ async fn related_works_rank_by_co_citation_and_coupling() {
     assert_eq!(
         found(&analysis),
         [
-            // Co-cited twice (by W101, W104), and its own references share
-            // two of the set's: the highest of both counts' mean.
-            ("W61".into(), 0.75, 2, 2, s(&[0, 1, 2])),
             // Co-cited by four, with its preprint (W67): the most.
-            ("W60".into(), 0.5, 4, 0, s(&[0, 1, 2])),
-            // Coupled: they cite two of the set's references.
-            ("W102".into(), 0.5, 0, 2, s(&[0, 1, 2])),
-            ("W201".into(), 0.5, 0, 2, s(&[0, 1, 2])),
-            ("W50".into(), 0.25, 2, 0, s(&[0, 1])),
-            ("W51".into(), 0.125, 1, 0, s(&[0])),
-            ("W62".into(), 0.125, 1, 0, s(&[0])),
-            ("W63".into(), 0.125, 1, 0, s(&[2])),
+            ("W60".into(), 0.8, 4, 0, s(&[0, 1, 2])),
+            // Co-cited twice (by W101, W104), and its own references share
+            // two of the set's (W1's and W2's): 0.8 × 2/4 + 0.2 × 2/2.
+            ("W61".into(), 0.6, 2, 2, s(&[0, 1])),
+            ("W50".into(), 0.4, 2, 0, s(&[0, 1])),
+            ("W51".into(), 0.2, 1, 0, s(&[0])),
+            ("W62".into(), 0.2, 1, 0, s(&[0])),
+            ("W63".into(), 0.2, 1, 0, s(&[2])),
+            // Coupled: they cite two of the set's references (two of W1's
+            // and W2's each, one of W3's).
+            ("W102".into(), 0.2, 0, 2, s(&[0, 1])),
+            ("W201".into(), 0.2, 0, 2, s(&[0, 1])),
             // Left out: W64 (retracted), W65 (W1's preprint), W66 (the
-            // missing seed's DOI); W202 shares one reference only.
+            // missing seed's DOI); W202 shares one reference only; W107
+            // (and W70, which only it cites) can't cite W1.
         ]
     );
-    let w60 = &related.items[1];
+    let w60 = &related.items[0];
     let ids: Vec<String> = w60.ids.iter().map(ToString::to_string).collect();
     assert_eq!(ids, ["openalex:W60", "openalex:W67"]);
     assert!(w60.record.is_some());
@@ -1034,9 +1046,8 @@ async fn related_works_are_the_same_every_time_and_reuse_the_cache() {
     // Not the missing seed: the cache would find it by the DOI W66 carries.
     let seeds = inputs(&AROUND[..3]);
     let first = engine.analyse(&seeds, &kinds, None, false).await.unwrap();
-    // Ties by id: W60, W102 and W201 score 0.5.
     let ids: Vec<String> = found(&first).into_iter().map(|f| f.0).collect();
-    assert_eq!(ids, ["W61", "W60", "W102"]);
+    assert_eq!(ids, ["W60", "W61", "W50"]);
     let pages = alex.citing_pages().len();
 
     let again = engine.analyse(&seeds, &kinds, None, false).await.unwrap();
@@ -1053,7 +1064,8 @@ async fn related_works_are_the_same_every_time_and_reuse_the_cache() {
 
 /// A classic (cited 50,000 times, as its record says) among ordinary
 /// papers; 1,200 of its citing works are listed, each also citing W51 (a
-/// reference the papers share) and one of seven works.
+/// reference the papers share) and one of seven works. Twelve of them,
+/// much cited, are dated 2001: their references aren't theirs.
 fn with_classic() -> Vec<SourceRecord> {
     let mut works = around();
     let mut classic = work(
@@ -1066,14 +1078,15 @@ fn with_classic() -> Vec<SourceRecord> {
     classic.work.cited_by_count = Some(50_000);
     works.push(classic);
     for k in 0..1_200u64 {
+        let misdated = k % 100 == 0;
         let mut citing = work(
             &[&format!("W{}", 10_000 + k)],
             "Citing the classic",
             "A",
-            2020,
+            if misdated { 2001 } else { 2020 },
             Some(&["W9000", "W51", &format!("W{}", 20_000 + k % 7)]),
         );
-        citing.work.cited_by_count = Some(k % 50);
+        citing.work.cited_by_count = Some(if misdated { 49 } else { k % 50 });
         works.push(citing);
     }
     works
@@ -1098,9 +1111,9 @@ async fn a_classic_is_sampled_and_says_how_much() {
     let related = analysis.related.as_ref().unwrap();
     let stop = related.incomplete.unwrap();
     assert_eq!(stop.kind, IncompleteKind::Capped);
-    // The three papers' 7 citing works, and the classic's 1,000 most cited
+    // The three papers' 8 citing works, and the classic's 1,000 most cited
     // of its 50,000.
-    assert_eq!((stop.done, stop.total), (1_007, 50_007));
+    assert_eq!((stop.done, stop.total), (1_008, 50_008));
     assert!(!analysis.complete());
     // One page for the papers, five for the classic; five of the works
     // citing the shared references (W51 by all four, W50 and W52 by two).
@@ -1111,10 +1124,34 @@ async fn a_classic_is_sampled_and_says_how_much() {
         pages.iter().filter(|p| *p == "cites:W51|W50|W52").count(),
         5
     );
-    // W51 is co-cited by each of the classic's citing works read, and by
-    // W102.
+    // W51 is co-cited by each of the classic's citing works read (but the
+    // twelve misdated), and by W102.
     let w51 = found(&analysis).into_iter().find(|f| f.0 == "W51").unwrap();
-    assert_eq!(w51.2, 1_001);
+    assert_eq!(w51.2, 989);
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_classic_sample_is_cached_whole() {
+    let cache = Arc::new(SqliteCache::open_in_memory().unwrap());
+    let alex = Arc::new(Alex::new(with_classic()));
+    let engine = engine(alex.clone(), Some(cache));
+    let kinds = [AnalysisKind::Related { limit: 5 }];
+    let first = engine
+        .analyse(&inputs(&CLASSIC), &kinds, None, false)
+        .await
+        .unwrap();
+    let pages = alex.citing_pages().len();
+    assert_eq!(pages, 11);
+    let again = engine
+        .analyse(&inputs(&CLASSIC), &kinds, None, false)
+        .await
+        .unwrap();
+    // The 1,000 read, the misdated among them, all from the cache.
+    assert_eq!(alex.citing_pages().len(), pages);
+    assert_eq!(spent(&again), 0.0);
+    assert_eq!(found(&again), found(&first));
+    let stop = again.related.unwrap().incomplete.unwrap();
+    assert_eq!((stop.kind, stop.done), (IncompleteKind::Capped, 1_008));
 }
 
 #[tokio::test(start_paused = true)]
@@ -1131,7 +1168,7 @@ async fn a_budget_shares_out_pages_and_says_how_far_they_got() {
     let related = analysis.related.as_ref().unwrap();
     let stop = related.incomplete.unwrap();
     assert_eq!(stop.kind, IncompleteKind::Budget);
-    assert_eq!((stop.done, stop.total), (207, 50_007));
+    assert_eq!((stop.done, stop.total), (208, 50_008));
     let mut pages = alex.citing_pages();
     pages.sort();
     assert_eq!(pages, ["cites:W1|W2|W3", "cites:W9000"]);
@@ -1165,7 +1202,7 @@ async fn failing_pages_say_so() {
     let related = analysis.related.unwrap();
     let stop = related.incomplete.unwrap();
     assert_eq!(stop.kind, IncompleteKind::ProviderFailed);
-    assert_eq!((stop.done, stop.total), (0, 7));
+    assert_eq!((stop.done, stop.total), (0, 8));
     assert!(related.items.is_empty());
 }
 

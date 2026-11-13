@@ -24,7 +24,8 @@
 //!   cite (the 100 most shared), at most [`COUPLING_PAGES`] pages of it,
 //!   most cited first, cached as searches are (a day).
 //! - **Score:** each count as a share of the highest among the works found,
-//!   then the mean of the two (of one, when no work has the other).
+//!   weighted 0.8 co-citation and 0.2 coupling (all of it to one when no
+//!   work has the other): see [`CO_CITATION`].
 //! - The best are looked up in whole batches (one request for up to 100),
 //!   so works that are one of the set (sharing any identifier with any
 //!   seed, or one work with a seed) and retracted works drop, and versions
@@ -60,10 +61,18 @@ const COUPLING_PAGES: usize = 5;
 /// References in common for a work to count as coupled: one is chance.
 const MIN_SHARED: usize = 2;
 
+/// The weights of co-citation and coupling in a score. Co-citation leads:
+/// what the citing literature reads together. Coupling counts favour long
+/// reference lists, so weighted evenly (tried on two sets, 2026-11) they
+/// ranked broad reviews, theses and off-topic works (AI in food science)
+/// above the field's core works; they still rank works no one cites yet.
+const CO_CITATION: f64 = 0.8;
+const COUPLING: f64 = 0.2;
+
 /// Pages read at once (different filters; one filter's pages run in turn).
 const READ_AT_ONCE: usize = 4;
 
-const SELECT: &str = "id,referenced_works";
+const SELECT: &str = "id,publication_year,referenced_works";
 const SORT: &str = "cited_by_count:desc";
 
 /// A work around the set: co-cited with it, coupled to it, or both.
@@ -76,8 +85,9 @@ pub struct RelatedWork {
     pub ids: Vec<WorkId>,
     /// Its record, when looked up.
     pub record: Option<SourceRecord>,
-    /// From 0 to 1: the mean of its co-citation and coupling counts, each
-    /// as a share of the highest among the works found.
+    /// From 0 to 1: its co-citation and coupling counts, each as a share
+    /// of the highest among the works found, weighted 0.8 and 0.2 (all to
+    /// one when no work has the other).
     pub score: f64,
     /// The citing works read that cite it and at least one work of the set.
     pub co_cited_with: usize,
@@ -94,6 +104,10 @@ type Counted = (WorkId, u64);
 
 /// Citing works, each with its references.
 type Citing = Vec<(WorkId, Vec<WorkId>)>;
+
+/// A work of the set's citing works from the cache: those whose references
+/// are cached too, how many were read, and whether that's all of them.
+type CachedCiting = (Citing, usize, bool);
 
 /// A `cites:` filter of works of the set, and the pages of it to read.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -236,9 +250,9 @@ fn citing_query(filter: &str, cursor: Option<Cursor>) -> SearchQuery {
 /// What reading a filter's pages found.
 #[derive(Default)]
 struct Read {
-    /// Each citing work with its references (works without any listed are
-    /// left out: they can't be placed).
-    works: Citing,
+    /// Each citing work read, with its references; `None` when OpenAlex
+    /// lists none, or ones it can't have (see [`Read::take`]).
+    works: Vec<(WorkId, Option<Vec<WorkId>>)>,
     /// Pages paid for.
     paid: usize,
     /// The last page was read.
@@ -248,12 +262,24 @@ struct Read {
 }
 
 impl Read {
-    fn take(&mut self, page: Page) -> Option<Cursor> {
+    /// Keeps a page's works, without the references of those dated more
+    /// than a year before a work of the set they cite (`years`): OpenAlex
+    /// sometimes gives a work another's references (a 2001 paper on mustard
+    /// citing 2014 sepsis trials, seen 2026-11).
+    fn take(&mut self, page: Page, years: &BTreeMap<WorkId, i16>) -> Option<Cursor> {
         for hit in page.hits {
-            let id = openalex_id(&hit.record).cloned();
-            if let (Some(id), Some(cited)) = (id, hit.record.references) {
-                self.works.push((id, cited));
-            }
+            let Some(id) = openalex_id(&hit.record).cloned() else {
+                continue;
+            };
+            let year = hit.record.work.issued.map(|d| d.year());
+            let cited = hit.record.references.filter(|cited| {
+                year.is_none_or(|year| {
+                    !cited
+                        .iter()
+                        .any(|c| years.get(c).is_some_and(|&y| y > year + 1))
+                })
+            });
+            self.works.push((id, cited));
         }
         if page.next.is_none() {
             self.finished = true;
@@ -275,16 +301,25 @@ struct Tally {
 
 impl Tally {
     /// Counts `refs` (a work's references) as coupling, with `cited` the
-    /// works of the set citing each of the set's references.
+    /// works of the set citing each of the set's references. It links the
+    /// works of the set it shares at least [`MIN_SHARED`] references with.
     fn couple(&mut self, refs: &[WorkId], cited: &BTreeMap<&WorkId, BTreeSet<usize>>) -> bool {
         let shared: Vec<&WorkId> = refs.iter().filter(|r| cited.contains_key(r)).collect();
         if shared.len() < MIN_SHARED {
             return false;
         }
+        let mut with: BTreeMap<usize, usize> = BTreeMap::new();
         for r in shared {
             self.shared.insert(r.clone());
-            self.groups.extend(&cited[r]);
+            for &g in &cited[r] {
+                *with.entry(g).or_default() += 1;
+            }
         }
+        self.groups.extend(
+            with.into_iter()
+                .filter(|(_, n)| *n >= MIN_SHARED)
+                .map(|(g, _)| g),
+        );
         true
     }
 
@@ -297,19 +332,21 @@ impl Tally {
     }
 }
 
-/// Each count as a share of the highest, then their mean (over the counts
-/// any work has), to four places.
+/// Each count as a share of the highest, weighted [`CO_CITATION`] and
+/// [`COUPLING`] (all of it to one when no work has the other), to four
+/// places.
 fn score(t: &Tally, (most_cited, most_shared): (usize, usize)) -> f64 {
-    let shares: Vec<f64> = [(t.citing.len(), most_cited), (t.shared.len(), most_shared)]
-        .into_iter()
-        .filter(|(_, most)| *most > 0)
-        .map(|(n, most)| n as f64 / most as f64)
-        .collect();
-    if shares.is_empty() {
-        return 0.0;
-    }
-    let mean = shares.iter().sum::<f64>() / shares.len() as f64;
-    (mean * 10_000.0).round() / 10_000.0
+    let share = |n: usize, most: usize| n as f64 / most as f64;
+    let score = match (most_cited > 0, most_shared > 0) {
+        (true, true) => {
+            CO_CITATION * share(t.citing.len(), most_cited)
+                + COUPLING * share(t.shared.len(), most_shared)
+        }
+        (true, false) => share(t.citing.len(), most_cited),
+        (false, true) => share(t.shared.len(), most_shared),
+        (false, false) => 0.0,
+    };
+    (score * 10_000.0).round() / 10_000.0
 }
 
 fn highest<'a>(tallies: impl Iterator<Item = &'a Tally>) -> (usize, usize) {
@@ -351,6 +388,13 @@ impl Engine {
             }
         }
         let works: Vec<(WorkId, u64)> = counts.into_iter().collect();
+        let years: BTreeMap<WorkId, i16> = seeds
+            .iter()
+            .filter_map(|s| {
+                let record = s.record.as_ref()?;
+                Some((openalex_id(record)?.clone(), record.work.issued?.year()))
+            })
+            .collect();
         let full = plan(&works);
         let targets: Vec<u64> = works.iter().map(|(w, c)| target(&full, w, *c)).collect();
         let cached = self.cached_citing(&works, &targets);
@@ -432,7 +476,7 @@ impl Engine {
         }
         let reads =
             futures::stream::iter(jobs.into_iter().map(|(filter, paid, cached, remember)| {
-                self.read_citing(entry, filter, paid, cached, remember)
+                self.read_citing(entry, filter, paid, cached, remember, &years)
             }))
             .buffered(READ_AT_ONCE)
             .collect::<Vec<Read>>()
@@ -451,10 +495,14 @@ impl Engine {
             stops.failed |= read.failed;
             stops.budget |= *n < c.pages && !read.finished && !read.failed;
             for work in &c.works {
+                // Alone, every work read cites it; sharing, those whose
+                // references say so.
                 let ids: Vec<WorkId> = read
                     .works
                     .iter()
-                    .filter(|(_, cited)| cited.contains(work))
+                    .filter(|(_, cited)| {
+                        c.works.len() == 1 || cited.as_ref().is_some_and(|r| r.contains(work))
+                    })
                     .map(|(id, _)| id.clone())
                     .collect();
                 if !read.failed && *n > 0 {
@@ -463,8 +511,10 @@ impl Engine {
                 found.insert(work, (ids, read.finished));
             }
             for (id, cited) in read.works {
-                links.push((id.clone(), cited.clone()));
-                citing.insert(id, cited);
+                if let Some(cited) = cited {
+                    links.push((id.clone(), cited.clone()));
+                    citing.insert(id, cited);
+                }
             }
         }
         if coupling.is_some() {
@@ -473,8 +523,10 @@ impl Engine {
             stops.failed |= read.failed;
             stops.budget |= coupling_allotted < coupling_paid && !read.finished && !read.failed;
             for (id, cited) in read.works {
-                links.push((id.clone(), cited.clone()));
-                citing.entry(id).or_insert(cited);
+                if let Some(cited) = cited {
+                    links.push((id.clone(), cited.clone()));
+                    citing.entry(id).or_insert(cited);
+                }
             }
         }
         self.remember_citing(&to_cache, &links);
@@ -484,8 +536,7 @@ impl Engine {
         for (((work, count), cached), target) in works.iter().zip(cached).zip(&targets) {
             total += count;
             let (read, complete) = match cached {
-                Some((cited, complete)) => {
-                    let n = cited.len();
+                Some((cited, n, complete)) => {
                     for (id, refs) in cited {
                         citing.entry(id).or_insert(refs);
                     }
@@ -643,7 +694,7 @@ impl Engine {
 
     /// Reads up to `paid` pages of a `cites:` filter after the `cached` ones
     /// (pages already read, from the first), keeping each page read in the
-    /// search cache when `remember`.
+    /// search cache when `remember`; `years` are the set's works' years.
     async fn read_citing(
         &self,
         entry: &Entry,
@@ -651,12 +702,13 @@ impl Engine {
         paid: usize,
         cached: Vec<Page>,
         remember: bool,
+        years: &BTreeMap<WorkId, i16>,
     ) -> Read {
         let provider = entry.provider.id();
         let mut read = Read::default();
         let mut cursor = None;
         for page in cached {
-            cursor = read.take(page);
+            cursor = read.take(page, years);
             if cursor.is_none() {
                 return read;
             }
@@ -677,7 +729,7 @@ impl Engine {
                         let _ = cache.put_search(&provider, &query, &resp.value, (self.clock)());
                     }
                     let empty = resp.value.hits.is_empty();
-                    cursor = read.take(resp.value);
+                    cursor = read.take(resp.value, years);
                     if cursor.is_none() || empty {
                         break;
                     }
@@ -713,11 +765,11 @@ impl Engine {
     }
 
     /// For each work of the set (with its count and the citing works to
-    /// read of it), its citing works from the cache, each with its
-    /// references, and whether they are all of them: when cached within a
-    /// day (any age, offline), covering the target (all of them, or a
-    /// sample at least that big), and every one's references cached too.
-    fn cached_citing(&self, works: &[Counted], targets: &[u64]) -> Vec<Option<(Citing, bool)>> {
+    /// read of it), its citing works from the cache, when cached within a
+    /// day (any age, offline) and covering the target (all of them, or a
+    /// sample at least that big): those whose references are cached (the
+    /// others had none to use), how many were read, and whether that's all.
+    fn cached_citing(&self, works: &[Counted], targets: &[u64]) -> Vec<Option<CachedCiting>> {
         let none = || vec![None; works.len()];
         let Some(cache) = &self.cache else {
             return none();
@@ -767,14 +819,15 @@ impl Engine {
         rows.into_iter()
             .map(|row| {
                 let (ids, complete) = row?;
-                let cited: Option<Citing> = ids
+                let read = ids.len();
+                let cited: Citing = ids
                     .into_iter()
-                    .map(|id| {
+                    .filter_map(|id| {
                         let r = refs.get(&id)?.clone();
                         Some((id, r))
                     })
                     .collect();
-                cited.map(|c| (c, complete))
+                Some((cited, read, complete))
             })
             .collect()
     }

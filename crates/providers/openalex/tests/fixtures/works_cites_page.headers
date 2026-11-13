@@ -6,6 +6,6 @@ x-ratelimit-limit: 10000
 x-ratelimit-limit-usd: 1
 x-ratelimit-onetime-remaining: 0
 x-ratelimit-prepaid-remaining-usd: 0
-x-ratelimit-remaining: 5622
-x-ratelimit-remaining-usd: 0.5622
-x-ratelimit-reset: 24987
+x-ratelimit-remaining: 5538
+x-ratelimit-remaining-usd: 0.5538
+x-ratelimit-reset: 23635

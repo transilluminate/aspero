@@ -15,7 +15,7 @@ use std::sync::Arc;
 
 use aspero_core::{Cursor, Error, SearchQuery, Sort, WorkType, YearRange};
 use aspero_engine::{
-    CallOptions, Engine, Extras, SecretString, SqliteCache, StandardConfig, standard,
+    CallOptions, Engine, EngineError, Extras, SecretString, SqliteCache, StandardConfig, standard,
 };
 use aspero_json::InputClaim;
 use futures::StreamExt;
@@ -300,6 +300,13 @@ impl Aspero {
                 query.sort = request.sort.map_or(Sort::Relevance, Into::into);
                 query.extra = request.extra.into_iter().collect();
                 query.tree = request.query.map(Into::into);
+                match request.since.as_deref().map(SearchQuery::parse_since) {
+                    Some(Err(reason)) => {
+                        return SearchResults::new(Err(EngineError::InvalidQuery(reason)));
+                    }
+                    Some(Ok(since)) => query.since = Some(since),
+                    None => {}
+                }
                 SearchResults::new(engine.search(request.source.as_deref(), &query).await)
             },
             cancel,
@@ -365,14 +372,28 @@ impl Aspero {
     }
 
     /// Whether `source` (or, without one, the source `search` picks) can
-    /// search by `query`: `nil` if so, otherwise why, in English ("OpenAlex
-    /// can't combine title and author with any"). Offline and instant.
-    /// Searching anyway fails as `unsupported` with the same reason, or as
-    /// `badRequest` for a value that can't be valid (an author id that's
-    /// neither an ORCID nor an OpenAlex id, an unknown language code).
-    pub fn search_supports(&self, source: Option<String>, query: SearchNode) -> Option<String> {
+    /// search by `query`, and with `since` (as `SearchRequest.since`),
+    /// only works added since that day: `nil` if so, otherwise why, in
+    /// English ("OpenAlex can't combine title and author with any",
+    /// "OpenAlex can't search by date added (it needs a paid plan)").
+    /// Offline and instant. Searching anyway fails as `unsupported` with
+    /// the same reason, or as `badRequest` for a value that can't be valid
+    /// (an author id that's neither an ORCID nor an OpenAlex id, an unknown
+    /// language code, a date that isn't one).
+    #[uniffi::method(default(since = None))]
+    pub fn search_supports(
+        &self,
+        source: Option<String>,
+        query: SearchNode,
+        since: Option<String>,
+    ) -> Option<String> {
+        let since = match since.as_deref().map(SearchQuery::parse_since) {
+            Some(Err(reason)) => return Some(reason),
+            Some(Ok(since)) => Some(since),
+            None => None,
+        };
         self.engine
-            .search_supports(source.as_deref(), &query.into())
+            .search_supports_since(source.as_deref(), &query.into(), since)
     }
 
     /// What each source can search by, in the order `search` picks from:

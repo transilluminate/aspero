@@ -6,6 +6,7 @@ use aspero_core::{
     Error, FieldSet, Filter, FilterValue, IdKind, Page, Provider, ProviderId, QueryNode,
     SearchMode, SearchQuery, Sort, Usage, WorkId, YearRange,
 };
+use jiff::civil::Date;
 
 use crate::{Engine, EngineError, Entry, Served};
 
@@ -34,9 +35,25 @@ impl Engine {
     /// reason. Relations' works aren't looked up, so one that doesn't exist
     /// fails only when searched.
     pub fn search_supports(&self, source: Option<&str>, tree: &QueryNode) -> Option<String> {
+        self.search_supports_since(source, tree, None)
+    }
+
+    /// [`search_supports`](Self::search_supports) for a search that also
+    /// asks for only works added since a date
+    /// ([`SearchQuery::since`]): without a `source`, the provider
+    /// [`search`](Self::search) would pick for it.
+    pub fn search_supports_since(
+        &self,
+        source: Option<&str>,
+        tree: &QueryNode,
+        since: Option<Date>,
+    ) -> Option<String> {
         let result = self
-            .search_entry(source, false)
-            .and_then(|entry| self.prepare_tree(entry, tree.clone(), None));
+            .search_entry(source, false, since.is_some())
+            .and_then(|entry| {
+                check_since(entry, since)?;
+                self.prepare_tree(entry, tree.clone(), None)
+            });
         match result {
             Ok(Some(_)) => None,
             Ok(None) => Some(EngineError::NothingToSearch.to_string()),
@@ -49,9 +66,11 @@ impl Engine {
     }
 
     /// Searches one provider: `source` if given, otherwise the first that
-    /// supports the query's mode. Fields and sorts it lacks fail with
-    /// [`Error::Unsupported`]; other filters it lacks are ignored. A query
-    /// tree it can't say fails with [`Error::UnsupportedQuery`], as
+    /// supports the query's mode (and [`SearchQuery::since`], if set).
+    /// Fields and sorts it lacks fail with [`Error::Unsupported`]; other
+    /// filters it lacks are ignored, but for `since`. A query tree it
+    /// can't say, or a `since` it can't apply, fails with
+    /// [`Error::UnsupportedQuery`], as
     /// [`search_supports`](Self::search_supports) tells.
     pub async fn search(
         &self,
@@ -83,7 +102,7 @@ impl Engine {
             // parameters (an OpenAlex `filter` alone): something to find.
             return Err(EngineError::NothingToSearch);
         }
-        let entry = self.search_entry(source, citation)?;
+        let entry = self.search_entry(source, citation, query.since.is_some())?;
         let provider = entry.provider.id();
         let caps = entry.provider.capabilities();
         let refuse = |what| EngineError::Provider {
@@ -96,6 +115,8 @@ impl Engine {
         if citation && !caps.citation_search {
             return Err(refuse("citation search"));
         }
+        // Never ignored: a watch would see old works as new.
+        check_since(entry, query.since)?;
 
         let (missing_fields, ignored_filters): (Vec<Filter>, Vec<Filter>) = query
             .filters()
@@ -204,8 +225,13 @@ impl Engine {
     }
 
     /// The provider named `source`, or the first that searches (by citation,
-    /// if asked).
-    fn search_entry(&self, source: Option<&str>, citation: bool) -> Result<&Entry, EngineError> {
+    /// and by date added, if asked).
+    fn search_entry(
+        &self,
+        source: Option<&str>,
+        citation: bool,
+        since: bool,
+    ) -> Result<&Entry, EngineError> {
         match source {
             Some(name) => self
                 .entries
@@ -217,12 +243,15 @@ impl Engine {
                 .iter()
                 .find(|e| {
                     let caps = e.provider.capabilities();
-                    caps.search && (!citation || caps.citation_search)
+                    caps.search
+                        && (!citation || caps.citation_search)
+                        && (!since || caps.search_filters.contains(&Filter::Since))
                 })
-                .ok_or(EngineError::NoCapableProvider(if citation {
-                    "citation search"
-                } else {
-                    "search"
+                .ok_or(EngineError::NoCapableProvider(match (citation, since) {
+                    (true, false) => "citation search",
+                    (true, true) => "citation search by date added",
+                    (false, true) => "search by date added",
+                    (false, false) => "search",
                 })),
         }
     }
@@ -372,6 +401,19 @@ impl Engine {
         if let Some(cache) = &self.cache {
             let _ = cache.put_search(provider, query, page, (self.clock)());
         }
+    }
+}
+
+/// Refuses a `since` that `entry` can't apply, saying why
+/// ([`Provider::since_unsupported`]).
+fn check_since(entry: &Entry, since: Option<Date>) -> Result<(), EngineError> {
+    let caps = entry.provider.capabilities();
+    match since.is_some() && !caps.search_filters.contains(&Filter::Since) {
+        true => Err(EngineError::Provider {
+            provider: entry.provider.id(),
+            error: Error::UnsupportedQuery(entry.provider.since_unsupported()),
+        }),
+        false => Ok(()),
     }
 }
 

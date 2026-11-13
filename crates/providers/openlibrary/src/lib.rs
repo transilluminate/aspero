@@ -359,6 +359,9 @@ impl Provider for OpenLibrary {
         if query.mode != SearchMode::Keywords {
             return Err(Error::Unsupported("Open Library has no citation matcher"));
         }
+        if query.since.is_some() {
+            return Err(Error::UnsupportedQuery(self.since_unsupported()));
+        }
         if let Some((key, _)) = query.extra.iter().next() {
             return Err(Error::BadRequest(format!(
                 "unknown Open Library parameter {key:?}"
@@ -425,6 +428,11 @@ impl Provider for OpenLibrary {
 
     fn express(&self, tree: &QueryNode) -> std::result::Result<(), String> {
         express(tree, &self.capabilities).map(|_| ())
+    }
+
+    /// Its search has no date a record was added.
+    fn since_unsupported(&self) -> String {
+        format!("{NAME} can't search by date added")
     }
 }
 

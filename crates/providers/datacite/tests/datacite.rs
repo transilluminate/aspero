@@ -317,3 +317,39 @@ fn orcids_match_as_urls_or_bare_and_languages_both_ways() {
         "DataCite can't search by journal"
     );
 }
+
+#[test]
+fn since_is_the_registration_date_anded_with_text_or_a_tree() {
+    let (dc, http) = provider([recorded("search_since"), empty_page()]);
+    let since = Some(jiff::civil::date(2026, 11, 1));
+    let mut q = SearchQuery::new("sepsis");
+    q.since = since;
+    q.page.limit = 3;
+    let page = block_on(dc.search(&q)).unwrap().value;
+    assert_eq!(
+        query(&http, 0),
+        [
+            pair("query", "(sepsis) AND created:[2026-11-01 TO *]"),
+            pair("sort", "relevance"),
+            pair("page[number]", "1"),
+            pair("page[size]", "3"),
+        ]
+    );
+    assert_eq!(page.total, Some(280));
+    assert_eq!(page.hits.len(), 3);
+
+    // A tree's top-level any is bracketed, so the date bounds all of it.
+    let mut q = tree_query(QueryNode::Any(vec![
+        QueryNode::term(TermField::Title, "sepsis"),
+        QueryNode::phrase(TermField::Abstract, "septic shock"),
+    ]));
+    q.since = since;
+    block_on(dc.search(&q)).unwrap();
+    assert_eq!(
+        query(&http, 1)[0],
+        pair(
+            "query",
+            r#"(titles.title:(sepsis) OR descriptions.description:"septic shock") AND created:[2026-11-01 TO *]"#
+        )
+    );
+}

@@ -159,6 +159,10 @@ pub enum Filter {
     Language,
     /// Only works with an abstract.
     HasAbstract,
+    /// Only works the source added on or after a date
+    /// ([`SearchQuery::since`]). A source lacking it fails rather than
+    /// ignoring it: a watch would otherwise see old works as new.
+    Since,
 }
 
 impl Filter {
@@ -177,6 +181,7 @@ impl Filter {
         Filter::NotRetracted,
         Filter::Language,
         Filter::HasAbstract,
+        Filter::Since,
     ];
 
     /// As serialized: `years`, `work_type`, ….
@@ -195,6 +200,7 @@ impl Filter {
             Filter::NotRetracted => "not_retracted",
             Filter::Language => "language",
             Filter::HasAbstract => "has_abstract",
+            Filter::Since => "since",
         }
     }
 
@@ -342,6 +348,12 @@ pub struct SearchQuery {
     pub open_access: Option<bool>,
     /// Volume and first page, for citations that give no title.
     pub place: Option<Place>,
+    /// Only works the source added on or after this date (first deposited
+    /// or indexed), whenever they were published: for watching a search.
+    /// Sources fail with [`Error::UnsupportedQuery`] without
+    /// [`Filter::Since`]; it is never ignored.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub since: Option<jiff::civil::Date>,
     pub fields: FieldSet,
     pub page: PageReq,
     /// Provider-specific parameters, passed through by name.
@@ -365,6 +377,24 @@ impl SearchQuery {
         }
     }
 
+    /// A [`since`](SearchQuery::since) as written, `YYYY-MM-DD`, or why
+    /// it isn't one, in English.
+    pub fn parse_since(s: &str) -> std::result::Result<jiff::civil::Date, String> {
+        let t = s.trim();
+        let shaped = t.len() == 10
+            && t.bytes().enumerate().all(|(i, b)| {
+                if i == 4 || i == 7 {
+                    b == b'-'
+                } else {
+                    b.is_ascii_digit()
+                }
+            });
+        shaped
+            .then(|| t.parse().ok())
+            .flatten()
+            .ok_or_else(|| format!("invalid date {s:?}: expected YYYY-MM-DD"))
+    }
+
     /// The common filters this query actually uses.
     pub fn filters(&self) -> Vec<Filter> {
         [
@@ -375,6 +405,7 @@ impl SearchQuery {
             self.field(Filter::Author).map(|_| Filter::Author),
             self.field(Filter::Title).map(|_| Filter::Title),
             self.field(Filter::Container).map(|_| Filter::Container),
+            self.since.map(|_| Filter::Since),
         ]
         .into_iter()
         .flatten()
@@ -521,6 +552,14 @@ pub trait Provider: Send + Sync {
         Err(format!("{} can't search by a query tree", self.id()))
     }
 
+    /// Why [`search`](Provider::search) can't take
+    /// [`SearchQuery::since`], in English, when
+    /// [`Capabilities::search_filters`] lacks [`Filter::Since`]. Searching
+    /// with one fails with [`Error::UnsupportedQuery`] and this reason.
+    fn since_unsupported(&self) -> String {
+        format!("{} can't search by date added", self.id())
+    }
+
     /// Works that cite `id`.
     async fn citations(
         &self,
@@ -615,6 +654,8 @@ mod tests {
             q.filters(),
             [Filter::Years, Filter::OpenAccess, Filter::Author]
         );
+        q.since = Some(jiff::civil::date(2026, 11, 1));
+        assert_eq!(q.filters().last(), Some(&Filter::Since));
     }
 
     #[test]
@@ -633,12 +674,13 @@ mod tests {
             Filter::NotRetracted => 10,
             Filter::Language => 11,
             Filter::HasAbstract => 12,
+            Filter::Since => 13,
         };
         for (i, f) in Filter::ALL.iter().enumerate() {
             assert_eq!(position(*f), i);
             assert_eq!(serde_json::to_value(f).unwrap(), f.as_str());
         }
-        assert_eq!(Filter::ALL.len(), position(Filter::HasAbstract) + 1);
+        assert_eq!(Filter::ALL.len(), position(Filter::Since) + 1);
         let position = |s: Sort| match s {
             Sort::Relevance => 0,
             Sort::Newest => 1,
@@ -652,13 +694,30 @@ mod tests {
     }
 
     #[test]
+    fn since_dates_are_iso_days() {
+        assert_eq!(
+            SearchQuery::parse_since(" 2026-11-01 "),
+            Ok(jiff::civil::date(2026, 11, 1))
+        );
+        for bad in ["2026-11", "20261101", "2026-02-30", "1 Nov 2026", ""] {
+            assert_eq!(
+                SearchQuery::parse_since(bad),
+                Err(format!("invalid date {bad:?}: expected YYYY-MM-DD"))
+            );
+        }
+    }
+
+    #[test]
     fn queries_without_fields_or_sort_serialize_as_before() {
         let json = serde_json::to_string(&SearchQuery::new("x")).unwrap();
         assert!(!json.contains("\"author\"") && !json.contains("\"sort\""));
-        assert!(!json.contains("\"tree\""));
+        assert!(!json.contains("\"tree\"") && !json.contains("\"since\""));
         let mut q = SearchQuery::new("x");
         q.sort = Sort::MostCited;
-        let back: SearchQuery = serde_json::from_str(&serde_json::to_string(&q).unwrap()).unwrap();
+        q.since = Some(jiff::civil::date(2026, 11, 1));
+        let json = serde_json::to_string(&q).unwrap();
+        assert!(json.contains(r#""since":"2026-11-01""#), "{json}");
+        let back: SearchQuery = serde_json::from_str(&json).unwrap();
         assert_eq!(back, q);
     }
 

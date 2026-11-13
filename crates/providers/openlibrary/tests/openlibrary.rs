@@ -249,3 +249,22 @@ fn a_none_needs_something_beside_it_to_find() {
         "Open Library can't search by abstract"
     );
 }
+
+#[test]
+fn since_is_refused_without_asking() {
+    let (ol, http) = provider([]);
+    assert!(
+        !ol.capabilities()
+            .search_filters
+            .contains(&aspero_core::Filter::Since)
+    );
+    let reason = "Open Library can't search by date added";
+    assert_eq!(ol.since_unsupported(), reason);
+    let mut q = SearchQuery::new("sepsis");
+    q.since = Some(jiff::civil::date(2026, 11, 1));
+    match block_on(ol.search(&q)) {
+        Err(Error::UnsupportedQuery(r)) => assert_eq!(r, reason),
+        other => panic!("{other:?}"),
+    }
+    assert!(http.requests().is_empty());
+}

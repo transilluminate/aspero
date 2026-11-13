@@ -1180,6 +1180,14 @@ pub struct SearchRequest {
     /// (`unsupported`), as `searchSupports` tells beforehand.
     #[uniffi(default = None)]
     pub query: Option<SearchNode>,
+    /// Only works the source added on or after this day, `YYYY-MM-DD`
+    /// (first deposited or indexed), whenever they were published: for
+    /// watching a search. Without a `source`, the first that can
+    /// (`searchCapabilities`' filters hold `since`). A source that can't
+    /// fails (`unsupported`) and says why, never ignoring it; a date that
+    /// isn't one fails (`badRequest`).
+    #[uniffi(default = None)]
+    pub since: Option<String>,
 }
 
 /// A search as a tree. Groups hold any number of nodes, groups included
@@ -1413,7 +1421,8 @@ impl From<SearchField> for TermField {
     }
 }
 
-/// A filter a search can apply. One a source lacks is ignored.
+/// A filter a search can apply. One a source lacks is ignored, but for
+/// `since`.
 ///
 /// In a query tree, one a source lacks fails (`unsupported`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Enum)]
@@ -1427,6 +1436,9 @@ pub enum SearchFilter {
     NotRetracted,
     Language,
     HasAbstract,
+    /// `since`, never in a query tree. A source without it fails
+    /// (`unsupported`) rather than ignoring it.
+    Since,
 }
 
 impl SearchFilter {
@@ -1438,6 +1450,7 @@ impl SearchFilter {
             Filter::NotRetracted => Some(SearchFilter::NotRetracted),
             Filter::Language => Some(SearchFilter::Language),
             Filter::HasAbstract => Some(SearchFilter::HasAbstract),
+            Filter::Since => Some(SearchFilter::Since),
             _ => None,
         }
     }
@@ -2352,6 +2365,11 @@ mod tests {
                 both => panic!("{f:?} maps twice: {both:?}"),
             }
         }
+        // A request's option, not a tree's filter, but listed all the same.
+        assert_eq!(
+            SearchFilter::from_core(Filter::Since),
+            Some(SearchFilter::Since)
+        );
         // Query trees' fields, filters, relations and reaches.
         for f in TermField::ALL {
             let field = SearchField::from_core(f.filter()).unwrap();

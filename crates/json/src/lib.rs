@@ -9,12 +9,14 @@
 pub mod check;
 mod claim;
 mod lookup;
+mod query;
 mod scan;
 mod verify;
 mod work;
 
 pub use claim::{ClaimInput, InputClaim};
 pub use lookup::{Status, disagreements, input as input_lookup, invalid, item as lookup_item};
+pub use query::{parse_query, query_json};
 pub use scan::mention;
 pub use verify::{invalid_claim, verification};
 pub use work::{candidate, set_abstract, usage, usage_one, work};

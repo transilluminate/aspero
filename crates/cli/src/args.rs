@@ -183,15 +183,25 @@ silently dropped. A provider that can't search by --author, --title,
 --container or the --sort asked for fails instead. OpenAlex searches cost
 $0.001 each, and a --container search one more.
 
+--query takes the search as a JSON tree instead of keywords and fields: all,
+any and none of terms (keywords, title, author, container, abstract,
+author_id; \"phrase\": true for the words together), filters (years, type,
+open_access, language, not_retracted, has_abstract) and relations (cites,
+cited_by, any identifier: OpenAlex only). A provider that can't say the
+tree fails and says why.
+
 Examples:
   aspero search \"retrieval augmented generation\" --year 2020.. --limit 5
   aspero search transformer --source crossref --type article-journal
   aspero search --author lecun --title \"deep learning\" --sort most-cited
-  aspero search \"protein folding\" --oa --cursor <next_cursor from last page>")]
+  aspero search \"protein folding\" --oa --cursor <next_cursor from last page>
+  aspero search --query '{\"all\": [{\"title\": \"alphafold\"}, {\"not_retracted\": true}]}'
+  aspero search --source europepmc --query '{\"any\": [{\"title\": \"sepsis\"}, {\"abstract\": \"septic shock\", \"phrase\": true}]}'
+  aspero search --query '{\"all\": [{\"cites\": \"10.1038/nature14539\"}, {\"title\": \"survey\"}]}'")]
     Search {
-        /// Keywords; may be left out when --author, --title or --container
-        /// is given.
-        #[arg(required_unless_present_any = ["author", "title", "container"], default_value = "")]
+        /// Keywords; may be left out when --author, --title, --container or
+        /// --query is given.
+        #[arg(required_unless_present_any = ["author", "title", "container", "tree"], default_value = "")]
         query: String,
         #[command(flatten)]
         options: SearchOptions,
@@ -456,6 +466,10 @@ pub struct SearchOptions {
     /// Where the work appeared: the journal, or the book for a chapter.
     #[arg(long, visible_alias = "journal")]
     pub container: Option<String>,
+    /// The search as a JSON tree of all, any and none, instead of keywords,
+    /// --author, --title and --container (see below).
+    #[arg(long = "query", id = "tree", value_name = "JSON", conflicts_with_all = ["author", "title", "container"])]
+    pub tree: Option<String>,
     /// Order of the hits.
     #[arg(long, value_enum, default_value_t = SortBy::Relevance)]
     pub sort: SortBy,

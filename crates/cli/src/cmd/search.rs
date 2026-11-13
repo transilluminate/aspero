@@ -186,6 +186,10 @@ fn next_command(
             flag(name, Some(v.clone()));
         }
     }
+    // As given, so the next page asks the same.
+    if let Some(tree) = &o.tree {
+        flag("--query", Some(tree.clone()));
+    }
     if o.sort != SortBy::Relevance {
         flag("--sort", Some(sort(o.sort).as_str().replace('_', "-")));
     }
@@ -205,10 +209,18 @@ fn query(text: String, o: &SearchOptions) -> Result<SearchQuery, Failure> {
     q.author = o.author.clone();
     q.title = o.title.clone();
     q.container = o.container.clone();
+    q.tree = o.tree.as_deref().map(parse_tree).transpose()?;
     q.sort = sort(o.sort);
     q.page.limit = o.limit;
     q.page.cursor = o.cursor.clone().map(Cursor);
     Ok(q)
+}
+
+/// `--query`'s JSON tree.
+fn parse_tree(json: &str) -> Result<aspero_core::QueryNode, Failure> {
+    let value: serde_json::Value = serde_json::from_str(json)
+        .map_err(|e| Failure::usage(format!("--query is not JSON: {e}")))?;
+    aspero_json::parse_query(&value).map_err(|e| Failure::usage(format!("--query: {e}")))
 }
 
 fn sort(by: SortBy) -> Sort {
@@ -257,6 +269,7 @@ mod tests {
             author: None,
             title: None,
             container: None,
+            tree: None,
             sort: SortBy::Relevance,
             limit: 5,
             cursor: Some("old".into()),
@@ -289,6 +302,25 @@ mod tests {
             next_command("", &by_fields, "crossref", "c", false),
             "aspero search --source crossref --author LeCun --container Nature --sort most-cited --limit 5 --cursor c"
         );
+        let by_tree = SearchOptions {
+            author: None,
+            container: None,
+            tree: Some(r#"{"title": "Bishop's"}"#.into()),
+            ..by_fields
+        };
+        assert_eq!(
+            next_command("", &by_tree, "openalex", "c", false),
+            r#"aspero search --source openalex --query '{"title": "Bishop'\''s"}' --sort most-cited --limit 5 --cursor c"#
+        );
+    }
+
+    #[test]
+    fn query_trees_parse_or_say_why() {
+        let tree = parse_tree(r#"{"any": [{"title": "a"}, {"title": "b"}]}"#).unwrap();
+        assert!(matches!(tree, aspero_core::QueryNode::Any(_)));
+        let bad = |s| parse_tree(s).unwrap_err().message;
+        assert!(bad("{").starts_with("--query is not JSON"));
+        assert!(bad(r#"{"titel": "a"}"#).starts_with("--query: unknown query key"));
     }
 
     #[test]

@@ -1,0 +1,252 @@
+//! Query trees as JSON, as the CLI's `search --query` takes them. Each node
+//! is an object with one key (and `phrase`, for a term):
+//!
+//! ```json
+//! {"all": [
+//!   {"keywords": "protein folding"},
+//!   {"any": [{"title": "alphafold"}, {"title": "structure prediction", "phrase": true}]},
+//!   {"none": [{"author_id": "0000-0002-1825-0097"}]},
+//!   {"years": {"from": 2020}}, {"not_retracted": true}, {"cites": "10.1038/nature14539"}
+//! ]}
+//! ```
+//!
+//! - groups: `all`, `any`, `none`, each an array of nodes;
+//! - terms: `keywords`, `title`, `author`, `container` (or `journal`),
+//!   `abstract`, `author_id`, each a string, with `"phrase": true` for the
+//!   words together;
+//! - filters: `years` (`{"from": 2017, "to": 2020}`, either optional, or a
+//!   year), `type` (a CSL type), `open_access` (a boolean), `language` (ISO
+//!   639-1), and `not_retracted` and `has_abstract` (`true`);
+//! - relations: `cites` and `cited_by`, any identifier.
+
+use aspero_core::{FilterValue, QueryNode, Relation, TermField, WorkType, YearRange};
+use serde_json::{Map, Value, json};
+
+/// A tree from its JSON form, or why not, in English.
+pub fn parse_query(value: &Value) -> Result<QueryNode, String> {
+    let Value::Object(object) = value else {
+        return Err(format!("a query node is an object, not {value}"));
+    };
+    let mut keys = object.keys().filter(|k| *k != "phrase");
+    let (Some(key), None) = (keys.next(), keys.next()) else {
+        let keys: Vec<&String> = object.keys().collect();
+        return Err(format!(
+            "a query node has one key (and \"phrase\", for a term), not {keys:?}"
+        ));
+    };
+    let value = &object[key.as_str()];
+    let phrase = match object.get("phrase") {
+        None => false,
+        Some(Value::Bool(b)) if field(key).is_some() => *b,
+        Some(_) if field(key).is_some() => return Err("\"phrase\" is true or false".into()),
+        Some(_) => return Err(format!("\"phrase\" goes with a term, not {key:?}")),
+    };
+    if let Some(field) = field(key) {
+        let text = string(key, value)?;
+        return Ok(match phrase {
+            true => QueryNode::phrase(field, text),
+            false => QueryNode::term(field, text),
+        });
+    }
+    let flag = |filter: FilterValue| match value {
+        Value::Bool(true) => Ok(QueryNode::filter(filter)),
+        _ => Err(format!("{key:?} takes true")),
+    };
+    Ok(match key.as_str() {
+        "all" | "any" | "none" => {
+            let Value::Array(items) = value else {
+                return Err(format!("{key:?} takes an array of nodes"));
+            };
+            let nodes = items.iter().map(parse_query).collect::<Result<_, _>>()?;
+            match key.as_str() {
+                "all" => QueryNode::All(nodes),
+                "any" => QueryNode::Any(nodes),
+                _ => QueryNode::None(nodes),
+            }
+        }
+        "years" => QueryNode::filter(FilterValue::Years(years(value)?)),
+        "type" => QueryNode::filter(FilterValue::WorkType(WorkType::from_csl(string(
+            key, value,
+        )?))),
+        "open_access" => match value {
+            Value::Bool(b) => QueryNode::filter(FilterValue::OpenAccess(*b)),
+            _ => return Err("\"open_access\" takes true or false".into()),
+        },
+        "language" => QueryNode::filter(FilterValue::Language(string(key, value)?.to_owned())),
+        "not_retracted" => flag(FilterValue::NotRetracted)?,
+        "has_abstract" => flag(FilterValue::HasAbstract)?,
+        "cites" => QueryNode::relation(Relation::Cites, string(key, value)?),
+        "cited_by" => QueryNode::relation(Relation::CitedBy, string(key, value)?),
+        other => {
+            return Err(format!(
+                "unknown query key {other:?} (all, any, none, keywords, title, author, \
+                 container, abstract, author_id, years, type, open_access, language, \
+                 not_retracted, has_abstract, cites, cited_by)"
+            ));
+        }
+    })
+}
+
+/// A tree in its JSON form; [`parse_query`] reads it back.
+pub fn query_json(node: &QueryNode) -> Value {
+    let one = |key: &str, value: Value| {
+        let mut map = Map::new();
+        map.insert(key.to_owned(), value);
+        Value::Object(map)
+    };
+    let nodes = |nodes: &[QueryNode]| Value::Array(nodes.iter().map(query_json).collect());
+    match node {
+        QueryNode::All(n) => one("all", nodes(n)),
+        QueryNode::Any(n) => one("any", nodes(n)),
+        QueryNode::None(n) => one("none", nodes(n)),
+        QueryNode::Term(t) => {
+            let mut term = one(field_key(t.field), json!(t.value));
+            if t.phrase {
+                term["phrase"] = json!(true);
+            }
+            term
+        }
+        QueryNode::Filter(f) => match f {
+            FilterValue::Years(y) => {
+                let mut range = Map::new();
+                if let Some(from) = y.from {
+                    range.insert("from".into(), json!(from));
+                }
+                if let Some(to) = y.to {
+                    range.insert("to".into(), json!(to));
+                }
+                one("years", Value::Object(range))
+            }
+            FilterValue::WorkType(t) => one("type", json!(t.as_csl())),
+            FilterValue::OpenAccess(oa) => one("open_access", json!(oa)),
+            FilterValue::Language(code) => one("language", json!(code)),
+            FilterValue::NotRetracted => one("not_retracted", json!(true)),
+            FilterValue::HasAbstract => one("has_abstract", json!(true)),
+            _ => one("unknown", Value::Null),
+        },
+        QueryNode::Relation(r) => one(r.relation.as_str(), json!(r.id)),
+        _ => one("unknown", Value::Null),
+    }
+}
+
+fn field(key: &str) -> Option<TermField> {
+    Some(match key {
+        "keywords" => TermField::Keywords,
+        "title" => TermField::Title,
+        "author" => TermField::Author,
+        "container" | "journal" => TermField::Container,
+        "abstract" => TermField::Abstract,
+        "author_id" => TermField::AuthorId,
+        _ => return None,
+    })
+}
+
+fn field_key(field: TermField) -> &'static str {
+    match field {
+        TermField::Keywords => "keywords",
+        TermField::Title => "title",
+        TermField::Author => "author",
+        TermField::Container => "container",
+        TermField::Abstract => "abstract",
+        _ => "author_id",
+    }
+}
+
+fn string<'a>(key: &str, value: &'a Value) -> Result<&'a str, String> {
+    value
+        .as_str()
+        .ok_or_else(|| format!("{key:?} takes a string, not {value}"))
+}
+
+/// `2017`, or `{"from": 2017, "to": 2020}` with either left out.
+fn years(value: &Value) -> Result<YearRange, String> {
+    let year = |v: &Value| {
+        v.as_i64()
+            .and_then(|y| i16::try_from(y).ok())
+            .ok_or_else(|| format!("not a year: {v}"))
+    };
+    match value {
+        Value::Object(range) => {
+            if let Some(other) = range.keys().find(|k| !matches!(k.as_str(), "from" | "to")) {
+                return Err(format!("\"years\" takes from and to, not {other:?}"));
+            }
+            Ok(YearRange {
+                from: range.get("from").map(year).transpose()?,
+                to: range.get("to").map(year).transpose()?,
+            })
+        }
+        v => {
+            let y = year(v)?;
+            Ok(YearRange {
+                from: Some(y),
+                to: Some(y),
+            })
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn trees_read_and_write_their_json_form() {
+        let text = r#"{"all": [
+            {"keywords": "protein folding"},
+            {"any": [{"title": "alphafold"}, {"journal": "structure prediction", "phrase": true}]},
+            {"none": [{"author_id": "0000-0002-1825-0097"}, {"not_retracted": true}]},
+            {"years": {"from": 2020}}, {"years": 2019}, {"type": "article-journal"},
+            {"open_access": false}, {"language": "en"}, {"has_abstract": true},
+            {"cites": "10.1038/nature14539"}, {"cited_by": "W1"}
+        ]}"#;
+        let tree = parse_query(&serde_json::from_str(text).unwrap()).unwrap();
+        let QueryNode::All(nodes) = &tree else {
+            panic!("{tree:?}")
+        };
+        assert_eq!(nodes.len(), 11);
+        assert_eq!(
+            nodes[1],
+            QueryNode::Any(vec![
+                QueryNode::term(TermField::Title, "alphafold"),
+                QueryNode::phrase(TermField::Container, "structure prediction"),
+            ])
+        );
+        assert_eq!(
+            nodes[4],
+            QueryNode::filter(FilterValue::Years(YearRange {
+                from: Some(2019),
+                to: Some(2019)
+            }))
+        );
+        assert_eq!(parse_query(&query_json(&tree)).unwrap(), tree);
+        assert_eq!(
+            query_json(&nodes[1]).to_string(),
+            r#"{"any":[{"title":"alphafold"},{"container":"structure prediction","phrase":true}]}"#
+        );
+    }
+
+    #[test]
+    fn mistakes_are_explained() {
+        let err = |text: &str| parse_query(&serde_json::from_str(text).unwrap()).unwrap_err();
+        assert!(err(r#"{"titel": "x"}"#).starts_with("unknown query key \"titel\""));
+        assert!(err(r#"{"title": "x", "author": "y"}"#).starts_with("a query node has one key"));
+        assert_eq!(
+            err(r#"{"all": {"title": "x"}}"#),
+            "\"all\" takes an array of nodes"
+        );
+        assert_eq!(err(r#"{"title": 3}"#), "\"title\" takes a string, not 3");
+        assert_eq!(
+            err(r#"{"cites": "x", "phrase": true}"#),
+            "\"phrase\" goes with a term, not \"cites\""
+        );
+        assert_eq!(
+            err(r#"{"not_retracted": false}"#),
+            "\"not_retracted\" takes true"
+        );
+        assert_eq!(
+            err(r#"{"years": {"since": 2000}}"#),
+            "\"years\" takes from and to, not \"since\""
+        );
+        assert_eq!(err(r#"["x"]"#), "a query node is an object, not [\"x\"]");
+    }
+}

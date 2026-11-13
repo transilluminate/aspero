@@ -236,17 +236,77 @@ title metadata unless junk), or its title and first author on the page
 verified as a citation; a given title not on the page (a banner, "PLOS
 ONE") only joins the text. `decided_by` says which.
 
+## Citation links
+
+Who cites whom, read from **OpenAlex's `referenced_works`**, so nodes are
+OpenAlex work ids (`references`, `analyse`; `engine/src/graph.rs`, shapes
+in `aspero_json::graph`). Phases (#60): G1 references and the analyses
+below; G2 related works (co-citation and coupling, capped and sampled,
+from `cites:` pages); G3 OpenCitations as a free source of citing works.
+
+- **Coverage.** OpenAlex gives `referenced_works: []` (and a count of 0)
+  both for works it has no reference data for (books such as the DSM-5,
+  publishers that deposit none, older work) and for works citing nothing,
+  and no other field tells them apart (checked 2026-11: `indexed_in`,
+  `has_fulltext` don't). Works citing nothing are rare, so an empty list
+  is **unknown** (`SourceRecord::references` is `None`), never "none"; a
+  source that can say "none" may give `Some(empty)`. Lists are complete
+  (5,000 listed for a count of 5,000) and ordered by id, not as the work
+  cites them.
+- **Records.** OpenAlex lookups fetch whole works (no `select`), so the
+  list costs no extra request; it is mapped onto the record, and the cache
+  was rebuilt for it.
+- **Resolving seeds** is cheap and never retried (many fail by design):
+  fresh cached answers, then one batch per identifier kind (a batch of one
+  is a free lookup). Kinds OpenAlex can't look up (PMCIDs, ISBNs) are
+  looked up elsewhere and asked again by the DOI or PMID found; without
+  one, `unsupported_id`. A DOI OpenAlex lacks is `not_found` without
+  asking other sources: analyses need the OpenAlex work.
+- **Identity.** Seeds, and works found, are one work when they share a
+  DOI, PMID or arXiv ID (published records list their preprint's arXiv
+  copy), else on the same title (similarity ≥ 0.9, a reply or erratum
+  never the work it answers), first author and years ±1. Merged ids are
+  kept; counts are over merged seeds ("cited by k of n").
+- **Retracted references:** the union of the seeds' references checked
+  with `openalex:A|B|…,is_retracted:true`, 100 per request ($0.0001; the
+  same as a lookup batch), plus, without calls, notices already cached:
+  cached records' own flags and the registry's (Crossref) notices for
+  their DOIs.
+- **Odd one out:** a seed citing no other seed, cited by none, sharing no
+  references, is `no_links`; with unknown references it's
+  `no_reference_data`, unless another seed cites it (then it isn't odd).
+  Free. Nothing is odd in a set of fewer than two works.
+- **Probably missing:** references counted over merged seeds, works of the
+  set left out, at least two citing, most cited first (ties by id). The
+  best are looked up in whole batches (one request for up to 100), so
+  works that turn out to be a seed or each other (versions) drop or merge
+  at no extra cost; then the best `limit`. A version cited by only one
+  seed isn't seen.
+- **Spend.** Analyses run cheapest first (odd one out, probably missing,
+  retracted references). With a budget (US dollars), each paid request is
+  refused when it could take the spend past it; what was stopped says
+  so: `incomplete: {kind: budget|provider_failed|capped, done, total}`
+  (`capped` is G2's sampling). `estimate_only` resolves seeds from the
+  cache and free lookups of one id (which the run then finds cached) and
+  counts the rest exactly: requests not answerable from the cache. A set
+  of 11 works with 350 references cost $0.0005 and 3 s (2026-11).
+- **Cache.** An `edges` table (work, direction `references`|`cited_by`,
+  ids, complete, stored_at): references 30 days, citing pages (G2) 1 day.
+  It is created with `CREATE TABLE IF NOT EXISTS` beside the versioned
+  schema, so adding it rebuilt nothing; rebuilds drop it like the rest.
+
 ## Storage
 
 Two SQLite stores, split by whether data can be refetched:
 
 - **Cache** (`cache.sqlite`, platform cache dir or `$ASPERO_CACHE_DIR`):
-  mapped records with raw bodies, "not found" answers, search pages. WAL,
-  busy timeout, batch reads and single-transaction writes. No migrations:
-  bump `SCHEMA_VERSION` on any schema *or record-shape/mapping* change and
-  it rebuilds. TTLs: records 7d, misses 1d, searches 1d. A cached record
-  counts only if it covers the requested fields. Failed providers fall back
-  to stale entries.
+  mapped records with raw bodies, "not found" answers, search pages,
+  citation links. WAL, busy timeout, batch reads and single-transaction
+  writes. No migrations: bump `SCHEMA_VERSION` on any schema *or
+  record-shape/mapping* change and it rebuilds (a table added beside the
+  schema, like `edges`, needs no rebuild). TTLs: records 7d, misses 1d,
+  searches 1d, references 30d. A cached record counts only if it covers
+  the requested fields. Failed providers fall back to stale entries.
 - **Durable store** (`aspero.sqlite`, data dir; not built yet): history and
   derived data (embeddings, extracted text) keyed by
   `(work id, kind, producer, version)`, with forward-only numbered
@@ -358,7 +418,8 @@ fixture recorded with different parameters once hid a ranking bug.
 `searchCapabilities` saying what each source can search by, and
 `searchSupports` whether it can search a query tree), offline
 `scan`, `split_references` and `split_lines` (laid-out lines with
-indents, from PDFKit), and for settings `budgets` (as last
+indents, from PDFKit), `references` and `analyse` (citation links), and
+for settings `budgets` (as last
 reported: free), `check_openalex_key` (one free lookup), `cache_stats`,
 `clear_cache` and `unavailable`. Network calls take a `Patience` (batch,
 interactive, offline).
@@ -409,8 +470,9 @@ its container; different schema versions would rebuild each other's).
 - **Configuration**: TOML config (enable/order providers, per-provider
   resilience overrides); `auth status` distinguishing rejected from
   rate-limited.
-- **Discovery**: citations/references, snowballing (co-citation, coupling),
-  watches ("new since last run"), history and sessions.
+- **Discovery**: related works (co-citation, coupling: citation links
+  G2), OpenCitations (G3), watches ("new since last run"), history and
+  sessions.
 - **Integration**: CSL-JSON export, DOI-as-citekey builds, Zotero
   interop; an MCP adapter if ever wanted.
 - **hayagriva workarounds** in `bib/src/cite.rs` (a default `<name/>`;

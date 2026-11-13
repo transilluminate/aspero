@@ -1138,7 +1138,10 @@ pub struct SearchRequest {
     /// $0.001 a page).
     #[uniffi(default = None)]
     pub source: Option<String>,
-    /// A previous page's `next`, with the same request otherwise.
+    /// A previous page's `next`, with the same request otherwise. Crossref
+    /// sorted by `newest` pages by offset, and orders works sharing a date
+    /// differently from one request to the next, so its pages may repeat
+    /// or skip such works.
     #[uniffi(default = None)]
     pub cursor: Option<String>,
     /// An author's name. Fields are ANDed with `text`, which may then be

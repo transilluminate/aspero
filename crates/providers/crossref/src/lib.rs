@@ -301,7 +301,9 @@ impl Provider for Crossref {
         let rows = query.page.limit.clamp(1, MAX_ROWS);
         params.push(("rows", rows.to_string()));
         // Crossref refuses date sorts with a cursor, so those page by offset,
-        // carried in our cursor as `offset:N`.
+        // carried in our cursor as `offset:N`. Its order among works of one
+        // date isn't stable between requests, so such pages may repeat or
+        // skip them; one sort key leaves no tie-break to ask for.
         let by_date = params
             .iter()
             .any(|(k, v)| *k == "sort" && DATE_SORTS.contains(&v.as_str()));

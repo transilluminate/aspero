@@ -201,16 +201,24 @@ fn identifiers(inputs: Vec<String>) -> Result<Vec<String>, Failure> {
     Ok(lines(&read_stdin()?).map(str::to_owned).collect())
 }
 
-/// The most serious problem among the seeds and analyses; a budget
-/// reached is not one (it was asked for).
+/// Success when the analyses ran: seeds that don't resolve (books, made-up
+/// identifiers) are expected and reported, so they decide the exit only
+/// when none resolved. A provider failure does; a budget reached doesn't
+/// (it was asked for).
 fn exit_for(a: &Analysis) -> Exit {
-    let seeds = a.seeds.iter().filter_map(|s| s.problem).map(|p| match p {
-        SeedProblem::InvalidId => Exit::Usage,
-        SeedProblem::NotFound => Exit::NotFound,
-        SeedProblem::UnsupportedId => Exit::Unsupported,
-        SeedProblem::ProviderFailed => Exit::Unavailable,
-        _ => Exit::Ok,
-    });
+    let none_resolved = a.seeds.iter().all(|s| s.problem.is_some());
+    let seeds = a
+        .seeds
+        .iter()
+        .filter(|_| none_resolved)
+        .filter_map(|s| s.problem)
+        .map(|p| match p {
+            SeedProblem::InvalidId => Exit::Usage,
+            SeedProblem::NotFound => Exit::NotFound,
+            SeedProblem::UnsupportedId => Exit::Unsupported,
+            SeedProblem::ProviderFailed => Exit::Unavailable,
+            _ => Exit::Ok,
+        });
     let stopped = [
         a.retracted_references.as_ref().and_then(|s| s.incomplete),
         a.odd_one_out.as_ref().and_then(|s| s.incomplete),
@@ -469,7 +477,8 @@ mod tests {
             &(serde_json::to_string_pretty(&json).unwrap() + "\n"),
         );
         pinned("graph/analysis.txt", &analysis_text(&analysis, &json));
-        assert_eq!(exit_for(&analysis), Exit::Unsupported);
+        // An ISBN that doesn't resolve is reported, not a failure.
+        assert_eq!(exit_for(&analysis), Exit::Ok);
 
         let estimate = engine.analyse(&inputs, &kinds, None, true).await.unwrap();
         let json = aspero_json::graph::analysis(&estimate, false);

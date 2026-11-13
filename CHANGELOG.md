@@ -20,6 +20,16 @@ Added:
   | DataCite | yes | yes | no | no | yes |
   | Open Library | yes | yes | no | yes | no |
 
+- Newest first, without an upper year, searches up to this year, so
+  records dated ahead (deposits, early issues, typos like 2115) don't
+  lead. Crossref pages date sorts by offset (it refuses them with a
+  cursor), carried as `offset:N`; its order within one date isn't
+  stable, so such pages may repeat or skip works of that date.
+- A search with nothing to search for (no keywords, fields or provider
+  parameters) is refused as a usage error. Provider parameters alone
+  (an OpenAlex `filter`) are a search.
+- DataCite's citation count of 0 is none: it counts only citations it
+  tracks.
 - FFI: `searchCapabilities()`, each searching source's fields, filters
   and sorts, in the order `search` picks from; `Work.citedByCount`.
 - JSON: lean works carry `cited_by_count`.

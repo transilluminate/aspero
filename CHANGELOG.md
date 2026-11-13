@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.15.0
+## Unreleased
 
 Added:
 
@@ -18,7 +18,7 @@ Added:
   notices) 7 days, "not found" 1 day, searches 1 day, references 30 days,
   citing works 1 day; provider failures and verdicts are never cached.
 
-## Unreleased
+## 0.15.0
 
 Added:
 

@@ -510,7 +510,12 @@ fn specs(sources: &[String]) -> Vec<ToolSpec> {
              years, type (article-journal, review, book, chapter, paper-conference, article \
              for preprints, thesis, report, dataset), language, open access, retraction and \
              abstracts, and citation relations: `cites` X for works citing X, `cited_by` X \
-             for X's references), or by keywords (`text`). One source answers (`source`, or the first \
+             for X's references), or by keywords (`text`). Example: {\"all\": [{\"title\": \
+             \"sepsis\"}, {\"any\": [{\"journal\": \"Lancet\", \"phrase\": true}, \
+             {\"journal\": \"BMJ\", \"phrase\": true}]}, {\"none\": [{\"title\": \
+             \"neonatal\"}]}, {\"years\": {\"from\": 2018}}]}. A term with \"phrase\": true \
+             matches as a phrase; for a journal, that journal exactly (Nature, not Nature \
+             Communications). One source answers (`source`, or the first \
              that can); a tree it can't search fails with the reason, as `search_supports` \
              says. Pages with `cursor`. OpenAlex searches cost $0.001 each (a journal term \
              one more). Lean records by default; `full` for every field.",

@@ -38,10 +38,10 @@ pub(crate) struct Plan {
     pub containers: Vec<Container>,
 }
 
+/// Journals whose sources make one filter: any of `names` (name, phrase).
 #[derive(Debug, PartialEq, Eq)]
 pub(crate) struct Container {
-    pub name: String,
-    pub phrase: bool,
+    pub names: Vec<(String, bool)>,
     /// Leave out works from these sources.
     pub negated: bool,
 }
@@ -167,9 +167,25 @@ fn text_value(value: &str, phrase: bool, grouped: bool) -> String {
     }
 }
 
-/// An any of leaves that are all values of one filter: `type:a|b`.
+/// An any of leaves that are all values of one filter: `type:a|b`, or
+/// journals, whose sources are then ORed.
 fn any_of_values(node: &QueryNode, nodes: &[QueryNode]) -> Result<Clause, String> {
     let refuse = || format!("{NAME} can't combine {} with any", node.leaf_names());
+    let journals: Option<Vec<(String, bool)>> = nodes
+        .iter()
+        .map(|n| match n {
+            QueryNode::Term(t) if t.field == TermField::Container => {
+                Some((t.value.clone(), t.phrase))
+            }
+            _ => None,
+        })
+        .collect();
+    if let Some(names) = journals.filter(|names| !names.is_empty()) {
+        return Ok(Clause::Container(Container {
+            names,
+            negated: false,
+        }));
+    }
     let mut key = None;
     let mut values = Vec::new();
     for n in nodes {
@@ -201,8 +217,7 @@ fn leaf_clauses(leaf: &QueryNode, negated: bool) -> Result<Vec<Clause>, String> 
     match leaf {
         QueryNode::Term(t) if t.field == TermField::Container => {
             Ok(vec![Clause::Container(Container {
-                name: t.value.clone(),
-                phrase: t.phrase,
+                names: vec![(t.value.clone(), t.phrase)],
                 negated,
             })])
         }
@@ -421,16 +436,29 @@ mod tests {
             plan(tree).unwrap().containers,
             [
                 Container {
-                    name: "Nature".into(),
-                    phrase: true,
+                    names: vec![("Nature".into(), true)],
                     negated: false
                 },
                 Container {
-                    name: "Science".into(),
-                    phrase: false,
+                    names: vec![("Science".into(), false)],
                     negated: true
                 },
             ]
+        );
+    }
+
+    #[test]
+    fn any_of_journals_ors_their_sources() {
+        let tree = QueryNode::Any(vec![
+            term(TermField::Container, "Nature"),
+            QueryNode::phrase(TermField::Container, "Science"),
+        ]);
+        assert_eq!(
+            plan(tree).unwrap().containers,
+            [Container {
+                names: vec![("Nature".into(), false), ("Science".into(), true)],
+                negated: false
+            }]
         );
     }
 
@@ -457,13 +485,6 @@ mod tests {
                 QueryNode::filter(FilterValue::WorkType(WorkType::Book)),
             ])),
             "OpenAlex can't combine language and work type with any"
-        );
-        assert_eq!(
-            reason(QueryNode::Any(vec![
-                term(TermField::Container, "Nature"),
-                term(TermField::Container, "Science"),
-            ])),
-            "OpenAlex can't combine journal with any"
         );
         assert_eq!(
             reason(QueryNode::None(vec![QueryNode::All(vec![

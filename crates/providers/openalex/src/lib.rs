@@ -36,6 +36,8 @@ pub const DEFAULT_BASE_URL: &str = "https://api.openalex.org";
 
 /// OpenAlex's cap on `per-page` and on values OR-ed in one filter.
 const MAX_PAGE: u32 = 100;
+/// Most values OpenAlex takes in one filter (`a|b|…`).
+const MAX_FILTER_VALUES: usize = 100;
 
 #[derive(Debug, Clone)]
 #[non_exhaustive]
@@ -357,8 +359,7 @@ impl Provider for OpenAlex {
             None => {
                 flat_filters(query, &mut filters)?;
                 let container = query.field(Filter::Container).map(|name| tree::Container {
-                    name: name.to_owned(),
-                    phrase: false,
+                    names: vec![(name.to_owned(), false)],
                     negated: false,
                 });
                 let text = query.text.trim();
@@ -368,13 +369,24 @@ impl Provider for OpenAlex {
         };
         let mut usage = None;
         for container in containers {
-            let name = match container.phrase {
-                true => format!("\"{}\"", container.name.replace('"', "")),
-                false => container.name,
-            };
-            let (sources, u) = self.sources_named(&name).await?;
-            let spent = usage.map_or(u, |s: Usage| s.then(u));
-            usage = Some(spent);
+            // OpenAlex takes at most 100 values in a filter: each journal
+            // gets an equal share of its best-matching sources.
+            let share = (MAX_FILTER_VALUES / container.names.len().max(1)).max(1);
+            let mut sources = Vec::new();
+            for (name, phrase) in container.names {
+                let name = match phrase {
+                    true => format!("\"{}\"", name.replace('"', "")),
+                    false => name,
+                };
+                let (found, u) = self.sources_named(&name).await?;
+                usage = Some(usage.map_or(u, |s: Usage| s.then(u)));
+                for source in found.into_iter().take(share) {
+                    if !sources.contains(&source) {
+                        sources.push(source);
+                    }
+                }
+            }
+            let spent = usage.unwrap_or_default();
             match (sources.is_empty(), container.negated) {
                 // No source so named: nothing to find (or to leave out).
                 (true, false) => {

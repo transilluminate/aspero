@@ -309,7 +309,9 @@ fixture recorded with different parameters once hid a ranking bug.
   `sort=relevance_score:desc` is refused without a search (text or a
   `.search` filter), so relevance is never sent: it is the default. Works
   can't be filtered by journal name, so a container search first finds
-  the sources so named (another $0.001) and ORs the best 100 IDs.
+  the sources so named (another $0.001) and ORs the best 100 IDs. An
+  any of journals finds each one's sources and ORs them all, each journal
+  given an equal share of the 100 values a filter takes.
 - **Crossref.** `mailto` puts requests in the polite pool (10 req/s single,
   3 req/s lists, 3 concurrent). **Cursor paging drops relevance order**
   unless `sort=score&order=desc` is sent. Lookalike re-deposits exist (2025

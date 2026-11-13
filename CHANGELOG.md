@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased
+
+Fixed:
+
+- A record whose title only partly agrees, with nothing else agreeing
+  ("Journal of the American College of Surgeons" for a book by the
+  College), scored plausible; it's now no evidence (#52).
+- Another edition of a cited book (same title and authors, another
+  year) was a mismatch; it's plausible, the year a difference. A book
+  cited by its 9th edition no longer turns on which searches answered
+  in time (#52).
+
 ## 0.10.0
 
 Added:

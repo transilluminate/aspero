@@ -655,3 +655,38 @@ fn a_claims_place_takes_its_fields_then_its_text() {
     let read = claim.as_read();
     assert_eq!(read.page.as_deref(), Some("797"));
 }
+
+/// #52: the ATLS manual, 9th edition (2012), cited by its organisation.
+const ATLS: &str = "American College of Surgeons. Advanced trauma life support student \
+                    course manual. 9th ed. Chicago, IL: American College of Surgeons; 2012.";
+
+#[test]
+fn a_periodicals_title_inside_the_author_is_no_match() {
+    let mut journal = record(
+        &[],
+        "Journal of the American College of Surgeons.",
+        &[],
+        2000,
+    );
+    journal.work.issued = None;
+    let a = assess(&Claim::from_text(ATLS), &journal);
+    assert!(a.confidence < PLAUSIBLE, "{a:?}");
+}
+
+#[test]
+fn another_edition_of_a_cited_book_is_plausible() {
+    let mut book = record(
+        &["isbn:9781880696514"],
+        "Advanced Trauma Life Support®",
+        &["American College of Surgeons Committee on Trauma"],
+        2025,
+    );
+    book.work.work_type = Some(crate::work::WorkType::Book);
+    let a = assess(&Claim::from_text(ATLS), &book);
+    assert!(a.confidence >= PLAUSIBLE, "{a:?}");
+    assert_eq!(a.year.agreement, Agreement::Mismatch);
+
+    // Not for articles: a different year there is more often another work.
+    book.work.work_type = Some(crate::work::WorkType::JournalArticle);
+    assert!(assess(&Claim::from_text(ATLS), &book).confidence < PLAUSIBLE);
+}

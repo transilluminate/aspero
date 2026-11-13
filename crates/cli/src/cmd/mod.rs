@@ -10,6 +10,7 @@ pub mod claim;
 pub mod graph;
 pub mod identify;
 pub mod lookup;
+pub mod mcp;
 pub mod resolve;
 pub mod scan;
 pub mod search;

@@ -106,6 +106,28 @@ which works most of them cite but the set lacks. A work whose references
 OpenAlex doesn't have (often a book) is reported as such, never as
 unlinked.
 
+## Agents (MCP)
+
+Agents that speak the Model Context Protocol can use aspero as tools
+rather than through the shell. `aspero mcp` serves them over stdio, for the
+agent to launch; with Claude Code:
+
+```sh
+claude mcp add aspero -- aspero mcp
+```
+
+The tools: `search` (a query tree, the JSON that `search --query` takes, or
+keywords), `search_supports`, `lookup`, `verify` (one citation, text or
+fields, or a batch), `identify` (a first page's text), and `citing_works` and
+`references` (the works citing a work, and its references). Results are the
+JSON the commands print, as structured content with a short text summary;
+`full: true` gives every field.
+
+Each session may spend up to `--budget` dollars (default $0.25)
+on OpenAlex searches; once it has, tools that may spend are refused. Every
+result reports its usage and the session's spend. The environment, cache
+and pacing are the other commands'.
+
 ## How it behaves
 
 - **Cheap**: free sources first; paid OpenAlex searches only when needed,
@@ -120,10 +142,11 @@ unlinked.
 ## Library
 
 The CLI is a thin adapter over `aspero-engine`, with its JSON shapes in
-`aspero-json`; providers are separate crates behind features. Apps use
-`aspero-ffi`: Swift bindings and an `.xcframework` attached to each
-release (`just xcframework` builds them). See [DESIGN.md](DESIGN.md) for
-the architecture, scoring rules, provider gotchas and plans.
+`aspero-json`; providers are separate crates behind features, and the MCP
+server is `aspero-mcp`. Apps use `aspero-ffi`: Swift bindings and an
+`.xcframework` attached to each release (`just xcframework` builds them).
+See [DESIGN.md](DESIGN.md) for the architecture, scoring rules, provider
+gotchas and plans.
 
 ## Development
 

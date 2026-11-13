@@ -260,7 +260,8 @@ pub enum EngineError {
     UnknownProvider(String),
     #[error("no enabled provider supports {0}")]
     NoCapableProvider(&'static str),
-    /// A search with no keywords and no author, title or container.
+    /// A search with no keywords, no author, title or container, and no
+    /// provider parameters.
     #[error("nothing to search for: give keywords, or an author, title or container")]
     NothingToSearch,
     #[error("{provider}: {error}")]

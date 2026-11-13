@@ -36,10 +36,12 @@ impl Engine {
         query: &SearchQuery,
     ) -> Result<SearchReport, EngineError> {
         let citation = query.mode == SearchMode::Citation;
-        // Keywords, a field, or (verifying) a place: something to find.
+        // Keywords, a field, (verifying) a place, or an expert's own
+        // parameters (an OpenAlex `filter` alone): something to find.
         let fields = [Filter::Author, Filter::Title, Filter::Container];
         if query.text.trim().is_empty()
             && query.place.is_none()
+            && query.extra.is_empty()
             && !fields.iter().any(|f| query.field(*f).is_some())
         {
             return Err(EngineError::NothingToSearch);

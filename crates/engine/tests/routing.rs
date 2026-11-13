@@ -443,6 +443,12 @@ async fn a_search_for_nothing_is_refused() {
     let r = engine.search(None, &SearchQuery::new("  ")).await;
     assert!(matches!(r, Err(EngineError::NothingToSearch)), "{r:?}");
     assert!(mock.searches.lock().unwrap().is_empty());
+
+    // An expert's filter alone is a search.
+    let mut q = SearchQuery::new("");
+    q.extra.insert("filter".into(), "is_oa:true".into());
+    engine.search(None, &q).await.unwrap();
+    assert_eq!(mock.searches.lock().unwrap().len(), 1);
 }
 
 #[tokio::test(start_paused = true)]

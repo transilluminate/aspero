@@ -1,5 +1,35 @@
 # Changelog
 
+## Unreleased
+
+Added:
+
+- Search by a query tree: all, any and none of terms, filters and
+  relations, nested (#54). `aspero search --query '<json>'`; on the
+  FFI, `SearchRequest.query` (a `SearchNode`), instead of the keywords
+  and fields. Each source says what it can do in `searchCapabilities()`
+  (`any`, `none`, `nesting`, `relations`), and `searchSupports(source,
+  query)` says, offline, whether a tree can be searched and if not why
+  ("OpenAlex can't combine title and author with any"); searching anyway
+  fails (`unsupported`) with the same reason.
+- Fields: keywords, abstract, and author id (an ORCID, or an OpenAlex
+  author id). Filters: not retracted, language (ISO 639-1, given to each
+  source in its own form) and has an abstract. Relations: works citing,
+  or cited by, a work named by any identifier aspero looks up (resolved,
+  through the cache, to its OpenAlex work).
+
+  | Source | Any | None | Fields | Filters | Relations |
+  | --- | --- | --- | --- | --- | --- |
+  | OpenAlex | within one field or filter | yes, not years | all; author id by ORCID or OpenAlex id | all | cites, cited by |
+  | Crossref | no | no | keywords, title, author, container, ORCID | years, type, abstract | no |
+  | Europe PMC | yes | yes | all; author id by ORCID | all but type | no |
+  | DataCite | yes | yes | all but container; author id by ORCID | all but open access and retraction | no |
+  | Open Library | yes | beside something to find | keywords, title, author | years, language | no |
+
+- Newest first, a tree is searched up to this year unless a years
+  filter it always applies (the tree, or one of its top-level all)
+  gives an upper year; a first year alone gains this year as its last.
+
 ## 0.10.1
 
 Fixed:

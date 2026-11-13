@@ -5,7 +5,8 @@ use std::time::Duration;
 
 use aspero_core::testing::{FIXTURE_TIME, ReplayClient, block_on, fixture, response};
 use aspero_core::{
-    Error, FieldSet, HttpResponse, Provider, SearchQuery, Sort, WorkId, WorkType, YearRange,
+    Error, FieldSet, FilterValue, HttpResponse, Provider, QueryNode, SearchQuery, Sort, TermField,
+    WorkId, WorkType, YearRange,
 };
 use aspero_crossref::{Crossref, CrossrefConfig};
 
@@ -399,4 +400,109 @@ fn retraction_watch_notices_are_mapped() {
             .iter()
             .any(|u| u.kind == aspero_core::UpdateKind::Correction)
     );
+}
+
+fn tree_query(tree: QueryNode) -> SearchQuery {
+    let mut q = SearchQuery::new("");
+    q.tree = Some(tree);
+    q.page.limit = 3;
+    q
+}
+
+fn years(from: i16, to: i16) -> QueryNode {
+    QueryNode::filter(FilterValue::Years(YearRange {
+        from: Some(from),
+        to: Some(to),
+    }))
+}
+
+#[test]
+fn trees_are_all_of_query_fields_and_filters() {
+    let (cr, http) = provider([recorded("works_search_tree")]);
+    let tree = QueryNode::All(vec![
+        QueryNode::term(TermField::Title, "deep"),
+        QueryNode::term(TermField::Author, "lecun"),
+        QueryNode::term(TermField::Title, "learning"),
+        years(2010, 2015),
+        years(2015, 2020),
+        QueryNode::filter(FilterValue::WorkType(WorkType::JournalArticle)),
+    ]);
+    let page = block_on(cr.search(&tree_query(tree))).unwrap().value;
+    // Terms of one field share its parameter; overlapping years narrow.
+    assert_eq!(
+        query(&http, 0),
+        [
+            pair("query.title", "deep learning"),
+            pair("query.author", "lecun"),
+            pair(
+                "filter",
+                "from-pub-date:2015,until-pub-date:2015,type:journal-article"
+            ),
+            pair("sort", "score"),
+            pair("order", "desc"),
+            pair("rows", "3"),
+            pair("cursor", "*"),
+            pair("mailto", "test@example.org"),
+        ]
+    );
+    assert_eq!(
+        page.hits[0].record.work.title.as_deref(),
+        Some("Deep learning")
+    );
+}
+
+#[test]
+fn trees_crossref_cant_say_and_why() {
+    let (cr, http) = provider([]);
+    let reason = |tree: QueryNode| cr.express(&tree).unwrap_err();
+    assert_eq!(
+        reason(QueryNode::Any(vec![
+            QueryNode::term(TermField::Title, "a"),
+            QueryNode::term(TermField::Title, "b"),
+        ])),
+        "Crossref can't combine terms with any"
+    );
+    assert_eq!(
+        reason(QueryNode::None(vec![QueryNode::term(
+            TermField::Title,
+            "a"
+        )])),
+        "Crossref can't leave out terms with none"
+    );
+    assert_eq!(
+        reason(QueryNode::phrase(TermField::Title, "deep learning")),
+        "Crossref can't search for phrases"
+    );
+    assert_eq!(
+        reason(QueryNode::term(TermField::Abstract, "x")),
+        "Crossref can't search by abstract"
+    );
+    assert_eq!(
+        reason(QueryNode::filter(FilterValue::NotRetracted)),
+        "Crossref can't leave out retracted works"
+    );
+    assert_eq!(
+        reason(QueryNode::term(TermField::AuthorId, "A5023888391")),
+        "Crossref finds authors by ORCID, not OpenAlex author ids"
+    );
+    assert_eq!(
+        reason(QueryNode::All(vec![
+            QueryNode::filter(FilterValue::WorkType(WorkType::Book)),
+            QueryNode::filter(FilterValue::WorkType(WorkType::Chapter)),
+        ])),
+        "Crossref can't require two work types at once"
+    );
+    // An ORCID and an abstract are filters.
+    let (cr2, http2) = provider([response(200, &[], r#"{"message": {"items": []}}"#)]);
+    let tree = QueryNode::All(vec![
+        QueryNode::term(TermField::Keywords, "x"),
+        QueryNode::term(TermField::AuthorId, "https://orcid.org/0000-0002-1825-0097"),
+        QueryNode::filter(FilterValue::HasAbstract),
+    ]);
+    block_on(cr2.search(&tree_query(tree))).unwrap();
+    assert!(query(&http2, 0).contains(&pair(
+        "filter",
+        "has-abstract:true,orcid:0000-0002-1825-0097"
+    )));
+    assert!(http.requests().is_empty());
 }

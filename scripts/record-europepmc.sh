@@ -40,6 +40,11 @@ record search_newest 'query=(alphafold)' 'resultType=core' 'format=json' 'pageSi
   'cursorMark=*' 'sort=P_PDATE_D desc'
 record search_most_cited 'query=(alphafold)' 'resultType=core' 'format=json' 'pageSize=3' \
   'cursorMark=*' 'sort=CITED desc'
+record search_tree \
+  'query=(TITLE:"protein structure prediction" OR ABSTRACT:(alphafold)) AND LANG:eng AND HAS_ABSTRACT:Y AND (NOT PUB_TYPE:"Retracted Publication") AND (NOT TITLE:(review)) AND PUB_YEAR:[2021 TO 2023]' \
+  'resultType=core' 'format=json' 'pageSize=3' 'cursorMark=*'
+record search_tree_orcid 'query=AUTHORID:"0000-0001-6187-6610" AND (NOT LANG:ger)' 'resultType=core' 'format=json' \
+  'pageSize=3' 'cursorMark=*' 'sort=P_PDATE_D desc'
 
 if grep -rqiF "$ASPERO_MAILTO" "$out"; then
   echo "mailto address found in fixtures; deleting them" >&2

@@ -15,11 +15,13 @@ use std::time::Duration;
 
 use aspero_core::csl::{null_default, plain_text, strip_markup};
 use aspero_core::http::{escape_lucene, status_error};
+use aspero_core::query::{check_supported, lucene_term, lucene_years, render_lucene};
 use aspero_core::{
-    Capabilities, Cursor, Doi, Error, FieldSet, Filter, Hit, HttpClient, HttpRequest, HttpResponse,
-    IdKind, Lookup, Nbk, OpenAccess, Page, PartialDate, Person, Pmcid, Pmid, Provider, ProviderId,
-    Raw, ResiliencePolicy, Response, Result, SearchMode, SearchQuery, Sort, SourceRecord, Update,
-    UpdateKind, Work, WorkId, WorkType, tidy_abstract,
+    BooleanSupport, Capabilities, Cursor, Doi, Error, FieldSet, Filter, FilterValue, Hit,
+    HttpClient, HttpRequest, HttpResponse, IdKind, Lookup, Nbk, OpenAccess, Page, PartialDate,
+    Person, Pmcid, Pmid, Provider, ProviderId, QueryNode, Raw, ResiliencePolicy, Response, Result,
+    SearchMode, SearchQuery, Sort, SourceRecord, TermField, Update, UpdateKind, Work, WorkId,
+    WorkType, tidy_abstract,
 };
 use async_trait::async_trait;
 use jiff::Timestamp;
@@ -68,8 +70,18 @@ impl EuropePmc {
             Filter::Author,
             Filter::Title,
             Filter::Container,
+            Filter::Keywords,
+            Filter::Abstract,
+            Filter::AuthorId,
+            Filter::NotRetracted,
+            Filter::Language,
+            Filter::HasAbstract,
         ];
         capabilities.sorts = vec![Sort::Relevance, Sort::Newest, Sort::MostCited];
+        // Lucene: AND, OR and NOT across fields, nested.
+        capabilities.search_any = BooleanSupport::Anywhere;
+        capabilities.search_none = BooleanSupport::Anywhere;
+        capabilities.search_nesting = true;
         EuropePmc {
             config,
             http,
@@ -460,6 +472,9 @@ impl Provider for EuropePmc {
             return Err(Error::Unsupported("Europe PMC has no citation matcher"));
         }
         let mut clauses = Vec::new();
+        if let Some(tree) = &query.tree {
+            clauses.push(express(tree, &self.capabilities).map_err(Error::UnsupportedQuery)?);
+        }
         if !query.text.trim().is_empty() {
             clauses.push(format!("({})", escape_lucene(query.text.trim())));
         }
@@ -526,4 +541,56 @@ impl Provider for EuropePmc {
             .map(Cursor);
         Ok(Response::new(Page::new(hits, results.hit_count, next)))
     }
+
+    fn express(&self, tree: &QueryNode) -> std::result::Result<(), String> {
+        express(tree, &self.capabilities).map(|_| ())
+    }
+}
+
+/// A query tree in Europe PMC's syntax (Lucene, checked live 2026-11-13):
+/// fields `TITLE`, `AUTH`, `JOURNAL`, `ABSTRACT` and `AUTHORID` (a bare
+/// ORCID; the URL form finds nothing), `LANG` with MEDLINE's
+/// three-letter codes (`ger`, not `deu`), `HAS_ABSTRACT:Y`, and retracted
+/// works left out by PubMed's "Retracted Publication" type, which flags
+/// the retracted works themselves (the notices are "Retraction of
+/// Publication"). `NOT` works alone and nested.
+fn express(tree: &QueryNode, caps: &Capabilities) -> std::result::Result<String, String> {
+    const NAME: &str = "Europe PMC";
+    check_supported(tree, caps, NAME)?;
+    render_lucene(tree, &mut |leaf| match leaf {
+        QueryNode::Term(t) => {
+            let prefix = match t.field {
+                TermField::Keywords => None,
+                TermField::Title => Some("TITLE"),
+                TermField::Author => Some("AUTH"),
+                TermField::Container => Some("JOURNAL"),
+                TermField::Abstract => Some("ABSTRACT"),
+                TermField::AuthorId => {
+                    return match aspero_core::AuthorId::parse(&t.value) {
+                        Some(aspero_core::AuthorId::Orcid(orcid)) => {
+                            Ok(format!("AUTHORID:\"{orcid}\""))
+                        }
+                        _ => Err(format!(
+                            "{NAME} finds authors by ORCID, not OpenAlex author ids"
+                        )),
+                    };
+                }
+                _ => return Err(format!("{NAME} can't search by {}", t.field.name())),
+            };
+            Ok(lucene_term(prefix, &t.value, t.phrase))
+        }
+        QueryNode::Filter(f) => Ok(match f {
+            FilterValue::Years(years) => lucene_years("PUB_YEAR", *years),
+            FilterValue::OpenAccess(oa) => format!("OPEN_ACCESS:{}", if *oa { "y" } else { "n" }),
+            FilterValue::NotRetracted => "(NOT PUB_TYPE:\"Retracted Publication\")".to_owned(),
+            FilterValue::Language(code) => {
+                let (medline, _) = aspero_core::query::language(code)
+                    .ok_or_else(|| format!("{code:?} is not an ISO 639-1 language code"))?;
+                format!("LANG:{medline}")
+            }
+            FilterValue::HasAbstract => "HAS_ABSTRACT:Y".to_owned(),
+            _ => return Err(format!("{NAME} can't filter by {}", leaf.leaf_name())),
+        }),
+        other => Err(format!("{NAME} can't search by {}", other.leaf_name())),
+    })
 }

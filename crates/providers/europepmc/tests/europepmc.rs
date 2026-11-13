@@ -5,8 +5,8 @@ use std::sync::Arc;
 
 use aspero_core::testing::{ReplayClient, block_on, fixture, response};
 use aspero_core::{
-    Cursor, Error, FieldSet, HttpResponse, Provider, SearchQuery, Sort, UpdateKind, WorkId,
-    WorkType, YearRange,
+    Cursor, Error, FieldSet, FilterValue, HttpResponse, Provider, QueryNode, SearchQuery, Sort,
+    TermField, UpdateKind, WorkId, WorkType, YearRange,
 };
 use aspero_europepmc::{EuropePmc, EuropePmcConfig};
 
@@ -274,4 +274,92 @@ fn unknown_extras_and_citation_mode_are_refused() {
         Err(Error::Unsupported(_))
     ));
     assert!(http.requests().is_empty());
+}
+
+fn tree_query(tree: QueryNode) -> SearchQuery {
+    let mut q = SearchQuery::new("");
+    q.tree = Some(tree);
+    q.page.limit = 3;
+    q
+}
+
+#[test]
+fn trees_are_lucene_queries_across_fields() {
+    let (epmc, http) = provider([recorded("search_tree")]);
+    let tree = QueryNode::All(vec![
+        QueryNode::Any(vec![
+            QueryNode::phrase(TermField::Title, "protein structure prediction"),
+            QueryNode::term(TermField::Abstract, "alphafold"),
+        ]),
+        QueryNode::filter(FilterValue::Language("en".into())),
+        QueryNode::filter(FilterValue::HasAbstract),
+        QueryNode::filter(FilterValue::NotRetracted),
+        QueryNode::None(vec![QueryNode::term(TermField::Title, "review")]),
+        QueryNode::filter(FilterValue::Years(YearRange {
+            from: Some(2021),
+            to: Some(2023),
+        })),
+    ]);
+    let page = block_on(epmc.search(&tree_query(tree))).unwrap().value;
+    assert_eq!(
+        query(&http, 0),
+        [
+            pair(
+                "query",
+                r#"(TITLE:"protein structure prediction" OR ABSTRACT:(alphafold)) AND LANG:eng AND HAS_ABSTRACT:Y AND (NOT PUB_TYPE:"Retracted Publication") AND (NOT TITLE:(review)) AND PUB_YEAR:[2021 TO 2023]"#
+            ),
+            pair("resultType", "core"),
+            pair("format", "json"),
+            pair("pageSize", "3"),
+            pair("cursorMark", "*"),
+        ]
+    );
+    for hit in &page.hits {
+        let w = &hit.record.work;
+        assert!(w.abstract_text.is_some());
+        assert!(
+            !w.title
+                .as_deref()
+                .unwrap()
+                .to_lowercase()
+                .contains("review")
+        );
+        assert!(w.updates.iter().all(|u| u.kind != UpdateKind::Retraction));
+    }
+}
+
+#[test]
+fn orcids_are_author_ids_and_languages_medline_codes() {
+    let (epmc, http) = provider([recorded("search_tree_orcid")]);
+    let tree = QueryNode::All(vec![
+        QueryNode::term(TermField::AuthorId, "https://orcid.org/0000-0001-6187-6610"),
+        QueryNode::None(vec![QueryNode::filter(FilterValue::Language("de".into()))]),
+    ]);
+    let mut q = tree_query(tree);
+    q.sort = Sort::Newest;
+    let page = block_on(epmc.search(&q)).unwrap().value;
+    assert_eq!(
+        query(&http, 0)[0],
+        pair(
+            "query",
+            r#"AUTHORID:"0000-0001-6187-6610" AND (NOT LANG:ger)"#
+        )
+    );
+    assert_eq!(page.total, Some(2));
+    let (epmc, _) = provider([]);
+    assert_eq!(
+        epmc.express(&QueryNode::term(TermField::AuthorId, "A5023888391"))
+            .unwrap_err(),
+        "Europe PMC finds authors by ORCID, not OpenAlex author ids"
+    );
+    assert_eq!(
+        epmc.express(&QueryNode::relation(aspero_core::Relation::Cites, "W1"))
+            .unwrap_err(),
+        "Europe PMC can't find the works citing a work"
+    );
+    assert_eq!(
+        epmc.express(&QueryNode::filter(FilterValue::WorkType(WorkType::Book)))
+            .unwrap_err(),
+        "Europe PMC can't filter by work type"
+    );
 }

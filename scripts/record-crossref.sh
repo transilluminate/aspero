@@ -25,6 +25,7 @@ requests=(
   "works_search_fields     /works?query.author=LeCun&query.title=Deep%20learning&query.container-title=Nature&sort=score&order=desc&rows=5&cursor=*"
   "works_search_newest     /works?query=deep%20learning&sort=published&order=desc&rows=3&offset=0"
   "works_search_most_cited /works?query=deep%20learning&sort=is-referenced-by-count&order=desc&rows=3&cursor=*"
+  "works_search_tree       /works?query.title=deep%20learning&query.author=lecun&filter=from-pub-date:2015,until-pub-date:2015,type:journal-article&sort=score&order=desc&rows=3&cursor=*"
   "bad_filter              /works?filter=no-such-filter:1"
   "work_retracted          /works/10.1016/S0140-6736(97)11096-0"
 )

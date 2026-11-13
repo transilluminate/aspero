@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Records DataCite REST API responses as fixtures for aspero-datacite.
 #
-# Usage: scripts/record-datacite.sh
+# Usage: [ONLY=name] scripts/record-datacite.sh
 #
 # Keep the requests identical to what the provider sends (the tests assert
 # the parameters): relevance only works with page-number paging.
@@ -14,6 +14,7 @@ base="https://api.datacite.org"
 # name  path  [query params as name=value, URL-encoded by curl]
 record() {
   local name=$1 path=$2; shift 2
+  [[ -n "${ONLY:-}" && "$name" != "$ONLY" ]] && return 0
   local args=()
   for p in "$@"; do args+=(--data-urlencode "$p"); done
   curl -sS -G -H "Accept: application/vnd.api+json" -D "$out/$name.headers" -o "$out/$name.body" \
@@ -32,5 +33,11 @@ record batch_doi /dois \
 record search /dois 'query=(attention is all you need)' 'sort=relevance' 'page[number]=1' 'page[size]=3'
 record search_filtered /dois \
   'query=(transformer) AND publicationYear:[2017 TO 2018]' 'resource-type-id=preprint' \
+  'sort=relevance' 'page[number]=1' 'page[size]=3'
+record search_tree /dois \
+  'query=(titles.title:(transformer) OR descriptions.description:"attention mechanism") AND types.resourceTypeGeneral:Dataset AND descriptions.descriptionType:Abstract AND (NOT creators.name:(smith)) AND publicationYear:[2020 TO *]' \
+  'sort=relevance' 'page[number]=1' 'page[size]=3'
+record search_tree_orcid /dois \
+  'query=creators.nameIdentifiers.nameIdentifier:("https://orcid.org/0000-0001-6187-6610" OR "0000-0001-6187-6610") AND language:(en OR eng)' \
   'sort=relevance' 'page[number]=1' 'page[size]=3'
 record bad_request /dois 'published=2017-2018'

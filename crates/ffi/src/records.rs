@@ -9,7 +9,8 @@ use std::collections::HashMap;
 use std::time::SystemTime;
 
 use aspero_core::{
-    Agreement as CoreAgreement, Capabilities, Filter, ProviderId, Sort, SourceRecord, UpdateKind,
+    Agreement as CoreAgreement, BooleanSupport, Capabilities, Filter, FilterValue, ProviderId,
+    QueryNode, Relation, Sort, SourceRecord, TermField, UpdateKind, WorkType, YearRange,
 };
 use aspero_engine::{
     self as engine, Candidate as CoreCandidate, Disagreement as CoreDisagreement, InputLookup,
@@ -1164,6 +1165,169 @@ pub struct SearchRequest {
     /// own syntax), …. A name the source doesn't know fails.
     #[uniffi(default)]
     pub extra: HashMap<String, String>,
+    /// The search as a tree of all, any and none, instead of `text`,
+    /// `author`, `title` and `container`: giving it with any of those fails
+    /// (`badRequest`). The other filters, the sort, paging, `source` and
+    /// `extra` still apply. A tree the source can't say fails
+    /// (`unsupported`), as `searchSupports` tells beforehand.
+    #[uniffi(default = None)]
+    pub query: Option<SearchNode>,
+}
+
+/// A search as a tree. Groups hold any number of nodes, groups included
+/// (where `SourceSearch.nesting`); empty groups are dropped, and an all or
+/// any of one node is that node.
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Enum)]
+pub enum SearchNode {
+    /// Every node matches.
+    All {
+        nodes: Vec<SearchNode>,
+    },
+    /// At least one node matches (where `SourceSearch.any` allows).
+    Any {
+        nodes: Vec<SearchNode>,
+    },
+    /// No node matches (where `SourceSearch.none` allows).
+    None {
+        nodes: Vec<SearchNode>,
+    },
+    /// Words in a field, or with `phrase`, the words together in order.
+    /// The value is searched as written: quotes and operators in it are
+    /// never syntax.
+    Term {
+        field: SearchField,
+        value: String,
+        phrase: bool,
+    },
+    Filter {
+        filter: SearchFilterValue,
+    },
+    /// Works citing, or cited by, the work `id` names: any identifier
+    /// `lookup` takes. Aspero looks it up (through the cache) to find the
+    /// work at the source; a work it can't find fails the search.
+    Relation {
+        relation: SearchRelation,
+        id: String,
+    },
+}
+
+impl From<SearchNode> for QueryNode {
+    fn from(node: SearchNode) -> Self {
+        let nodes = |nodes: Vec<SearchNode>| nodes.into_iter().map(QueryNode::from).collect();
+        match node {
+            SearchNode::All { nodes: n } => QueryNode::All(nodes(n)),
+            SearchNode::Any { nodes: n } => QueryNode::Any(nodes(n)),
+            SearchNode::None { nodes: n } => QueryNode::None(nodes(n)),
+            SearchNode::Term {
+                field,
+                value,
+                phrase: false,
+            } => QueryNode::term(field.into(), value),
+            SearchNode::Term { field, value, .. } => QueryNode::phrase(field.into(), value),
+            SearchNode::Filter { filter } => QueryNode::Filter(filter.into()),
+            SearchNode::Relation { relation, id } => QueryNode::relation(relation.into(), id),
+        }
+    }
+}
+
+/// A filter in a query tree.
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Enum)]
+pub enum SearchFilterValue {
+    /// Published from `from` to `to`, inclusive; either may be open.
+    Years { from: Option<i16>, to: Option<i16> },
+    /// A CSL type: `article-journal`, `book`, ….
+    WorkType { r#type: String },
+    /// Whether a free, legal copy exists.
+    OpenAccess { is_oa: bool },
+    /// Leaves out retracted works.
+    NotRetracted,
+    /// An ISO 639-1 code, like `en`; aspero gives each source its own form.
+    Language { code: String },
+    /// Only works with an abstract.
+    HasAbstract,
+}
+
+impl From<SearchFilterValue> for FilterValue {
+    fn from(filter: SearchFilterValue) -> Self {
+        match filter {
+            SearchFilterValue::Years { from, to } => FilterValue::Years(YearRange { from, to }),
+            SearchFilterValue::WorkType { r#type } => {
+                FilterValue::WorkType(WorkType::from_csl(&r#type))
+            }
+            SearchFilterValue::OpenAccess { is_oa } => FilterValue::OpenAccess(is_oa),
+            SearchFilterValue::NotRetracted => FilterValue::NotRetracted,
+            SearchFilterValue::Language { code } => FilterValue::Language(code),
+            SearchFilterValue::HasAbstract => FilterValue::HasAbstract,
+        }
+    }
+}
+
+impl SearchFilterValue {
+    #[cfg(test)]
+    fn from_core(filter: &FilterValue) -> Option<Self> {
+        Some(match filter {
+            FilterValue::Years(y) => SearchFilterValue::Years {
+                from: y.from,
+                to: y.to,
+            },
+            FilterValue::WorkType(t) => SearchFilterValue::WorkType {
+                r#type: t.as_csl().to_owned(),
+            },
+            FilterValue::OpenAccess(is_oa) => SearchFilterValue::OpenAccess { is_oa: *is_oa },
+            FilterValue::NotRetracted => SearchFilterValue::NotRetracted,
+            FilterValue::Language(code) => SearchFilterValue::Language { code: code.clone() },
+            FilterValue::HasAbstract => SearchFilterValue::HasAbstract,
+            _ => return None,
+        })
+    }
+}
+
+/// How one work relates to another.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Enum)]
+pub enum SearchRelation {
+    /// Works citing the given work.
+    Cites,
+    /// Works the given work cites.
+    CitedBy,
+}
+
+impl SearchRelation {
+    fn from_core(relation: Relation) -> Option<Self> {
+        match relation {
+            Relation::Cites => Some(SearchRelation::Cites),
+            Relation::CitedBy => Some(SearchRelation::CitedBy),
+            _ => None,
+        }
+    }
+}
+
+impl From<SearchRelation> for Relation {
+    fn from(relation: SearchRelation) -> Self {
+        match relation {
+            SearchRelation::Cites => Relation::Cites,
+            SearchRelation::CitedBy => Relation::CitedBy,
+        }
+    }
+}
+
+/// How far a source can combine terms with any or none.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Enum)]
+pub enum SearchBoolean {
+    No,
+    /// Only among terms in one field, or values of one filter.
+    WithinField,
+    /// Across fields.
+    Anywhere,
+}
+
+impl SearchBoolean {
+    fn from_core(b: BooleanSupport) -> Self {
+        match b {
+            BooleanSupport::WithinField => SearchBoolean::WithinField,
+            BooleanSupport::Anywhere => SearchBoolean::Anywhere,
+            _ => SearchBoolean::No,
+        }
+    }
 }
 
 /// The order of search hits.
@@ -1199,11 +1363,19 @@ impl From<SearchSort> for Sort {
 
 /// A field a search can name ([`SearchRequest`]'s `author`, `title`,
 /// `container`).
+///
+/// In a query tree, the rest too.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Enum)]
 pub enum SearchField {
     Author,
     Title,
     Container,
+    /// Plain text, wherever the source searches it: every source.
+    Keywords,
+    Abstract,
+    /// An ORCID (bare or as a URL) or an OpenAlex author id (`A…`);
+    /// anything else fails (`badRequest`).
+    AuthorId,
 }
 
 impl SearchField {
@@ -1212,12 +1384,30 @@ impl SearchField {
             Filter::Author => Some(SearchField::Author),
             Filter::Title => Some(SearchField::Title),
             Filter::Container => Some(SearchField::Container),
+            Filter::Keywords => Some(SearchField::Keywords),
+            Filter::Abstract => Some(SearchField::Abstract),
+            Filter::AuthorId => Some(SearchField::AuthorId),
             _ => None,
         }
     }
 }
 
+impl From<SearchField> for TermField {
+    fn from(field: SearchField) -> Self {
+        match field {
+            SearchField::Author => TermField::Author,
+            SearchField::Title => TermField::Title,
+            SearchField::Container => TermField::Container,
+            SearchField::Keywords => TermField::Keywords,
+            SearchField::Abstract => TermField::Abstract,
+            SearchField::AuthorId => TermField::AuthorId,
+        }
+    }
+}
+
 /// A filter a search can apply. One a source lacks is ignored.
+///
+/// In a query tree, one a source lacks fails (`unsupported`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Enum)]
 pub enum SearchFilter {
     /// `yearFrom` and `yearTo`.
@@ -1225,6 +1415,10 @@ pub enum SearchFilter {
     WorkType,
     /// `openAccessOnly`.
     OpenAccess,
+    /// In a query tree only, as are the rest.
+    NotRetracted,
+    Language,
+    HasAbstract,
 }
 
 impl SearchFilter {
@@ -1233,6 +1427,9 @@ impl SearchFilter {
             Filter::Years => Some(SearchFilter::Years),
             Filter::WorkType => Some(SearchFilter::WorkType),
             Filter::OpenAccess => Some(SearchFilter::OpenAccess),
+            Filter::NotRetracted => Some(SearchFilter::NotRetracted),
+            Filter::Language => Some(SearchFilter::Language),
+            Filter::HasAbstract => Some(SearchFilter::HasAbstract),
             _ => None,
         }
     }
@@ -1246,6 +1443,14 @@ pub struct SourceSearch {
     pub fields: Vec<SearchField>,
     pub filters: Vec<SearchFilter>,
     pub sorts: Vec<SearchSort>,
+    /// How far a query tree's any can reach: `withinField` is terms of one
+    /// field (or values of one filter) only.
+    pub any: SearchBoolean,
+    /// How far a query tree's none can reach.
+    pub none: SearchBoolean,
+    /// Whether a query tree's groups can hold groups.
+    pub nesting: bool,
+    pub relations: Vec<SearchRelation>,
 }
 
 impl SourceSearch {
@@ -1265,6 +1470,14 @@ impl SourceSearch {
                 .sorts
                 .iter()
                 .filter_map(|s| SearchSort::from_core(*s))
+                .collect(),
+            any: SearchBoolean::from_core(caps.search_any),
+            none: SearchBoolean::from_core(caps.search_none),
+            nesting: caps.search_nesting,
+            relations: caps
+                .relations
+                .iter()
+                .filter_map(|r| SearchRelation::from_core(*r))
                 .collect(),
         }
     }
@@ -1717,6 +1930,25 @@ mod tests {
                 (None, None) => assert_eq!(*f, Filter::Place),
                 both => panic!("{f:?} maps twice: {both:?}"),
             }
+        }
+        // Query trees' fields, filters, relations and reaches.
+        for f in TermField::ALL {
+            let field = SearchField::from_core(f.filter()).unwrap();
+            assert_eq!(TermField::from(field), *f);
+        }
+        for f in FilterValue::ALL {
+            let value = SearchFilterValue::from_core(f).unwrap();
+            assert_eq!(name(&value), f.filter().as_str());
+            assert_eq!(FilterValue::from(value), *f);
+            assert!(SearchFilter::from_core(f.filter()).is_some());
+        }
+        for r in Relation::ALL {
+            let relation = SearchRelation::from_core(*r).unwrap();
+            assert_eq!(name(relation), r.as_str());
+            assert_eq!(Relation::from(relation), *r);
+        }
+        for b in BooleanSupport::ALL {
+            assert_eq!(name(SearchBoolean::from_core(*b)), b.as_str());
         }
 
         // `IdElsewhere` cites a candidate.

@@ -33,6 +33,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::error::{Error, Result};
 use crate::id::{IdKind, WorkId};
+use crate::query::{BooleanSupport, QueryNode, Relation};
 use crate::record::{FieldSet, SourceRecord};
 use crate::work::WorkType;
 
@@ -114,6 +115,14 @@ pub struct Capabilities {
     /// Orders [`Provider::search`] can return hits in. Every searching
     /// provider lists [`Sort::Relevance`].
     pub sorts: Vec<Sort>,
+    /// How far a query tree's any-of groups can reach.
+    pub search_any: BooleanSupport,
+    /// How far a query tree's none-of groups can reach.
+    pub search_none: BooleanSupport,
+    /// Whether a query tree's groups can hold groups.
+    pub search_nesting: bool,
+    /// Relations a query tree can search by.
+    pub relations: Vec<Relation>,
     /// Identifier kinds whose "not found" here is final: no other provider
     /// can know them (doi.org for DOIs), so lookups stop asking.
     pub final_misses: Vec<IdKind>,
@@ -138,6 +147,18 @@ pub enum Filter {
     Title,
     /// [`SearchQuery::container`].
     Container,
+    /// Plain text: every searching provider has it. Named only in query
+    /// trees; [`SearchQuery::text`] needs no capability.
+    Keywords,
+    Abstract,
+    /// An ORCID or an OpenAlex author id.
+    AuthorId,
+    /// Leaves out retracted works.
+    NotRetracted,
+    /// The language a work is written in.
+    Language,
+    /// Only works with an abstract.
+    HasAbstract,
 }
 
 impl Filter {
@@ -150,6 +171,12 @@ impl Filter {
         Filter::Author,
         Filter::Title,
         Filter::Container,
+        Filter::Keywords,
+        Filter::Abstract,
+        Filter::AuthorId,
+        Filter::NotRetracted,
+        Filter::Language,
+        Filter::HasAbstract,
     ];
 
     /// As serialized: `years`, `work_type`, ….
@@ -162,13 +189,28 @@ impl Filter {
             Filter::Author => "author",
             Filter::Title => "title",
             Filter::Container => "container",
+            Filter::Keywords => "keywords",
+            Filter::Abstract => "abstract",
+            Filter::AuthorId => "author_id",
+            Filter::NotRetracted => "not_retracted",
+            Filter::Language => "language",
+            Filter::HasAbstract => "has_abstract",
         }
     }
 
-    /// Whether this filter narrows by a field of the work (author, title,
-    /// container). A source lacking one fails rather than ignoring it.
+    /// Whether this filter narrows by a field of the work (keywords,
+    /// author, title, container, abstract, author id). A source lacking
+    /// one fails rather than ignoring it.
     pub fn is_field(self) -> bool {
-        matches!(self, Filter::Author | Filter::Title | Filter::Container)
+        matches!(
+            self,
+            Filter::Author
+                | Filter::Title
+                | Filter::Container
+                | Filter::Keywords
+                | Filter::Abstract
+                | Filter::AuthorId
+        )
     }
 }
 
@@ -273,7 +315,8 @@ pub enum SearchMode {
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[non_exhaustive]
 pub struct SearchQuery {
-    /// May be empty when a field (author, title, container) is given.
+    /// May be empty when a field (author, title, container) or a tree is
+    /// given.
     pub text: String,
     pub mode: SearchMode,
     /// An author's name, ANDed with the rest.
@@ -285,6 +328,12 @@ pub struct SearchQuery {
     /// Where the work appeared: the journal, or the book for a chapter.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub container: Option<String>,
+    /// The search as a tree of all, any and none: instead of `text`,
+    /// `author`, `title`, `container` and `place`, which must then be
+    /// empty. The engine folds `years`, `work_type` and `open_access` into
+    /// it, so a provider reads only the tree (see [`crate::query`]).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tree: Option<QueryNode>,
     /// Sources fail with [`Error::Unsupported`] for a sort they lack.
     #[serde(default, skip_serializing_if = "is_relevance")]
     pub sort: Sort,
@@ -462,6 +511,16 @@ pub trait Provider: Send + Sync {
         Err(Error::Unsupported("search"))
     }
 
+    /// Whether [`search`](Provider::search) can say `tree` (normalised and
+    /// validated, see [`crate::query`]), and if not, why, in English.
+    /// Searching with a tree this refuses fails with
+    /// [`Error::UnsupportedQuery`] and the same reason, so one translation
+    /// decides both.
+    fn express(&self, tree: &QueryNode) -> std::result::Result<(), String> {
+        let _ = tree;
+        Err(format!("{} can't search by a query tree", self.id()))
+    }
+
     /// Works that cite `id`.
     async fn citations(
         &self,
@@ -568,12 +627,18 @@ mod tests {
             Filter::Author => 4,
             Filter::Title => 5,
             Filter::Container => 6,
+            Filter::Keywords => 7,
+            Filter::Abstract => 8,
+            Filter::AuthorId => 9,
+            Filter::NotRetracted => 10,
+            Filter::Language => 11,
+            Filter::HasAbstract => 12,
         };
         for (i, f) in Filter::ALL.iter().enumerate() {
             assert_eq!(position(*f), i);
             assert_eq!(serde_json::to_value(f).unwrap(), f.as_str());
         }
-        assert_eq!(Filter::ALL.len(), position(Filter::Container) + 1);
+        assert_eq!(Filter::ALL.len(), position(Filter::HasAbstract) + 1);
         let position = |s: Sort| match s {
             Sort::Relevance => 0,
             Sort::Newest => 1,
@@ -590,6 +655,7 @@ mod tests {
     fn queries_without_fields_or_sort_serialize_as_before() {
         let json = serde_json::to_string(&SearchQuery::new("x")).unwrap();
         assert!(!json.contains("\"author\"") && !json.contains("\"sort\""));
+        assert!(!json.contains("\"tree\""));
         let mut q = SearchQuery::new("x");
         q.sort = Sort::MostCited;
         let back: SearchQuery = serde_json::from_str(&serde_json::to_string(&q).unwrap()).unwrap();

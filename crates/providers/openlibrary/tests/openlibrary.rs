@@ -5,7 +5,8 @@ use std::sync::Arc;
 
 use aspero_core::testing::{ReplayClient, block_on, fixture, response};
 use aspero_core::{
-    Cursor, Error, FieldSet, HttpResponse, Provider, SearchQuery, Sort, WorkId, WorkType, YearRange,
+    Cursor, Error, FieldSet, FilterValue, HttpResponse, Provider, QueryNode, SearchQuery, Sort,
+    TermField, WorkId, WorkType, YearRange,
 };
 use aspero_openlibrary::{OpenLibrary, OpenLibraryConfig};
 
@@ -190,4 +191,61 @@ fn user_text_is_escaped_and_extras_rejected() {
         block_on(ol.search(&SearchQuery::citation("x"))),
         Err(Error::Unsupported(_))
     ));
+}
+
+fn tree_query(tree: QueryNode) -> SearchQuery {
+    let mut q = SearchQuery::new("");
+    q.tree = Some(tree);
+    q.page.limit = 3;
+    q
+}
+
+#[test]
+fn trees_are_solr_queries_across_fields() {
+    let (ol, http) = provider([recorded("search_tree")]);
+    let tree = QueryNode::All(vec![
+        QueryNode::Any(vec![
+            QueryNode::term(TermField::Title, "hobbit"),
+            QueryNode::term(TermField::Title, "silmarillion"),
+        ]),
+        QueryNode::term(TermField::Author, "tolkien"),
+        QueryNode::None(vec![QueryNode::term(TermField::Title, "companion")]),
+        QueryNode::filter(FilterValue::Language("en".into())),
+    ]);
+    let page = block_on(ol.search(&tree_query(tree))).unwrap().value;
+    let params = query(&http, 0);
+    assert_eq!(
+        params[0],
+        pair(
+            "q",
+            "(title:(hobbit) OR title:(silmarillion)) AND author_name:(tolkien) AND (NOT title:(companion)) AND language:eng"
+        )
+    );
+    assert!(!params.iter().any(|(k, _)| k == "title" || k == "author"));
+    let titles: Vec<_> = page
+        .hits
+        .iter()
+        .map(|h| h.record.work.title.as_deref().unwrap())
+        .collect();
+    assert_eq!(titles[..2], ["The Hobbit", "The Silmarillion"]);
+}
+
+#[test]
+fn a_none_needs_something_beside_it_to_find() {
+    let (ol, _) = provider([]);
+    let reason = "Open Library can only leave out terms beside something to find, in an all";
+    let alone = QueryNode::None(vec![QueryNode::term(TermField::Author, "tolkien")]);
+    assert_eq!(ol.express(&alone).unwrap_err(), reason);
+    let in_any = QueryNode::Any(vec![
+        QueryNode::term(TermField::Title, "hobbit"),
+        QueryNode::None(vec![QueryNode::term(TermField::Author, "tolkien")]),
+    ]);
+    assert_eq!(ol.express(&in_any).unwrap_err(), reason);
+    let beside = QueryNode::All(vec![QueryNode::term(TermField::Title, "hobbit"), alone]);
+    assert_eq!(ol.express(&beside), Ok(()));
+    assert_eq!(
+        ol.express(&QueryNode::term(TermField::Abstract, "x"))
+            .unwrap_err(),
+        "Open Library can't search by abstract"
+    );
 }

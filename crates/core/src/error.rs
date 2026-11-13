@@ -69,6 +69,10 @@ pub enum Error {
     #[error("unsupported: {0}")]
     Unsupported(&'static str),
 
+    /// The provider can't say this query tree; the reason is in English.
+    #[error("unsupported: {0}")]
+    UnsupportedQuery(String),
+
     /// The response arrived but couldn't be understood.
     #[error("could not decode response: {0}")]
     Decode(#[source] Source),
@@ -183,7 +187,7 @@ impl Error {
             Error::AuthRejected { .. } => ErrorKind::KeyRejected,
             Error::NotFound => ErrorKind::NotFound,
             Error::BadRequest(_) => ErrorKind::BadRequest,
-            Error::Unsupported(_) => ErrorKind::Unsupported,
+            Error::Unsupported(_) | Error::UnsupportedQuery(_) => ErrorKind::Unsupported,
             Error::Decode(_) => ErrorKind::Decode,
             Error::InvalidId(_) => ErrorKind::InvalidId,
         }
@@ -200,7 +204,7 @@ impl Error {
             Error::AuthRejected { .. } => ErrorCategory::Auth,
             Error::NotFound => ErrorCategory::NotFound,
             Error::BadRequest(_) | Error::InvalidId(_) => ErrorCategory::Usage,
-            Error::Unsupported(_) => ErrorCategory::Unsupported,
+            Error::Unsupported(_) | Error::UnsupportedQuery(_) => ErrorCategory::Unsupported,
             Error::Decode(_) => ErrorCategory::Protocol,
         }
     }

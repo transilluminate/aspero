@@ -27,8 +27,9 @@ pub mod records;
 use records::{
     Bibliography, Budget, CacheStats, CitationStyle, CiteFormat, CitedEntry, Claim as ClaimRecord,
     DocxReferences, ExportFormat, Identification, KeyCheck, Line, LineReference, Lookup, Lookups,
-    Mention, ProviderUsage, ReadError, Reference, SearchRequest, SearchResults, SourceSearch,
-    StyleError, StyleSource, Unavailable, Utf16Offsets, Verification, Verifications, Work,
+    Mention, ProviderUsage, ReadError, Reference, SearchNode, SearchRequest, SearchResults,
+    SourceSearch, StyleError, StyleSource, Unavailable, Utf16Offsets, Verification, Verifications,
+    Work,
 };
 
 uniffi::setup_scaffolding!();
@@ -298,11 +299,23 @@ impl Aspero {
                 query.container = request.container;
                 query.sort = request.sort.map_or(Sort::Relevance, Into::into);
                 query.extra = request.extra.into_iter().collect();
+                query.tree = request.query.map(Into::into);
                 SearchResults::new(engine.search(request.source.as_deref(), &query).await)
             },
             cancel,
         )
         .await
+    }
+
+    /// Whether `source` (or, without one, the source `search` picks) can
+    /// search by `query`: `nil` if so, otherwise why, in English ("OpenAlex
+    /// can't combine title and author with any"). Offline and instant.
+    /// Searching anyway fails as `unsupported` with the same reason, or as
+    /// `badRequest` for a value that can't be valid (an author id that's
+    /// neither an ORCID nor an OpenAlex id, an unknown language code).
+    pub fn search_supports(&self, source: Option<String>, query: SearchNode) -> Option<String> {
+        self.engine
+            .search_supports(source.as_deref(), &query.into())
     }
 
     /// What each source can search by, in the order `search` picks from:

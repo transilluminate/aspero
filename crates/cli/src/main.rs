@@ -13,7 +13,7 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 use std::sync::Arc;
 
-use aspero_engine::{Engine, SecretString, SqliteCache, StandardConfig, standard};
+use aspero_engine::{CallOptions, Engine, SecretString, SqliteCache, StandardConfig, standard};
 use clap::Parser;
 use serde_json::json;
 
@@ -160,7 +160,10 @@ async fn run(cli: Cli, out: Out) -> Result<Exit, Failure> {
         Command::Styles { credits } => return cmd::styles::run(credits, out),
         _ => {}
     }
-    let engine = engine(open_cache(), cli.global.no_cache)?;
+    let mut engine = engine(open_cache(), cli.global.no_cache)?;
+    if cli.global.fresh {
+        engine = engine.with_options(CallOptions::fresh());
+    }
     match cli.command {
         Command::Lookup { ids } => cmd::lookup::run(&engine, ids, out).await,
         Command::Search { query, options } => cmd::search::run(&engine, query, options, out).await,

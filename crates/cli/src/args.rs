@@ -27,7 +27,8 @@ Environment:
 
 Answers are cached (records 7 days, not-found 1 day, searches 1 day,
 references 30 days) and
-served stale if a provider fails; JSON marks them \"served\": \"cache\"/\"stale\".";
+served stale if a provider fails; JSON marks them \"served\": \"cache\"/\"stale\".
+--fresh asks the providers past the cache, and caches their answers.";
 
 #[derive(Debug, Parser)]
 #[command(
@@ -67,6 +68,13 @@ pub struct Global {
     /// shared with other aspero processes).
     #[arg(long, global = true)]
     pub no_cache: bool,
+
+    /// Ask the providers again, past the cache, and cache their answers:
+    /// for checking again before submitting. Where a provider fails, its
+    /// cached answer is served, marked stale. Not with `--no-cache` (which
+    /// neither reads nor writes the cache).
+    #[arg(long, global = true, conflicts_with = "no_cache")]
+    pub fresh: bool,
 
     /// Include abstracts, looked up at other providers when the first one
     /// lacks it. JSON gives `abstract` (null if none exists) and
@@ -645,4 +653,32 @@ pub struct SearchOptions {
     /// `--source` (the printed `next page` command does both).
     #[arg(long)]
     pub cursor: Option<String>,
+}
+
+#[cfg(test)]
+mod tests {
+    use clap::Parser;
+
+    use super::*;
+
+    fn parse(args: &[&str]) -> Result<Cli, clap::Error> {
+        Cli::try_parse_from(std::iter::once("aspero").chain(args.iter().copied()))
+    }
+
+    #[test]
+    fn fresh_is_global_and_off_by_default() {
+        let claim = "LeCun Y. Deep learning. 2015";
+        assert!(!parse(&["verify", claim]).unwrap().global.fresh);
+        assert!(parse(&["--fresh", "verify", claim]).unwrap().global.fresh);
+        let after = parse(&["lookup", "10.1038/nature14539", "--fresh"]).unwrap();
+        assert!(after.global.fresh && !after.global.no_cache);
+    }
+
+    #[test]
+    fn fresh_with_no_cache_is_a_usage_error() {
+        let error = parse(&["--fresh", "--no-cache", "lookup", "10.1038/nature14539"])
+            .expect_err("conflicting flags");
+        assert_eq!(error.kind(), clap::error::ErrorKind::ArgumentConflict);
+        assert_eq!(error.exit_code(), 2, "usage, as the exit codes say");
+    }
 }

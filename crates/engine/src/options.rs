@@ -19,6 +19,12 @@ pub struct CallOptions {
     /// Answers from the cache only, however old; what it lacks fails as
     /// [`Error::Offline`](aspero_core::Error::Offline).
     pub offline: bool,
+    /// Asks providers past the cache: no cached answer is served as it
+    /// is, however recent. Every answer is still cached, replacing the old
+    /// one, so later calls see it; where a provider fails, its cached
+    /// answer is served as [`Served::Stale`](crate::Served::Stale).
+    /// Independent of the deadlines and retries; `offline` wins over it.
+    pub fresh: bool,
 }
 
 impl CallOptions {
@@ -29,6 +35,16 @@ impl CallOptions {
             deadline: Some(Duration::from_secs(8)),
             max_retries: Some(1),
             offline: false,
+            fresh: false,
+        }
+    }
+
+    /// Checking again (before submitting): a batch caller's patience, past
+    /// the cache ([`fresh`](Self::fresh)).
+    pub fn fresh() -> Self {
+        CallOptions {
+            fresh: true,
+            ..CallOptions::default()
         }
     }
 
@@ -38,6 +54,12 @@ impl CallOptions {
             offline: true,
             ..CallOptions::default()
         }
+    }
+
+    /// Whether a cached answer within its lifetime is served as it is:
+    /// not past the cache, unless offline.
+    pub(crate) fn reads_cache(&self) -> bool {
+        !self.fresh || self.offline
     }
 
     /// `policy`, capped by these options.

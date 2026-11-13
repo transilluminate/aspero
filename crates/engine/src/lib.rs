@@ -22,7 +22,8 @@
 //!
 //! - **Caching**: provider answers (records, "not found", search pages) are
 //!   cached with per-kind TTLs ([`CachePolicy`]) and served stale if a
-//!   provider fails; every answer says how it was [`Served`].
+//!   provider fails; every answer says how it was [`Served`]. A call
+//!   [`fresh`](CallOptions::fresh) asks past the cache and refreshes it.
 //!
 //! - **Sharing**: one engine serves many callers at once. Lookups already
 //!   in flight are joined rather than repeated, and each caller sets its
@@ -138,6 +139,7 @@ pub type Clock = fn() -> Timestamp;
 
 /// How long cached answers are trusted (DESIGN §5). Past these, a provider
 /// is asked again; if it then fails, the old answer is served as stale.
+/// Provider failures and verdicts are never cached.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct CachePolicy {
@@ -172,7 +174,8 @@ pub enum Served {
     Live,
     /// A cached answer within its TTL.
     Cache,
-    /// An expired cached answer, served because the provider failed.
+    /// A cached answer served because the provider failed: expired, or,
+    /// for a call [`fresh`](CallOptions::fresh), of any age.
     Stale,
 }
 
@@ -387,6 +390,12 @@ impl Engine {
         self.budgets
             .note(&provider, usage, result.as_ref().err(), now);
         result
+    }
+
+    /// Whether a cached answer may be served as current: stored within
+    /// `ttl`, and not by a call past the cache ([`CallOptions::fresh`]).
+    pub(crate) fn current<T>(&self, entry: &aspero_store::Entry<T>, ttl: Duration) -> bool {
+        self.options.reads_cache() && entry.is_fresh((self.clock)(), ttl)
     }
 
     /// Registered providers, in priority order.

@@ -120,8 +120,9 @@ impl Engine {
     }
 
     /// Asks one provider about `ids` (all of kinds it accepts): fresh cached
-    /// answers first, the rest in batches with retries, and stale cached
-    /// records for any that fail. One answer per ID, in order.
+    /// answers first (none, past the cache), the rest in batches with
+    /// retries, and stale cached answers for any that fail. One answer per
+    /// ID, in order.
     pub(crate) async fn lookup_at(
         &self,
         entry: &Entry,
@@ -229,10 +230,11 @@ impl Engine {
             let affected_ids: Vec<WorkId> = affected.iter().map(|&i| ids[i].clone()).collect();
             for (&i, stale) in affected
                 .iter()
-                .zip(self.stale_lookups(&provider, &affected_ids))
+                .zip(self.fallback_lookups(&provider, &affected_ids))
             {
                 answers[i] = Some(match stale {
-                    Some(record) => (attempt(Outcome::Found, Served::Stale), Some(record)),
+                    Some(Some(record)) => (attempt(Outcome::Found, Served::Stale), Some(record)),
+                    Some(None) => (attempt(Outcome::NotFound, Served::Stale), None),
                     None => (attempt(Outcome::Failed(error.clone()), Served::Live), None),
                 });
             }
@@ -266,14 +268,13 @@ impl Engine {
 
     /// For each ID, a fresh cached answer covering `fields`:
     /// `Some(Some(record))`, `Some(None)` for a fresh "not found", or `None`
-    /// to ask the provider.
+    /// to ask the provider (always, past the cache).
     pub(crate) fn cached_lookups(
         &self,
         provider: &ProviderId,
         ids: &[WorkId],
         fields: FieldSet,
     ) -> Vec<Option<Option<SourceRecord>>> {
-        let now = (self.clock)();
         let policy = self.cache_policy;
         self.cache_entries(provider, ids)
             .into_iter()
@@ -281,13 +282,37 @@ impl Engine {
                 let entry = entry?;
                 match entry.value {
                     Some(ref record)
-                        if entry.is_fresh(now, policy.records)
+                        if self.current(&entry, policy.records)
                             && fields.is_subset(record.fields) =>
                     {
                         Some(entry.value)
                     }
-                    None if entry.is_fresh(now, policy.misses) => Some(None),
+                    None if self.current(&entry, policy.misses) => Some(None),
                     _ => None,
+                }
+            })
+            .collect()
+    }
+
+    /// For each ID, the cached answer to serve as stale when the provider
+    /// fails: any record, however old, or a "not found" within its
+    /// lifetime (which only a call past the cache gets this far with;
+    /// older ones aren't served). `None` where there's neither.
+    fn fallback_lookups(
+        &self,
+        provider: &ProviderId,
+        ids: &[WorkId],
+    ) -> Vec<Option<Option<SourceRecord>>> {
+        let now = (self.clock)();
+        self.cache_entries(provider, ids)
+            .into_iter()
+            .map(|entry| {
+                let entry = entry?;
+                match entry.value {
+                    Some(record) => Some(Some(record)),
+                    None => entry
+                        .is_fresh(now, self.cache_policy.misses)
+                        .then_some(None),
                 }
             })
             .collect()

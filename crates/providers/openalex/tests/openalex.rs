@@ -829,3 +829,60 @@ fn retracted_works_among_ids_come_from_one_filter() {
     );
     assert_eq!(resp.usage.unwrap().cost, Some(0.0001));
 }
+
+/// OpenAlex finds a work by a DOI its record no longer carries (the
+/// journal changed publisher and re-registered it): in a batch, that
+/// record answers the key that found nothing, as the free lookup of the
+/// DOI alone does.
+#[test]
+fn batches_find_works_by_dois_they_no_longer_carry() {
+    let old = "10.1197/j.aem.2003.09.015";
+    let (oa, http) = provider([recorded("works_batch_reregistered")]);
+    let resp =
+        block_on(oa.lookup(&[id(old), id("10.1038/nature14539")], FieldSet::DEFAULT)).unwrap();
+    let record = resp.value[0].record.as_ref().unwrap();
+    assert_eq!(
+        ids(record),
+        [
+            "openalex:W2153551409",
+            "doi:10.1111/j.1553-2712.2004.tb01439.x",
+            "pmid:14759970"
+        ]
+    );
+    assert!(resp.value[1].record.is_some());
+    assert_eq!(http.requests().len(), 1, "one key missed, one record over");
+
+    // Two keys missed and a record over: each missed key asked alone.
+    let (oa, http) = provider([
+        recorded("works_batch_reregistered"),
+        recorded("work_reregistered"),
+        recorded("work_not_found"),
+    ]);
+    let asked = [
+        id(old),
+        id("10.1038/nature14539"),
+        id("10.5555/aspero-does-not-exist"),
+    ];
+    let resp = block_on(oa.lookup(&asked, FieldSet::DEFAULT)).unwrap();
+    let urls: Vec<String> = http.requests().into_iter().map(|r| r.url).collect();
+    assert_eq!(
+        urls[1..],
+        [
+            format!("https://api.openalex.org/works/doi:{old}"),
+            "https://api.openalex.org/works/doi:10.5555/aspero-does-not-exist".to_owned(),
+        ]
+    );
+    let found: Vec<Option<String>> = resp
+        .value
+        .iter()
+        .map(|l| l.record.as_ref().map(|r| r.ids[0].to_string()))
+        .collect();
+    assert_eq!(
+        found,
+        [
+            Some("openalex:W2153551409".into()),
+            Some("openalex:W2919115771".into()),
+            None
+        ]
+    );
+}

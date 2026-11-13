@@ -295,45 +295,82 @@ impl Provider for OpenAlex {
         }
 
         // One filter call per kind, in order of first appearance.
-        let mut groups: Vec<(&str, Vec<&Key>)> = Vec::new();
+        let mut groups: Vec<(&str, Vec<usize>)> = Vec::new();
         let mut singles = Vec::new();
-        for key in &keys {
+        for (i, key) in keys.iter().enumerate() {
             if !key.batchable() {
-                singles.push(key);
+                singles.push(i);
             } else if let Some((_, group)) = groups.iter_mut().find(|(f, _)| *f == key.filter) {
-                group.push(key);
+                group.push(i);
             } else {
-                groups.push((key.filter, vec![key]));
+                groups.push((key.filter, vec![i]));
             }
         }
 
-        let mut found = Vec::new();
+        let mut records: Vec<Option<SourceRecord>> = vec![None; keys.len()];
+        let mut add = |u: Usage| usage = Some(usage.map_or(u, |acc: Usage| acc.then(u)));
         for (filter, group) in groups {
             for chunk in group.chunks(MAX_PAGE as usize) {
-                let values: Vec<&str> = chunk.iter().map(|k| k.value.as_str()).collect();
+                let values: Vec<&str> = chunk.iter().map(|&i| keys[i].value.as_str()).collect();
                 let params = [
                     ("filter", format!("{filter}:{}", values.join("|"))),
                     ("per-page", MAX_PAGE.to_string()),
                 ];
                 let (hits, _, u) = self.list(&params).await?;
-                found.extend(hits.into_iter().map(|h| h.record));
-                usage = Some(usage.map_or(u, |acc: Usage| acc.then(u)));
+                add(u);
+                let mut unclaimed: Vec<SourceRecord> = Vec::new();
+                for record in hits.into_iter().map(|h| h.record) {
+                    let mut claimed = false;
+                    for &i in chunk {
+                        if records[i].is_none() && record.ids.contains(&keys[i].matches) {
+                            records[i] = Some(record.clone());
+                            claimed = true;
+                        }
+                    }
+                    if !claimed {
+                        unclaimed.push(record);
+                    }
+                }
+                // OpenAlex finds works by DOIs their records no longer
+                // carry (re-registered when a journal changed publisher):
+                // such a record answers a key that found nothing. One of
+                // each pairs up; otherwise each such key is asked alone
+                // (free), which says which work it is.
+                let missed: Vec<usize> = chunk
+                    .iter()
+                    .copied()
+                    .filter(|&i| records[i].is_none())
+                    .collect();
+                match (missed.as_slice(), unclaimed.len()) {
+                    (_, 0) | ([], _) => {}
+                    ([i], 1) => records[*i] = unclaimed.pop(),
+                    (missed, _) => {
+                        for &i in missed {
+                            let (record, u) = self.lookup_one(&keys[i]).await?;
+                            records[i] = record;
+                            if let Some(u) = u {
+                                add(u);
+                            }
+                        }
+                    }
+                }
             }
         }
-        for key in singles {
-            let (record, u) = self.lookup_one(key).await?;
-            found.extend(record);
+        // Asked alone, a record answers its key whatever it carries.
+        for i in singles {
+            let (record, u) = self.lookup_one(&keys[i]).await?;
+            records[i] = record;
             if let Some(u) = u {
-                usage = Some(usage.map_or(u, |acc: Usage| acc.then(u)));
+                add(u);
             }
         }
 
         let lookups = ids
             .iter()
-            .zip(&keys)
-            .map(|(id, key)| Lookup {
+            .zip(records)
+            .map(|(id, record)| Lookup {
                 id: id.clone(),
-                record: found.iter().find(|r| r.ids.contains(&key.matches)).cloned(),
+                record,
             })
             .collect();
         Ok(respond(lookups, usage))

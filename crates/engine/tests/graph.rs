@@ -1005,16 +1005,20 @@ async fn related_works_rank_by_co_citation_and_coupling() {
             // Co-cited by four, with its preprint (W67): the most.
             ("W60".into(), 0.8, 4, 0, s(&[0, 1, 2])),
             // Co-cited twice (by W101, W104), and its own references share
-            // two of the set's (W1's and W2's): 0.8 × 2/4 + 0.2 × 2/2.
-            ("W61".into(), 0.6, 2, 2, s(&[0, 1])),
-            ("W50".into(), 0.4, 2, 0, s(&[0, 1])),
-            ("W51".into(), 0.2, 1, 0, s(&[0])),
-            ("W62".into(), 0.2, 1, 0, s(&[0])),
-            ("W63".into(), 0.2, 1, 0, s(&[2])),
+            // two of the set's (W1's and W2's): 0.8 × its share of W60's
+            // co-citation (each citing work counting 1/√ its references)
+            // + 0.2 × 2/2.
+            ("W61".into(), 0.5762, 2, 2, s(&[0, 1])),
+            ("W50".into(), 0.3284, 2, 0, s(&[0, 1])),
+            // Co-cited by W103, which lists fewer references than W51's
+            // and W62's citing work (W102).
+            ("W63".into(), 0.212, 1, 0, s(&[2])),
             // Coupled: they cite two of the set's references (two of W1's
             // and W2's each, one of W3's).
             ("W102".into(), 0.2, 0, 2, s(&[0, 1])),
             ("W201".into(), 0.2, 0, 2, s(&[0, 1])),
+            ("W51".into(), 0.1642, 1, 0, s(&[0])),
+            ("W62".into(), 0.1642, 1, 0, s(&[0])),
             // Left out: W64 (retracted), W65 (W1's preprint), W66 (the
             // missing seed's DOI); W202 shares one reference only; W107
             // (and W70, which only it cites) can't cite W1.

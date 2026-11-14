@@ -355,13 +355,28 @@ from `cites:` pages); G3 OpenCitations as a free source of citing works.
     (the 100 most shared), at most 5 pages, most cited first (a fixed
     sample, not counted as capped). A seed links a work by coupling when
     the work cites two of the seed's own references.
-  - *Score:* each count as a share of the highest found, weighted 0.8
-    co-citation and 0.2 coupling (all to one when no work has the
-    other). Weighted evenly (tried on two sets, 2026-11), coupling's
-    long-reference-list favourites (broad reviews, theses, AI in food
-    science) outranked the field's core works; co-citation-led, a set of
-    eleven sepsis trials gets its peers (VASST, SAFE, CORTICUS, TRICC,
-    VISEP) and the guidelines and definitions.
+  - *Score:* co-citation strength and the coupling count, each as a
+    share of the highest found, weighted 0.8 co-citation and 0.2
+    coupling (all to one when no work has the other). Weighted evenly
+    (tried on two sets, 2026-11), coupling's long-reference-list
+    favourites (broad reviews, theses, AI in food science) outranked the
+    field's core works; co-citation-led, a set of eleven sepsis trials
+    gets its peers (VASST, SAFE, CORTICUS, TRICC, VISEP) and the
+    guidelines and definitions.
+  - *Co-citation strength* weighs each citing work by 1/√(its
+    references); `co_cited_with` still counts them. A work listing
+    hundreds co-cites everything it lists: OpenAlex has 26 chapter
+    records of the Oxford Handbook of Clinical Specialties (2020), each
+    with the whole book's ~970 references, so a set of ED analgesia
+    trials (one cited by the book) got CRASH-2, an airway guideline,
+    parvovirus B19 and lithium, co-cited 26–27 times, in its top 20.
+    Tried live (2026-11-14) on that set and the sepsis trials: 1/n
+    (association strength) favoured citing works listing a handful of
+    references (partial data); 1/ln(e + n) left the chapters' picks in the
+    top 20; requiring two linking seeds didn't help (the book cites two
+    of the set). 1/√n dropped them all, keeping the ED set's own field
+    (PEMI, oligoanalgesia, Bijur 2005, the hydromorphone titration
+    trials) and the sepsis set's top 20 as it was, a place or two apart.
   - The best 100 (per 100 of `limit`) are looked up in one batch, so works
     of the set (any shared identifier with any seed, resolved or not, or
     `same_work` with one), retracted works, drop, and versions merge

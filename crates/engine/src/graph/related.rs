@@ -14,7 +14,10 @@
 //!   them (`references`, 30 days).
 //! - **Co-citation:** the citing works read that cite a work and at least
 //!   one work of the set. One per citing work, however many works of the
-//!   set it cites: a review citing ten of them counts once.
+//!   set it cites: a review citing ten of them counts once. In the score
+//!   each counts 1/√(its references), so works listing hundreds (a
+//!   handbook's chapters) don't make everything they list related: see
+//!   [`citing_weight`].
 //! - **Coupling:** how many of the set's references (all its works'
 //!   references together) a work cites too, counted from [`MIN_SHARED`].
 //!   Counted for every work whose references are known: the citing works
@@ -23,9 +26,10 @@
 //!   sample: one filter of the references at least two works of the set
 //!   cite (the 100 most shared), at most [`COUPLING_PAGES`] pages of it,
 //!   most cited first, cached as searches are (a day).
-//! - **Score:** each count as a share of the highest among the works found,
-//!   weighted 0.8 co-citation and 0.2 coupling (all of it to one when no
-//!   work has the other): see [`CO_CITATION`].
+//! - **Score:** co-citation strength (the weights summed) and the coupling
+//!   count, each as a share of the highest among the works found, weighted
+//!   0.8 and 0.2 (all of it to one when no work has the other): see
+//!   [`CO_CITATION`].
 //! - The best are looked up in whole batches (one request for up to 100),
 //!   so works that are one of the set (sharing any identifier with any
 //!   seed, or one work with a seed) and retracted works drop, and versions
@@ -85,9 +89,10 @@ pub struct RelatedWork {
     pub ids: Vec<WorkId>,
     /// Its record, when looked up.
     pub record: Option<SourceRecord>,
-    /// From 0 to 1: its co-citation and coupling counts, each as a share
-    /// of the highest among the works found, weighted 0.8 and 0.2 (all to
-    /// one when no work has the other).
+    /// From 0 to 1: its co-citation strength (each citing work counting
+    /// 1/√(its references)) and coupling count, each as a share of the
+    /// highest among the works found, weighted 0.8 and 0.2 (all to one when
+    /// no work has the other).
     pub score: f64,
     /// The citing works read that cite it and at least one work of the set.
     pub co_cited_with: usize,
@@ -332,26 +337,43 @@ impl Tally {
     }
 }
 
-/// Each count as a share of the highest, weighted [`CO_CITATION`] and
-/// [`COUPLING`] (all of it to one when no work has the other), to four
-/// places.
-fn score(t: &Tally, (most_cited, most_shared): (usize, usize)) -> f64 {
-    let share = |n: usize, most: usize| n as f64 / most as f64;
-    let score = match (most_cited > 0, most_shared > 0) {
+/// Co-citation strength ([`co_citation`]) and the coupling count, each as
+/// a share of the highest, weighted [`CO_CITATION`] and [`COUPLING`] (all
+/// of it to one when no work has the other), to four places.
+fn score(t: &Tally, weights: &[f64], (most_cited, most_shared): (f64, usize)) -> f64 {
+    let co_cited = co_citation(t, weights);
+    let shared = t.shared.len() as f64;
+    let score = match (most_cited > 0.0, most_shared > 0) {
         (true, true) => {
-            CO_CITATION * share(t.citing.len(), most_cited)
-                + COUPLING * share(t.shared.len(), most_shared)
+            CO_CITATION * co_cited / most_cited + COUPLING * shared / most_shared as f64
         }
-        (true, false) => share(t.citing.len(), most_cited),
-        (false, true) => share(t.shared.len(), most_shared),
+        (true, false) => co_cited / most_cited,
+        (false, true) => shared / most_shared as f64,
         (false, false) => 0.0,
     };
     (score * 10_000.0).round() / 10_000.0
 }
 
-fn highest<'a>(tallies: impl Iterator<Item = &'a Tally>) -> (usize, usize) {
-    tallies.fold((0, 0), |(c, s), t| {
-        (c.max(t.citing.len()), s.max(t.shared.len()))
+/// What a citing work's co-citation is worth: 1/√(its references). A work
+/// listing hundreds co-cites everything it lists: a handbook's chapters
+/// (the Oxford Handbook of Clinical Specialties, 2020: 26 chapter records,
+/// each with the whole book's ~970 references) made CRASH-2, an airway
+/// guideline and parvovirus B19 "related" to ED analgesia trials. Tried on
+/// two sets (2026-11): 1/n favoured citing works listing a few references
+/// (partial data), and 1/ln(e + n) left the chapters' picks in the top 20;
+/// 1/√n dropped them and kept a set of sepsis trials' top 20 as it was.
+fn citing_weight(references: usize) -> f64 {
+    1.0 / (references.max(1) as f64).sqrt()
+}
+
+/// A work's co-citation strength: its citing works' weights, summed.
+fn co_citation(t: &Tally, weights: &[f64]) -> f64 {
+    t.citing.iter().map(|&i| weights[i as usize]).sum()
+}
+
+fn highest<'a>(tallies: impl Iterator<Item = &'a Tally>, weights: &[f64]) -> (f64, usize) {
+    tallies.fold((0.0, 0), |(c, s), t| {
+        (c.max(co_citation(t, weights)), s.max(t.shared.len()))
     })
 }
 
@@ -564,6 +586,7 @@ impl Engine {
             }
         }
         let mut tallies: BTreeMap<&WorkId, Tally> = BTreeMap::new();
+        let weights: Vec<f64> = citing.values().map(|r| citing_weight(r.len())).collect();
         for (i, (work, refs)) in citing.iter().enumerate() {
             let of_set: BTreeSet<usize> = refs
                 .iter()
@@ -583,11 +606,11 @@ impl Engine {
                 }
             }
         }
-        let most = highest(tallies.values());
+        let most = highest(tallies.values(), &weights);
         let mut ranked: Vec<(&WorkId, Tally, f64)> = tallies
             .into_iter()
             .map(|(w, t)| {
-                let s = score(&t, most);
+                let s = score(&t, &weights, most);
                 (w, t, s)
             })
             .collect();
@@ -663,11 +686,11 @@ impl Engine {
                 )),
             }
         }
-        let most = highest(merged.iter().map(|(_, t)| t));
+        let most = highest(merged.iter().map(|(_, t)| t), &weights);
         let mut items: Vec<RelatedWork> = merged
             .into_iter()
             .map(|(mut work, tally)| {
-                work.score = score(&tally, most);
+                work.score = score(&tally, &weights, most);
                 work.co_cited_with = tally.citing.len();
                 work.shared_references = tally.shared.len();
                 work.seeds = tally.groups.iter().map(|&g| groups[g].members[0]).collect();
@@ -884,6 +907,28 @@ mod tests {
         assert_eq!(target(&plan, &w(6), 90_000), 1_000);
         assert_eq!(target(&plan, &w(5), 300), 300);
         assert_eq!(target(&plan, &w(4), 0), 0);
+    }
+
+    #[test]
+    fn citing_works_listing_hundreds_count_for_less() {
+        // Three papers of 30 references co-cite A; five chapters of a
+        // handbook, each listing its 900, co-cite B.
+        let weights: Vec<f64> = [30, 30, 30, 900, 900, 900, 900, 900]
+            .map(citing_weight)
+            .to_vec();
+        let a = Tally {
+            citing: vec![0, 1, 2],
+            ..Tally::default()
+        };
+        let b = Tally {
+            citing: vec![3, 4, 5, 6, 7],
+            ..Tally::default()
+        };
+        let most = highest([&a, &b].into_iter(), &weights);
+        assert_eq!(score(&a, &weights, most), 1.0);
+        // 5/√900 of 3/√30: about a third.
+        assert_eq!(score(&b, &weights, most), 0.3043);
+        assert_eq!(citing_weight(0), 1.0, "no references: no division by zero");
     }
 
     #[test]

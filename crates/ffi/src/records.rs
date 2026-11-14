@@ -2270,8 +2270,9 @@ pub struct RelatedWork {
     pub ids: Vec<String>,
     /// When looked up.
     pub work: Option<Work>,
-    /// From 0 to 1: its co-citation and coupling counts, each as a share
-    /// of the highest among the works found, weighted 0.8 and 0.2.
+    /// From 0 to 1: its co-citation strength (each citing work counting
+    /// 1/√ of its references) and coupling count, each as a share of the
+    /// highest among the works found, weighted 0.8 and 0.2.
     pub score: f64,
     /// Citing works read that cite it and at least one seed.
     pub co_cited_with: u32,

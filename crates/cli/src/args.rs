@@ -443,7 +443,9 @@ Analyses (--kinds, comma-separated):
                     (`co_cited_with`: citing works read that cite it and a
                     seed) and sharing its references (`shared_references`,
                     from two), each as a share of the highest, weighted
-                    0.8 and 0.2 into `score`; `seeds` link it. From the
+                    0.8 and 0.2 into `score` (in which each citing work
+                    counts 1/√ of its references, so a handbook listing
+                    hundreds counts for little); `seeds` link it. From the
                     works citing the set, 200 per $0.0001 page: a seed
                     cited more than 1,000 times is sampled (its 1,000 most
                     cited citing works; `incomplete: {kind: capped}`), at

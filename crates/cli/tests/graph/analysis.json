@@ -92,7 +92,7 @@
       {
         "co_cited_with": 1,
         "id": "openalex:W11",
-        "score": 0.4,
+        "score": 0.4287,
         "seeds": [
           0
         ],
@@ -115,7 +115,7 @@
       {
         "co_cited_with": 1,
         "id": "openalex:W60",
-        "score": 0.4,
+        "score": 0.3713,
         "seeds": [
           0,
           1

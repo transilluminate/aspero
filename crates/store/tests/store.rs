@@ -207,6 +207,35 @@ fn a_cache_from_another_schema_version_is_rebuilt() {
         .unwrap();
 }
 
+/// Per-key spend outlives reopening, clearing and rebuilding: it's a
+/// budget's accounting, not a cached answer.
+#[test]
+fn key_spend_adds_up_per_day_and_survives_rebuilds() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("cache.sqlite");
+    {
+        let cache = SqliteCache::open(&path).unwrap();
+        assert_eq!(cache.key_spend("k1", "2026-11-14").unwrap(), 0.0);
+        cache.add_key_spend("k1", "2026-11-14", 0.25).unwrap();
+        cache.add_key_spend("k1", "2026-11-14", 0.5).unwrap();
+        cache.add_key_spend("k2", "2026-11-14", 1.0).unwrap();
+        cache.add_key_spend("k1", "2026-11-13", 2.0).unwrap();
+        cache.clear().unwrap();
+    }
+    {
+        let conn = rusqlite::Connection::open(&path).unwrap();
+        conn.pragma_update(None, "user_version", 99).unwrap();
+    }
+    let cache = SqliteCache::open(&path).unwrap();
+    assert_eq!(cache.key_spend("k1", "2026-11-14").unwrap(), 0.75);
+    assert_eq!(cache.key_spend("k2", "2026-11-14").unwrap(), 1.0);
+    assert_eq!(cache.key_spend("k1", "2026-11-13").unwrap(), 2.0);
+    // A month on, the old days go.
+    cache.add_key_spend("k1", "2026-12-20", 0.25).unwrap();
+    assert_eq!(cache.key_spend("k1", "2026-11-14").unwrap(), 0.0);
+    assert_eq!(cache.key_spend("k1", "2026-12-20").unwrap(), 0.25);
+}
+
 #[test]
 fn citation_links_round_trip_per_work_and_direction() {
     let cache = SqliteCache::open_in_memory().unwrap();

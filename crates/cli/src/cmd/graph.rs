@@ -182,7 +182,9 @@ pub async fn analyse(
         aspero_json::graph::file_seeds(&mut doc, &keys, &skipped);
     }
     match out.format {
-        Format::Jsonl => print_line(&doc),
+        Format::Jsonl => aspero_json::graph::analysis_lines(&doc)
+            .iter()
+            .for_each(print_line),
         Format::Table | Format::Text => {
             let related = kinds
                 .iter()

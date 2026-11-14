@@ -276,6 +276,11 @@ so a search run again finds what's new. Without --source, the first
 provider that can answers; OpenAlex (it needs a paid plan) and Open
 Library can't, and fail rather than ignore it.
 
+JSON: {provider, total, hits: [{rank, score, work}], ignored_filters,
+served, next_cursor, next_command, usage}. --format jsonl prints each hit
+on a line, as {rank, score, work}: `aspero search x --format jsonl | jq
+'.work.ids'`.
+
 Examples:
   aspero search \"retrieval augmented generation\" --year 2020.. --limit 5
   aspero search transformer --source crossref --type article-journal
@@ -466,6 +471,13 @@ of works citing the shared references) or `lookup` (works looked up);
 and a failure, the `provider` (its error is logged to stderr). Without
 OPENALEX_API_KEY, OpenAlex gives only first pages: each seed's 200 most
 cited citing works (`capped`).
+
+--format jsonl prints a line per seed and per finding, each tagged with
+its `section` (seed, retracted, odd_one_out, probably_missing, related)
+beside the fields JSON gives it, then a `summary` line: with_references,
+complete, incomplete, estimate, usage, and each analysis' own complete
+and incomplete under its name. `jq 'select(.section == \"related\") |
+.work.title'` lists related works' titles.
 
 Examples:
   aspero analyse 10.1038/nature14539 10.1145/3065386 W2194775991

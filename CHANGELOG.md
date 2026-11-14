@@ -4,6 +4,29 @@
 
 Added:
 
+- Agents in an app (#58, P1 and P2): the FFI's `McpServer` (behind an
+  `mcp` feature, on in the xcframework) serves the MCP tools over
+  Streamable HTTP at `http://127.0.0.1:<port>/mcp` (23130 by default;
+  never moved: a port in use throws `portInUse`), through the app's own
+  `Aspero` handle. Requests need a bearer key the app minted (`McpKey`:
+  id, name, scopes, the token's SHA-256, a daily budget), compared in
+  constant time; browsers (an `Origin`) and other host names are
+  refused. Scopes (`sources`, `readHistory`, `writeHistory`) decide what a
+  key sees and calls. Budgets per session (`sessionBudgetUsd`, $0.25) and
+  per key per UTC day (`dailyBudgetUsd`, $1, engine spend, kept in the
+  cache file). The app serves its own tools through `McpHost` (`tools()`,
+  `async call(name, arguments, caller)`, `activity()`, told of every tool
+  call); `setKeys`, `hostToolsChanged`, `status` and `stop`.
+- `aspero-mcp`'s `http` feature: the same server for Rust hosts
+  (`aspero_mcp::http::HttpServer`, the `Host` trait). The CLI still
+  serves stdio only.
+- The cache keeps each MCP key's spend per UTC day in an additive table,
+  `mcp_spend`, which rebuilds and `clear` leave alone.
+
+## Unreleased
+
+Added:
+
 - Third-party notices, built in (#77). The FFI's `dependencies()` lists
   what the library is built from (`Dependency`: `name`, `version`,
   `license` as an SPDX expression, `repository`): every crate in it,

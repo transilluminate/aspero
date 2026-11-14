@@ -17,7 +17,7 @@ use aspero_engine::{CallOptions, Engine, SecretString, SqliteCache, StandardConf
 use clap::Parser;
 use serde_json::json;
 
-use crate::args::{Cli, Command, Format};
+use crate::args::{Cli, Command, Format, Global};
 use crate::cmd::{Failure, Out};
 use crate::exit::Exit;
 
@@ -142,9 +142,14 @@ fn open_cache() -> Option<Arc<SqliteCache>> {
 /// config file and keyring (DESIGN §7) come later.
 /// `file` paces requests across processes (parallel agents), and caches
 /// answers unless `no_cache`.
-fn engine(file: Option<Arc<SqliteCache>>, no_cache: bool) -> Result<Engine, Failure> {
+fn engine(
+    file: Option<Arc<SqliteCache>>,
+    no_cache: bool,
+    global: &Global,
+) -> Result<Engine, Failure> {
     let mut config = StandardConfig::all(env("OPENALEX_API_KEY").map(SecretString::from));
     config.mailto = env("ASPERO_MAILTO");
+    config.openalex_daily_cap = global.openalex_cap;
     config.pacing = file.clone().map(|c| c as _);
     config.cache = file.filter(|_| !no_cache).map(|c| c as _);
     standard(config).map_err(|e| Failure {
@@ -160,7 +165,7 @@ async fn run(cli: Cli, out: Out) -> Result<Exit, Failure> {
         Command::Styles { credits } => return cmd::styles::run(credits, out),
         _ => {}
     }
-    let mut engine = engine(open_cache(), cli.global.no_cache)?;
+    let mut engine = engine(open_cache(), cli.global.no_cache, &cli.global)?;
     if cli.global.fresh {
         engine = engine.with_options(CallOptions::fresh());
     }

@@ -99,6 +99,8 @@ impl OpenAlex {
         capabilities.relations = vec![Relation::Cites, Relation::CitedBy];
         // `/rate-limit` answers only with a key.
         capabilities.budget_status = config.api_key.is_some();
+        // The singleton endpoint is free; batches are list calls.
+        capabilities.max_free_batch = 1;
         OpenAlex {
             config,
             http,

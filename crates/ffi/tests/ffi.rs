@@ -21,9 +21,8 @@ fn text(text: &str) -> Claim {
 
 fn aspero(cache_dir: Option<String>) -> std::sync::Arc<Aspero> {
     Aspero::new(Config {
-        mailto: None,
-        openalex_key: None,
         cache_dir,
+        ..Config::default()
     })
     .unwrap()
 }
@@ -867,6 +866,24 @@ fn caches_report_and_clear() {
     assert!(aspero(None).cache_stats().unwrap().is_none());
     drop(handle);
     std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn a_daily_cap_must_be_an_amount() {
+    for cap in [-0.5, f64::NAN, f64::INFINITY] {
+        let made = Aspero::new(Config {
+            openalex_daily_cap: Some(cap),
+            ..Config::default()
+        });
+        assert!(matches!(made, Err(AsperoError::Setup(_))), "{cap}");
+    }
+    for cap in [0.0, 0.5] {
+        let config = Config {
+            openalex_daily_cap: Some(cap),
+            ..Config::default()
+        };
+        assert!(Aspero::new(config).is_ok());
+    }
 }
 
 #[test]

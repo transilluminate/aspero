@@ -209,7 +209,7 @@ impl Engine {
             tracing::info!(target: "aspero::cache", provider = %provider, text = %sent.text, "search served from cache");
             return Ok(report(page, None, Served::Cache));
         }
-        match self.call(entry, || entry.provider.search(&sent)).await {
+        match self.call_paid(entry, || entry.provider.search(&sent)).await {
             Ok(resp) => {
                 self.remember_search(&provider, &sent, &resp.value);
                 Ok(report(resp.value, resp.usage, Served::Live))

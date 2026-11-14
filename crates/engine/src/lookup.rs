@@ -173,13 +173,22 @@ impl Engine {
         let wanted: Vec<(usize, WorkId)> = pending.iter().map(|&i| (i, ids[i].clone())).collect();
         let (mut leads, joined) = self.inflight.claim(&provider, &wanted, fields);
         let led = leads.indices();
-        let mut chunks = led.chunks(caps.max_batch.max(1));
+        // Batches cost where single lookups don't (OpenAlex): past a daily
+        // cap, IDs go as many at a time as is free.
+        let free = caps.max_free_batch;
+        let mut size = caps.max_batch.max(1);
+        if free > 0 && led.len() > free && self.check_cap(entry).await.is_err() {
+            size = size.min(free);
+        }
+        let mut chunks = led.chunks(size);
         while let Some(chunk) = chunks.next() {
             leads.publish(&answers);
             let batch: Vec<WorkId> = chunk.iter().map(|&i| ids[i].clone()).collect();
-            let answer = self
-                .call(entry, || entry.provider.lookup(&batch, fields))
-                .await;
+            let ask = || entry.provider.lookup(&batch, fields);
+            let answer = match batch.len() > free {
+                true => self.call_paid(entry, ask).await,
+                false => self.call(entry, ask).await,
+            };
 
             let error = match answer {
                 Ok(resp) => {

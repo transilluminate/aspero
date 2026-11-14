@@ -24,6 +24,7 @@ Environment:
   OPENALEX_API_KEY  OpenAlex key ($1/day free budget; $0.10/day without)
   ASPERO_MAILTO     contact address for polite API pools (Crossref)
   ASPERO_CACHE_DIR  where to keep the answer cache (default: platform cache dir)
+  ASPERO_OPENALEX_CAP  --openalex-cap
 
 Answers are cached (records 7 days, not-found 1 day, searches 1 day,
 references 30 days) and
@@ -91,6 +92,14 @@ pub struct Global {
     /// default, the style's own.
     #[arg(long, global = true)]
     pub locale: Option<String>,
+
+    /// Stop OpenAlex's paid calls (searches, batch lookups) once today's
+    /// use, as OpenAlex reports it for the key (shared with anything else
+    /// using it), reaches this many USD, until midnight UTC. Lookups (free)
+    /// go on, checks fall back to the free sources, and a search that needs
+    /// OpenAlex fails (exit 5). `aspero budget` shows today's use.
+    #[arg(long, global = true, value_name = "USD", env = "ASPERO_OPENALEX_CAP", value_parser = cap)]
+    pub openalex_cap: Option<f64>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
@@ -542,6 +551,14 @@ Examples:
     },
 }
 
+/// `--openalex-cap`: zero or more dollars.
+fn cap(s: &str) -> Result<f64, String> {
+    match s.trim().parse::<f64>() {
+        Ok(usd) if usd.is_finite() && usd >= 0.0 => Ok(usd),
+        _ => Err(format!("{s:?} is not an amount of USD")),
+    }
+}
+
 /// `--budget`: a positive number of dollars.
 fn budget(s: &str) -> Result<f64, String> {
     match s.parse::<f64>() {
@@ -686,6 +703,18 @@ mod tests {
         assert!(parse(&["--fresh", "verify", claim]).unwrap().global.fresh);
         let after = parse(&["lookup", "10.1038/nature14539", "--fresh"]).unwrap();
         assert!(after.global.fresh && !after.global.no_cache);
+    }
+
+    #[test]
+    fn the_openalex_cap_is_an_amount() {
+        let cli = parse(&["--openalex-cap", "0.5", "search", "x"]).unwrap();
+        assert_eq!(cli.global.openalex_cap, Some(0.5));
+        let after = parse(&["search", "x", "--openalex-cap", "0"]).unwrap();
+        assert_eq!(after.global.openalex_cap, Some(0.0));
+        for bad in ["-1", "half", "inf"] {
+            let error = parse(&["--openalex-cap", bad, "search", "x"]).expect_err(bad);
+            assert_eq!(error.exit_code(), 2);
+        }
     }
 
     #[test]

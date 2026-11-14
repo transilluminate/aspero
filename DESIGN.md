@@ -451,6 +451,27 @@ verify a few claims at once and yield each as it finishes, so a slow
 claim doesn't hold up the rest, and a batch never queues so many requests
 that a caller sharing the engine waits behind it.
 
+A **daily cap** (`EngineBuilder::daily_cap`, `StandardConfig`/FFI
+`openalex_daily_cap`, CLI `--openalex-cap` / `ASPERO_OPENALEX_CAP`, USD)
+stops a provider's paid calls short of its own budget (#72). The day's
+use is the provider's figure, `limit − remaining` from the last response
+or refresh, so it counts everything using the key; once it reaches the
+cap, until the reset: searches (and graph pages) fail with
+`Error::BudgetCapped { cap, used, resets_at }` (kind `budget_capped`,
+category throttled, exit 5) before anything is sent, falling back like
+any failure (a stale cached page; the next provider in a check, so
+verify carries on with Crossref and the rest); lookups go
+`Capabilities::max_free_batch` IDs at a time (OpenAlex: 1, free) rather
+than in paid batches. After `resets_at` the use is unknown again. Unknown
+use: with a key, one free refresh (`/rate-limit`, no retries, 5 s; one at
+a time, and not again for a minute after one that couldn't say) decides
+the first paid call, so a day already past the cap stops at once;
+without a key the call is taken as under the cap and the cap applies from
+its response on. A call is checked before it's sent and its cost known
+only after, so the last call, or calls in flight together, can pass the
+cap by their own cost. The cap is no part of health: free calls go on,
+and `unavailable` doesn't list it.
+
 Pacing is **shared across processes** through the cache file: each
 request claims its provider's next slot in a `pacing` table (one write
 transaction), so parallel agents keep to one rate between them, even with
@@ -647,7 +668,8 @@ its container; different schema versions would rebuild each other's).
 
 ## Open questions
 
-- Whether to cap OpenAlex spend per CLI command, as MCP sessions are.
+- Whether to cap OpenAlex spend per CLI command, as MCP sessions are
+  (`--openalex-cap` caps the day, not a command).
 - The MCP session budget's default (provisional $1.00), and a per-token
   cap, before Streamable HTTP.
 - Whether a lookup should ever hedge (ask two providers at once) for

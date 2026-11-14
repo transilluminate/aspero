@@ -14,6 +14,19 @@ Added:
   without one. FFI `Budget.limit` and `prepaidRemaining`. `aspero budget`:
   "openalex: $0.0498 of $1.00 used today, resets 00:00 UTC". JSON usage
   gains `limit` and `prepaid_remaining`.
+- A daily cap on OpenAlex spend (#72): `openalex_daily_cap` (engine
+  `EngineBuilder::daily_cap`, `StandardConfig`, FFI `Config`; CLI
+  `--openalex-cap USD` / `ASPERO_OPENALEX_CAP`). Once today's use as
+  OpenAlex reports it for the key (`limit − remaining`, shared by
+  everything using it) reaches the cap, paid calls stop until the reset:
+  searches fail with the new `Error::BudgetCapped { cap, used, resets_at }`
+  (kind `budget_capped`, exit 5; FFI `ErrorKind.budgetCapped`, with
+  `Failure.budgetCap` carrying `cap`, `used` and `resetsAt`), lookups go
+  one free request at a time, and checks fall back to the free sources.
+  With a key, a free `/rate-limit` refresh decides the day's first paid
+  call; without one, unknown use counts as under the cap. Core
+  `ErrorKind::ALL` lists every kind; `Capabilities` gains `budget_status`
+  and `max_free_batch`.
 
 ## 0.16.1
 

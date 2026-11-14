@@ -42,6 +42,7 @@ Optional environment:
 | `OPENALEX_API_KEY` | Free OpenAlex key ($1/day budget; lookups free, searches $0.001) |
 | `ASPERO_MAILTO` | Your contact address, sent to polite API pools (Crossref) |
 | `ASPERO_CACHE_DIR` | Where to keep the answer cache |
+| `ASPERO_OPENALEX_CAP` | Stop OpenAlex's paid calls once today's use reaches this many USD (`--openalex-cap`) |
 
 ## Use
 

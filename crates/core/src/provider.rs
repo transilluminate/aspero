@@ -132,6 +132,10 @@ pub struct Capabilities {
     /// [`Provider::budget`] can say what's left without spending any
     /// (OpenAlex, with a key).
     pub budget_status: bool,
+    /// Lookups of at most this many IDs cost nothing (OpenAlex: 1, its
+    /// singleton endpoint); 0 when none are known to be free. Under a
+    /// daily cap, the engine looks IDs up this many at a time.
+    pub max_free_batch: usize,
 }
 
 /// Common search filters (see [`SearchQuery`]).

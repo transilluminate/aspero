@@ -54,6 +54,7 @@ macro_rules! every_variant {
 mod abstracts;
 mod batch;
 mod budget;
+mod cap;
 mod check;
 mod enrich;
 mod graph;
@@ -206,6 +207,12 @@ pub struct Engine {
     inflight: Arc<InFlight>,
     health: Arc<Health>,
     budgets: Arc<Budgets>,
+    /// Daily caps on providers' spend (see [`cap`]).
+    caps: Arc<Vec<(ProviderId, f64)>>,
+    /// One free budget refresh at a time, for the caps.
+    refreshing: Arc<tokio::sync::Mutex<()>>,
+    /// When a refresh last failed to say the day's use.
+    refreshed: Arc<std::sync::Mutex<Option<tokio::time::Instant>>>,
 }
 
 #[derive(Clone)]
@@ -220,6 +227,7 @@ pub struct EngineBuilder {
     cache: Option<Arc<dyn Cache>>,
     cache_policy: CachePolicy,
     clock: Clock,
+    caps: Vec<(ProviderId, f64)>,
 }
 
 impl EngineBuilder {
@@ -258,6 +266,15 @@ impl EngineBuilder {
         self
     }
 
+    /// Stops `provider`'s paid calls once its day's use, as it reports it
+    /// (`limit − remaining`), reaches `usd`, until its budget resets; free
+    /// calls go on. See [`Error::BudgetCapped`].
+    pub fn daily_cap(mut self, provider: ProviderId, usd: f64) -> Self {
+        self.caps.retain(|(p, _)| *p != provider);
+        self.caps.push((provider, usd));
+        self
+    }
+
     pub fn build(mut self) -> Engine {
         self.entries.sort_by_key(|(priority, _)| *priority);
         Engine {
@@ -270,6 +287,9 @@ impl EngineBuilder {
             inflight: Arc::default(),
             health: Arc::default(),
             budgets: Arc::default(),
+            caps: Arc::new(self.caps),
+            refreshing: Arc::default(),
+            refreshed: Arc::default(),
         }
     }
 }
@@ -316,7 +336,9 @@ impl EngineError {
                 ErrorKind::NotFound => ErrorCategory::NotFound,
                 ErrorKind::BadRequest | ErrorKind::InvalidId => ErrorCategory::Usage,
                 ErrorKind::Unsupported => ErrorCategory::Unsupported,
-                ErrorKind::RateLimited | ErrorKind::BudgetSpent => ErrorCategory::Throttled,
+                ErrorKind::RateLimited | ErrorKind::BudgetSpent | ErrorKind::BudgetCapped => {
+                    ErrorCategory::Throttled
+                }
                 ErrorKind::KeyRejected => ErrorCategory::Auth,
                 ErrorKind::Decode => ErrorCategory::Protocol,
                 _ => ErrorCategory::Unavailable,
@@ -344,6 +366,7 @@ impl Engine {
             cache: None,
             cache_policy: CachePolicy::default(),
             clock: Timestamp::now,
+            caps: Vec::new(),
         }
     }
 

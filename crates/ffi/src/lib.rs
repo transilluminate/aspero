@@ -34,7 +34,7 @@ use records::{
 
 uniffi::setup_scaffolding!();
 
-#[derive(Debug, Clone, uniffi::Record)]
+#[derive(Debug, Clone, Default, uniffi::Record)]
 pub struct Config {
     /// Contact address for providers' polite pools: the app's support
     /// address.
@@ -43,6 +43,16 @@ pub struct Config {
     /// Where to keep the answer cache (`cache.sqlite` inside); `None` for
     /// no cache.
     pub cache_dir: Option<String>,
+    /// Stops OpenAlex's paid calls (searches, batch lookups) once today's
+    /// use, as OpenAlex reports it for the key (shared with anything else
+    /// using it), reaches this many US dollars, until the budget resets.
+    /// Free lookups go on and checks fall back to the free sources; a
+    /// search that needs OpenAlex fails as `budgetCapped`, its
+    /// `Failure.budgetCap` saying the cap, what's used and when it resets.
+    /// With a key, a free budget refresh decides the first paid call of
+    /// the day. `None`: no cap but OpenAlex's own.
+    #[uniffi(default = None)]
+    pub openalex_daily_cap: Option<f64>,
 }
 
 /// How patient a call is.
@@ -154,6 +164,14 @@ impl Aspero {
         let mailto = config.mailto.filter(|m| !m.trim().is_empty());
         let key = config.openalex_key.filter(|k| !k.trim().is_empty());
         let mut standard_config = StandardConfig::all(key.map(SecretString::from));
+        if let Some(cap) = config.openalex_daily_cap
+            && !(cap.is_finite() && cap >= 0.0)
+        {
+            return Err(setup(format!(
+                "the OpenAlex daily cap must be zero or more US dollars, not {cap}"
+            )));
+        }
+        standard_config.openalex_daily_cap = config.openalex_daily_cap;
         standard_config.mailto = mailto.clone();
         standard_config.pacing = cache.clone().map(|c| c as _);
         standard_config.cache = cache.clone().map(|c| c as _);

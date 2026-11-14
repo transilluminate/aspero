@@ -269,6 +269,40 @@ fn works_cite_in_a_style() {
 }
 
 #[test]
+fn dependencies_and_notices_come_built_in() {
+    let handle = aspero(None);
+    let deps = handle.dependencies();
+    assert!(deps.len() > 100, "{} dependencies", deps.len());
+    let key = |name: &str| name.to_lowercase();
+    assert!(deps.windows(2).all(|w| key(&w[0].name) <= key(&w[1].name)));
+    let find = |name: &str| deps.iter().find(|d| d.name == name);
+    let ours = find("aspero-ffi").expect("the library itself");
+    assert_eq!(ours.version, env!("CARGO_PKG_VERSION"));
+    assert_eq!(ours.license, "MIT OR Apache-2.0");
+    assert!(find("uniffi").is_some_and(|d| d.license == "MPL-2.0"));
+    for data in ["CSL styles (8)", "CSL locales (2)"] {
+        let d = find(data).unwrap_or_else(|| panic!("{data}"));
+        assert_eq!(d.license, "CC-BY-SA-3.0");
+        assert!(
+            d.repository
+                .as_deref()
+                .unwrap()
+                .contains("citation-style-language")
+        );
+    }
+    // Build and dev dependencies aren't shipped.
+    assert!(find("cc").is_none() && find("proptest").is_none());
+
+    let notices = handle.third_party_notices();
+    assert!(notices.starts_with("Third-party software and data in aspero"));
+    assert!(notices.contains("Permission is hereby granted, free of charge"));
+    assert!(notices.contains("Apache License\n                           Version 2.0"));
+    assert!(notices.contains("Used by:\n  "));
+    assert!(notices.contains("Citation Style Language styles and locales (CC-BY-SA-3.0)"));
+    assert!(notices.contains("Attribution-ShareAlike 3.0"));
+}
+
+#[test]
 fn word_documents_give_their_citations() {
     use std::io::Write;
     let json = r#"{"citationItems":[{"id":1,"uris":["http://zotero.org/users/1/items/ABCD1234"],"itemData":{"type":"article-journal","title":"Deep learning","DOI":"10.1038/nature14539"}}]}"#;

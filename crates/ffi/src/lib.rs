@@ -23,14 +23,15 @@ use futures::StreamExt;
 use tokio::sync::watch;
 use tokio::task::JoinHandle;
 
+mod notices;
 pub mod records;
 
 use records::{
     Analysis, AnalysisKind, Bibliography, Budget, CacheStats, CitationStyle, CiteFormat,
-    CitedEntry, Claim as ClaimRecord, DocxReferences, ExportFormat, Identification, KeyCheck, Line,
-    LineReference, Lookup, Lookups, Mention, ProviderUsage, ReadError, Reference, ReferencesPage,
-    SearchNode, SearchRequest, SearchResults, SourceSearch, StyleError, StyleSource, Unavailable,
-    Utf16Offsets, Verification, Verifications, Work,
+    CitedEntry, Claim as ClaimRecord, Dependency, DocxReferences, ExportFormat, Identification,
+    KeyCheck, Line, LineReference, Lookup, Lookups, Mention, ProviderUsage, ReadError, Reference,
+    ReferencesPage, SearchNode, SearchRequest, SearchResults, SourceSearch, StyleError,
+    StyleSource, Unavailable, Utf16Offsets, Verification, Verifications, Work,
 };
 
 uniffi::setup_scaffolding!();
@@ -608,6 +609,21 @@ impl Aspero {
     /// authors, to show with formatted references.
     pub fn style_credits(&self) -> String {
         aspero_bib::cite::credits()
+    }
+
+    /// What the library is built from, by name (ignoring case): every
+    /// crate (its normal dependencies, for macOS) with its licence, and
+    /// the bundled citation style data. Offline; generated at release
+    /// (`just notices`).
+    pub fn dependencies(&self) -> Vec<Dependency> {
+        notices::dependencies().to_vec()
+    }
+
+    /// The full third-party notices: each licence text once, after the
+    /// crates under it and their copyright lines, then the citation style
+    /// data's licence and authors. For an app's acknowledgements. Offline.
+    pub fn third_party_notices(&self) -> String {
+        notices::NOTICES.to_owned()
     }
 
     /// Each provider's budget as its last response reported it, without

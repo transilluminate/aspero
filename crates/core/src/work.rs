@@ -333,7 +333,7 @@ const PARTICLES: [&str; 14] = [
 ];
 
 /// Words that make a name an organisation's.
-const BODIES: [&str; 40] = [
+const BODIES: [&str; 46] = [
     "university",
     "institute",
     "institution",
@@ -374,6 +374,12 @@ const BODIES: [&str; 40] = [
     "laboratory",
     "hospital",
     "college",
+    "subcommittee",
+    "taskforce",
+    "workgroup",
+    "secretariat",
+    "trialists",
+    "collaborators",
 ];
 
 /// A personal name written whole ("Yann LeCun", "Vincent van Gogh"), as
@@ -624,6 +630,16 @@ mod tests {
             Some(("van Gogh".into(), Some("Vincent".into())))
         );
         assert_eq!(Person::literal("World Health Organization").parts(), None);
+        // #69: OpenAlex title-cases "ATLS Subcommittee".
+        for body in [
+            "Atls Subcommittee",
+            "Sepsis Taskforce",
+            "CRASH Trialists",
+            "Covid Collaborators",
+        ] {
+            assert_eq!(Person::literal(body).parts(), None, "{body}");
+            assert_eq!(short(Person::literal(body)), body);
+        }
     }
 
     #[test]

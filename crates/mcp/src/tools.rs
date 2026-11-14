@@ -56,6 +56,8 @@ pub struct Output {
     /// A few lines of text: the verdicts, the best matches or top hits, and
     /// the spend.
     pub summary: String,
+    /// What the call cost, in USD (the paid providers' reported cost).
+    pub cost_usd: f64,
 }
 
 /// Why a call failed, for the agent to read (an MCP tool error, not a
@@ -77,8 +79,11 @@ pub enum ToolErrorKind {
     /// The source can't do this (a query tree it can't say, with why).
     Unsupported,
     NotFound,
-    /// This session's budget is spent.
+    /// This session's budget is spent (or, over HTTP, the key's daily
+    /// one).
     BudgetSpent,
+    /// The key lacks the tool's scope (HTTP).
+    Forbidden,
     /// A provider's rate limit or own budget (OpenAlex's daily one).
     Throttled,
     /// A provider rejected aspero's credentials.
@@ -97,6 +102,7 @@ impl ToolErrorKind {
             ToolErrorKind::Unsupported => "unsupported",
             ToolErrorKind::NotFound => "not_found",
             ToolErrorKind::BudgetSpent => "budget_spent",
+            ToolErrorKind::Forbidden => "forbidden",
             ToolErrorKind::Throttled => "throttled",
             ToolErrorKind::Auth => "auth",
             ToolErrorKind::Unavailable => "unavailable",
@@ -222,6 +228,7 @@ impl Tools {
         Ok(Output {
             structured,
             summary,
+            cost_usd: cost,
         })
     }
 

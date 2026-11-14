@@ -11,14 +11,41 @@ use crate::{ToolError, ToolErrorKind};
 /// search costs $0.001, so this is about 250 searches; lookups are free.
 pub const DEFAULT_BUDGET_USD: f64 = 0.25;
 
+/// What a key may do over HTTP. Over stdio there are no keys: the agent
+/// that launched the server may call every tool.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Scope {
+    /// The engine tools: searching, looking up and verifying works in
+    /// open sources (and spending on them).
+    Sources,
+    /// An app's tools that read its history.
+    ReadHistory,
+    /// An app's tools that add to its history.
+    WriteHistory,
+}
+
+impl Scope {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Scope::Sources => "sources",
+            Scope::ReadHistory => "read_history",
+            Scope::WriteHistory => "write_history",
+        }
+    }
+}
+
 /// Who is calling. Over stdio, the agent that launched the server, which
-/// is all there is to know; an HTTP transport will add the token's
-/// identity and access here.
+/// is all there is to know; over HTTP, also the key it presented.
 #[derive(Debug, Clone, Default)]
 #[non_exhaustive]
 pub struct Caller {
     /// How the client introduced itself, for logs.
     pub client: Option<String>,
+    /// The key's id and name, as the host gave them (HTTP only).
+    pub key_id: Option<String>,
+    pub key_name: Option<String>,
+    /// What the key may do (HTTP only).
+    pub scopes: Vec<Scope>,
 }
 
 /// One connection: its caller, and its spend against a cap.
@@ -33,6 +60,8 @@ pub struct Session {
     caller: Caller,
     budget_usd: f64,
     spent_usd: Mutex<f64>,
+    /// How the user raises the budget, for the budget-spent error.
+    raise: &'static str,
 }
 
 impl Session {
@@ -41,7 +70,15 @@ impl Session {
             caller,
             budget_usd,
             spent_usd: Mutex::new(0.0),
+            raise: "ask the user to raise `aspero mcp --budget`",
         }
+    }
+
+    /// Says how the user raises the budget when it's spent ("ask the user
+    /// to raise the session budget in the app's settings").
+    pub fn with_raise_hint(mut self, hint: &'static str) -> Self {
+        self.raise = hint;
+        self
     }
 
     pub fn caller(&self) -> &Caller {
@@ -72,10 +109,10 @@ impl Session {
             ToolErrorKind::BudgetSpent,
             format!(
                 "this session's budget is spent (${:.4} of ${:.2}); free tools \
-                 (search_supports) still work. Start a new session, or ask the \
-                 user to raise `aspero mcp --budget`",
+                 (search_supports) still work. Start a new session, or {}",
                 self.spent_usd(),
-                self.budget_usd
+                self.budget_usd,
+                self.raise
             ),
         ))
     }
@@ -116,6 +153,6 @@ impl Session {
 }
 
 /// Dollars to a millionth, without float noise (0.0030000000000000005).
-fn usd(value: f64) -> f64 {
+pub(crate) fn usd(value: f64) -> f64 {
     (value * 1e6).round() / 1e6
 }

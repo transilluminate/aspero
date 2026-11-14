@@ -14,6 +14,27 @@ categories = ["science"]
 [lints]
 workspace = true
 
+[features]
+# Streamable HTTP on loopback, with bearer keys, scopes, budgets per key,
+# and tools the embedding app provides: for apps (the FFI's `mcp`
+# feature). The CLI serves stdio only, without it.
+http = [
+    "rmcp/transport-streamable-http-server",
+    "dep:async-trait",
+    "dep:bytes",
+    "dep:http",
+    "dep:http-body-util",
+    "dep:hyper",
+    "dep:hyper-util",
+    "dep:jiff",
+    "dep:sha2",
+    "dep:subtle",
+    "dep:tokio-util",
+    "tokio/net",
+    "tokio/rt",
+    "tokio/time",
+]
+
 [dependencies]
 aspero-core.workspace = true
 aspero-engine.workspace = true
@@ -25,9 +46,26 @@ serde.workspace = true
 serde_json.workspace = true
 tokio = { workspace = true, features = ["io-std", "sync"] }
 tracing.workspace = true
+# The `http` feature's.
+async-trait = { workspace = true, optional = true }
+bytes = { version = "1.12.1", optional = true }
+http = { version = "1.5.0", optional = true }
+http-body-util = { version = "0.1.5", optional = true }
+hyper = { version = "1.12.0", features = ["server", "http1"], optional = true }
+hyper-util = { version = "0.1.21", features = ["tokio", "server", "http1", "server-graceful"], optional = true }
+jiff = { workspace = true, optional = true }
+sha2 = { version = "0.11.1", default-features = false, optional = true }
+subtle = { version = "2.6.1", optional = true }
+tokio-util = { version = "0.7.20", optional = true }
 
 [dev-dependencies]
 async-trait.workspace = true
 jiff.workspace = true
+reqwest = { workspace = true, features = ["json"] }
 rmcp = { workspace = true, features = ["client"] }
-tokio = { workspace = true, features = ["macros", "rt", "io-util"] }
+tempfile.workspace = true
+tokio = { workspace = true, features = ["macros", "rt", "rt-multi-thread", "io-util", "net", "time"] }
+
+[[test]]
+name = "http"
+required-features = ["http"]

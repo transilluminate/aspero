@@ -37,10 +37,11 @@ impl Budget {
         }
     }
 
-    /// Spent in the current period (`limit − remaining`), when both are
-    /// known.
+    /// Spent in the current period (`limit − remaining`, to a millionth),
+    /// when both are known.
     pub fn used(&self) -> Option<f64> {
-        Some((self.limit? - self.remaining?).max(0.0))
+        let used = (self.limit? - self.remaining?).max(0.0);
+        Some((used * 1e6).round() / 1e6)
     }
 }
 

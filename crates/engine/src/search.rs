@@ -22,11 +22,34 @@ pub struct SearchReport {
     pub served: Served,
 }
 
+/// The built-in sources in the order searches prefer them, when no source
+/// is named: before any other provider, in their own (lookup) order.
+const SEARCH_ORDER: &[&str] = &[
+    "openalex",
+    "crossref",
+    "europepmc",
+    "datacite",
+    "openlibrary",
+];
+
 impl Engine {
     /// Providers that search by keywords, in the order [`search`](Self::search)
     /// picks from: without a `source`, the first.
     pub fn search_providers(&self) -> impl Iterator<Item = &Arc<dyn Provider>> {
-        self.providers().filter(|p| p.capabilities().search)
+        let mut searching: Vec<&Arc<dyn Provider>> = self
+            .providers()
+            .filter(|p| p.capabilities().search)
+            .collect();
+        // For searching, the broad indexes first, then Europe PMC (for
+        // medicine and life sciences) ahead of DataCite (mostly datasets
+        // and repositories); other providers keep their order, after.
+        searching.sort_by_key(|p| {
+            SEARCH_ORDER
+                .iter()
+                .position(|name| *name == p.id().as_str())
+                .unwrap_or(SEARCH_ORDER.len())
+        });
+        searching.into_iter()
     }
 
     /// Whether `source` can search by `tree` or, without one, any source

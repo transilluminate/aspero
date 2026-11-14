@@ -6,6 +6,10 @@ Fixes from a discovery session (IV morphine titration in the ED).
 
 Changed:
 
+- Searches prefer Europe PMC to DataCite, when no source is named: a
+  search OpenAlex can't say goes to the first that can (`searchCapabilities`
+  lists them in that order: OpenAlex, Crossref, Europe PMC, DataCite, Open
+  Library).
 - A search without a source goes to the first source, in order of
   preference, that can search the whole query (tree, `since`, fields,
   sort), not to the first that searches at all; if none can, the first's

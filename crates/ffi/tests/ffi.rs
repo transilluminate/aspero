@@ -459,8 +459,8 @@ fn the_first_searching_source_is_the_one_search_picks() {
         [
             "openalex",
             "crossref",
-            "datacite",
             "europepmc",
+            "datacite",
             "openlibrary"
         ]
     );
@@ -723,7 +723,7 @@ fn since_picks_a_source_that_can_and_one_that_cant_says_why() {
         .filter(|s| s.filters.contains(&SearchFilter::Since))
         .map(|s| s.source)
         .collect();
-    assert_eq!(dated, ["crossref", "datacite", "europepmc"]);
+    assert_eq!(dated, ["crossref", "europepmc", "datacite"]);
 
     // Without a source, the first that can: Crossref, not OpenAlex.
     let keywords = term(SearchField::Keywords, "sepsis");

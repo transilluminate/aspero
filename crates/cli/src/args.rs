@@ -60,7 +60,7 @@ Explore
 
 Also
   scan <files>          the identifiers mentioned in documents
-  styles, budget, cache, mcp
+  styles, budget, cache, mcp, licences
 
 Examples
   aspero verify \"LeCun Y, Bengio Y, Hinton G. Deep learning. Nature 2015.\"
@@ -245,6 +245,8 @@ pub enum Format {
     Bibtex,
     /// The works found as RIS records (lookup, search, verify).
     Ris,
+    /// The works found as one CSL-JSON array (lookup, search, verify).
+    CslJson,
     /// The works found as a reference list in `--style` (lookup, search,
     /// verify).
     Cite,
@@ -258,7 +260,10 @@ impl Format {
 
     /// The works found, for a reference manager.
     pub fn is_export(self) -> bool {
-        matches!(self, Format::Bibtex | Format::Ris | Format::Cite)
+        matches!(
+            self,
+            Format::Bibtex | Format::Ris | Format::CslJson | Format::Cite
+        )
     }
 }
 
@@ -714,6 +719,25 @@ Examples:
         #[arg(long)]
         credits: bool,
     },
+
+    /// List the crates and data aspero is built from, and their licences.
+    #[command(
+        alias = "licenses",
+        after_help = "\
+Every Rust crate in this binary (aspero's own among them), with its version
+and SPDX licence, and the bundled citation styles and locales (CC BY-SA
+3.0). --full prints the third-party notices instead: each licence text once,
+after the crates under it and their copyright lines. JSON: {\"dependencies\":
+[{\"name\", \"version\", \"license\", \"repository\"}]}, or with --full
+{\"notices\": \"...\"}.
+
+Examples:
+  aspero licences
+  aspero licences --full > THIRD-PARTY-NOTICES.txt
+  aspero licences --format json"
+    )]
+    #[command(display_order = 14)]
+    Licences,
 }
 
 /// `--openalex-cap`: zero or more dollars.
@@ -859,6 +883,13 @@ mod tests {
 
     fn parse(args: &[&str]) -> Result<Cli, clap::Error> {
         Cli::try_parse_from(std::iter::once("aspero").chain(args.iter().copied()))
+    }
+
+    #[test]
+    fn csl_json_is_an_export_format() {
+        let cli = parse(&["lookup", "--format", "csl-json", "10.1038/nature14539"]).unwrap();
+        assert_eq!(cli.global.format, Format::CslJson);
+        assert!(Format::CslJson.is_export() && !Format::CslJson.is_human());
     }
 
     #[test]

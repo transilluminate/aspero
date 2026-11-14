@@ -73,7 +73,9 @@ pub async fn run(
                 print_line(&aspero_json::check::entry(entry, c, &keys, out.full));
             }
         }
-        Format::Bibtex | Format::Ris | Format::Cite => unreachable!("rejected in main"),
+        Format::Bibtex | Format::Ris | Format::CslJson | Format::Cite => {
+            unreachable!("rejected in main")
+        }
         Format::Json | Format::Auto => print(&aspero_json::check::report(
             &path, &entries, &report, out.full,
         )),

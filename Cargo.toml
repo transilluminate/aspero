@@ -9,6 +9,7 @@ members = [
     "crates/ffi",
     "crates/mcp",
     "crates/cli",
+    "crates/notices-gen",
     "crates/providers/*",
 ]
 

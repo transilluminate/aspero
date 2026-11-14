@@ -69,7 +69,7 @@ pub async fn run(engine: &Engine, ids: Vec<String>, out: Out) -> Result<Exit, Fa
                 eprintln!("{usage}");
             }
         }
-        Format::Bibtex | Format::Ris | Format::Cite => {
+        Format::Bibtex | Format::Ris | Format::CslJson | Format::Cite => {
             let mut export = output::Exporter::new(&out)?;
             for (input, lookup) in inputs.iter().zip(&report.items) {
                 match looked(lookup).and_then(|l| l.result.record.as_ref()) {

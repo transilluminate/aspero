@@ -1768,6 +1768,9 @@ impl From<aspero_bib::ReadError> for ReadError {
 pub enum ExportFormat {
     Bibtex,
     Ris,
+    /// One CSL-JSON array, as Zotero imports it (and `readReferences`
+    /// reads it).
+    CslJson,
 }
 
 impl Work {
@@ -1814,12 +1817,48 @@ impl Work {
     }
 }
 
+/// Something the library is built from: a Rust crate (aspero's own
+/// included), or bundled data (`CSL styles (8)`, `CSL locales (2)`).
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct Dependency {
+    pub name: String,
+    /// A crate's version; for data, the commit it's from.
+    pub version: String,
+    /// An SPDX licence expression: `MIT OR Apache-2.0`, `CC-BY-SA-3.0`.
+    pub license: String,
+    pub repository: Option<String>,
+}
+
 /// A bundled citation style.
 #[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
 pub struct CitationStyle {
     /// How `StyleSource.bundled` names it: `apa`, `vancouver`, ….
     pub id: String,
     pub title: String,
+    /// Who wrote it: its authors, then its contributors.
+    #[uniffi(default = [])]
+    pub authors: Vec<String>,
+    /// Its page in the Zotero Style Repository.
+    #[uniffi(default = None)]
+    pub link: Option<String>,
+    /// Its licence, as an SPDX id: `CC-BY-SA-3.0`.
+    #[uniffi(default = "CC-BY-SA-3.0")]
+    pub license: String,
+}
+
+/// Where the bundled styles and locales come from, and their licence,
+/// to credit them (`CitationStyle` has each style's authors).
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct StyleProject {
+    /// `Citation Style Language`.
+    pub name: String,
+    pub link: String,
+    /// An SPDX id: `CC-BY-SA-3.0`.
+    pub license: String,
+    pub license_link: String,
+    /// The bundled locales' codes: `en-US`, `en-GB`.
+    pub locales: Vec<String>,
+    pub locales_link: String,
 }
 
 /// Which citation style to format in.

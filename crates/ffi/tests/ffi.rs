@@ -178,13 +178,25 @@ fn works_export_as_bibtex_and_ris() {
         bibtex.contains("year = {2015}"),
         "a year without a date: {bibtex}"
     );
-    let ris = handle.export(vec![work], ExportFormat::Ris);
+    let ris = handle.export(vec![work.clone()], ExportFormat::Ris);
     assert!(ris.contains("DO  - 10.1038/nature14539\n"), "{ris}");
     let back = handle.read_references(ris).unwrap();
     assert_eq!(
         back.entries[0].claim.title.as_deref(),
         Some("Deep learning")
     );
+
+    // CSL-JSON reads back as written.
+    let csl = handle.export(vec![work.clone(), work.clone()], ExportFormat::CslJson);
+    let items: serde_json::Value = serde_json::from_str(&csl).unwrap();
+    assert_eq!(items[1]["id"], "lecun2015deepa");
+    let back = handle.read_references(csl).unwrap();
+    assert_eq!(back.entries.len(), 2);
+    let claim = &back.entries[0].claim;
+    assert_eq!(claim.title.as_deref(), Some("Deep learning"));
+    assert_eq!(claim.authors, ["LeCun, Yann"]);
+    assert_eq!(claim.year, Some(2015));
+    assert_eq!(claim.ids, work.ids);
 }
 
 fn work(title: &str, author: &str, year: i16) -> Work {
@@ -266,6 +278,80 @@ fn works_cite_in_a_style() {
         Err(StyleError::Invalid { .. })
     ));
     assert!(handle.style_credits().contains("Attribution-ShareAlike"));
+}
+
+#[test]
+fn styles_are_credited_as_data() {
+    let handle = aspero(None);
+    let styles = handle.citation_styles();
+    for style in &styles {
+        assert!(!style.authors.is_empty(), "{}", style.id);
+        assert_eq!(style.license, "CC-BY-SA-3.0");
+        assert!(
+            style
+                .link
+                .as_deref()
+                .unwrap()
+                .starts_with("https://www.zotero.org/styles?q=id%3A")
+        );
+    }
+    let apa = &styles[0];
+    assert_eq!(apa.id, "apa");
+    assert!(apa.authors.contains(&"Brenton M. Wiernik".to_owned()));
+    let project = handle.style_project();
+    assert_eq!(project.name, "Citation Style Language");
+    assert_eq!(project.link, "https://citationstyles.org");
+    assert_eq!(project.license, "CC-BY-SA-3.0");
+    assert_eq!(
+        project.license_link,
+        "https://creativecommons.org/licenses/by-sa/3.0/"
+    );
+    assert_eq!(project.locales, ["en-US", "en-GB"]);
+    // As the third-party notices list the same data.
+    let deps = handle.dependencies();
+    let locales = deps
+        .iter()
+        .find(|d| d.name.starts_with("CSL locales"))
+        .unwrap();
+    assert_eq!(locales.license, project.license);
+    assert_eq!(
+        locales.repository.as_deref(),
+        Some(project.locales_link.as_str())
+    );
+}
+
+#[test]
+fn dependencies_and_notices_come_built_in() {
+    let handle = aspero(None);
+    let deps = handle.dependencies();
+    assert!(deps.len() > 100, "{} dependencies", deps.len());
+    let key = |name: &str| name.to_lowercase();
+    assert!(deps.windows(2).all(|w| key(&w[0].name) <= key(&w[1].name)));
+    let find = |name: &str| deps.iter().find(|d| d.name == name);
+    let ours = find("aspero-ffi").expect("the library itself");
+    assert_eq!(ours.version, env!("CARGO_PKG_VERSION"));
+    assert_eq!(ours.license, "MIT OR Apache-2.0");
+    assert!(find("uniffi").is_some_and(|d| d.license == "MPL-2.0"));
+    for data in ["CSL styles (8)", "CSL locales (2)"] {
+        let d = find(data).unwrap_or_else(|| panic!("{data}"));
+        assert_eq!(d.license, "CC-BY-SA-3.0");
+        assert!(
+            d.repository
+                .as_deref()
+                .unwrap()
+                .contains("citation-style-language")
+        );
+    }
+    // Build and dev dependencies aren't shipped.
+    assert!(find("cc").is_none() && find("proptest").is_none());
+
+    let notices = handle.third_party_notices();
+    assert!(notices.starts_with("Third-party software and data in aspero"));
+    assert!(notices.contains("Permission is hereby granted, free of charge"));
+    assert!(notices.contains("Apache License\n                           Version 2.0"));
+    assert!(notices.contains("Used by:\n  "));
+    assert!(notices.contains("Citation Style Language styles and locales (CC-BY-SA-3.0)"));
+    assert!(notices.contains("Attribution-ShareAlike 3.0"));
 }
 
 #[test]

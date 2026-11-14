@@ -23,14 +23,15 @@ use futures::StreamExt;
 use tokio::sync::watch;
 use tokio::task::JoinHandle;
 
+mod notices;
 pub mod records;
 
 use records::{
     Analysis, AnalysisKind, Bibliography, Budget, CacheStats, CitationStyle, CiteFormat,
-    CitedEntry, Claim as ClaimRecord, DocxReferences, ExportFormat, Identification, KeyCheck, Line,
-    LineReference, Lookup, Lookups, Mention, ProviderUsage, ReadError, Reference, ReferencesPage,
-    SearchNode, SearchRequest, SearchResults, SourceSearch, StyleError, StyleSource, Unavailable,
-    Utf16Offsets, Verification, Verifications, Work,
+    CitedEntry, Claim as ClaimRecord, Dependency, DocxReferences, ExportFormat, Identification,
+    KeyCheck, Line, LineReference, Lookup, Lookups, Mention, ProviderUsage, ReadError, Reference,
+    ReferencesPage, SearchNode, SearchRequest, SearchResults, SourceSearch, StyleError,
+    StyleProject, StyleSource, Unavailable, Utf16Offsets, Verification, Verifications, Work,
 };
 
 uniffi::setup_scaffolding!();
@@ -542,8 +543,13 @@ impl Aspero {
     }
 
     /// Works as BibTeX entries (keys kept distinct) or RIS records, one
-    /// after another. Offline.
+    /// after another, or as a CSL-JSON array (keyed as BibTeX). Offline.
     pub fn export(&self, works: Vec<Work>, format: ExportFormat) -> String {
+        if format == ExportFormat::CslJson {
+            let core: Vec<_> = works.iter().map(Work::to_core).collect();
+            let pairs: Vec<_> = core.iter().map(|(w, ids)| (w, &ids[..])).collect();
+            return aspero_bib::csl_json(&pairs);
+        }
         let mut keys = aspero_bib::Keys::default();
         let entries: Vec<String> = works
             .iter()
@@ -552,6 +558,7 @@ impl Aspero {
                 match format {
                     ExportFormat::Ris => aspero_bib::ris(&w, &ids),
                     ExportFormat::Bibtex => aspero_bib::bibtex(&w, &ids, &keys.key(&w)),
+                    ExportFormat::CslJson => unreachable!("written above"),
                 }
             })
             .collect();
@@ -563,11 +570,31 @@ impl Aspero {
     pub fn citation_styles(&self) -> Vec<CitationStyle> {
         aspero_bib::cite::BUNDLED
             .iter()
-            .map(|b| CitationStyle {
-                id: b.id.into(),
-                title: b.title.into(),
+            .map(|b| {
+                let credits = b.credits();
+                CitationStyle {
+                    id: b.id.into(),
+                    title: b.title.into(),
+                    authors: credits.authors,
+                    link: credits.link,
+                    license: credits.license.unwrap_or_default(),
+                }
             })
             .collect()
+    }
+
+    /// The project the bundled styles and locales come from (the Citation
+    /// Style Language), their licence, and the locales. Offline.
+    pub fn style_project(&self) -> StyleProject {
+        use aspero_bib::cite;
+        StyleProject {
+            name: cite::PROJECT.into(),
+            link: cite::PROJECT_LINK.into(),
+            license: cite::LICENSE.into(),
+            license_link: cite::LICENSE_LINK.into(),
+            locales: cite::locales(),
+            locales_link: cite::LOCALES_LINK.into(),
+        }
     }
 
     /// Works as a reference list in `style`, one entry each, in the
@@ -608,6 +635,21 @@ impl Aspero {
     /// authors, to show with formatted references.
     pub fn style_credits(&self) -> String {
         aspero_bib::cite::credits()
+    }
+
+    /// What the library is built from, by name (ignoring case): every
+    /// crate (its normal dependencies, for macOS) with its licence, and
+    /// the bundled citation style data. Offline; generated at release
+    /// (`just notices`).
+    pub fn dependencies(&self) -> Vec<Dependency> {
+        notices::dependencies().to_vec()
+    }
+
+    /// The full third-party notices: each licence text once, after the
+    /// crates under it and their copyright lines, then the citation style
+    /// data's licence and authors. For an app's acknowledgements. Offline.
+    pub fn third_party_notices(&self) -> String {
+        notices::NOTICES.to_owned()
     }
 
     /// Each provider's budget as its last response reported it, without

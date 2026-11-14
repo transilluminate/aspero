@@ -11,7 +11,8 @@ Citation Style Language project, unmodified:
 They are licensed under the Creative Commons Attribution-ShareAlike 3.0
 license (<https://creativecommons.org/licenses/by-sa/3.0/>), not under
 aspero's own license. Each file names its authors and contributors;
-`aspero styles --credits` (and the FFI's `styleCredits`) lists them.
+`aspero styles --credits` (and the FFI's `styleCredits`, or as data
+`citationStyles` and `styleProject`) lists them.
 
 When a style is loaded, a `<names>` element without a `<name>` child is
 given an empty `<name/>`, which the CSL specification implies, to work

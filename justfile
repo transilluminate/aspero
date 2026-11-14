@@ -27,9 +27,15 @@ scan-bench filter="":
 record provider name="":
     ONLY={{name}} scripts/record-{{provider}}.sh
 
-# Checks plus a crates.io dry run, after bumping the version: everything a
-# release needs short of publishing.
+# Write the FFI's and CLI's third-party notices (crates/{ffi,cli}/notices);
+# `just notices --check` fails if they're out of date.
+notices *args:
+    cargo run -q -p notices-gen -- {{args}}
+
+# Checks plus a crates.io dry run, after bumping the version (and running
+# `just notices`): everything a release needs short of publishing.
 release-check: check
+    cargo run -q -p notices-gen -- --check
     cargo publish --workspace --dry-run --allow-dirty
 
 # Build the macOS app framework and Swift bindings (needs Xcode).

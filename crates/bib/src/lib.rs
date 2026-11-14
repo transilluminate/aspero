@@ -26,7 +26,7 @@ use biblatex::{Bibliography, ChunksExt, Person};
 
 pub use csl::parse_csl_json;
 pub use ris::parse_ris;
-pub use write::{Keys, bibtex, cite_key, ris};
+pub use write::{Keys, bibtex, cite_key, csl_item, csl_json, ris};
 
 /// A bibliography file format.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

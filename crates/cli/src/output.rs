@@ -16,13 +16,14 @@ const TABLE_AUTHORS: usize = 3;
 
 /// Works written as BibTeX entries or RIS records (BibTeX keys kept
 /// distinct: `lecun2015deep`, `lecun2015deepa`, …), or gathered into a
-/// reference list in a citation style.
+/// CSL-JSON array or a reference list in a citation style.
 pub struct Exporter {
     format: crate::args::Format,
     keys: aspero_bib::Keys,
     style: Option<aspero_bib::cite::Style>,
     locale: Option<String>,
-    works: Vec<(Work, Vec<WorkId>)>,
+    /// Gathered for the end, with their input positions.
+    works: Vec<(usize, Work, Vec<WorkId>)>,
 }
 
 impl Exporter {
@@ -56,26 +57,38 @@ impl Exporter {
         })
     }
 
-    /// The work's entry to print now; empty for a style, whose list is
-    /// ordered once every work is in ([`Exporter::finish`]).
+    /// The work's entry to print now; empty for CSL-JSON, one array, and
+    /// a style, whose list is ordered once every work is in
+    /// ([`Exporter::finish`]).
     pub fn entry(&mut self, work: &Work, ids: &[WorkId]) -> String {
+        self.entry_at(self.works.len(), work, ids)
+    }
+
+    /// [`Exporter::entry`] for the input at `position`, for works that
+    /// arrive out of order: gathered ones are given in input order.
+    pub fn entry_at(&mut self, position: usize, work: &Work, ids: &[WorkId]) -> String {
         match self.format {
             crate::args::Format::Ris => aspero_bib::ris(work, ids),
-            crate::args::Format::Cite => {
-                self.works.push((work.clone(), ids.to_vec()));
+            crate::args::Format::Cite | crate::args::Format::CslJson => {
+                self.works.push((position, work.clone(), ids.to_vec()));
                 String::new()
             }
             _ => aspero_bib::bibtex(work, ids, &self.keys.key(work)),
         }
     }
 
-    /// A style's reference list, one entry per line; empty otherwise.
-    pub fn finish(self) -> String {
+    /// The CSL-JSON array, or a style's reference list, one entry per
+    /// line; empty otherwise.
+    pub fn finish(mut self) -> String {
+        self.works.sort_by_key(|(position, ..)| *position);
+        let works: Vec<(&Work, &[WorkId])> =
+            self.works.iter().map(|(_, w, ids)| (w, &ids[..])).collect();
+        if self.format == crate::args::Format::CslJson {
+            return aspero_bib::csl_json(&works) + "\n";
+        }
         let Some(style) = &self.style else {
             return String::new();
         };
-        let works: Vec<(&Work, &[WorkId])> =
-            self.works.iter().map(|(w, ids)| (w, &ids[..])).collect();
         let cited = aspero_bib::cite::cite(
             &works,
             style,
@@ -425,5 +438,28 @@ mod tests {
         );
         assert_eq!(first(&["S. C. S"]), "S. C. S");
         assert_eq!(first(&[]), "");
+    }
+
+    #[test]
+    fn csl_json_is_one_array_at_the_end() {
+        let out = crate::cmd::Out {
+            format: crate::args::Format::CslJson,
+            full: false,
+            abstracts: false,
+            style: None,
+            locale: None,
+        };
+        let mut export = Exporter::new(&out).unwrap();
+        let r = record();
+        let mut other = record();
+        other.work.title = Some("Attention is all you need".into());
+        // Verifications finish in any order; the array is in input order.
+        assert_eq!(export.entry_at(1, &other.work, &other.ids), "");
+        assert_eq!(export.entry_at(0, &r.work, &r.ids), "");
+        let json: serde_json::Value = serde_json::from_str(&export.finish()).unwrap();
+        assert_eq!(json[0]["title"], "Deep learning");
+        assert_eq!(json[0]["DOI"], "10.1038/nature14539");
+        assert_eq!(json[0]["type"], "article-journal");
+        assert_eq!(json[1]["title"], "Attention is all you need");
     }
 }

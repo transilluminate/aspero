@@ -10,6 +10,7 @@ pub mod check;
 pub mod claim;
 pub mod graph;
 pub mod identify;
+pub mod licences;
 pub mod lookup;
 pub mod mcp;
 pub mod resolve;

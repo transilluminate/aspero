@@ -8,14 +8,14 @@ use std::fmt::Write as _;
 use aspero_core::{Work, WorkId, WorkType};
 use hayagriva::citationberg::json::Item;
 use hayagriva::citationberg::{
-    IndependentStyle, Locale, LocaleCode, LocaleFile, Style as CslStyle,
+    IndependentStyle, InfoLinkRel, Locale, LocaleCode, LocaleFile, Style as CslStyle,
 };
 use hayagriva::{
     BibliographyDriver, BibliographyRequest, BufWriteFormat, CitationItem, CitationRequest,
 };
-use serde_json::{Map, Value, json};
+use serde_json::{Value, json};
 
-use crate::write::{Name, name};
+use crate::write::on_arxiv;
 
 /// A bundled style: `id` is how it's asked for.
 #[derive(Debug, Clone, Copy)]
@@ -270,86 +270,114 @@ fn tidy(text: &str) -> String {
     out
 }
 
-/// A work as a CSL-JSON item keyed by its position.
+/// A work as a CSL-JSON item keyed by its position: the exported item
+/// ([`crate::csl_item`]), with what styles should print. Indexes list
+/// arXiv as a journal ("arXiv (Cornell University)"), sometimes with a
+/// later version's volume and pages: cite the preprint.
 fn item(index: usize, work: &Work, ids: &[WorkId]) -> Value {
-    let mut item = Map::new();
-    let mut put = |key: &str, value: Option<Value>| {
-        if let Some(v) = value {
-            item.insert(key.into(), v);
-        }
-    };
-    put("id", Some(json!(index.to_string())));
-    // Indexes list arXiv as a journal ("arXiv (Cornell University)"),
-    // sometimes with a later version's volume and pages: cite the preprint.
-    let on_arxiv = ids.iter().any(|id| matches!(id, WorkId::Arxiv(_)))
-        && work
-            .container_title
-            .as_deref()
-            .is_none_or(|c| c.to_lowercase().contains("arxiv"));
-    let preprint = on_arxiv || matches!(work.work_type, Some(WorkType::Preprint));
+    const PRINTED: [&str; 14] = [
+        "id",
+        "type",
+        "title",
+        "author",
+        "issued",
+        "container-title",
+        "volume",
+        "issue",
+        "page",
+        "publisher",
+        "URL",
+        "DOI",
+        "ISBN",
+        "number",
+    ];
+    let mut item = crate::csl_item(work, ids, &index.to_string());
+    item.retain(|k, _| PRINTED.contains(&k.as_str()));
+    let on_arxiv = on_arxiv(work, ids);
     let kind = match &work.work_type {
-        _ if preprint => "article",
+        _ if on_arxiv => "article",
         Some(WorkType::Other(_)) | None => "article",
         Some(t) => t.as_csl(),
     };
-    put("type", Some(json!(kind)));
-    put("title", work.title.as_ref().map(|t| json!(t)));
-    let authors: Vec<Value> = work
-        .authors
-        .iter()
-        .filter_map(|p| match name(p) {
-            Name::Person { family, given } => Some(json!({"family": family, "given": given})),
-            Name::Whole(whole) if whole.is_empty() => None,
-            Name::Whole(whole) => Some(json!({"literal": whole})),
-        })
-        .collect();
-    put("author", (!authors.is_empty()).then(|| json!(authors)));
-    put(
-        "issued",
-        work.issued.map(|d| {
-            let parts: Vec<i64> = [
-                Some(i64::from(d.year())),
-                d.month().map(i64::from),
-                d.day().map(i64::from),
-            ]
-            .into_iter()
-            .map_while(|p| p)
-            .collect();
-            json!({"date-parts": [parts]})
-        }),
-    );
-    if !on_arxiv {
-        let text = |v: &Option<String>| v.as_ref().map(|v| json!(v));
-        put("container-title", text(&work.container_title));
-        put("volume", text(&work.volume));
-        put("issue", text(&work.issue));
-        put("page", text(&work.page));
-        put("publisher", text(&work.publisher));
-    }
-    put("URL", work.url.as_ref().map(|v| json!(v)));
-    for id in ids {
-        match id {
-            WorkId::Doi(doi) if !item.contains_key("DOI") => {
-                item.insert("DOI".into(), json!(doi.to_string()));
-            }
-            WorkId::Isbn(isbn) if !item.contains_key("ISBN") => {
-                item.insert("ISBN".into(), json!(isbn.to_string()));
-            }
-            // A preprint's repository and number, as styles print them.
-            WorkId::Arxiv(arxiv) if preprint => {
-                item.entry("publisher").or_insert(json!("arXiv"));
-                item.insert("number".into(), json!(format!("arXiv:{arxiv}")));
-                if work.url.is_none() {
-                    item.insert(
-                        "URL".into(),
-                        json!(format!("https://arxiv.org/abs/{arxiv}")),
-                    );
-                }
-            }
-            _ => {}
+    item.insert("type".into(), json!(kind));
+    if on_arxiv {
+        for key in ["container-title", "volume", "issue", "page"] {
+            item.remove(key);
         }
+        item.insert("publisher".into(), json!("arXiv"));
     }
     Value::Object(item)
+}
+
+/// The project the bundled styles and locales come from.
+pub const PROJECT: &str = "Citation Style Language";
+pub const PROJECT_LINK: &str = "https://citationstyles.org";
+/// The bundled styles' and locales' licence (SPDX), and its deed.
+pub const LICENSE: &str = "CC-BY-SA-3.0";
+pub const LICENSE_LINK: &str = "https://creativecommons.org/licenses/by-sa/3.0/";
+pub const STYLES_LINK: &str = "https://github.com/citation-style-language/styles";
+pub const LOCALES_LINK: &str = "https://github.com/citation-style-language/locales";
+
+/// A bundled style's credits, from its `<info>`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Credits {
+    /// Its authors, then its contributors.
+    pub authors: Vec<String>,
+    /// Its page in the Zotero Style Repository (the official styles'
+    /// home), or failing that its documentation.
+    pub link: Option<String>,
+    /// The SPDX id of its `<rights>` (`CC-BY-SA-3.0`), or the licence's
+    /// URL when that has none here.
+    pub license: Option<String>,
+}
+
+impl Bundled {
+    pub fn credits(&self) -> Credits {
+        let Ok(CslStyle::Independent(csl)) = CslStyle::from_xml(self.xml) else {
+            unreachable!("bundled styles are independent styles")
+        };
+        let info = &csl.info;
+        let authors = info
+            .authors
+            .iter()
+            .chain(&info.contributors)
+            .map(|a| a.name.clone())
+            .collect();
+        // `/styles/<id>` serves the file itself; the search is the page.
+        let zotero = info.link.iter().find_map(|l| {
+            let rest = l.href.strip_prefix("http://www.zotero.org/styles/")?;
+            (l.rel == InfoLinkRel::Zelf)
+                .then(|| format!("https://www.zotero.org/styles?q=id%3A{rest}"))
+        });
+        let documentation = || {
+            info.link
+                .iter()
+                .find(|l| l.rel == InfoLinkRel::Documentation)
+                .map(|l| l.href.clone())
+        };
+        let license = info.rights.as_ref().and_then(|r| r.license.as_deref());
+        Credits {
+            authors,
+            link: zotero.or_else(documentation),
+            license: license.map(|url| {
+                match url
+                    .trim_start_matches("http://")
+                    .trim_start_matches("https://")
+                {
+                    "creativecommons.org/licenses/by-sa/3.0/" => LICENSE.to_owned(),
+                    _ => url.to_owned(),
+                }
+            }),
+        }
+    }
+}
+
+/// The bundled locales' codes: `en-US`, `en-GB`.
+pub fn locales() -> Vec<String> {
+    LOCALES
+        .iter()
+        .map(|xml| LocaleFile::from_xml(xml).expect("bundled locale").lang.0)
+        .collect()
 }
 
 /// The bundled styles' and locales' license and authors, to show with
@@ -595,6 +623,29 @@ mod tests {
         ));
         let own = Style::from_xml(BUNDLED[0].xml).unwrap();
         assert_eq!(own.title(), "APA Style 7th edition");
+    }
+
+    #[test]
+    fn each_style_credits_its_authors_link_and_license() {
+        for b in BUNDLED {
+            let c = b.credits();
+            assert!(!c.authors.is_empty(), "{}", b.id);
+            assert_eq!(c.license.as_deref(), Some(LICENSE), "{}", b.id);
+            let link = c.link.unwrap();
+            assert!(
+                link.starts_with("https://www.zotero.org/styles?q=id%3A"),
+                "{link}"
+            );
+        }
+        let apa = BUNDLED[0].credits();
+        assert_eq!(apa.authors[..2], ["Brenton M. Wiernik", "Andrew Dunning"]);
+        assert_eq!(
+            apa.link.as_deref(),
+            Some("https://www.zotero.org/styles?q=id%3Aapa")
+        );
+        let link = BUNDLED[1].credits().link.unwrap();
+        assert!(link.ends_with("id%3Anlm-citation-sequence"), "{link}");
+        assert_eq!(locales(), ["en-US", "en-GB"]);
     }
 
     #[test]

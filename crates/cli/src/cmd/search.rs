@@ -73,7 +73,7 @@ pub async fn run(
             }
             footer(&report, next.as_deref());
         }
-        Format::Bibtex | Format::Ris | Format::Cite => {
+        Format::Bibtex | Format::Ris | Format::CslJson | Format::Cite => {
             let mut export = output::Exporter::new(&out)?;
             for hit in &page.hits {
                 let entry = export.entry(&hit.record.work, &hit.record.ids);

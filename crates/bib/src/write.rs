@@ -1,9 +1,10 @@
-//! Works written out as BibTeX entries or RIS records, for pasting into a
-//! reference manager.
+//! Works written out as BibTeX entries, RIS records or CSL-JSON items,
+//! for pasting into a reference manager.
 
 use std::fmt::Write as _;
 
 use aspero_core::{Person, Work, WorkId, WorkType};
+use serde_json::{Map, Value, json};
 
 const MONTHS: [&str; 12] = [
     "jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec",
@@ -60,8 +61,6 @@ const STOP: [&str; 9] = ["a", "an", "the", "on", "of", "in", "and", "for", "to"]
 pub(crate) enum Name {
     Person {
         family: String,
-        // Read by citation styles' CSL-JSON.
-        #[cfg_attr(not(feature = "styles"), allow(dead_code))]
         given: Option<String>,
     },
     Whole(String),
@@ -286,6 +285,147 @@ pub fn ris(work: &Work, ids: &[WorkId]) -> String {
     out
 }
 
+/// The item types of CSL 1.0.2.
+const CSL_TYPES: [&str; 45] = [
+    "article",
+    "article-journal",
+    "article-magazine",
+    "article-newspaper",
+    "bill",
+    "book",
+    "broadcast",
+    "chapter",
+    "classic",
+    "collection",
+    "dataset",
+    "document",
+    "entry",
+    "entry-dictionary",
+    "entry-encyclopedia",
+    "event",
+    "figure",
+    "graphic",
+    "hearing",
+    "interview",
+    "legal_case",
+    "legislation",
+    "manuscript",
+    "map",
+    "motion_picture",
+    "musical_score",
+    "pamphlet",
+    "paper-conference",
+    "patent",
+    "performance",
+    "periodical",
+    "personal_communication",
+    "post",
+    "post-weblog",
+    "regulation",
+    "report",
+    "review",
+    "review-book",
+    "software",
+    "song",
+    "speech",
+    "standard",
+    "thesis",
+    "treaty",
+    "webpage",
+];
+
+/// Whether `work` is an arXiv preprint that an index lists as a journal
+/// ("arXiv (Cornell University)"), or with no journal at all.
+pub(crate) fn on_arxiv(work: &Work, ids: &[WorkId]) -> bool {
+    ids.iter().any(|id| matches!(id, WorkId::Arxiv(_)))
+        && work
+            .container_title
+            .as_deref()
+            .is_none_or(|c| c.to_lowercase().contains("arxiv"))
+}
+
+/// `work` as a CSL-JSON item with `id`, as Zotero exports them (and
+/// [`crate::parse_csl_json`] reads them): the identifiers in `ids` that
+/// CSL has variables for (the first of each kind), and an arXiv preprint's
+/// repository and number.
+pub fn csl_item(work: &Work, ids: &[WorkId], id: &str) -> Map<String, Value> {
+    let mut item = Map::new();
+    let mut put = |key: &str, value: Option<Value>| {
+        if let Some(v) = value {
+            item.insert(key.into(), v);
+        }
+    };
+    put("id", Some(json!(id)));
+    let kind = match &work.work_type {
+        Some(WorkType::Other(t)) if CSL_TYPES.contains(&t.as_str()) => t.as_str(),
+        Some(WorkType::Other(_)) | None => "document",
+        Some(t) => t.as_csl(),
+    };
+    put("type", Some(json!(kind)));
+    put("title", work.title.as_ref().map(|t| json!(t)));
+    let authors: Vec<Value> = work
+        .authors
+        .iter()
+        .filter_map(|p| match name(p) {
+            Name::Person { family, given } => Some(json!({"family": family, "given": given})),
+            Name::Whole(whole) if whole.is_empty() => None,
+            Name::Whole(whole) => Some(json!({"literal": whole})),
+        })
+        .collect();
+    put("author", (!authors.is_empty()).then(|| json!(authors)));
+    put(
+        "issued",
+        work.issued.map(|d| {
+            let parts: Vec<i64> = [
+                Some(i64::from(d.year())),
+                d.month().map(i64::from),
+                d.day().map(i64::from),
+            ]
+            .into_iter()
+            .map_while(|p| p)
+            .collect();
+            json!({"date-parts": [parts]})
+        }),
+    );
+    let text = |v: &Option<String>| v.as_ref().map(|v| json!(v));
+    put("container-title", text(&work.container_title));
+    put("volume", text(&work.volume));
+    put("issue", text(&work.issue));
+    put("page", text(&work.page));
+    put("publisher", text(&work.publisher));
+    put("URL", text(&work.url));
+    let preprint = on_arxiv(work, ids) || matches!(work.work_type, Some(WorkType::Preprint));
+    for id in ids {
+        let (key, value) = match id {
+            WorkId::Doi(doi) => ("DOI", doi.to_string()),
+            WorkId::Isbn(isbn) => ("ISBN", isbn.to_string()),
+            WorkId::Pmid(pmid) => ("PMID", pmid.to_string()),
+            WorkId::Pmcid(pmcid) => ("PMCID", pmcid.to_string()),
+            // A preprint's repository and number, as styles print them.
+            WorkId::Arxiv(arxiv) if preprint && !item.contains_key("number") => {
+                item.entry("publisher").or_insert(json!("arXiv"));
+                item.entry("URL")
+                    .or_insert(json!(format!("https://arxiv.org/abs/{arxiv}")));
+                ("number", format!("arXiv:{arxiv}"))
+            }
+            _ => continue,
+        };
+        item.entry(key).or_insert(json!(value));
+    }
+    item
+}
+
+/// `works` as a CSL-JSON array, each item keyed as [`Keys`] keys BibTeX
+/// entries.
+pub fn csl_json(works: &[(&Work, &[WorkId])]) -> String {
+    let mut keys = Keys::default();
+    let items: Vec<Value> = works
+        .iter()
+        .map(|(work, ids)| Value::Object(csl_item(work, ids, &keys.key(work))))
+        .collect();
+    serde_json::to_string_pretty(&items).expect("JSON values serialise")
+}
+
 #[cfg(test)]
 mod tests {
     use aspero_core::PartialDate;
@@ -367,6 +507,85 @@ ER  -\x20
         let entries = crate::parse_ris(&ris(&w, &ids)).unwrap();
         assert_eq!(entries[0].claim.page.as_deref(), Some("436-444"));
         assert_eq!(entries[0].claim.ids, ids[..1]);
+    }
+
+    #[test]
+    fn csl_json_reads_back_as_written() {
+        let (mut w, mut ids) = lecun();
+        w.publisher = Some("Springer Nature".into());
+        w.url = Some("https://www.nature.com/articles/nature14539".into());
+        ids.push("pmcid:PMC1234567".parse().unwrap());
+        ids.push("isbn:9780262035613".parse().unwrap());
+        let mut book = Work::default();
+        book.title = Some("Deep learning".into());
+        book.work_type = Some(WorkType::Book);
+        book.authors = vec![Person::new("Ian", "Goodfellow")];
+        book.issued = Some(PartialDate::from_year(2016));
+        let none: &[WorkId] = &[];
+        let json = csl_json(&[(&w, &ids), (&book, none)]);
+
+        // As the reader of CSL-JSON files sees it.
+        let entries = crate::parse_csl_json(&json).unwrap();
+        assert_eq!(entries[0].key, "lecun2015deep");
+        assert_eq!(entries[0].entry_type, "article-journal");
+        let claim = &entries[0].claim;
+        assert_eq!(claim.title, w.title);
+        assert_eq!(
+            claim.authors,
+            ["LeCun, Yann", "Bengio, Yoshua", "Google Brain Team"]
+        );
+        assert_eq!(claim.year, Some(2015));
+        assert_eq!(claim.container, w.container_title);
+        assert_eq!((&claim.volume, &claim.page), (&w.volume, &w.page));
+        let mut read = claim.ids.clone();
+        let mut written = ids.clone();
+        read.sort_by_key(ToString::to_string);
+        written.sort_by_key(ToString::to_string);
+        assert_eq!(read, written);
+        assert_eq!(entries[1].key, "goodfellow2016deep");
+        assert_eq!(entries[1].entry_type, "book");
+
+        // And every field, as a work again.
+        let items: Vec<aspero_core::csl::CslItem> = serde_json::from_str(&json).unwrap();
+        for (item, original) in items.iter().zip([&w, &book]) {
+            let back = item.to_work();
+            assert_eq!(back.title, original.title);
+            assert_eq!(back.authors, original.authors);
+            assert_eq!(back.issued, original.issued);
+            assert_eq!(back.work_type, original.work_type);
+            assert_eq!(back.container_title, original.container_title);
+            assert_eq!(back.volume, original.volume);
+            assert_eq!(back.issue, original.issue);
+            assert_eq!(back.page, original.page);
+            assert_eq!(back.publisher, original.publisher);
+            assert_eq!(back.url, original.url);
+        }
+    }
+
+    #[test]
+    fn csl_json_types_are_csl_types() {
+        let kind = |t: Option<WorkType>, ids: &[WorkId]| {
+            let mut w = Work::default();
+            w.work_type = t;
+            csl_item(&w, ids, "k")["type"].as_str().unwrap().to_owned()
+        };
+        assert_eq!(kind(None, &[]), "document");
+        assert_eq!(
+            kind(Some(WorkType::Other("retraction".into())), &[]),
+            "document"
+        );
+        assert_eq!(
+            kind(Some(WorkType::Other("webpage".into())), &[]),
+            "webpage"
+        );
+        assert_eq!(kind(Some(WorkType::Preprint), &[]), "article");
+        let arxiv: WorkId = "arXiv:1706.03762".parse().unwrap();
+        let mut w = Work::default();
+        w.work_type = Some(WorkType::Preprint);
+        let item = csl_item(&w, &[arxiv], "k");
+        assert_eq!(item["number"], "arXiv:1706.03762");
+        assert_eq!(item["publisher"], "arXiv");
+        assert_eq!(item["URL"], "https://arxiv.org/abs/1706.03762");
     }
 
     #[test]

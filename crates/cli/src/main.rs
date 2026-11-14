@@ -50,7 +50,7 @@ async fn main() -> ExitCode {
     );
     let result = match format.is_export() && !exports {
         true => Err(Failure::usage(
-            "--format bibtex, ris and cite are for lookup, search and verify",
+            "--format bibtex, ris, csl-json and cite are for lookup, search and verify",
         )),
         false => run(cli, out.clone()).await,
     };
@@ -183,6 +183,7 @@ async fn run(cli: Cli, out: Out) -> Result<Exit, Failure> {
         }
         Command::Scan { files } => return cmd::scan::run(files, out),
         Command::Styles { credits } => return cmd::styles::run(credits, out),
+        Command::Licences => return cmd::licences::run(out),
         _ => {}
     }
     let file = open_cache(cli.global.cache_max_bytes());
@@ -217,7 +218,10 @@ async fn run(cli: Cli, out: Out) -> Result<Exit, Failure> {
         } => cmd::graph::analyse(&engine, inputs, kinds, limit, budget, estimate, out).await,
         Command::Mcp { budget } => cmd::mcp::run(engine, budget).await,
         Command::Budget => cmd::budget::run(&engine, out).await,
-        Command::Cache { .. } | Command::Scan { .. } | Command::Styles { .. } => {
+        Command::Cache { .. }
+        | Command::Scan { .. }
+        | Command::Styles { .. }
+        | Command::Licences => {
             unreachable!("handled above")
         }
     }

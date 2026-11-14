@@ -60,7 +60,7 @@ Explore
 
 Also
   scan <files>          the identifiers mentioned in documents
-  styles, budget, cache, mcp
+  styles, budget, cache, mcp, licences
 
 Examples
   aspero verify \"LeCun Y, Bengio Y, Hinton G. Deep learning. Nature 2015.\"
@@ -714,6 +714,25 @@ Examples:
         #[arg(long)]
         credits: bool,
     },
+
+    /// List the crates and data aspero is built from, and their licences.
+    #[command(
+        alias = "licenses",
+        after_help = "\
+Every Rust crate in this binary (aspero's own among them), with its version
+and SPDX licence, and the bundled citation styles and locales (CC BY-SA
+3.0). --full prints the third-party notices instead: each licence text once,
+after the crates under it and their copyright lines. JSON: {\"dependencies\":
+[{\"name\", \"version\", \"license\", \"repository\"}]}, or with --full
+{\"notices\": \"...\"}.
+
+Examples:
+  aspero licences
+  aspero licences --full > THIRD-PARTY-NOTICES.txt
+  aspero licences --format json"
+    )]
+    #[command(display_order = 14)]
+    Licences,
 }
 
 /// `--openalex-cap`: zero or more dollars.

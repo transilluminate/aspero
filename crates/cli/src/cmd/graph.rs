@@ -139,6 +139,13 @@ pub async fn analyse(
         [path] if path != "-" && std::path::Path::new(path).is_file() => Some(path.clone()),
         _ => None,
     };
+    if file.is_none() {
+        no_kinds_among(&inputs, &kinds)?;
+    }
+    let kinds = match kinds.is_empty() {
+        true => DEFAULT_KINDS.to_vec(),
+        false => kinds,
+    };
     let seeds = match &file {
         Some(path) => {
             let source = std::fs::read(path)
@@ -189,6 +196,41 @@ pub async fn analyse(
         Format::Json | Format::Auto => print(&doc),
     }
     Ok(exit_for(&analysis))
+}
+
+/// The analyses run when `--kinds` isn't given.
+const DEFAULT_KINDS: [AnalysisArg; 3] = [
+    AnalysisArg::Retracted,
+    AnalysisArg::OddOneOut,
+    AnalysisArg::ProbablyMissing,
+];
+
+/// A usage error for an input naming an analysis: `--kinds related
+/// probably-missing 10.1/x` takes one kind, and the next word as a seed
+/// that never resolves while the analysis it names never runs. The fix
+/// suggested is the kinds given (if any) and the stray ones, comma-joined.
+fn no_kinds_among(inputs: &[String], kinds: &[AnalysisArg]) -> Result<(), Failure> {
+    use clap::ValueEnum;
+    let named = |s: &str| AnalysisArg::from_str(&s.trim().replace('_', "-"), true).ok();
+    let stray: Vec<(&String, AnalysisArg)> =
+        inputs.iter().filter_map(|i| Some((i, named(i)?))).collect();
+    let Some((first, _)) = stray.first() else {
+        return Ok(());
+    };
+    let mut wanted: Vec<AnalysisArg> = kinds.to_vec();
+    for (_, kind) in &stray {
+        if !wanted.contains(kind) {
+            wanted.push(*kind);
+        }
+    }
+    let names: Vec<String> = wanted
+        .iter()
+        .filter_map(|k| Some(k.to_possible_value()?.get_name().to_owned()))
+        .collect();
+    Err(Failure::usage(format!(
+        "{first:?} is an analysis, not a seed: use --kinds {}",
+        names.join(",")
+    )))
 }
 
 /// Arguments, or one identifier per stdin line when given none (or `-`).
@@ -551,6 +593,46 @@ mod tests {
             "graph/estimate.json",
             &(serde_json::to_string_pretty(&json).unwrap() + "\n"),
         );
+    }
+
+    fn analyse_args(args: &[&str]) -> (Vec<String>, Vec<AnalysisArg>) {
+        use clap::Parser;
+        let all = ["aspero", "analyse"].iter().chain(args);
+        match crate::args::Cli::try_parse_from(all).unwrap().command {
+            crate::args::Command::Analyse { inputs, kinds, .. } => (inputs, kinds),
+            other => panic!("{other:?}"),
+        }
+    }
+
+    #[test]
+    fn kinds_are_comma_separated_and_a_kind_given_as_a_seed_is_refused() {
+        let (inputs, kinds) = analyse_args(&["--kinds", "related,probably-missing", "10.1/x"]);
+        assert_eq!(kinds, [AnalysisArg::Related, AnalysisArg::ProbablyMissing]);
+        assert_eq!(inputs, ["10.1/x"]);
+        assert!(no_kinds_among(&inputs, &kinds).is_ok());
+
+        // Space-separated, the second kind is taken as a seed.
+        let (inputs, kinds) = analyse_args(&[
+            "--kinds",
+            "related",
+            "probably-missing",
+            "10.1016/j.ajem.2007.10.025",
+        ]);
+        assert_eq!(kinds, [AnalysisArg::Related]);
+        let error = no_kinds_among(&inputs, &kinds).unwrap_err();
+        assert_eq!(error.exit, Exit::Usage);
+        assert_eq!(
+            error.message,
+            "\"probably-missing\" is an analysis, not a seed: use --kinds related,probably-missing"
+        );
+        // Without --kinds, as JSON names it, or in capitals.
+        let error = no_kinds_among(&["odd_one_out".into(), "Related".into()], &[]).unwrap_err();
+        assert_eq!(
+            error.message,
+            "\"odd_one_out\" is an analysis, not a seed: use --kinds odd-one-out,related"
+        );
+        // None given runs the defaults.
+        assert_eq!(analyse_args(&["10.1/x"]).1, []);
     }
 
     #[test]

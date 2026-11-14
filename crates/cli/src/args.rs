@@ -476,13 +476,10 @@ Examples:
         /// Identifiers, or one .bib/.ris/CSL-JSON file; `-` (or none, when
         /// piped) reads identifiers from stdin, one per line.
         inputs: Vec<String>,
-        /// The analyses to run.
-        #[arg(
-            long,
-            value_enum,
-            value_delimiter = ',',
-            default_values_t = [AnalysisArg::Retracted, AnalysisArg::OddOneOut, AnalysisArg::ProbablyMissing]
-        )]
+        /// The analyses to run, comma-separated, as in `--kinds
+        /// related,probably-missing` (or repeated). [default:
+        /// retracted,odd-one-out,probably-missing]
+        #[arg(long, value_enum, value_delimiter = ',', value_name = "KIND,...")]
         kinds: Vec<AnalysisArg>,
         /// Probably-missing and related works to list.
         #[arg(long, default_value_t = 20)]

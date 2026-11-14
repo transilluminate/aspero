@@ -281,6 +281,46 @@ fn works_cite_in_a_style() {
 }
 
 #[test]
+fn styles_are_credited_as_data() {
+    let handle = aspero(None);
+    let styles = handle.citation_styles();
+    for style in &styles {
+        assert!(!style.authors.is_empty(), "{}", style.id);
+        assert_eq!(style.license, "CC-BY-SA-3.0");
+        assert!(
+            style
+                .link
+                .as_deref()
+                .unwrap()
+                .starts_with("https://www.zotero.org/styles?q=id%3A")
+        );
+    }
+    let apa = &styles[0];
+    assert_eq!(apa.id, "apa");
+    assert!(apa.authors.contains(&"Brenton M. Wiernik".to_owned()));
+    let project = handle.style_project();
+    assert_eq!(project.name, "Citation Style Language");
+    assert_eq!(project.link, "https://citationstyles.org");
+    assert_eq!(project.license, "CC-BY-SA-3.0");
+    assert_eq!(
+        project.license_link,
+        "https://creativecommons.org/licenses/by-sa/3.0/"
+    );
+    assert_eq!(project.locales, ["en-US", "en-GB"]);
+    // As the third-party notices list the same data.
+    let deps = handle.dependencies();
+    let locales = deps
+        .iter()
+        .find(|d| d.name.starts_with("CSL locales"))
+        .unwrap();
+    assert_eq!(locales.license, project.license);
+    assert_eq!(
+        locales.repository.as_deref(),
+        Some(project.locales_link.as_str())
+    );
+}
+
+#[test]
 fn dependencies_and_notices_come_built_in() {
     let handle = aspero(None);
     let deps = handle.dependencies();

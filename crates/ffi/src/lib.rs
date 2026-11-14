@@ -31,7 +31,7 @@ use records::{
     CitedEntry, Claim as ClaimRecord, Dependency, DocxReferences, ExportFormat, Identification,
     KeyCheck, Line, LineReference, Lookup, Lookups, Mention, ProviderUsage, ReadError, Reference,
     ReferencesPage, SearchNode, SearchRequest, SearchResults, SourceSearch, StyleError,
-    StyleSource, Unavailable, Utf16Offsets, Verification, Verifications, Work,
+    StyleProject, StyleSource, Unavailable, Utf16Offsets, Verification, Verifications, Work,
 };
 
 uniffi::setup_scaffolding!();
@@ -570,11 +570,31 @@ impl Aspero {
     pub fn citation_styles(&self) -> Vec<CitationStyle> {
         aspero_bib::cite::BUNDLED
             .iter()
-            .map(|b| CitationStyle {
-                id: b.id.into(),
-                title: b.title.into(),
+            .map(|b| {
+                let credits = b.credits();
+                CitationStyle {
+                    id: b.id.into(),
+                    title: b.title.into(),
+                    authors: credits.authors,
+                    link: credits.link,
+                    license: credits.license.unwrap_or_default(),
+                }
             })
             .collect()
+    }
+
+    /// The project the bundled styles and locales come from (the Citation
+    /// Style Language), their licence, and the locales. Offline.
+    pub fn style_project(&self) -> StyleProject {
+        use aspero_bib::cite;
+        StyleProject {
+            name: cite::PROJECT.into(),
+            link: cite::PROJECT_LINK.into(),
+            license: cite::LICENSE.into(),
+            license_link: cite::LICENSE_LINK.into(),
+            locales: cite::locales(),
+            locales_link: cite::LOCALES_LINK.into(),
+        }
     }
 
     /// Works as a reference list in `style`, one entry each, in the

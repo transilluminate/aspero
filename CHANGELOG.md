@@ -19,6 +19,13 @@ Added:
   reader reads back as written: type, title, authors, date, container,
   volume, issue, page, publisher, URL, DOI, ISBN, PMID, PMCID, and an arXiv
   preprint's number. Citation styles format from the same items.
+- Style credits as data: the FFI's `CitationStyle` gains `authors` (its
+  `<author>`s, then `<contributor>`s), `link` (its page in the Zotero
+  Style Repository, `https://www.zotero.org/styles?q=id%3Aapa`) and
+  `license` (`CC-BY-SA-3.0`, from its `<rights>`), all with defaults; and
+  `styleProject()` gives the Citation Style Language project's name, link,
+  licence and deed, and the bundled locales (`en-US`, `en-GB`) and their
+  repository. `styleCredits()` is unchanged.
 - `just notices` writes both artefacts' notices (the normal dependencies,
   for macOS, from Cargo.lock); tests fail when they're stale, and
   `just release-check` checks them.

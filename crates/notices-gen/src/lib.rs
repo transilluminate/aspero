@@ -14,6 +14,9 @@ use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+use aspero_bib::cite::{
+    LICENSE as CSL_LICENSE, LOCALES_LINK as LOCALES_REPO, STYLES_LINK as STYLES_REPO,
+};
 use cargo_metadata::{Metadata, MetadataCommand, Package};
 use serde::Serialize;
 
@@ -606,8 +609,6 @@ struct Data {
 }
 
 const CC_BY_SA_3: &str = "http://creativecommons.org/licenses/by-sa/3.0/";
-const STYLES_REPO: &str = "https://github.com/citation-style-language/styles";
-const LOCALES_REPO: &str = "https://github.com/citation-style-language/locales";
 
 impl Data {
     fn read(root: &Path) -> Result<Self, Error> {
@@ -638,6 +639,15 @@ impl Data {
             )
             .into());
         }
+        // As the FFI's citationStyles() and styleProject() credit them.
+        for b in aspero_bib::cite::BUNDLED {
+            if b.credits().license.as_deref() != Some(CSL_LICENSE) {
+                return Err(format!("style {}: not {CSL_LICENSE}", b.id).into());
+            }
+        }
+        if locales != aspero_bib::cite::locales().len() {
+            return Err(format!("{locales} locale files, but others bundled").into());
+        }
         let notice = std::fs::read_to_string(dir.join("NOTICE.md"))?;
         let commit = |repo: &str| -> Result<String, Error> {
             let line = notice
@@ -666,13 +676,13 @@ impl Data {
             Dependency {
                 name: format!("CSL styles ({})", self.styles),
                 version: self.styles_commit.clone(),
-                license: "CC-BY-SA-3.0".into(),
+                license: CSL_LICENSE.into(),
                 repository: Some(STYLES_REPO.into()),
             },
             Dependency {
                 name: format!("CSL locales ({})", self.locales),
                 version: self.locales_commit.clone(),
-                license: "CC-BY-SA-3.0".into(),
+                license: CSL_LICENSE.into(),
                 repository: Some(LOCALES_REPO.into()),
             },
         ]

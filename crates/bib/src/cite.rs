@@ -8,7 +8,7 @@ use std::fmt::Write as _;
 use aspero_core::{Work, WorkId, WorkType};
 use hayagriva::citationberg::json::Item;
 use hayagriva::citationberg::{
-    IndependentStyle, Locale, LocaleCode, LocaleFile, Style as CslStyle,
+    IndependentStyle, InfoLinkRel, Locale, LocaleCode, LocaleFile, Style as CslStyle,
 };
 use hayagriva::{
     BibliographyDriver, BibliographyRequest, BufWriteFormat, CitationItem, CitationRequest,
@@ -309,6 +309,77 @@ fn item(index: usize, work: &Work, ids: &[WorkId]) -> Value {
     Value::Object(item)
 }
 
+/// The project the bundled styles and locales come from.
+pub const PROJECT: &str = "Citation Style Language";
+pub const PROJECT_LINK: &str = "https://citationstyles.org";
+/// The bundled styles' and locales' licence (SPDX), and its deed.
+pub const LICENSE: &str = "CC-BY-SA-3.0";
+pub const LICENSE_LINK: &str = "https://creativecommons.org/licenses/by-sa/3.0/";
+pub const STYLES_LINK: &str = "https://github.com/citation-style-language/styles";
+pub const LOCALES_LINK: &str = "https://github.com/citation-style-language/locales";
+
+/// A bundled style's credits, from its `<info>`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Credits {
+    /// Its authors, then its contributors.
+    pub authors: Vec<String>,
+    /// Its page in the Zotero Style Repository (the official styles'
+    /// home), or failing that its documentation.
+    pub link: Option<String>,
+    /// The SPDX id of its `<rights>` (`CC-BY-SA-3.0`), or the licence's
+    /// URL when that has none here.
+    pub license: Option<String>,
+}
+
+impl Bundled {
+    pub fn credits(&self) -> Credits {
+        let Ok(CslStyle::Independent(csl)) = CslStyle::from_xml(self.xml) else {
+            unreachable!("bundled styles are independent styles")
+        };
+        let info = &csl.info;
+        let authors = info
+            .authors
+            .iter()
+            .chain(&info.contributors)
+            .map(|a| a.name.clone())
+            .collect();
+        // `/styles/<id>` serves the file itself; the search is the page.
+        let zotero = info.link.iter().find_map(|l| {
+            let rest = l.href.strip_prefix("http://www.zotero.org/styles/")?;
+            (l.rel == InfoLinkRel::Zelf)
+                .then(|| format!("https://www.zotero.org/styles?q=id%3A{rest}"))
+        });
+        let documentation = || {
+            info.link
+                .iter()
+                .find(|l| l.rel == InfoLinkRel::Documentation)
+                .map(|l| l.href.clone())
+        };
+        let license = info.rights.as_ref().and_then(|r| r.license.as_deref());
+        Credits {
+            authors,
+            link: zotero.or_else(documentation),
+            license: license.map(|url| {
+                match url
+                    .trim_start_matches("http://")
+                    .trim_start_matches("https://")
+                {
+                    "creativecommons.org/licenses/by-sa/3.0/" => LICENSE.to_owned(),
+                    _ => url.to_owned(),
+                }
+            }),
+        }
+    }
+}
+
+/// The bundled locales' codes: `en-US`, `en-GB`.
+pub fn locales() -> Vec<String> {
+    LOCALES
+        .iter()
+        .map(|xml| LocaleFile::from_xml(xml).expect("bundled locale").lang.0)
+        .collect()
+}
+
 /// The bundled styles' and locales' license and authors, to show with
 /// formatted references.
 pub fn credits() -> String {
@@ -552,6 +623,29 @@ mod tests {
         ));
         let own = Style::from_xml(BUNDLED[0].xml).unwrap();
         assert_eq!(own.title(), "APA Style 7th edition");
+    }
+
+    #[test]
+    fn each_style_credits_its_authors_link_and_license() {
+        for b in BUNDLED {
+            let c = b.credits();
+            assert!(!c.authors.is_empty(), "{}", b.id);
+            assert_eq!(c.license.as_deref(), Some(LICENSE), "{}", b.id);
+            let link = c.link.unwrap();
+            assert!(
+                link.starts_with("https://www.zotero.org/styles?q=id%3A"),
+                "{link}"
+            );
+        }
+        let apa = BUNDLED[0].credits();
+        assert_eq!(apa.authors[..2], ["Brenton M. Wiernik", "Andrew Dunning"]);
+        assert_eq!(
+            apa.link.as_deref(),
+            Some("https://www.zotero.org/styles?q=id%3Aapa")
+        );
+        let link = BUNDLED[1].credits().link.unwrap();
+        assert!(link.ends_with("id%3Anlm-citation-sequence"), "{link}");
+        assert_eq!(locales(), ["en-US", "en-GB"]);
     }
 
     #[test]

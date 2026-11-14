@@ -1835,6 +1835,30 @@ pub struct CitationStyle {
     /// How `StyleSource.bundled` names it: `apa`, `vancouver`, ….
     pub id: String,
     pub title: String,
+    /// Who wrote it: its authors, then its contributors.
+    #[uniffi(default = [])]
+    pub authors: Vec<String>,
+    /// Its page in the Zotero Style Repository.
+    #[uniffi(default = None)]
+    pub link: Option<String>,
+    /// Its licence, as an SPDX id: `CC-BY-SA-3.0`.
+    #[uniffi(default = "CC-BY-SA-3.0")]
+    pub license: String,
+}
+
+/// Where the bundled styles and locales come from, and their licence,
+/// to credit them (`CitationStyle` has each style's authors).
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct StyleProject {
+    /// `Citation Style Language`.
+    pub name: String,
+    pub link: String,
+    /// An SPDX id: `CC-BY-SA-3.0`.
+    pub license: String,
+    pub license_link: String,
+    /// The bundled locales' codes: `en-US`, `en-GB`.
+    pub locales: Vec<String>,
+    pub locales_link: String,
 }
 
 /// Which citation style to format in.

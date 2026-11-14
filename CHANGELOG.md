@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+Fixed:
+
+- An organisation author OpenAlex lists as a name ("Atls Subcommittee")
+  was split as a person, so citation styles wrote "Subcommittee, A."
+  (#69). Subcommittees, taskforces, workgroups, secretariats, trialists
+  and collaborators now read as organisations.
+
 ## 0.16.0
 
 Added:

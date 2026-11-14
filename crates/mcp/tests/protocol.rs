@@ -29,7 +29,8 @@ async fn a_client_lists_and_calls_the_tools() {
     let client = ().serve(client_io).await.unwrap();
     let info = client.peer_info().unwrap();
     assert_eq!(info.server_info.as_ref().unwrap().name, "aspero");
-    assert!(info.capabilities.tools.is_some());
+    let tools = info.capabilities.tools.as_ref().unwrap();
+    assert_eq!(tools.list_changed, Some(true));
     assert!(
         info.instructions
             .as_deref()

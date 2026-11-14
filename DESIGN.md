@@ -718,6 +718,22 @@ CLI builds without it and serves stdio only) and, over it, the FFI's
   ("this key can't use … : it lacks the … scope") and the app isn't
   asked. Host tools are annotated read-only unless `writeHistory`; none is
   destructive, and there's no delete scope.
+- **Tool-list changes.** `tools/list`, `tools/call` and the scope check
+  read the request's key (as `setKeys` last left it) and the host's
+  tools (as `hostToolsChanged` last read them) at each request; nothing
+  is fixed when a session opens. The server declares
+  `tools.listChanged`, and tells sessions when their list may have
+  changed: a key kept by `setKeys` (same id and hash) with other scopes
+  (as a set) gets `notifications/tools/list_changed` on its open
+  sessions; `hostToolsChanged` (unless it throws) sends it to every open
+  session. Each session's `rmcp` peer is kept from its `initialize`,
+  with its key's id and hash, and dropped once its transport has closed;
+  each notification is sent from a task of its own on the server's
+  runtime (`Peer::notify_tool_list_changed`, given up after 10 s, errors
+  ignored), so neither call waits on a client. `rmcp` puts it on the
+  session's GET stream, or keeps it (up to 16 messages, the newest) until
+  the client opens one. Over stdio the list never changes, but is still listed from
+  `Tools` at each request.
 - **Host tools.** Names must differ from the engine tools' (even with
   `engineTools` off) and each other's, or `start` / `hostToolsChanged`
   throws `toolNameClash`; schemas must be JSON objects. A call's
@@ -754,8 +770,7 @@ who the user is. No tool deletes anything; writes go only through the
 app's `writeHistory` tools, which the app implements and can refuse.
 Results are third-party data, and say so.
 
-Next (#58, P3): notifications (progress, the app's tools changing) and
-resources.
+Next (#58, P3): progress notifications and resources.
 
 ## Apps (FFI)
 

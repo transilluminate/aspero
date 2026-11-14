@@ -12,8 +12,14 @@
 //!   SHA-256 is a key's, compared in constant time (401, no detail); a
 //!   session id, if any, that this key opened.
 //! - **Scopes:** the engine tools need [`Scope::Sources`], a host tool
-//!   its declared scope. `tools/list` shows a key what it may call; a call
-//!   without the scope is a tool error, and the host isn't asked.
+//!   its declared scope. `tools/list` shows a key what it may call, from
+//!   its scopes and the host's tools at the time; a call without the scope
+//!   is a tool error, and the host isn't asked.
+//! - **Changes:** when [`HttpServer::set_keys`] changes a key's scopes
+//!   (same id, same hash), that key's open sessions are sent
+//!   `notifications/tools/list_changed`; after
+//!   [`HttpServer::host_tools_changed`], every open session is. They go on
+//!   the session's GET stream, or wait for the client to open one.
 //! - **Budgets:** per session ([`HttpConfig::session_budget_usd`]), and per
 //!   key per UTC day ([`Key::daily_budget_usd`]), engine spend only, kept
 //!   in a [`Ledger`] (the cache file) so restarts don't reset it.
@@ -42,7 +48,9 @@ use hyper::service::service_fn;
 use hyper_util::rt::{TokioIo, TokioTimer};
 use hyper_util::server::graceful::GracefulShutdown;
 use jiff::Timestamp;
+use rmcp::RoleServer;
 use rmcp::model::Tool;
+use rmcp::service::Peer;
 use rmcp::transport::streamable_http_server::SessionManager;
 use rmcp::transport::streamable_http_server::session::local::LocalSessionManager;
 use rmcp::transport::{StreamableHttpServerConfig, StreamableHttpService};
@@ -66,6 +74,9 @@ pub const DEFAULT_PORT: u16 = 23130;
 pub const DEFAULT_DAILY_BUDGET_USD: f64 = 1.0;
 /// How long a host tool may take.
 pub const HOST_TIMEOUT: Duration = Duration::from_secs(30);
+/// How long a session may take to take a notification before it's given
+/// up on.
+const NOTIFY_TIMEOUT: Duration = Duration::from_secs(10);
 /// The path the protocol is served at.
 pub const PATH: &str = "/mcp";
 
@@ -220,6 +231,16 @@ pub(crate) struct Shared {
     session_budget_usd: f64,
     host_timeout: Duration,
     activity: Mutex<Option<std::sync::mpsc::Sender<Activity>>>,
+    /// Each initialized session's line back to its client, for telling it
+    /// the tools changed.
+    listeners: Mutex<Vec<Listener>>,
+}
+
+/// An open session's client, and the key that opened it.
+struct Listener {
+    key_id: String,
+    digest: [u8; 32],
+    peer: Peer<RoleServer>,
 }
 
 impl Shared {
@@ -233,6 +254,38 @@ impl Shared {
     fn ledger_add(&self, key_id: &str, usd: f64) {
         if let Err(e) = self.ledger.add(key_id, &today(), usd) {
             tracing::warn!(target: "aspero::mcp", key = key_id, error = %e, "could not record a key's spend");
+        }
+    }
+
+    /// Keeps a session's client, to tell it when its tools change.
+    fn listen(&self, key: &Credential, peer: Peer<RoleServer>) {
+        let mut listeners = self.listeners.lock().unwrap_or_else(|e| e.into_inner());
+        listeners.retain(|l| !l.peer.is_transport_closed());
+        listeners.push(Listener {
+            key_id: key.key.id.clone(),
+            digest: key.digest,
+            peer,
+        });
+    }
+
+    /// Sends `notifications/tools/list_changed`, on `runtime`, to the open
+    /// sessions `which` picks (by key id and hash), without waiting: a slow
+    /// or gone client holds up no one, and its errors are ignored.
+    fn tools_changed(
+        &self,
+        runtime: &tokio::runtime::Handle,
+        which: impl Fn(&str, &[u8; 32]) -> bool,
+    ) {
+        let mut listeners = self.listeners.lock().unwrap_or_else(|e| e.into_inner());
+        listeners.retain(|l| !l.peer.is_transport_closed());
+        for listener in listeners.iter().filter(|l| which(&l.key_id, &l.digest)) {
+            let peer = listener.peer.clone();
+            runtime.spawn(async move {
+                let sent = tokio::time::timeout(NOTIFY_TIMEOUT, peer.notify_tool_list_changed());
+                if let Ok(Err(e)) = sent.await {
+                    tracing::debug!(target: "aspero::mcp", error = %e, "could not tell a session its tools changed");
+                }
+            });
         }
     }
 
@@ -428,6 +481,7 @@ impl HttpServer {
             session_budget_usd: budget,
             host_timeout: config.host_timeout,
             activity: Mutex::new(activity),
+            listeners: Mutex::default(),
         });
         let cancel = CancellationToken::new();
         let manager = Arc::new(LocalSessionManager::default());
@@ -463,9 +517,11 @@ impl HttpServer {
     }
 
     /// Replaces the keys at once. Sessions opened with a key that's gone,
-    /// or whose hash changed, end; their next request is refused (401). A
-    /// key whose hash isn't 64 hex digits is left out (and logged): it
-    /// could never match.
+    /// or whose hash changed, end; their next request is refused (401).
+    /// Sessions of a key whose scopes changed (same id, same hash) are sent
+    /// `notifications/tools/list_changed`, and list and call by the new
+    /// scopes from now on. A key whose hash isn't 64 hex digits is left out
+    /// (and logged): it could never match. Doesn't wait on any client.
     pub fn set_keys(&self, keys: Vec<Key>) {
         let credentials: Vec<Arc<Credential>> = keys
             .into_iter()
@@ -493,11 +549,34 @@ impl HttpServer {
             })
             .map(|(id, _)| id.clone())
             .collect();
-        *self
-            .state
-            .credentials
-            .write()
-            .unwrap_or_else(|e| e.into_inner()) = Arc::new(credentials);
+        // Kept keys whose scopes changed: their sessions' lists did.
+        let rescoped: Vec<(String, [u8; 32])> = {
+            let mut current = self
+                .state
+                .credentials
+                .write()
+                .unwrap_or_else(|e| e.into_inner());
+            let rescoped = credentials
+                .iter()
+                .filter(|c| {
+                    current.iter().any(|o| {
+                        o.key.id == c.key.id
+                            && o.digest == c.digest
+                            && !same_scopes(&o.key.scopes, &c.key.scopes)
+                    })
+                })
+                .map(|c| (c.key.id.clone(), c.digest))
+                .collect();
+            *current = Arc::new(credentials);
+            rescoped
+        };
+        if !rescoped.is_empty() {
+            self.state
+                .shared
+                .tools_changed(&self.runtime, |id, digest| {
+                    rescoped.iter().any(|(i, d)| i == id && d == digest)
+                });
+        }
         if !ended.is_empty() {
             let manager = self.state.manager.clone();
             self.runtime.spawn(async move {
@@ -508,8 +587,10 @@ impl HttpServer {
         }
     }
 
-    /// Asks the host for its tools again, and lists them from now on. On a
-    /// clash or a bad schema, keeps the tools it had.
+    /// Asks the host for its tools again, lists them from now on, and
+    /// sends every open session `notifications/tools/list_changed`
+    /// (without waiting on any client). On a clash or a bad schema, keeps
+    /// the tools it had, and tells no one.
     pub fn host_tools_changed(&self) -> Result<(), StartError> {
         let shared = &self.state.shared;
         let Some(host) = &shared.host else {
@@ -517,6 +598,7 @@ impl HttpServer {
         };
         let catalog = host::catalog(host.as_ref(), &shared.engine_names)?;
         *shared.catalog.write().unwrap_or_else(|e| e.into_inner()) = Arc::new(catalog);
+        shared.tools_changed(&self.runtime, |_, _| true);
         Ok(())
     }
 
@@ -580,6 +662,11 @@ impl Drop for HttpServer {
     fn drop(&mut self) {
         self.cancel.cancel();
     }
+}
+
+/// Whether two keys may do the same things, in whatever order.
+fn same_scopes(a: &[Scope], b: &[Scope]) -> bool {
+    a.iter().all(|s| b.contains(s)) && b.iter().all(|s| a.contains(s))
 }
 
 /// Accepts connections until cancelled, then lets requests in flight

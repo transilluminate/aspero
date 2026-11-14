@@ -698,6 +698,56 @@ async fn the_claim_as_read_and_cited_values_come_back() {
 }
 
 #[tokio::test]
+async fn a_reference_naming_another_journal_is_plausible_and_says_which() {
+    // #80: Plasticenta is in Environment International, not ES&T.
+    let mut found = work(
+        "crossref",
+        &["10.1016/j.envint.2020.106274"],
+        "Plasticenta: First evidence of microplastics in human placenta",
+        &[
+            "Antonio Ragusa",
+            "Alessandro Svelato",
+            "Criselda Santacroce",
+        ],
+        2021,
+    );
+    found.work.work_type = Some(aspero_core::WorkType::JournalArticle);
+    found.work.container_title = Some("Environment International".into());
+    found.work.volume = Some("146".into());
+    found.work.page = Some("106274".into());
+    let crossref = Arc::new(Scripted::new("crossref").matcher(vec![found]));
+    let engine = engine(vec![crossref]);
+    let cite = |journal: &str| {
+        Claim::from_text(format!(
+            "Ragusa A, Svelato A, Santacroce C, et al. Plasticenta: first evidence of \
+             microplastics in human placenta. {journal}. 2021;146:106274."
+        ))
+    };
+
+    let v = engine.verify(&cite("Environ Int"), 5).await;
+    assert_eq!(v.verdict, Verdict::Verified, "{:?}: {}", v.why, v.reason);
+    assert_eq!(v.read.container.as_deref(), Some("Environ Int"));
+
+    let v = engine.verify(&cite("Environ Sci Technol"), 5).await;
+    assert_eq!(v.verdict, Verdict::Plausible, "{:?}: {}", v.why, v.reason);
+    assert_eq!(v.read.container.as_deref(), Some("Environ Sci Technol"));
+    let journal = v
+        .why
+        .differs()
+        .iter()
+        .find(|d| d.field == CitedField::Journal);
+    assert_eq!(
+        journal.map(|d| (d.cited.as_deref(), d.actual.as_deref())),
+        Some((
+            Some("Environ Sci Technol"),
+            Some("Environment International")
+        )),
+        "{:?}",
+        v.why
+    );
+}
+
+#[tokio::test]
 async fn a_doi_cut_short_reads_as_written() {
     let full = work(
         "crossref",

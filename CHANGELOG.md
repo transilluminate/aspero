@@ -1,5 +1,23 @@
 # Changelog
 
+## Unreleased
+
+Fixed:
+
+- A citation naming the wrong journal no longer verifies (#80). The
+  journal a reference cites is read where it can be told (the words
+  before the volume and page, Vancouver or APA), and a journal article
+  cited in a journal that's clearly another, or a preprint cited by
+  journal, volume and page, is `plausible` at most, with
+  `checks.container` a `mismatch` and a `journal` difference whose `cited`
+  is the journal as cited. Abbreviations, "The", spelling variants and
+  names inside names ("Proc Natl Acad Sci U S A") aren't another journal;
+  books, proceedings and references without a clear journal are left
+  alone.
+- `read` carries the journal read from free text (`container`).
+- APA references without an issue ("Journal Name, 146, 106274.") give
+  their volume and page.
+
 ## 0.19.0
 
 Added:

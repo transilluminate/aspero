@@ -284,8 +284,9 @@ fn journal_volume_and_page_are_checked_in_text_and_fields() {
     assert_eq!(a.page.agreement, Agreement::Mismatch);
     assert!((PLAUSIBLE..VERIFIED).contains(&a.confidence), "{a:?}");
 
-    // Structured: the journal is compared by abbreviation rules; a
-    // different one lowers the ranking without settling the verdict.
+    // Structured: the journal is compared by abbreviation rules; for a
+    // work not known to be a journal article, a different one lowers the
+    // ranking without settling the verdict.
     let claim = Claim {
         title: Some("Fibrinolysis for patients with intermediate-risk pulmonary embolism".into()),
         authors: vec!["Meyer G".into()],
@@ -723,4 +724,155 @@ fn a_preprint_and_its_published_version_are_one_work() {
     assert!(!same_work(&biorxiv, &other));
     let reply = record(&["W7"], "Reply to: Sepsis in mice", &["Jane Doe"], 2020);
     assert!(!same_work(&biorxiv, &reply));
+}
+
+/// #80: Ragusa et al., Plasticenta, in Environment International.
+fn plasticenta() -> SourceRecord {
+    let mut r = placed(
+        &["10.1016/j.envint.2020.106274"],
+        "Plasticenta: First evidence of microplastics in human placenta",
+        &[
+            "Antonio Ragusa",
+            "Alessandro Svelato",
+            "Criselda Santacroce",
+        ],
+        2021,
+        ("Environment International", "146", "106274"),
+    );
+    r.work.work_type = Some(crate::work::WorkType::JournalArticle);
+    r
+}
+
+const PLASTICENTA_VANCOUVER: &str = "Ragusa A, Svelato A, Santacroce C, et al. Plasticenta: \
+    first evidence of microplastics in human placenta. Environ Int. 2021;146:106274.";
+const PLASTICENTA_APA: &str = "Ragusa, A., Svelato, A., & Santacroce, C. (2021). Plasticenta: \
+    First evidence of microplastics in human placenta. Environment International, 146, 106274.";
+
+#[test]
+fn a_reference_naming_another_journal_is_not_verified() {
+    for (right, wrong) in [
+        (PLASTICENTA_VANCOUVER, "Environ Sci Technol"),
+        (PLASTICENTA_APA, "Environmental Science & Technology"),
+    ] {
+        let a = assess(&Claim::from_text(right), &plasticenta());
+        assert_eq!(
+            (a.container.agreement, a.volume.agreement, a.page.agreement),
+            (Agreement::Match, Agreement::Match, Agreement::Match),
+            "{right}"
+        );
+        assert!(a.confidence >= VERIFIED, "{right}: {a:?}");
+
+        let text = right
+            .replace("Environ Int", wrong)
+            .replace("Environment International", wrong);
+        let claim = Claim::from_text(&text);
+        let a = assess(&claim, &plasticenta());
+        assert_eq!(a.container.agreement, Agreement::Mismatch, "{text}");
+        assert!(
+            (PLAUSIBLE..VERIFIED).contains(&a.confidence),
+            "{text}: {a:?}"
+        );
+        // The journal as read, for "cited in X, found in Y".
+        assert_eq!(claim.as_read().container.as_deref(), Some(wrong));
+    }
+    // A structured claim naming another journal: the same.
+    let claim = Claim {
+        title: Some("Plasticenta: first evidence of microplastics in human placenta".into()),
+        authors: vec!["Ragusa A".into()],
+        year: Some(2021),
+        container: Some("Environ Sci Technol".into()),
+        ..Claim::default()
+    };
+    let a = assess(&claim, &plasticenta());
+    assert_eq!(a.container.agreement, Agreement::Mismatch);
+    assert!((PLAUSIBLE..VERIFIED).contains(&a.confidence), "{a:?}");
+
+    // Its preprint, sharing the main title, is another version of a work
+    // cited by journal, volume and page: plausible at most (live, it
+    // outranked the capped article).
+    let mut preprint = record(
+        &["10.1101/2020.07.15.198325"],
+        "Plasticenta: Microplastics in Human Placenta",
+        &[
+            "Antonio Ragusa",
+            "Alessandro Svelato",
+            "Criselda Santacroce",
+        ],
+        2020,
+    );
+    preprint.work.work_type = Some(crate::work::WorkType::Preprint);
+    for text in [
+        PLASTICENTA_VANCOUVER.to_owned(),
+        PLASTICENTA_VANCOUVER.replace("Environ Int", "Environ Sci Technol"),
+    ] {
+        let a = assess(&Claim::from_text(&text), &preprint);
+        assert_eq!(a.container.agreement, Agreement::Mismatch, "{text}");
+        assert!(a.confidence < VERIFIED, "{text}: {a:?}");
+    }
+    // Cited without a journal and place, it may be the preprint.
+    let text =
+        "Ragusa A, Svelato A, Santacroce C. Plasticenta: microplastics in human placenta. 2020.";
+    let a = assess(&Claim::from_text(text), &preprint);
+    assert_eq!(a.container.agreement, Agreement::Unknown);
+    assert!(a.confidence >= VERIFIED, "{a:?}");
+}
+
+#[test]
+fn journals_named_otherwise_or_not_at_all_are_no_mismatch() {
+    let mut nejm = peitho();
+    nejm.work.work_type = Some(crate::work::WorkType::JournalArticle);
+    let title = "Fibrinolysis for patients with intermediate-risk pulmonary embolism";
+    for journal in [
+        "N Engl J Med",
+        "New England Journal of Medicine",
+        "The New England Journal of Medicine",
+        "NEJM",
+    ] {
+        let text = format!("Meyer G, Vicaut E, et al. {title}. {journal}. 2014;370(15):1402-11.");
+        let a = assess(&Claim::from_text(&text), &nejm);
+        assert_eq!(a.container.agreement, Agreement::Match, "{text}");
+        assert!(a.confidence >= VERIFIED, "{text}: {a:?}");
+    }
+    // "Lancet" for "The Lancet", and back.
+    let mut lancet = nejm.clone();
+    lancet.work.container_title = Some("The Lancet".into());
+    let text = format!("Meyer G, et al. {title}. Lancet. 2014;370:1402-11.");
+    let a = assess(&Claim::from_text(&text), &lancet);
+    assert_eq!(a.container.agreement, Agreement::Match);
+    lancet.work.container_title = Some("Lancet".into());
+    let text = format!("Meyer G, et al. {title}. The Lancet, 370(15), 1402–1411.");
+    assert_eq!(
+        assess(&Claim::from_text(&text), &lancet)
+            .container
+            .agreement,
+        Agreement::Match
+    );
+    // No journal in the reference.
+    let text = format!("Meyer G, et al. {title}. 2014.");
+    let a = assess(&Claim::from_text(&text), &nejm);
+    assert_eq!(a.container.agreement, Agreement::Unknown);
+    assert!(a.confidence >= VERIFIED, "{a:?}");
+    // A book with its publisher, in a book series: no journal to differ.
+    let mut book = record(
+        &["isbn:9780262035613"],
+        "Deep Learning",
+        &["Ian Goodfellow", "Yoshua Bengio", "Aaron Courville"],
+        2016,
+    );
+    book.work.work_type = Some(crate::work::WorkType::Book);
+    book.work.container_title = Some("Adaptive Computation and Machine Learning".into());
+    for text in [
+        "Goodfellow I, Bengio Y, Courville A. Deep Learning. MIT Press; 2016.",
+        "Goodfellow I, Bengio Y, Courville A. Deep Learning. Cambridge, MA: MIT Press; 2016:1-800.",
+    ] {
+        let a = assess(&Claim::from_text(text), &book);
+        assert_eq!(a.container.agreement, Agreement::Unknown, "{text}");
+        assert!(a.confidence >= VERIFIED, "{text}: {a:?}");
+    }
+    // Not a journal article: proceedings go by many names.
+    let mut paper = nejm.clone();
+    paper.work.work_type = Some(crate::work::WorkType::ConferencePaper);
+    let text = format!("Meyer G, et al. {title}. Lancet. 2014;370:1402-11.");
+    let a = assess(&Claim::from_text(&text), &paper);
+    assert_eq!(a.container.agreement, Agreement::Unknown);
 }

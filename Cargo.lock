@@ -1591,6 +1591,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "notices-gen"
+version = "0.17.1"
+dependencies = [
+ "aspero-bib",
+ "cargo_metadata",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "nu-ansi-term"
 version = "0.50.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"

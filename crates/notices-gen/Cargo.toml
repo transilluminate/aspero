@@ -1,0 +1,23 @@
+[package]
+name = "notices-gen"
+description = "Generates the third-party notices that aspero's FFI library and CLI ship (`just notices`)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+authors.workspace = true
+# A release-time tool, not shipped.
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+aspero-bib = { workspace = true, features = ["styles"] }
+cargo_metadata = "=0.23.1"
+serde.workspace = true
+serde_json.workspace = true
+
+[package.metadata.dist]
+dist = false

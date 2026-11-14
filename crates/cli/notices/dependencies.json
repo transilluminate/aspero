@@ -1,6 +1,6 @@
 {
   "artefact": "aspero",
-  "version": "0.19.0",
+  "version": "0.19.1",
   "target": "aarch64-apple-darwin",
   "dependencies": [
     {
@@ -29,79 +29,79 @@
     },
     {
       "name": "aspero",
-      "version": "0.19.0",
+      "version": "0.19.1",
       "license": "MIT OR Apache-2.0",
       "repository": "https://github.com/transilluminate/aspero"
     },
     {
       "name": "aspero-bib",
-      "version": "0.19.0",
+      "version": "0.19.1",
       "license": "MIT OR Apache-2.0",
       "repository": "https://github.com/transilluminate/aspero"
     },
     {
       "name": "aspero-core",
-      "version": "0.19.0",
+      "version": "0.19.1",
       "license": "MIT OR Apache-2.0",
       "repository": "https://github.com/transilluminate/aspero"
     },
     {
       "name": "aspero-crossref",
-      "version": "0.19.0",
+      "version": "0.19.1",
       "license": "MIT OR Apache-2.0",
       "repository": "https://github.com/transilluminate/aspero"
     },
     {
       "name": "aspero-datacite",
-      "version": "0.19.0",
+      "version": "0.19.1",
       "license": "MIT OR Apache-2.0",
       "repository": "https://github.com/transilluminate/aspero"
     },
     {
       "name": "aspero-doi",
-      "version": "0.19.0",
+      "version": "0.19.1",
       "license": "MIT OR Apache-2.0",
       "repository": "https://github.com/transilluminate/aspero"
     },
     {
       "name": "aspero-engine",
-      "version": "0.19.0",
+      "version": "0.19.1",
       "license": "MIT OR Apache-2.0",
       "repository": "https://github.com/transilluminate/aspero"
     },
     {
       "name": "aspero-europepmc",
-      "version": "0.19.0",
+      "version": "0.19.1",
       "license": "MIT OR Apache-2.0",
       "repository": "https://github.com/transilluminate/aspero"
     },
     {
       "name": "aspero-json",
-      "version": "0.19.0",
+      "version": "0.19.1",
       "license": "MIT OR Apache-2.0",
       "repository": "https://github.com/transilluminate/aspero"
     },
     {
       "name": "aspero-mcp",
-      "version": "0.19.0",
+      "version": "0.19.1",
       "license": "MIT OR Apache-2.0",
       "repository": "https://github.com/transilluminate/aspero"
     },
     {
       "name": "aspero-openalex",
-      "version": "0.19.0",
+      "version": "0.19.1",
       "license": "MIT OR Apache-2.0",
       "repository": "https://github.com/transilluminate/aspero"
     },
     {
       "name": "aspero-openlibrary",
-      "version": "0.19.0",
+      "version": "0.19.1",
       "license": "MIT OR Apache-2.0",
       "repository": "https://github.com/transilluminate/aspero"
     },
     {
       "name": "aspero-store",
-      "version": "0.19.0",
+      "version": "0.19.1",
       "license": "MIT OR Apache-2.0",
       "repository": "https://github.com/transilluminate/aspero"
     },

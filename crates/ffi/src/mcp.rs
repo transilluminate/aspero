@@ -326,15 +326,19 @@ impl McpServer {
     }
 
     /// Replaces the keys at once. Sessions of a key that's gone, or whose
-    /// hash changed, end: their next request is refused (401). A key whose
-    /// hash isn't 64 hex digits is left out.
+    /// hash changed, end: their next request is refused (401). Sessions of
+    /// a key whose scopes changed (same id, same hash) are told their tools
+    /// changed (`notifications/tools/list_changed`). A key whose hash isn't
+    /// 64 hex digits is left out. Returns without waiting on any agent.
     pub fn set_keys(&self, keys: Vec<McpKey>) {
         self.inner
             .set_keys(keys.into_iter().map(Into::into).collect());
     }
 
-    /// Asks the host for its tools again. On a clash (or a schema that
-    /// isn't a JSON object) throws, keeping the tools it had.
+    /// Asks the host for its tools again, and tells every open session its
+    /// tools changed (`notifications/tools/list_changed`), without waiting
+    /// on any agent. On a clash (or a schema that isn't a JSON object)
+    /// throws, keeping the tools it had.
     pub fn host_tools_changed(&self) -> Result<(), McpError> {
         Ok(self.inner.host_tools_changed()?)
     }

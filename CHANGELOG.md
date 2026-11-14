@@ -33,6 +33,20 @@ Changed:
   `null` (#81). The MCP `search` output schema's `score` is a number, and
   optional, as before.
 
+## 0.19.1
+
+Fixed:
+
+- MCP: open sessions see tool-list changes (#82). The server declares
+  `tools.listChanged`; `setKeys` sends `notifications/tools/list_changed`
+  to the open sessions of a key whose scopes changed (same id, same
+  hash), and `hostToolsChanged` sends it to every open session, neither
+  waiting on the agents. `tools/list` is worked out from the key's scopes
+  and the app's tools at each request, so a session that lists again
+  after the notification gets the new tools (a newly allowed write tool;
+  no longer a removed scope's). Keys removed or re-hashed still end their
+  sessions (401).
+
 ## 0.19.0
 
 Added:

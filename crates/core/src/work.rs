@@ -404,6 +404,13 @@ fn split_literal(literal: &str) -> Option<(String, Option<String>)> {
     while start > 1 && PARTICLES.contains(&words[start - 1]) {
         start -= 1;
     }
+    // A family name of one letter is a name mangled upstream, not one to
+    // cite by: OpenAlex lists a PASTIES trial author (Siobhan Creanor) as
+    // "S. C. S" (A5004132779, seen 2026-11-14). It stays as written. Two
+    // letters are a family name often enough (Li, Wu, Ng: "J. Li").
+    if words[start..].join("").trim_matches('.').chars().count() == 1 {
+        return None;
+    }
     Some((words[start..].join(" "), Some(words[..start].join(" "))))
 }
 
@@ -640,6 +647,22 @@ mod tests {
             assert_eq!(Person::literal(body).parts(), None, "{body}");
             assert_eq!(short(Person::literal(body)), body);
         }
+    }
+
+    /// OpenAlex gives Siobhan Creanor, on one of the PASTIES trials, as
+    /// "S. C. S": not family "S", but the name as written. Two-letter
+    /// family names are real.
+    #[test]
+    fn a_one_letter_family_name_stays_as_written() {
+        let mangled = Person::literal("S. C. S");
+        assert_eq!(mangled.parts(), None);
+        assert_eq!(mangled.short().as_deref(), Some("S. C. S"));
+        assert_eq!(mangled.inverted().as_deref(), Some("S. C. S"));
+        assert_eq!(
+            Person::literal("J. Li").parts(),
+            Some(("Li".into(), Some("J.".into())))
+        );
+        assert_eq!(Person::literal("Wei Wu").short().as_deref(), Some("Wu W"));
     }
 
     #[test]

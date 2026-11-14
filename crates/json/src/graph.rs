@@ -155,9 +155,19 @@ fn section<T>(s: &Section<T>, item: impl Fn(&T) -> Value) -> Value {
     Value::Object(out)
 }
 
-/// `{kind, done, total}`: what stopped a step, and how far it got.
+/// `{kind, done, total}`: what stopped a step, and how far it got; with
+/// `stage` (related works: `citing`, `coupling` or `lookup`, which `done`
+/// and `total` then count: citing works, pages, works) and the `provider`
+/// that failed, when known.
 pub fn incomplete(i: &Incomplete) -> Value {
-    json!({"kind": i.kind.as_str(), "done": i.done, "total": i.total})
+    let mut out = json!({"kind": i.kind.as_str(), "done": i.done, "total": i.total});
+    if let Some(stage) = i.stage {
+        out["stage"] = json!(stage.as_str());
+    }
+    if let Some(provider) = &i.provider {
+        out["provider"] = json!(provider.as_str());
+    }
+    out
 }
 
 pub fn estimate(e: &Estimate) -> Value {
@@ -207,7 +217,8 @@ fn related(r: &RelatedWork, full: bool) -> Value {
 
 #[cfg(test)]
 mod tests {
-    use aspero_engine::IncompleteKind;
+    use aspero_core::ProviderId;
+    use aspero_engine::{IncompleteKind, Stage};
 
     use super::*;
 
@@ -217,6 +228,13 @@ mod tests {
         assert_eq!(
             incomplete(&i),
             json!({"kind": "budget", "done": 1200, "total": 4300})
+        );
+        let lookup = Incomplete::new(IncompleteKind::ProviderFailed, 0, 100)
+            .at(Stage::Lookup)
+            .from(ProviderId::from_static("openalex"));
+        assert_eq!(
+            incomplete(&lookup),
+            json!({"kind": "provider_failed", "stage": "lookup", "provider": "openalex", "done": 0, "total": 100})
         );
     }
 

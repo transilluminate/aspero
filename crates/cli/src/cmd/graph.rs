@@ -5,7 +5,7 @@ use std::io::IsTerminal;
 use aspero_bib::BibEntry;
 use aspero_core::{Cursor, IdKind, SourceRecord, WorkId};
 use aspero_engine::{
-    Analysis, AnalysisKind, Engine, Incomplete, IncompleteKind, ReferencesPage, SeedProblem,
+    Analysis, AnalysisKind, Engine, Incomplete, IncompleteKind, ReferencesPage, SeedProblem, Stage,
 };
 use serde_json::Value;
 
@@ -223,10 +223,14 @@ fn exit_for(a: &Analysis) -> Exit {
             _ => Exit::Ok,
         });
     let stopped = [
-        a.retracted_references.as_ref().and_then(|s| s.incomplete),
-        a.odd_one_out.as_ref().and_then(|s| s.incomplete),
-        a.probably_missing.as_ref().and_then(|s| s.incomplete),
-        a.related.as_ref().and_then(|s| s.incomplete),
+        a.retracted_references
+            .as_ref()
+            .and_then(|s| s.incomplete.as_ref()),
+        a.odd_one_out.as_ref().and_then(|s| s.incomplete.as_ref()),
+        a.probably_missing
+            .as_ref()
+            .and_then(|s| s.incomplete.as_ref()),
+        a.related.as_ref().and_then(|s| s.incomplete.as_ref()),
     ];
     let failed = stopped
         .into_iter()
@@ -255,6 +259,12 @@ fn stopped(i: &Incomplete, what: &str) -> String {
         IncompleteKind::Budget => "stopped at the budget",
         IncompleteKind::ProviderFailed => "OpenAlex failed",
         _ => "capped",
+    };
+    // Related works say which stage stopped, and count its own things.
+    let what = match i.stage {
+        Some(Stage::Coupling) => "pages of works citing the set's shared references read",
+        Some(Stage::Lookup) => "works looked up",
+        _ => what,
     };
     format!(
         "  ⚠ {why}: {} of {} {what}\n",

@@ -2350,7 +2350,7 @@ impl Analysis {
                 };
             }
         };
-        let incomplete = |i: Option<engine::Incomplete>| i.as_ref().map(Incomplete::from);
+        let incomplete = |i: &Option<engine::Incomplete>| i.as_ref().map(Incomplete::from);
         Analysis {
             seeds: a
                 .seeds
@@ -2372,7 +2372,7 @@ impl Analysis {
                             source: r.source.clone(),
                         })
                         .collect(),
-                    incomplete: incomplete(s.incomplete),
+                    incomplete: incomplete(&s.incomplete),
                 }),
             odd_one_out: a.odd_one_out.as_ref().map(|s| OddOnesOut {
                 items: s
@@ -2383,7 +2383,7 @@ impl Analysis {
                         reason: o.reason.into(),
                     })
                     .collect(),
-                incomplete: incomplete(s.incomplete),
+                incomplete: incomplete(&s.incomplete),
             }),
             probably_missing: a.probably_missing.as_ref().map(|s| ProbablyMissing {
                 items: s
@@ -2397,7 +2397,7 @@ impl Analysis {
                         count: m.count() as u32,
                     })
                     .collect(),
-                incomplete: incomplete(s.incomplete),
+                incomplete: incomplete(&s.incomplete),
             }),
             not_yet: a.not_yet.iter().map(|&k| k.into()).collect(),
             estimate: a.estimate.map(|e| Estimate {
@@ -2406,7 +2406,7 @@ impl Analysis {
                 exact: e.exact,
             }),
             complete: a.complete(),
-            incomplete: incomplete(a.incomplete),
+            incomplete: incomplete(&a.incomplete),
             failure: None,
             usage: usage(&a.usage),
             related: a.related.as_ref().map(|s| RelatedWorks {
@@ -2423,7 +2423,7 @@ impl Analysis {
                         seeds: r.seeds.iter().map(|&i| i as u32).collect(),
                     })
                     .collect(),
-                incomplete: incomplete(s.incomplete),
+                incomplete: incomplete(&s.incomplete),
             }),
         }
     }

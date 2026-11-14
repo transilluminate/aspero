@@ -81,15 +81,19 @@ fn reset_sigpipe() {
 #[cfg(not(unix))]
 fn reset_sigpipe() {}
 
-/// `-v`: aspero's own events (requests, cache, retries) at info; `-vv`:
-/// everything at debug, including the HTTP stack. Always to stderr, so
-/// stdout stays clean for pipes.
+/// Warnings by default (a step of an analysis that failed, and why), but
+/// not each failed request, which may be retried and is reported where it
+/// matters; `-v`: aspero's own events (requests, cache, retries) at info;
+/// `-vv`: everything at debug, including the HTTP stack. Always to stderr,
+/// so stdout stays clean for pipes.
 fn init_logging(verbosity: u8) {
     use tracing_subscriber::filter::{LevelFilter, Targets};
     use tracing_subscriber::prelude::*;
 
     let targets = match verbosity {
-        0 => return,
+        0 => Targets::new()
+            .with_target("aspero", LevelFilter::WARN)
+            .with_target("aspero::http", LevelFilter::OFF),
         1 => Targets::new().with_target("aspero", LevelFilter::INFO),
         _ => Targets::new().with_default(LevelFilter::DEBUG),
     };

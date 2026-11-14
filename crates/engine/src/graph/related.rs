@@ -44,10 +44,10 @@ use aspero_store::{Direction, Edges};
 use futures::StreamExt;
 
 use super::{
-    Group, Incomplete, IncompleteKind, MAX_FILTER, MIN_CITING, Section, Seed, Spend, TheSet,
+    Group, Incomplete, IncompleteKind, MAX_FILTER, MIN_CITING, Section, Seed, Spend, Stage, TheSet,
     openalex_id,
 };
-use crate::{Engine, Entry, Outcome};
+use crate::{Engine, Entry};
 
 /// Works per page of citing works: OpenAlex's most.
 const PAGE: u64 = 200;
@@ -165,7 +165,7 @@ fn bins(works: &[(WorkId, u64)]) -> Vec<Vec<WorkId>> {
 /// first, then works alone, least cited first, at most [`PAGES_PER_WORK`]
 /// pages each. Over [`CITING_PAGES`] in all, pages come off the works read
 /// most (the most cited of them first), down to none.
-fn plan(works: &[(WorkId, u64)]) -> Vec<Cites> {
+fn plan(works: &[(WorkId, u64)], per_work: usize) -> Vec<Cites> {
     let (small, large): (Vec<Counted>, Vec<Counted>) = works
         .iter()
         .filter(|(_, count)| *count > 0)
@@ -178,7 +178,7 @@ fn plan(works: &[(WorkId, u64)]) -> Vec<Cites> {
     let mut alone: Vec<(u64, Cites)> = large
         .into_iter()
         .map(|(work, count)| {
-            let pages = (count.div_ceil(PAGE) as usize).min(PAGES_PER_WORK);
+            let pages = (count.div_ceil(PAGE) as usize).min(per_work);
             (
                 count,
                 Cites {
@@ -377,11 +377,51 @@ fn highest<'a>(tallies: impl Iterator<Item = &'a Tally>, weights: &[f64]) -> (f6
     })
 }
 
-/// Why a step stopped short.
+/// Why each stage stopped short, if it did.
 #[derive(Default)]
 struct Stops {
+    /// Reading the set's citing works.
+    citing: Stop,
+    /// Reading the works citing the set's most shared references: pages
+    /// read of those meant to be.
+    coupling: Stop,
+    coupling_pages: (u64, u64),
+    /// Looking up the best: works answered of those asked about.
+    lookup: Stop,
+    lookups: (u64, u64),
+}
+
+#[derive(Default, Clone, Copy)]
+struct Stop {
     budget: bool,
     failed: bool,
+}
+
+impl Stops {
+    /// What stopped related works, the first stage that failed first, then
+    /// the first stopped by the budget, then a sample (`done` of `total`
+    /// citing works read): each with its stage and how far that got.
+    fn incomplete(&self, (done, total): (u64, u64), provider: &ProviderId) -> Option<Incomplete> {
+        let stages = [
+            (Stage::Citing, self.citing, (done, total)),
+            (Stage::Coupling, self.coupling, self.coupling_pages),
+            (Stage::Lookup, self.lookup, self.lookups),
+        ];
+        let at = |kind, (stage, _, (done, total)): (Stage, Stop, (u64, u64))| {
+            let mut i = Incomplete::new(kind, done as usize, total as usize).at(stage);
+            if kind == IncompleteKind::ProviderFailed {
+                i = i.from(provider.clone());
+            }
+            i
+        };
+        if let Some(&s) = stages.iter().find(|(_, s, _)| s.failed) {
+            return Some(at(IncompleteKind::ProviderFailed, s));
+        }
+        if let Some(&s) = stages.iter().find(|(_, s, _)| s.budget) {
+            return Some(at(IncompleteKind::Budget, s));
+        }
+        (done < total).then(|| at(IncompleteKind::Capped, stages[0]))
+    }
 }
 
 impl Engine {
@@ -398,6 +438,12 @@ impl Engine {
         spend: &mut Spend,
     ) -> Section<RelatedWork> {
         let provider = entry.provider.id();
+        // Without a key, OpenAlex gives only first pages: of a work cited
+        // more than 200 times, its 200 most cited citing works (`capped`).
+        let max_pages = match entry.provider.capabilities().max_pages {
+            0 => usize::MAX,
+            n => n,
+        };
         // The set's works, each once, with how often each is cited.
         let mut counts: BTreeMap<WorkId, u64> = BTreeMap::new();
         for group in groups {
@@ -417,7 +463,7 @@ impl Engine {
                 Some((openalex_id(record)?.clone(), record.work.issued?.year()))
             })
             .collect();
-        let full = plan(&works);
+        let full = plan(&works, PAGES_PER_WORK.min(max_pages));
         let targets: Vec<u64> = works.iter().map(|(w, c)| target(&full, w, *c)).collect();
         let cached = self.cached_citing(&works, &targets);
 
@@ -457,7 +503,9 @@ impl Engine {
         let coupling_paid = match (&coupling, cached_pages.last()) {
             (None, _) => 0,
             (Some(_), Some(last)) if last.next.is_none() => 0,
-            (Some(_), _) => COUPLING_PAGES - cached_pages.len(),
+            (Some(_), _) => COUPLING_PAGES
+                .min(max_pages)
+                .saturating_sub(cached_pages.len()),
         };
 
         let citing_paid: usize = filters.iter().map(|c| c.pages).sum();
@@ -493,6 +541,7 @@ impl Engine {
         for (c, &n) in filters.iter().zip(&allotted) {
             jobs.push((c.filter(), n, Vec::new(), false));
         }
+        let coupling_cached = cached_pages.len();
         if let Some(filter) = &coupling {
             jobs.push((filter.clone(), coupling_allotted, cached_pages, true));
         }
@@ -514,8 +563,8 @@ impl Engine {
         for (c, n) in filters.iter().zip(&allotted) {
             let mut read = reads.next().expect("a read per filter");
             spend.add(std::mem::take(&mut read.usage), read.paid);
-            stops.failed |= read.failed;
-            stops.budget |= *n < c.pages && !read.finished && !read.failed;
+            stops.citing.failed |= read.failed;
+            stops.citing.budget |= *n < c.pages && !read.finished && !read.failed;
             for work in &c.works {
                 // Alone, every work read cites it; sharing, those whose
                 // references say so.
@@ -542,8 +591,13 @@ impl Engine {
         if coupling.is_some() {
             let mut read = reads.next().expect("a read for coupling");
             spend.add(std::mem::take(&mut read.usage), read.paid);
-            stops.failed |= read.failed;
-            stops.budget |= coupling_allotted < coupling_paid && !read.finished && !read.failed;
+            stops.coupling.failed |= read.failed;
+            stops.coupling.budget |=
+                coupling_allotted < coupling_paid && !read.finished && !read.failed;
+            stops.coupling_pages = (
+                (coupling_cached + read.paid) as u64,
+                (coupling_cached + coupling_paid) as u64,
+            );
             for (id, cited) in read.works {
                 if let Some(cited) = cited {
                     links.push((id.clone(), cited.clone()));
@@ -637,12 +691,13 @@ impl Engine {
                     .lookup_at(entry, &ids, FieldSet::DEFAULT, &mut usage)
                     .await;
                 spend.add(usage, paid);
-                stops.failed |= answers
-                    .iter()
-                    .any(|(a, _)| matches!(a.outcome, Outcome::Failed(_)));
+                let failed = super::failed_lookups(&answers, "related works' lookup failed");
+                stops.lookup.failed = failed > 0;
+                stops.lookups = ((fetch - failed) as u64, fetch as u64);
                 records = answers.into_iter().map(|(_, r)| r).collect();
             } else {
-                stops.budget = true;
+                stops.lookup.budget = true;
+                stops.lookups = (0, fetch as u64);
             }
         }
 
@@ -702,17 +757,7 @@ impl Engine {
         items.sort_by(|a, b| b.score.total_cmp(&a.score).then(a.id.cmp(&b.id)));
         items.truncate(limit as usize);
 
-        let kind = if stops.failed {
-            Some(IncompleteKind::ProviderFailed)
-        } else if stops.budget {
-            Some(IncompleteKind::Budget)
-        } else if done < total {
-            Some(IncompleteKind::Capped)
-        } else {
-            None
-        };
-        let incomplete = kind.map(|kind| Incomplete { kind, done, total });
-        Section::new(items, incomplete)
+        Section::new(items, stops.incomplete((done, total), &provider))
     }
 
     /// Reads up to `paid` pages of a `cites:` filter after the `cached` ones
@@ -891,7 +936,7 @@ mod tests {
             (w(6), 90_000),
             (w(7), 30),
         ];
-        let plan = plan(&works);
+        let plan = plan(&works, PAGES_PER_WORK);
         let shape: Vec<(Vec<WorkId>, usize)> =
             plan.iter().map(|c| (c.works.clone(), c.pages)).collect();
         assert_eq!(
@@ -935,7 +980,7 @@ mod tests {
     fn the_set_reads_at_most_its_cap_taken_off_the_most_read() {
         // 30 works cited 1,000 times: 150 pages wanted, 75 read.
         let works: Vec<(WorkId, u64)> = (1..=30).map(|n| (w(n), 1_000)).collect();
-        let plan = plan(&works);
+        let plan = plan(&works, PAGES_PER_WORK);
         let pages: Vec<usize> = plan.iter().map(|c| c.pages).collect();
         assert_eq!(pages.iter().sum::<usize>(), CITING_PAGES);
         // Taken evenly, the last (ties by id) first.

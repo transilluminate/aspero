@@ -458,7 +458,12 @@ would cost without paid requests (seeds are resolved from the cache and
 free lookups, so the run finds them cached). --budget stops before any
 request that could spend more; what was stopped says how far it got:
 `complete: false`, `incomplete: {kind: budget|provider_failed|capped,
-done, total}`.
+done, total}`. Related works add the `stage` that stopped, which `done`
+and `total` then count: `citing` (citing works read), `coupling` (pages
+of works citing the shared references) or `lookup` (works looked up);
+and a failure, the `provider` (its error is logged to stderr). Without
+OPENALEX_API_KEY, OpenAlex gives only first pages: each seed's 200 most
+cited citing works (`capped`).
 
 Examples:
   aspero analyse 10.1038/nature14539 10.1145/3065386 W2194775991

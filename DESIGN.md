@@ -386,9 +386,24 @@ from `cites:` pages); G3 OpenCitations as a free source of citing works.
   - Citing works dated more than a year before a work of the set they cite
     are set aside: OpenAlex gave a 2001 paper on mustard 300 references,
     2014 sepsis trials among them.
-  - `incomplete` counts citing works read of those the set's
-    `cited_by_count`s promise (`done` of `total`): `capped` when a work was
-    sampled, `budget`, `provider_failed`.
+  - `incomplete` names the `stage` that stopped, and `done` of `total`
+    count that stage's things: `citing`, citing works read of those the
+    set's `cited_by_count`s promise (`capped` when a work was sampled);
+    `coupling`, pages read of coupling's sample; `lookup`, works answered
+    of those asked about. A failure (`provider_failed`, with the
+    `provider`) comes first, then `budget`, then `capped`, and is logged
+    at warn (the CLI shows warnings without `-v`, but not each failed
+    request). Before, a failed lookup or coupling page said
+    `provider_failed` with every citing work read (done = total), and
+    nothing said why.
+  - *Without a key* (seen 2026-11-14) OpenAlex refuses a cursor past the
+    first page: 401 "Paging past the first page with cursor= needs a free
+    API key". It had read as a rejected key, which stops the engine
+    asking OpenAlex anything for its life, so coupling's second page
+    failed and then the lookup, and related works came back unlooked-up.
+    Without a key a 401 or 403 is `UnsupportedQuery` now, and
+    `Capabilities::max_pages` (1 for OpenAlex without a key) caps each
+    filter to its first page: each seed's 200 most cited citing works.
   - Live (2026-11): eleven sepsis trials, $0.0060 (60 pages, as estimated),
     16 s, 10,647 of 15,357 citing works; eight deep-learning works with
     LeCun 2015 (90,000 citing works), $0.0046, 13 s, 8,000 of 149,057.

@@ -229,13 +229,18 @@ impl IncompleteKind {
 }
 
 /// How much of a step was done: `done` of `total` (seeds resolved,
-/// references checked, works looked up, citing works read).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// references checked, works looked up, citing works read; for related
+/// works, of the `stage` that stopped).
+#[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct Incomplete {
     pub kind: IncompleteKind,
     pub done: u64,
     pub total: u64,
+    /// Which stage stopped, for an analysis of several (related works).
+    pub stage: Option<Stage>,
+    /// The provider that failed (`ProviderFailed`).
+    pub provider: Option<ProviderId>,
 }
 
 impl Incomplete {
@@ -244,8 +249,66 @@ impl Incomplete {
             kind,
             done: done as u64,
             total: total as u64,
+            stage: None,
+            provider: None,
         }
     }
+
+    /// The same, stopped at `stage`.
+    pub fn at(mut self, stage: Stage) -> Self {
+        self.stage = Some(stage);
+        self
+    }
+
+    /// The same, `provider` having failed.
+    pub fn from(mut self, provider: ProviderId) -> Self {
+        self.provider = Some(provider);
+        self
+    }
+}
+
+/// A stage of related works, and what its `done` and `total` count.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum Stage {
+    /// Reading the works citing the set: citing works read, of those the
+    /// set's `cited_by_count`s promise.
+    Citing,
+    /// Reading the works citing the set's most shared references (the
+    /// coupling sample): pages read, of those meant to be.
+    Coupling,
+    /// Looking the best up: works answered, of those asked about.
+    Lookup,
+}
+
+impl Stage {
+    every_variant!(Stage: Citing, Coupling, Lookup);
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Stage::Citing => "citing",
+            Stage::Coupling => "coupling",
+            Stage::Lookup => "lookup",
+        }
+    }
+}
+
+/// How many lookups failed, each failure logged (a warning, once per
+/// distinct error) with `what` failed.
+fn failed_lookups(answers: &[(crate::Attempt, Option<SourceRecord>)], what: &str) -> usize {
+    let mut seen: Vec<String> = Vec::new();
+    let mut failed = 0;
+    for (attempt, _) in answers {
+        if let Outcome::Failed(e) = &attempt.outcome {
+            failed += 1;
+            let error = e.to_string();
+            if !seen.contains(&error) {
+                tracing::warn!(target: "aspero::graph", provider = %attempt.provider, %error, "{what}");
+                seen.push(error);
+            }
+        }
+    }
+    failed
 }
 
 /// One analysis' findings, and what stopped it, if anything.
@@ -970,16 +1033,12 @@ impl Engine {
                     .lookup_at(entry, &ids, FieldSet::DEFAULT, &mut usage)
                     .await;
                 spend.add(usage, paid);
-                let failed = answers
-                    .iter()
-                    .filter(|(a, _)| matches!(a.outcome, Outcome::Failed(_)))
-                    .count();
+                let failed = failed_lookups(&answers, "probably missing works' lookup failed");
                 if failed > 0 {
-                    incomplete = Some(Incomplete::new(
-                        IncompleteKind::ProviderFailed,
-                        fetch - failed,
-                        fetch,
-                    ));
+                    incomplete = Some(
+                        Incomplete::new(IncompleteKind::ProviderFailed, fetch - failed, fetch)
+                            .from(provider.clone()),
+                    );
                 }
                 records = answers.into_iter().map(|(_, r)| r).collect();
             } else {
@@ -1079,11 +1138,10 @@ impl Engine {
             }
         }
         if failed && incomplete.is_none() {
-            incomplete = Some(Incomplete::new(
-                IncompleteKind::ProviderFailed,
-                done,
-                cited.len(),
-            ));
+            incomplete = Some(
+                Incomplete::new(IncompleteKind::ProviderFailed, done, cited.len())
+                    .from(provider.clone()),
+            );
         }
         if spend.estimating {
             return Section::new(Vec::new(), None);

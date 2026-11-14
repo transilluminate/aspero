@@ -136,6 +136,9 @@ pub struct Capabilities {
     /// singleton endpoint); 0 when none are known to be free. Under a
     /// daily cap, the engine looks IDs up this many at a time.
     pub max_free_batch: usize,
+    /// Pages of one search's results a caller can read; 0 for no limit.
+    /// OpenAlex without a key: 1 (paging on needs a key).
+    pub max_pages: usize,
 }
 
 /// Common search filters (see [`SearchQuery`]).

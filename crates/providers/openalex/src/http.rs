@@ -70,8 +70,13 @@ pub(crate) fn rate_limit(resp: &HttpResponse) -> Result<Usage, Error> {
 }
 
 /// `Ok` for 2xx; otherwise the matching [`Error`]. 404 is `NotFound`, which
-/// lookups turn into an absent record.
-pub(crate) fn check(resp: &HttpResponse) -> Result<(), Error> {
+/// lookups turn into an absent record. Sent without a key (`keyed` false),
+/// a 401 or 403 rejected no credentials: it's something OpenAlex does only
+/// with a key, such as a cursor past the first page (401 "Paging past the
+/// first page with cursor= needs a free API key", 2026-11-14), so it's
+/// `UnsupportedQuery`, which doesn't stop the provider for the engine's
+/// life as a rejected key does.
+pub(crate) fn check(resp: &HttpResponse, keyed: bool) -> Result<(), Error> {
     if resp.is_success() {
         return Ok(());
     }
@@ -83,6 +88,10 @@ pub(crate) fn check(resp: &HttpResponse) -> Result<(), Error> {
         _ if quota_exhausted(resp) => Error::QuotaExhausted {
             resets_at: usage(resp).resets_at,
         },
+        401 | 403 if !keyed => Error::UnsupportedQuery(format!(
+            "OpenAlex needs an API key for this{}",
+            message.map(|m| format!(": {m}")).unwrap_or_default()
+        )),
         401 | 403 => Error::AuthRejected { message },
         _ => status_error(resp, message),
     })

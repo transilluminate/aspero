@@ -50,19 +50,7 @@ pub async fn run(
     match out.format {
         Format::Jsonl => hits.iter().for_each(print_line),
         Format::Table => {
-            let mut table = output::table(&["#", "Score", "Year", "Author", "Title", "ID"]);
-            for (i, hit) in page.hits.iter().enumerate() {
-                let w = &hit.record.work;
-                table.add_row(vec![
-                    (i + 1).to_string(),
-                    hit.score.map(|s| format!("{s:.1}")).unwrap_or_default(),
-                    output::year(w),
-                    output::first_author(w),
-                    w.title.clone().unwrap_or_default(),
-                    output::main_id(&hit.record.ids),
-                ]);
-            }
-            println!("{table}");
+            println!("{}", hits_table(&page.hits));
             for (i, hit) in page.hits.iter().enumerate() {
                 if let Some(a) = found(i) {
                     println!(
@@ -119,6 +107,50 @@ pub async fn run(
 }
 
 /// Totals, ignored filters, paging and spend, on stderr.
+/// The hits as a table: a Score column when any hit has one (scores are
+/// the provider's, and some give none), and Cited (`cited_by_count`) when
+/// any work says how often it's cited.
+fn hits_table(hits: &[aspero_core::Hit]) -> comfy_table::Table {
+    use comfy_table::CellAlignment;
+    let scored = hits.iter().any(|h| h.score.is_some());
+    let counted = hits.iter().any(|h| h.record.work.cited_by_count.is_some());
+    let mut headers = vec!["#"];
+    if scored {
+        headers.push("Score");
+    }
+    headers.push("Year");
+    if counted {
+        headers.push("Cited");
+    }
+    headers.extend(["Author", "Title", "ID"]);
+    let mut table = output::table(&headers);
+    for (i, hit) in hits.iter().enumerate() {
+        let w = &hit.record.work;
+        let mut row = vec![(i + 1).to_string()];
+        if scored {
+            row.push(hit.score.map(|s| format!("{s:.1}")).unwrap_or_default());
+        }
+        row.push(output::year(w));
+        if counted {
+            row.push(w.cited_by_count.map(output::thousands).unwrap_or_default());
+        }
+        row.extend([
+            output::first_author(w),
+            w.title.clone().unwrap_or_default(),
+            output::main_id(&hit.record.ids),
+        ]);
+        table.add_row(row);
+    }
+    for (i, header) in headers.iter().enumerate() {
+        if matches!(*header, "#" | "Score" | "Cited")
+            && let Some(column) = table.column_mut(i)
+        {
+            column.set_cell_alignment(CellAlignment::Right);
+        }
+    }
+    table
+}
+
 fn footer(report: &aspero_engine::SearchReport, next: Option<&str>) {
     let page = &report.page;
     let total = page.total.map(|t| format!(" of {t}")).unwrap_or_default();
@@ -267,6 +299,39 @@ fn parse_years(s: &str) -> Result<YearRange, Failure> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn tables_show_scores_only_when_given_and_citations_when_known() {
+        use aspero_core::Hit;
+        let mut cited = crate::cmd::testing::work(&["W1"], "Deep learning", &["Yann LeCun"], 2015);
+        cited.work.cited_by_count = Some(91_234);
+        let other = crate::cmd::testing::work(&["W2"], "Backprop", &["David Rumelhart"], 1986);
+        // Sorted by most cited, OpenAlex gives no scores.
+        let unscored = [Hit::new(cited.clone(), None), Hit::new(other.clone(), None)];
+        let table = hits_table(&unscored).to_string();
+        assert!(!table.contains("Score"), "{table}");
+        assert!(
+            table.contains("Cited") && table.contains("91,234"),
+            "{table}"
+        );
+        let header = |t: &comfy_table::Table| -> Vec<String> {
+            t.header()
+                .unwrap()
+                .cell_iter()
+                .map(|c| c.content())
+                .collect()
+        };
+        assert_eq!(
+            header(&hits_table(&unscored)),
+            ["#", "Year", "Cited", "Author", "Title", "ID"]
+        );
+        // Scored, without counts.
+        let scored = [Hit::new(other, Some(12.5))];
+        assert_eq!(
+            header(&hits_table(&scored)),
+            ["#", "Score", "Year", "Author", "Title", "ID"]
+        );
+    }
 
     #[test]
     fn next_page_commands_reuse_the_search_and_pin_the_provider() {

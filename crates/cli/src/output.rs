@@ -272,6 +272,19 @@ pub fn first_author(w: &Work) -> String {
     }
 }
 
+/// 4300 → "4,300".
+pub fn thousands(n: u64) -> String {
+    let digits = n.to_string();
+    let mut out = String::new();
+    for (i, c) in digits.chars().enumerate() {
+        if i > 0 && (digits.len() - i).is_multiple_of(3) {
+            out.push(',');
+        }
+        out.push(c);
+    }
+    out
+}
+
 pub fn year(w: &Work) -> String {
     w.issued.map(|d| d.year().to_string()).unwrap_or_default()
 }

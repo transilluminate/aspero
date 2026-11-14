@@ -12,7 +12,7 @@ use serde_json::Value;
 use super::{Failure, Out, lines, print, print_line, read_stdin, shell_quote};
 use crate::args::{AnalysisArg, Format};
 use crate::exit::Exit;
-use crate::output;
+use crate::output::{self, thousands};
 
 pub async fn references(
     engine: &Engine,
@@ -284,19 +284,6 @@ fn exit_for(a: &Analysis) -> Exit {
     seeds.chain(failed).fold(Exit::Ok, Exit::worst)
 }
 
-/// 4300 → "4,300".
-fn thousands(n: u64) -> String {
-    let digits = n.to_string();
-    let mut out = String::new();
-    for (i, c) in digits.chars().enumerate() {
-        if i > 0 && (digits.len() - i).is_multiple_of(3) {
-            out.push(',');
-        }
-        out.push(c);
-    }
-    out
-}
-
 /// "stopped at the budget: 1,200 of 4,300 references checked".
 fn stopped(i: &Incomplete, what: &str) -> String {
     let why = match i.kind {
@@ -429,8 +416,14 @@ fn analysis_text(a: &Analysis, doc: &Value, related: bool) -> String {
         for r in &found.items {
             let seeds: Vec<String> = r.seeds.iter().map(|i| format!("[{i}]")).collect();
             let work = r.record.as_ref().map(one_line).unwrap_or_default();
+            let cited = r
+                .record
+                .as_ref()
+                .and_then(|r| r.work.cited_by_count)
+                .map(|n| format!("; cited by {}", thousands(n)))
+                .unwrap_or_default();
             out.push_str(&format!(
-                "  {:.2}  {}  {work}  co-cited {}, shares {}; with {}\n",
+                "  {:.2}  {}  {work}  co-cited {}, shares {}; with {}{cited}\n",
                 r.score,
                 r.id,
                 r.co_cited_with,

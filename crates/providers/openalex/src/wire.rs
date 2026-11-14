@@ -272,16 +272,52 @@ impl WireWork {
 }
 
 impl WireAuthorship {
+    /// The author's display name, or the name as printed (`raw_author_name`)
+    /// when there is none or the display name is cut short of it: OpenAlex
+    /// shows the Société française d'anesthésie et de réanimation as
+    /// "Société française d'anesthésie et" (W894996489, seen 2026-11-14).
+    /// An "et al." standing for the rest isn't an author.
     fn person(&self) -> Option<Person> {
-        let name = self
-            .author
-            .display_name
-            .as_ref()
-            .or(self.raw_author_name.as_ref())?;
-        let mut person = Person::literal(name.clone());
+        let raw = self.raw_author_name.as_deref().map(str::trim);
+        let name = match (self.author.display_name.as_deref().map(str::trim), raw) {
+            (Some(shown), Some(raw)) if cut_short(shown, raw) => raw,
+            (Some(shown), _) if !shown.is_empty() => shown,
+            (_, raw) => raw?,
+        };
+        if name.is_empty() || is_et_al(name) {
+            return None;
+        }
+        let mut person = Person::literal(name.to_owned());
         person.orcid = self.author.orcid.as_deref().and_then(orcid);
         Some(person)
     }
+}
+
+/// Whether `shown`, an organisation's name (three words or more, not a
+/// person's), is `raw` cut short: a shorter start of it, comparing letters
+/// and digits only (quotes and spacing differ). People's names are left
+/// alone: "Smith" starts "Smith, John" too.
+fn cut_short(shown: &str, raw: &str) -> bool {
+    let key = |s: &str| -> String {
+        s.chars()
+            .filter(|c| c.is_alphanumeric())
+            .flat_map(char::to_lowercase)
+            .collect()
+    };
+    let organisation =
+        shown.split_whitespace().count() >= 3 && Person::literal(shown).parts().is_none();
+    let (shown, raw) = (key(shown), key(raw));
+    organisation && raw.len() > shown.len() && raw.starts_with(&shown)
+}
+
+/// "et al.", "et al", "et. al.": a list's tail, not a name.
+fn is_et_al(name: &str) -> bool {
+    let words: String = name
+        .chars()
+        .filter(|c| c.is_alphabetic())
+        .flat_map(char::to_lowercase)
+        .collect();
+    words == "etal"
 }
 
 /// OpenAlex types to CSL. Conference papers have their own type
@@ -319,6 +355,54 @@ fn rebuild_abstract(index: &BTreeMap<String, Vec<usize>>) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn authorship(display: Option<&str>, raw: Option<&str>) -> Option<Person> {
+        let wire = WireAuthorship {
+            author: WireAuthor {
+                display_name: display.map(str::to_owned),
+                orcid: None,
+            },
+            raw_author_name: raw.map(str::to_owned),
+        };
+        wire.person()
+    }
+
+    fn name(p: Option<Person>) -> Option<String> {
+        p.and_then(|p| p.display_name())
+    }
+
+    /// As OpenAlex gives W894996489 (2015), whose first author's display
+    /// name stops at "et": the name as printed is used.
+    #[test]
+    fn a_name_cut_short_is_read_as_printed_and_et_al_is_no_author() {
+        assert_eq!(
+            name(authorship(
+                Some("Société française d'anesthésie et"),
+                Some("Société française d’anesthésie et de réanimation"),
+            ))
+            .as_deref(),
+            Some("Société française d’anesthésie et de réanimation")
+        );
+        // People's display names stand.
+        for (display, raw) in [
+            ("Jason Edward Smith", "J. E. Smith"),
+            ("Smith", "Smith, John"),
+            ("S. C. S", "S. C. S"),
+        ] {
+            assert_eq!(
+                name(authorship(Some(display), Some(raw))).as_deref(),
+                Some(display)
+            );
+        }
+        assert_eq!(
+            name(authorship(None, Some("M. Rockett"))).as_deref(),
+            Some("M. Rockett")
+        );
+        for tail in ["et al.", "et al", "Et. Al.", " et al "] {
+            assert!(authorship(Some(tail), None).is_none(), "{tail}");
+        }
+        assert!(authorship(Some(" "), None).is_none());
+    }
 
     #[test]
     fn rebuilds_inverted_abstracts() {

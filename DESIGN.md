@@ -100,12 +100,17 @@ scripts/       fixture recorders, one per provider
   OpenAlex likewise. An unknown name, or every source, is a setup error
   (CLI: usage, exit 2). Checks need no particular source: any one alone
   verifies (tested with Crossref alone).
-- **Search** goes to one provider (named, or the first capable); filters it
-  can't apply are stripped and reported as ignored. Fields (author, title,
-  container) and sorts (newest, most cited) it can't apply fail
-  (`Unsupported`): dropping one would widen or reorder the search
-  silently. Relevance never fails; with only fields to rank by, it is the
-  source's own order.
+- **Search** goes to one provider: the one named, or else the first, in
+  order of preference, that can search the whole query (its mode, tree,
+  `since`, fields and sort: the same checks as a named search, no calls);
+  if none can, the first's reason fails, ", and no other source can"
+  (`UnsupportedQuery`). `search_supports` without a source likewise asks
+  whether any can (before 0.18, whether the first could). Filters a
+  provider can't apply are stripped and reported as ignored. Fields
+  (author, title, container) and sorts (newest, most cited) it can't
+  apply fail (`Unsupported`): dropping one would widen or reorder the
+  search silently. Relevance never fails; with only fields to rank by, it
+  is the source's own order.
 - **Since** (`SearchQuery::since`, a day): only works the source added
   on or after it, whenever published, for watching a search; the caller
   keeps what it has seen, and a page's `total` counts what's new. A
@@ -355,13 +360,28 @@ from `cites:` pages); G3 OpenCitations as a free source of citing works.
     (the 100 most shared), at most 5 pages, most cited first (a fixed
     sample, not counted as capped). A seed links a work by coupling when
     the work cites two of the seed's own references.
-  - *Score:* each count as a share of the highest found, weighted 0.8
-    co-citation and 0.2 coupling (all to one when no work has the
-    other). Weighted evenly (tried on two sets, 2026-11), coupling's
-    long-reference-list favourites (broad reviews, theses, AI in food
-    science) outranked the field's core works; co-citation-led, a set of
-    eleven sepsis trials gets its peers (VASST, SAFE, CORTICUS, TRICC,
-    VISEP) and the guidelines and definitions.
+  - *Score:* co-citation strength and the coupling count, each as a
+    share of the highest found, weighted 0.8 co-citation and 0.2
+    coupling (all to one when no work has the other). Weighted evenly
+    (tried on two sets, 2026-11), coupling's long-reference-list
+    favourites (broad reviews, theses, AI in food science) outranked the
+    field's core works; co-citation-led, a set of eleven sepsis trials
+    gets its peers (VASST, SAFE, CORTICUS, TRICC, VISEP) and the
+    guidelines and definitions.
+  - *Co-citation strength* weighs each citing work by 1/√(its
+    references); `co_cited_with` still counts them. A work listing
+    hundreds co-cites everything it lists: OpenAlex has 26 chapter
+    records of the Oxford Handbook of Clinical Specialties (2020), each
+    with the whole book's ~970 references, so a set of ED analgesia
+    trials (one cited by the book) got CRASH-2, an airway guideline,
+    parvovirus B19 and lithium, co-cited 26–27 times, in its top 20.
+    Tried live (2026-11-14) on that set and the sepsis trials: 1/n
+    (association strength) favoured citing works listing a handful of
+    references (partial data); 1/ln(e + n) left the chapters' picks in the
+    top 20; requiring two linking seeds didn't help (the book cites two
+    of the set). 1/√n dropped them all, keeping the ED set's own field
+    (PEMI, oligoanalgesia, Bijur 2005, the hydromorphone titration
+    trials) and the sepsis set's top 20 as it was, a place or two apart.
   - The best 100 (per 100 of `limit`) are looked up in one batch, so works
     of the set (any shared identifier with any seed, resolved or not, or
     `same_work` with one), retracted works, drop, and versions merge
@@ -371,9 +391,24 @@ from `cites:` pages); G3 OpenCitations as a free source of citing works.
   - Citing works dated more than a year before a work of the set they cite
     are set aside: OpenAlex gave a 2001 paper on mustard 300 references,
     2014 sepsis trials among them.
-  - `incomplete` counts citing works read of those the set's
-    `cited_by_count`s promise (`done` of `total`): `capped` when a work was
-    sampled, `budget`, `provider_failed`.
+  - `incomplete` names the `stage` that stopped, and `done` of `total`
+    count that stage's things: `citing`, citing works read of those the
+    set's `cited_by_count`s promise (`capped` when a work was sampled);
+    `coupling`, pages read of coupling's sample; `lookup`, works answered
+    of those asked about. A failure (`provider_failed`, with the
+    `provider`) comes first, then `budget`, then `capped`, and is logged
+    at warn (the CLI shows warnings without `-v`, but not each failed
+    request). Before, a failed lookup or coupling page said
+    `provider_failed` with every citing work read (done = total), and
+    nothing said why.
+  - *Without a key* (seen 2026-11-14) OpenAlex refuses a cursor past the
+    first page: 401 "Paging past the first page with cursor= needs a free
+    API key". It had read as a rejected key, which stops the engine
+    asking OpenAlex anything for its life, so coupling's second page
+    failed and then the lookup, and related works came back unlooked-up.
+    Without a key a 401 or 403 is `UnsupportedQuery` now, and
+    `Capabilities::max_pages` (1 for OpenAlex without a key) caps each
+    filter to its first page: each seed's 200 most cited citing works.
   - Live (2026-11): eleven sepsis trials, $0.0060 (60 pages, as estimated),
     16 s, 10,647 of 15,357 citing works; eight deep-learning works with
     LeCun 2015 (90,000 citing works), $0.0046, 13 s, 8,000 of 149,057.
@@ -531,7 +566,10 @@ fixture recorded with different parameters once hid a ranking bug.
   `resets_at`) for free (`daily_used_usd` unchanged across calls, no cost
   header; checked 2026-11-14), but only to a key (401 "Authentication
   required" without; Bearer works): `Engine::refresh_budgets` asks it,
-  and asks nothing without a key. Its body echoes the key's first and
+  and asks nothing without a key. `aspero budget` without a key (the CLI
+  alone; the FFI's `refreshBudgets` still asks nothing) looks one work up
+  alone, past the cache (free; limit $0.10, checked 2026-11-14), and
+  reads the budget from its headers. Its body echoes the key's first and
   last three characters, masked in the fixture.
   404s are HTML. Lists take up to 200 a page (`per-page`); filters OR up to
   100 values; `select` trims works to the fields named (citing works:

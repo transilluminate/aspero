@@ -92,6 +92,61 @@ pub fn analysis(a: &Analysis, full: bool) -> Value {
     Value::Object(out)
 }
 
+/// The analyses' sections as JSON names them, and as JSON lines tag them.
+const SECTIONS: [(&str, &str); 4] = [
+    ("retracted_references", "retracted"),
+    ("odd_one_out", "odd_one_out"),
+    ("probably_missing", "probably_missing"),
+    ("related", "related"),
+];
+
+/// An [`analysis`] as JSON lines: each seed (`"section": "seed"`), then
+/// each item of each analysis tagged with its section (`retracted`,
+/// `odd_one_out`, `probably_missing`, `related`), then a `summary`: the
+/// rest of the document (`with_references`, `complete`, `incomplete`,
+/// `estimate`, `not_yet`, `usage`), with each analysis' own `complete`
+/// and `incomplete` under its name.
+pub fn analysis_lines(doc: &Value) -> Vec<Value> {
+    let tagged = |section: &str, item: &Value| {
+        let mut line = Map::new();
+        line.insert("section".into(), json!(section));
+        if let Value::Object(fields) = item {
+            line.extend(fields.clone());
+        }
+        Value::Object(line)
+    };
+    let mut lines: Vec<Value> = doc["seeds"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .map(|s| tagged("seed", s))
+        .collect();
+    let mut summary = Map::new();
+    summary.insert("section".into(), json!("summary"));
+    for (key, section) in SECTIONS {
+        let Some(found) = doc.get(key) else {
+            continue;
+        };
+        for item in found["items"].as_array().into_iter().flatten() {
+            lines.push(tagged(section, item));
+        }
+        let mut status = found.clone();
+        if let Value::Object(fields) = &mut status {
+            fields.remove("items");
+        }
+        summary.insert(key.into(), status);
+    }
+    if let Value::Object(fields) = doc {
+        for (key, value) in fields {
+            if key != "seeds" && !SECTIONS.iter().any(|(k, _)| k == key) {
+                summary.insert(key.clone(), value.clone());
+            }
+        }
+    }
+    lines.push(Value::Object(summary));
+    lines
+}
+
 /// Names a bibliography's seeds by their entries' `keys` (one per seed, in
 /// order), and adds the entries without an identifier as skipped seeds.
 pub fn file_seeds(doc: &mut Value, keys: &[&str], skipped: &[&str]) {
@@ -155,9 +210,19 @@ fn section<T>(s: &Section<T>, item: impl Fn(&T) -> Value) -> Value {
     Value::Object(out)
 }
 
-/// `{kind, done, total}`: what stopped a step, and how far it got.
+/// `{kind, done, total}`: what stopped a step, and how far it got; with
+/// `stage` (related works: `citing`, `coupling` or `lookup`, which `done`
+/// and `total` then count: citing works, pages, works) and the `provider`
+/// that failed, when known.
 pub fn incomplete(i: &Incomplete) -> Value {
-    json!({"kind": i.kind.as_str(), "done": i.done, "total": i.total})
+    let mut out = json!({"kind": i.kind.as_str(), "done": i.done, "total": i.total});
+    if let Some(stage) = i.stage {
+        out["stage"] = json!(stage.as_str());
+    }
+    if let Some(provider) = &i.provider {
+        out["provider"] = json!(provider.as_str());
+    }
+    out
 }
 
 pub fn estimate(e: &Estimate) -> Value {
@@ -207,7 +272,8 @@ fn related(r: &RelatedWork, full: bool) -> Value {
 
 #[cfg(test)]
 mod tests {
-    use aspero_engine::IncompleteKind;
+    use aspero_core::ProviderId;
+    use aspero_engine::{IncompleteKind, Stage};
 
     use super::*;
 
@@ -217,6 +283,48 @@ mod tests {
         assert_eq!(
             incomplete(&i),
             json!({"kind": "budget", "done": 1200, "total": 4300})
+        );
+        let lookup = Incomplete::new(IncompleteKind::ProviderFailed, 0, 100)
+            .at(Stage::Lookup)
+            .from(ProviderId::from_static("openalex"));
+        assert_eq!(
+            incomplete(&lookup),
+            json!({"kind": "provider_failed", "stage": "lookup", "provider": "openalex", "done": 0, "total": 100})
+        );
+    }
+
+    #[test]
+    fn analyses_as_lines_tag_each_item_and_end_with_a_summary() {
+        let doc = json!({
+            "seeds": [{"index": 0, "input": "10.1/a", "status": "resolved"}],
+            "with_references": 1,
+            "odd_one_out": {"complete": true, "items": []},
+            "related": {
+                "complete": false,
+                "incomplete": {"kind": "capped", "stage": "citing", "done": 200, "total": 900},
+                "items": [{"id": "openalex:W1", "score": 1.0}, {"id": "openalex:W2", "score": 0.5}],
+            },
+            "complete": false,
+            "usage": {"openalex": {"cost": 0.0002}},
+        });
+        assert_eq!(
+            analysis_lines(&doc),
+            [
+                json!({"section": "seed", "index": 0, "input": "10.1/a", "status": "resolved"}),
+                json!({"section": "related", "id": "openalex:W1", "score": 1.0}),
+                json!({"section": "related", "id": "openalex:W2", "score": 0.5}),
+                json!({
+                    "section": "summary",
+                    "with_references": 1,
+                    "odd_one_out": {"complete": true},
+                    "related": {
+                        "complete": false,
+                        "incomplete": {"kind": "capped", "stage": "citing", "done": 200, "total": 900},
+                    },
+                    "complete": false,
+                    "usage": {"openalex": {"cost": 0.0002}},
+                }),
+            ]
         );
     }
 

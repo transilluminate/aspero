@@ -11,7 +11,7 @@ use aspero_core::{
 };
 use aspero_engine::{
     Analysis, AnalysisKind, Cache, Engine, IncompleteKind, OddOne, OddReason, SeedProblem,
-    SqliteCache,
+    SqliteCache, Stage,
 };
 use async_trait::async_trait;
 use jiff::Timestamp;
@@ -26,6 +26,8 @@ struct Alex {
     caps: Capabilities,
     works: Vec<SourceRecord>,
     failures: Mutex<VecDeque<Error>>,
+    /// Lookups still to fail, each with a server error.
+    lookup_failures: Mutex<usize>,
     lookups: Mutex<Vec<Vec<WorkId>>>,
     searches: Mutex<Vec<String>>,
     /// Identifiers its lookups don't find works by.
@@ -43,6 +45,7 @@ impl Alex {
             caps,
             works,
             failures: Mutex::default(),
+            lookup_failures: Mutex::default(),
             lookups: Mutex::default(),
             searches: Mutex::default(),
             blind: Vec::new(),
@@ -149,6 +152,15 @@ impl Provider for Alex {
         if let Some(e) = self.failures.lock().unwrap().pop_front() {
             return Err(e);
         }
+        let mut failing = self.lookup_failures.lock().unwrap();
+        if *failing > 0 {
+            *failing -= 1;
+            return Err(Error::Server {
+                status: 503,
+                message: None,
+            });
+        }
+        drop(failing);
         let lookups = ids
             .iter()
             .map(|id| Lookup {
@@ -1005,16 +1017,20 @@ async fn related_works_rank_by_co_citation_and_coupling() {
             // Co-cited by four, with its preprint (W67): the most.
             ("W60".into(), 0.8, 4, 0, s(&[0, 1, 2])),
             // Co-cited twice (by W101, W104), and its own references share
-            // two of the set's (W1's and W2's): 0.8 × 2/4 + 0.2 × 2/2.
-            ("W61".into(), 0.6, 2, 2, s(&[0, 1])),
-            ("W50".into(), 0.4, 2, 0, s(&[0, 1])),
-            ("W51".into(), 0.2, 1, 0, s(&[0])),
-            ("W62".into(), 0.2, 1, 0, s(&[0])),
-            ("W63".into(), 0.2, 1, 0, s(&[2])),
+            // two of the set's (W1's and W2's): 0.8 × its share of W60's
+            // co-citation (each citing work counting 1/√ its references)
+            // + 0.2 × 2/2.
+            ("W61".into(), 0.5762, 2, 2, s(&[0, 1])),
+            ("W50".into(), 0.3284, 2, 0, s(&[0, 1])),
+            // Co-cited by W103, which lists fewer references than W51's
+            // and W62's citing work (W102).
+            ("W63".into(), 0.212, 1, 0, s(&[2])),
             // Coupled: they cite two of the set's references (two of W1's
             // and W2's each, one of W3's).
             ("W102".into(), 0.2, 0, 2, s(&[0, 1])),
             ("W201".into(), 0.2, 0, 2, s(&[0, 1])),
+            ("W51".into(), 0.1642, 1, 0, s(&[0])),
+            ("W62".into(), 0.1642, 1, 0, s(&[0])),
             // Left out: W64 (retracted), W65 (W1's preprint), W66 (the
             // missing seed's DOI); W202 shares one reference only; W107
             // (and W70, which only it cites) can't cite W1.
@@ -1109,7 +1125,7 @@ async fn a_classic_is_sampled_and_says_how_much() {
         .await
         .unwrap();
     let related = analysis.related.as_ref().unwrap();
-    let stop = related.incomplete.unwrap();
+    let stop = related.incomplete.clone().unwrap();
     assert_eq!(stop.kind, IncompleteKind::Capped);
     // The three papers' 8 citing works, and the classic's 1,000 most cited
     // of its 50,000.
@@ -1166,7 +1182,7 @@ async fn a_budget_shares_out_pages_and_says_how_far_they_got() {
         .await
         .unwrap();
     let related = analysis.related.as_ref().unwrap();
-    let stop = related.incomplete.unwrap();
+    let stop = related.incomplete.clone().unwrap();
     assert_eq!(stop.kind, IncompleteKind::Budget);
     assert_eq!((stop.done, stop.total), (208, 50_008));
     let mut pages = alex.citing_pages();
@@ -1202,8 +1218,72 @@ async fn failing_pages_say_so() {
     let related = analysis.related.unwrap();
     let stop = related.incomplete.unwrap();
     assert_eq!(stop.kind, IncompleteKind::ProviderFailed);
+    assert_eq!(stop.stage, Some(Stage::Citing));
+    assert_eq!(stop.provider, Some(OPENALEX));
     assert_eq!((stop.done, stop.total), (0, 8));
     assert!(related.items.is_empty());
+}
+
+/// Every citing work read, and coupling's page, but the lookup failing:
+/// the stage says so, and `done` of `total` count the works looked up, not
+/// the citing works (all read, which looked like nothing had failed).
+#[tokio::test(start_paused = true)]
+async fn a_failed_lookup_says_it_was_the_lookup() {
+    let cache = Arc::new(SqliteCache::open_in_memory().unwrap());
+    let (engine, alex) = around_engine(Some(cache));
+    let seeds = inputs(&AROUND[..3]);
+    engine
+        .analyse(&seeds, &[AnalysisKind::OddOneOut], None, false)
+        .await
+        .unwrap();
+    *alex.lookup_failures.lock().unwrap() = 50;
+    let analysis = engine
+        .analyse(&seeds, &[AnalysisKind::Related { limit: 5 }], None, false)
+        .await
+        .unwrap();
+    let related = analysis.related.unwrap();
+    let stop = related.incomplete.unwrap();
+    assert_eq!(stop.kind, IncompleteKind::ProviderFailed);
+    assert_eq!(stop.stage, Some(Stage::Lookup));
+    assert_eq!(stop.provider, Some(OPENALEX));
+    assert_eq!((stop.done, stop.total), (0, 12));
+    // Found all the same, but not looked up.
+    assert!(!related.items.is_empty());
+    assert!(related.items.iter().all(|r| r.record.is_none()));
+}
+
+/// Without a key OpenAlex gives only first pages (`max_pages`): the
+/// classic's 200 most cited citing works, and a page of coupling's.
+#[tokio::test(start_paused = true)]
+async fn only_first_pages_are_read_where_only_they_can_be() {
+    let mut alex = Alex::new(with_classic());
+    alex.caps.max_pages = 1;
+    let alex = Arc::new(alex);
+    let engine = engine(alex.clone(), None);
+    let kinds = [AnalysisKind::Related { limit: 5 }];
+    let estimate = engine
+        .analyse(&inputs(&CLASSIC), &kinds, None, true)
+        .await
+        .unwrap()
+        .estimate
+        .unwrap();
+    // The seeds' batch (no cache keeps it), the papers' page, the
+    // classic's, coupling's and the lookup.
+    assert_eq!(estimate.requests, 5);
+    let analysis = engine
+        .analyse(&inputs(&CLASSIC), &kinds, None, false)
+        .await
+        .unwrap();
+    let pages = alex.citing_pages();
+    assert_eq!(pages.iter().filter(|p| *p == "cites:W9000").count(), 1);
+    assert_eq!(
+        pages.iter().filter(|p| *p == "cites:W51|W50|W52").count(),
+        1
+    );
+    let stop = analysis.related.unwrap().incomplete.unwrap();
+    assert_eq!(stop.kind, IncompleteKind::Capped);
+    assert_eq!(stop.stage, Some(Stage::Citing));
+    assert_eq!((stop.done, stop.total), (208, 50_008));
 }
 
 /// What `estimate_only` counts is what the run spends: the citing works'

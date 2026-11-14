@@ -182,7 +182,7 @@ async fn search_supports_says_why_and_search_fails_alike() {
 
     let tree = json!({"all": [{"author": "LeCun"}, {"none": [{"title": "x"}]}]});
     let out = supports(tree.clone()).await;
-    let reason = "Scripted can't search by author";
+    let reason = "Scripted can't search by author, and no other source can";
     assert_eq!(out.structured["supported"], false);
     assert_eq!(out.structured["reason"], reason);
     assert_eq!(out.structured["usage"], json!({}));

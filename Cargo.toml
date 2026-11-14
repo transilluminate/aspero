@@ -39,7 +39,7 @@ biblatex = "0.12.0"
 quick-xml = "0.38.4"
 zip = { version = "9.5.1", default-features = false, features = ["deflate-flate2-zlib-rs"] }
 hayagriva = { version = "0.10.1", default-features = false, features = ["csl-json"] }
-clap = { version = "4.6.7", features = ["derive", "env"] }
+clap = { version = "4.6.7", features = ["derive", "env", "wrap_help"] }
 comfy-table = "8.0.1"
 directories = "6.0.0"
 fastrand = "2.5.0"

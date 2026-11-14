@@ -5,14 +5,14 @@ use std::io::IsTerminal;
 use aspero_bib::BibEntry;
 use aspero_core::{Cursor, IdKind, SourceRecord, WorkId};
 use aspero_engine::{
-    Analysis, AnalysisKind, Engine, Incomplete, IncompleteKind, ReferencesPage, SeedProblem,
+    Analysis, AnalysisKind, Engine, Incomplete, IncompleteKind, ReferencesPage, SeedProblem, Stage,
 };
 use serde_json::Value;
 
 use super::{Failure, Out, lines, print, print_line, read_stdin, shell_quote};
 use crate::args::{AnalysisArg, Format};
 use crate::exit::Exit;
-use crate::output;
+use crate::output::{self, thousands};
 
 pub async fn references(
     engine: &Engine,
@@ -139,6 +139,13 @@ pub async fn analyse(
         [path] if path != "-" && std::path::Path::new(path).is_file() => Some(path.clone()),
         _ => None,
     };
+    if file.is_none() {
+        no_kinds_among(&inputs, &kinds)?;
+    }
+    let kinds = match kinds.is_empty() {
+        true => DEFAULT_KINDS.to_vec(),
+        false => kinds,
+    };
     let seeds = match &file {
         Some(path) => {
             let source = std::fs::read(path)
@@ -175,7 +182,9 @@ pub async fn analyse(
         aspero_json::graph::file_seeds(&mut doc, &keys, &skipped);
     }
     match out.format {
-        Format::Jsonl => print_line(&doc),
+        Format::Jsonl => aspero_json::graph::analysis_lines(&doc)
+            .iter()
+            .for_each(print_line),
         Format::Table | Format::Text => {
             let related = kinds
                 .iter()
@@ -189,6 +198,41 @@ pub async fn analyse(
         Format::Json | Format::Auto => print(&doc),
     }
     Ok(exit_for(&analysis))
+}
+
+/// The analyses run when `--kinds` isn't given.
+const DEFAULT_KINDS: [AnalysisArg; 3] = [
+    AnalysisArg::Retracted,
+    AnalysisArg::OddOneOut,
+    AnalysisArg::ProbablyMissing,
+];
+
+/// A usage error for an input naming an analysis: `--kinds related
+/// probably-missing 10.1/x` takes one kind, and the next word as a seed
+/// that never resolves while the analysis it names never runs. The fix
+/// suggested is the kinds given (if any) and the stray ones, comma-joined.
+fn no_kinds_among(inputs: &[String], kinds: &[AnalysisArg]) -> Result<(), Failure> {
+    use clap::ValueEnum;
+    let named = |s: &str| AnalysisArg::from_str(&s.trim().replace('_', "-"), true).ok();
+    let stray: Vec<(&String, AnalysisArg)> =
+        inputs.iter().filter_map(|i| Some((i, named(i)?))).collect();
+    let Some((first, _)) = stray.first() else {
+        return Ok(());
+    };
+    let mut wanted: Vec<AnalysisArg> = kinds.to_vec();
+    for (_, kind) in &stray {
+        if !wanted.contains(kind) {
+            wanted.push(*kind);
+        }
+    }
+    let names: Vec<String> = wanted
+        .iter()
+        .filter_map(|k| Some(k.to_possible_value()?.get_name().to_owned()))
+        .collect();
+    Err(Failure::usage(format!(
+        "{first:?} is an analysis, not a seed: use --kinds {}",
+        names.join(",")
+    )))
 }
 
 /// Arguments, or one identifier per stdin line when given none (or `-`).
@@ -223,10 +267,14 @@ fn exit_for(a: &Analysis) -> Exit {
             _ => Exit::Ok,
         });
     let stopped = [
-        a.retracted_references.as_ref().and_then(|s| s.incomplete),
-        a.odd_one_out.as_ref().and_then(|s| s.incomplete),
-        a.probably_missing.as_ref().and_then(|s| s.incomplete),
-        a.related.as_ref().and_then(|s| s.incomplete),
+        a.retracted_references
+            .as_ref()
+            .and_then(|s| s.incomplete.as_ref()),
+        a.odd_one_out.as_ref().and_then(|s| s.incomplete.as_ref()),
+        a.probably_missing
+            .as_ref()
+            .and_then(|s| s.incomplete.as_ref()),
+        a.related.as_ref().and_then(|s| s.incomplete.as_ref()),
     ];
     let failed = stopped
         .into_iter()
@@ -236,25 +284,18 @@ fn exit_for(a: &Analysis) -> Exit {
     seeds.chain(failed).fold(Exit::Ok, Exit::worst)
 }
 
-/// 4300 → "4,300".
-fn thousands(n: u64) -> String {
-    let digits = n.to_string();
-    let mut out = String::new();
-    for (i, c) in digits.chars().enumerate() {
-        if i > 0 && (digits.len() - i).is_multiple_of(3) {
-            out.push(',');
-        }
-        out.push(c);
-    }
-    out
-}
-
 /// "stopped at the budget: 1,200 of 4,300 references checked".
 fn stopped(i: &Incomplete, what: &str) -> String {
     let why = match i.kind {
         IncompleteKind::Budget => "stopped at the budget",
         IncompleteKind::ProviderFailed => "OpenAlex failed",
         _ => "capped",
+    };
+    // Related works say which stage stopped, and count its own things.
+    let what = match i.stage {
+        Some(Stage::Coupling) => "pages of works citing the set's shared references read",
+        Some(Stage::Lookup) => "works looked up",
+        _ => what,
     };
     format!(
         "  ⚠ {why}: {} of {} {what}\n",
@@ -375,8 +416,14 @@ fn analysis_text(a: &Analysis, doc: &Value, related: bool) -> String {
         for r in &found.items {
             let seeds: Vec<String> = r.seeds.iter().map(|i| format!("[{i}]")).collect();
             let work = r.record.as_ref().map(one_line).unwrap_or_default();
+            let cited = r
+                .record
+                .as_ref()
+                .and_then(|r| r.work.cited_by_count)
+                .map(|n| format!("; cited by {}", thousands(n)))
+                .unwrap_or_default();
             out.push_str(&format!(
-                "  {:.2}  {}  {work}  co-cited {}, shares {}; with {}\n",
+                "  {:.2}  {}  {work}  co-cited {}, shares {}; with {}{cited}\n",
                 r.score,
                 r.id,
                 r.co_cited_with,
@@ -541,6 +588,46 @@ mod tests {
             "graph/estimate.json",
             &(serde_json::to_string_pretty(&json).unwrap() + "\n"),
         );
+    }
+
+    fn analyse_args(args: &[&str]) -> (Vec<String>, Vec<AnalysisArg>) {
+        use clap::Parser;
+        let all = ["aspero", "analyse"].iter().chain(args);
+        match crate::args::Cli::try_parse_from(all).unwrap().command {
+            crate::args::Command::Analyse { inputs, kinds, .. } => (inputs, kinds),
+            other => panic!("{other:?}"),
+        }
+    }
+
+    #[test]
+    fn kinds_are_comma_separated_and_a_kind_given_as_a_seed_is_refused() {
+        let (inputs, kinds) = analyse_args(&["--kinds", "related,probably-missing", "10.1/x"]);
+        assert_eq!(kinds, [AnalysisArg::Related, AnalysisArg::ProbablyMissing]);
+        assert_eq!(inputs, ["10.1/x"]);
+        assert!(no_kinds_among(&inputs, &kinds).is_ok());
+
+        // Space-separated, the second kind is taken as a seed.
+        let (inputs, kinds) = analyse_args(&[
+            "--kinds",
+            "related",
+            "probably-missing",
+            "10.1016/j.ajem.2007.10.025",
+        ]);
+        assert_eq!(kinds, [AnalysisArg::Related]);
+        let error = no_kinds_among(&inputs, &kinds).unwrap_err();
+        assert_eq!(error.exit, Exit::Usage);
+        assert_eq!(
+            error.message,
+            "\"probably-missing\" is an analysis, not a seed: use --kinds related,probably-missing"
+        );
+        // Without --kinds, as JSON names it, or in capitals.
+        let error = no_kinds_among(&["odd_one_out".into(), "Related".into()], &[]).unwrap_err();
+        assert_eq!(
+            error.message,
+            "\"odd_one_out\" is an analysis, not a seed: use --kinds odd-one-out,related"
+        );
+        // None given runs the defaults.
+        assert_eq!(analyse_args(&["10.1/x"]).1, []);
     }
 
     #[test]

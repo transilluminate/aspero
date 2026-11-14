@@ -19,6 +19,6 @@ Probably missing (cited by k of the 3 works with known references)
 
 Related works (score: co-cited with the set, sharing its references)
   0.80  openalex:W10  "Early goal-directed therapy" — Rivers 2001  co-cited 2, shares 0; with [0] [1]
-  0.40  openalex:W11  "Surviving sepsis" — Dell 2016  co-cited 1, shares 0; with [0]
-  0.40  openalex:W60  "Sepsis definitions" — Singer 2016  co-cited 1, shares 0; with [0] [1]
+  0.43  openalex:W11  "Surviving sepsis" — Dell 2016  co-cited 1, shares 0; with [0]
+  0.37  openalex:W60  "Sepsis definitions" — Singer 2016  co-cited 1, shares 0; with [0] [1]
   0.20  openalex:W50  "Sepsis care, reviewed" — Hart 2023  co-cited 0, shares 2; with [1]

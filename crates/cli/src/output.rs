@@ -255,14 +255,12 @@ pub fn first_author(w: &Work) -> String {
     let Some(first) = w.authors.first() else {
         return String::new();
     };
-    // Family names throughout; for unsplit names, the last word.
+    // Family names throughout; an organisation's name (or one that isn't
+    // clearly a person's) whole. Its last word made "et et al." of a
+    // society listed as "Société française d'anesthésie et".
     let name = first
-        .family
-        .clone()
-        .or_else(|| {
-            let literal = first.literal.as_deref()?;
-            literal.split_whitespace().last().map(str::to_owned)
-        })
+        .parts()
+        .map(|(family, _)| family)
         .or_else(|| first.display_name())
         .unwrap_or_default();
     if w.authors.len() > 1 {
@@ -270,6 +268,19 @@ pub fn first_author(w: &Work) -> String {
     } else {
         name
     }
+}
+
+/// 4300 → "4,300".
+pub fn thousands(n: u64) -> String {
+    let digits = n.to_string();
+    let mut out = String::new();
+    for (i, c) in digits.chars().enumerate() {
+        if i > 0 && (digits.len() - i).is_multiple_of(3) {
+            out.push(',');
+        }
+        out.push(c);
+    }
+    out
 }
 
 pub fn year(w: &Work) -> String {
@@ -393,5 +404,26 @@ mod tests {
             work_text(&record(), "  "),
             "  Deep learning\n  Yann LeCun, Yoshua Bengio, Geoffrey Hinton, et al. · 2015 · Nature · article-journal\n  doi:10.1038/nature14539"
         );
+    }
+
+    #[test]
+    fn first_authors_are_family_names_or_whole_organisations() {
+        let first = |names: &[&str]| {
+            let mut w = Work::default();
+            w.authors = names.iter().map(|n| Person::literal(*n)).collect();
+            first_author(&w)
+        };
+        assert_eq!(first(&["Yann LeCun", "Yoshua Bengio"]), "LeCun et al.");
+        assert_eq!(first(&["Vincent van Gogh"]), "van Gogh");
+        // Not "et et al." (W894996489, 2015).
+        assert_eq!(
+            first(&[
+                "Société française d’anesthésie et de réanimation",
+                "Société française de médecine d’urgence"
+            ]),
+            "Société française d’anesthésie et de réanimation et al."
+        );
+        assert_eq!(first(&["S. C. S"]), "S. C. S");
+        assert_eq!(first(&[]), "");
     }
 }

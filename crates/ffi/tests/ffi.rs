@@ -459,8 +459,8 @@ fn the_first_searching_source_is_the_one_search_picks() {
         [
             "openalex",
             "crossref",
-            "datacite",
             "europepmc",
+            "datacite",
             "openlibrary"
         ]
     );
@@ -569,12 +569,15 @@ fn search_supports_says_why_and_search_fails_the_same_way() {
     let reason = "OpenAlex can't combine title and author with any";
     assert_eq!(
         aspero
-            .search_supports(None, across.clone(), None)
+            .search_supports(at("openalex"), across.clone(), None)
             .as_deref(),
         Some(reason)
     );
+    // Without a source, any that can: Europe PMC can.
+    assert_eq!(aspero.search_supports(None, across.clone(), None), None);
     let request = SearchRequest {
         query: Some(across),
+        source: at("openalex"),
         ..search_request("")
     };
     let failure = block_on(aspero.search(request, Patience::Offline, None))
@@ -684,10 +687,17 @@ fn identifiers_search_where_their_kind_is_taken() {
         nodes: vec![id("10.1038/nature14539"), id("pmid:26017442")],
     };
     assert_eq!(
-        aspero.search_supports(None, kinds.clone(), None).as_deref(),
+        aspero
+            .search_supports(at("openalex"), kinds.clone(), None)
+            .as_deref(),
         Some("OpenAlex can't combine DOI and PMID with any, only identifiers of one kind")
     );
-    assert_eq!(aspero.search_supports(at("europepmc"), kinds, None), None);
+    assert_eq!(
+        aspero.search_supports(at("europepmc"), kinds.clone(), None),
+        None
+    );
+    // Without a source, any that can: Europe PMC.
+    assert_eq!(aspero.search_supports(None, kinds, None), None);
     // Not an identifier: the caller's to fix.
     let reason =
         r#"can't search by identifier "nature14539": unrecognised identifier "nature14539""#;
@@ -713,7 +723,7 @@ fn since_picks_a_source_that_can_and_one_that_cant_says_why() {
         .filter(|s| s.filters.contains(&SearchFilter::Since))
         .map(|s| s.source)
         .collect();
-    assert_eq!(dated, ["crossref", "datacite", "europepmc"]);
+    assert_eq!(dated, ["crossref", "europepmc", "datacite"]);
 
     // Without a source, the first that can: Crossref, not OpenAlex.
     let keywords = term(SearchField::Keywords, "sepsis");

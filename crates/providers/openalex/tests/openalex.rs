@@ -5,7 +5,7 @@ use std::time::Duration;
 
 use aspero_core::testing::{FIXTURE_TIME, ReplayClient, block_on, fixture, response};
 use aspero_core::{
-    Error, FieldSet, FilterValue, HttpResponse, Page, Place, Provider, QueryNode, Relation,
+    Cursor, Error, FieldSet, FilterValue, HttpResponse, Page, Place, Provider, QueryNode, Relation,
     SearchQuery, Sort, SourceRecord, TermField, WorkId, WorkType, YearRange,
 };
 use aspero_openalex::{OpenAlex, OpenAlexConfig};
@@ -575,6 +575,29 @@ fn plain_429_is_rate_limited_with_retry_after() {
     assert!(
         matches!(err, Error::RateLimited { retry_after: Some(d) } if d == Duration::from_secs(2))
     );
+}
+
+/// Without a key, OpenAlex refuses a cursor past the first page (seen
+/// 2026-11-14). No key was rejected, so it's no `AuthRejected`, which
+/// would stop the engine asking OpenAlex anything else.
+#[test]
+fn without_a_key_paging_on_is_unsupported_not_a_rejected_key() {
+    let body = r#"{"error":"Authentication required","message":"Paging past the first page with cursor= needs a free API key."}"#;
+    let (oa, _) = provider_with(None, [response(401, &[], body)]);
+    assert_eq!(oa.capabilities().max_pages, 1);
+    let mut q = SearchQuery::new("x");
+    q.page.cursor = Some(Cursor("IlsxMDBd".into()));
+    match block_on(oa.search(&q)) {
+        Err(Error::UnsupportedQuery(m)) => {
+            assert!(
+                m.starts_with("OpenAlex needs an API key for this: Paging past"),
+                "{m}"
+            )
+        }
+        other => panic!("{other:?}"),
+    }
+    let (keyed, _) = provider([]);
+    assert_eq!(keyed.capabilities().max_pages, 0, "no limit with a key");
 }
 
 #[test]

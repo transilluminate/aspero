@@ -466,11 +466,13 @@ impl Aspero {
         .await
     }
 
-    /// Whether `source` (or, without one, the source `search` picks) can
-    /// search by `query`, and with `since` (as `SearchRequest.since`),
-    /// only works added since that day: `nil` if so, otherwise why, in
-    /// English ("OpenAlex can't combine title and author with any",
-    /// "OpenAlex can't search by date added (it needs a paid plan)").
+    /// Whether `source` (or, without one, any source: `search` then picks
+    /// the first that can) can search by `query`, and with `since` (as
+    /// `SearchRequest.since`), only works added since that day: `nil` if
+    /// so, otherwise why, in English ("OpenAlex can't combine title and
+    /// author with any", "OpenAlex can't search by date added (it needs a
+    /// paid plan)"; without a source, the first's reason, ", and no other
+    /// source can").
     /// Offline and instant. Searching anyway fails as `unsupported` with
     /// the same reason, or as `badRequest` for a value that can't be valid
     /// (an author id that's neither an ORCID nor an OpenAlex id, an unknown

@@ -1,5 +1,70 @@
 # Changelog
 
+## Unreleased
+
+Fixes from a discovery session (IV morphine titration in the ED).
+
+Changed:
+
+- A bare `aspero` prints an overview: the commands by purpose (check, find,
+  explore), examples, and where to read more. `-h` keeps to everyday
+  options; `--help` has every option, exit codes and environment.
+- Searches prefer Europe PMC to DataCite, when no source is named: a
+  search OpenAlex can't say goes to the first that can (`searchCapabilities`
+  lists them in that order: OpenAlex, Crossref, Europe PMC, DataCite, Open
+  Library).
+- A search without a source goes to the first source, in order of
+  preference, that can search the whole query (tree, `since`, fields,
+  sort), not to the first that searches at all; if none can, the first's
+  reason fails, ", and no other source can" (`UnsupportedQuery`, still
+  kind `unsupported`). `Engine::search_supports` (FFI `searchSupports`,
+  MCP `search_supports`) without a source now says whether any source
+  can, not whether the default could; with a source, nothing changes.
+  The app asks with an explicit source for saved searches, so they are
+  unaffected.
+- Related works weigh each citing work's co-citation by 1/√ of its
+  reference count, so works listing hundreds (a handbook's 26 chapter
+  records, each with ~970 references) no longer make everything they
+  cite "related"; `co_cited_with` still counts citing works.
+- `Incomplete` (engine) is no longer `Copy`; it gains `stage` (`Stage`:
+  citing, coupling, lookup) and `provider`, and JSON `incomplete` adds
+  `stage` and `provider` when known. Related works' `done` and `total`
+  count the stage that stopped (citing works, coupling pages, works
+  looked up), never every citing work read for a failed lookup. The FFI's
+  `Incomplete` is unchanged.
+- The CLI shows warnings without `-v` (a failed analysis step and why),
+  but not each failed request.
+- `analyse --format jsonl` prints a line per seed and finding, tagged
+  with its `section`, then a `summary` line, instead of one line.
+- Search tables show a Cited column when works carry `cited_by_count`,
+  and Score only when some hit has one.
+- `analyse --kinds` is documented as comma-separated
+  (`--kinds related,probably-missing`); an input naming an analysis is a
+  usage error saying so.
+- `aspero budget` without a key looks one work up (free, past the cache)
+  and shows the budget from its headers, "(no key)"; JSON adds
+  `"key": false`. The FFI's `refreshBudgets` still asks nothing without
+  a key.
+
+Fixed:
+
+- Without a key, OpenAlex refuses a cursor past the first page (HTTP 401
+  "needs a free API key"). That counted as a rejected key, which stops
+  the engine asking OpenAlex anything, so related works failed their
+  coupling page and their lookup (`provider_failed`, done = total, works
+  with ids only). Keyless 401/403s are `UnsupportedQuery` now, and
+  related works read only first pages without a key (`Capabilities`
+  gains `max_pages`).
+- Authors: OpenAlex organisation names cut short ("Société française
+  d'anesthésie et") give way to the name as printed; "et al." entries
+  are dropped; a one-letter family name (OpenAlex's "S. C. S") isn't
+  split off; the CLI's first author is a family name or an
+  organisation's whole name, not its last word ("et et al.").
+
+Swift bindings: doc comments of `searchSupports` and
+`RelatedWork.score` only (`searchSupports`'s checksum changes with its
+comment); no shapes changed.
+
 ## 0.17.0
 
 Added:

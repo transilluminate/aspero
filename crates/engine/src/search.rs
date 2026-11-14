@@ -22,38 +22,63 @@ pub struct SearchReport {
     pub served: Served,
 }
 
+/// The built-in sources in the order searches prefer them, when no source
+/// is named: before any other provider, in their own (lookup) order.
+const SEARCH_ORDER: &[&str] = &[
+    "openalex",
+    "crossref",
+    "europepmc",
+    "datacite",
+    "openlibrary",
+];
+
 impl Engine {
     /// Providers that search by keywords, in the order [`search`](Self::search)
     /// picks from: without a `source`, the first.
     pub fn search_providers(&self) -> impl Iterator<Item = &Arc<dyn Provider>> {
-        self.providers().filter(|p| p.capabilities().search)
+        let mut searching: Vec<&Arc<dyn Provider>> = self
+            .providers()
+            .filter(|p| p.capabilities().search)
+            .collect();
+        // For searching, the broad indexes first, then Europe PMC (for
+        // medicine and life sciences) ahead of DataCite (mostly datasets
+        // and repositories); other providers keep their order, after.
+        searching.sort_by_key(|p| {
+            SEARCH_ORDER
+                .iter()
+                .position(|name| *name == p.id().as_str())
+                .unwrap_or(SEARCH_ORDER.len())
+        });
+        searching.into_iter()
     }
 
-    /// Whether `source` (or, without one, the provider [`search`](Self::search)
-    /// would pick) can search by `tree`: `None` if so, otherwise why, in
-    /// English. Offline and instant; searching anyway fails with the same
-    /// reason. Relations' works aren't looked up, so one that doesn't exist
-    /// fails only when searched.
+    /// Whether `source` can search by `tree` or, without one, any source
+    /// can ([`search`](Self::search) then picks the first that can):
+    /// `None` if so, otherwise why, in English (without a source, the
+    /// first searching provider's reason, "and no other source can").
+    /// Offline and instant; searching anyway fails with the same reason.
+    /// Relations' works aren't looked up, so one that doesn't exist fails
+    /// only when searched.
     pub fn search_supports(&self, source: Option<&str>, tree: &QueryNode) -> Option<String> {
         self.search_supports_since(source, tree, None)
     }
 
     /// [`search_supports`](Self::search_supports) for a search that also
-    /// asks for only works added since a date
-    /// ([`SearchQuery::since`]): without a `source`, the provider
-    /// [`search`](Self::search) would pick for it.
+    /// asks for only works added since a date ([`SearchQuery::since`]).
     pub fn search_supports_since(
         &self,
         source: Option<&str>,
         tree: &QueryNode,
         since: Option<Date>,
     ) -> Option<String> {
-        let result = self
-            .search_entry(source, false, since.is_some())
-            .and_then(|entry| {
-                check_since(entry, since)?;
-                self.prepare_tree(entry, tree.clone(), None)
-            });
+        let can = |entry: &Entry| {
+            check_since(entry, since)?;
+            self.prepare_tree(entry, tree.clone(), None)
+        };
+        let result = match source {
+            Some(name) => self.named_entry(name).and_then(can),
+            None => self.first_that_can(false, can).map(|(_, tree)| tree),
+        };
         match result {
             Ok(Some(_)) => None,
             Ok(None) => Some(EngineError::NothingToSearch.to_string()),
@@ -65,13 +90,14 @@ impl Engine {
         }
     }
 
-    /// Searches one provider: `source` if given, otherwise the first that
-    /// supports the query's mode (and [`SearchQuery::since`], if set).
-    /// Fields and sorts it lacks fail with [`Error::Unsupported`]; other
-    /// filters it lacks are ignored, but for `since`. A query tree it
-    /// can't say, or a `since` it can't apply, fails with
-    /// [`Error::UnsupportedQuery`], as
-    /// [`search_supports`](Self::search_supports) tells.
+    /// Searches one provider: `source` if given, otherwise the first (in
+    /// order of preference) that can search the whole query: its mode, tree,
+    /// [`SearchQuery::since`], fields and sort. Fields and sorts it lacks
+    /// fail with [`Error::Unsupported`]; other filters it lacks are
+    /// ignored, but for `since`. A query tree it can't say, or a `since` it
+    /// can't apply, fails with [`Error::UnsupportedQuery`], as
+    /// [`search_supports`](Self::search_supports) tells. Without a source,
+    /// when none can, the first's reason fails, "and no other source can".
     pub async fn search(
         &self,
         source: Option<&str>,
@@ -102,79 +128,18 @@ impl Engine {
             // parameters (an OpenAlex `filter` alone): something to find.
             return Err(EngineError::NothingToSearch);
         }
-        let entry = self.search_entry(source, citation, query.since.is_some())?;
-        let provider = entry.provider.id();
-        let caps = entry.provider.capabilities();
-        let refuse = |what| EngineError::Provider {
-            provider: provider.clone(),
-            error: Error::Unsupported(what),
+        let plan = |entry: &Entry| self.plan_search(entry, query);
+        let (entry, (mut sent, ignored_filters)) = match source {
+            Some(name) => {
+                let entry = self.named_entry(name)?;
+                (entry, plan(entry)?)
+            }
+            None => self.first_that_can(citation, plan)?,
         };
-        if !caps.search {
-            return Err(refuse("search"));
-        }
-        if citation && !caps.citation_search {
-            return Err(refuse("citation search"));
-        }
-        // Never ignored: a watch would see old works as new.
-        check_since(entry, query.since)?;
-
-        let (missing_fields, ignored_filters): (Vec<Filter>, Vec<Filter>) = query
-            .filters()
-            .into_iter()
-            .filter(|f| !caps.search_filters.contains(f))
-            .partition(|f| f.is_field());
-        if let Some(field) = missing_fields.first() {
-            return Err(refuse(match field {
-                Filter::Author => "search by author",
-                Filter::Title => "search by title",
-                _ => "search by container",
-            }));
-        }
-        if query.sort != Sort::Relevance && !caps.sorts.contains(&query.sort) {
-            return Err(refuse(match query.sort {
-                Sort::Newest => "sorting newest first",
-                _ => "sorting most cited first",
-            }));
-        }
-        let mut sent = query.clone();
-        for filter in &ignored_filters {
-            match filter {
-                Filter::Years => sent.years = None,
-                Filter::WorkType => sent.work_type = None,
-                Filter::OpenAccess => sent.open_access = None,
-                Filter::Place => sent.place = None,
-                _ => {}
-            }
-        }
-        // Newest first, records dated ahead (deposits, issues printed early,
-        // typos like 2115) would lead: unless the caller says otherwise,
-        // newest means up to this year.
-        let cap = (sent.sort == Sort::Newest && caps.search_filters.contains(&Filter::Years))
-            .then(|| (self.clock)().to_zoned(jiff::tz::TimeZone::UTC).year());
+        let provider = entry.provider.id();
         let mut lookup_usage = Vec::new();
-        if let Some(tree) = sent.tree.take() {
-            // The request's own filters join the tree, as more of all of it.
-            let filters = [
-                sent.years.take().map(FilterValue::Years),
-                sent.work_type.take().map(FilterValue::WorkType),
-                sent.open_access.take().map(FilterValue::OpenAccess),
-            ];
-            let mut all = vec![tree];
-            all.extend(filters.into_iter().flatten().map(QueryNode::Filter));
-            match self.prepare_tree(entry, QueryNode::All(all), cap)? {
-                Some(mut tree) => {
-                    lookup_usage = self.resolve_relations(&mut tree).await?;
-                    sent.tree = Some(tree);
-                }
-                None if sent.extra.is_empty() => return Err(EngineError::NothingToSearch),
-                None => {}
-            }
-        } else if let Some(year) = cap
-            && sent.years.is_none_or(|y| y.to.is_none())
-        {
-            let mut years = sent.years.unwrap_or_default();
-            years.to = Some(year);
-            sent.years = Some(years);
+        if let Some(tree) = &mut sent.tree {
+            lookup_usage = self.resolve_relations(tree).await?;
         }
         let lookup_usage = lookup_usage
             .into_iter()
@@ -224,42 +189,146 @@ impl Engine {
         }
     }
 
-    /// The provider named `source`, or the first that searches (by citation,
-    /// and by date added, if asked).
-    fn search_entry(
-        &self,
-        source: Option<&str>,
-        citation: bool,
-        since: bool,
-    ) -> Result<&Entry, EngineError> {
-        match source {
-            Some(name) => match self
-                .entries
-                .iter()
-                .find(|e| e.provider.id().as_str() == name)
-            {
-                Some(entry) => Ok(entry),
-                None => Err(match self.disabled.iter().find(|p| p.as_str() == name) {
-                    Some(off) => EngineError::Disabled(off.clone()),
-                    None => EngineError::UnknownProvider(name.to_owned()),
-                }),
-            },
-            None => self
-                .entries
-                .iter()
-                .find(|e| {
-                    let caps = e.provider.capabilities();
-                    caps.search
-                        && (!citation || caps.citation_search)
-                        && (!since || caps.search_filters.contains(&Filter::Since))
-                })
-                .ok_or(EngineError::NoCapableProvider(match (citation, since) {
-                    (true, false) => "citation search",
-                    (true, true) => "citation search by date added",
-                    (false, true) => "search by date added",
-                    (false, false) => "search",
-                })),
+    /// The provider named `name`.
+    fn named_entry(&self, name: &str) -> Result<&Entry, EngineError> {
+        match self
+            .entries
+            .iter()
+            .find(|e| e.provider.id().as_str() == name)
+        {
+            Some(entry) => Ok(entry),
+            None => Err(match self.disabled.iter().find(|p| p.as_str() == name) {
+                Some(off) => EngineError::Disabled(off.clone()),
+                None => EngineError::UnknownProvider(name.to_owned()),
+            }),
         }
+    }
+
+    /// The first searching provider (by citation, if asked), in order of
+    /// preference, that `can` search: what it says, with it. A provider
+    /// that can't say the query (`Unsupported`, `UnsupportedQuery`) passes
+    /// to the next; if none can, the first one's reason fails, "and no
+    /// other source can". Any other error (a bad query) fails at once.
+    fn first_that_can<T>(
+        &self,
+        citation: bool,
+        can: impl Fn(&Entry) -> Result<T, EngineError>,
+    ) -> Result<(&Entry, T), EngineError> {
+        let mut first: Option<(ProviderId, String)> = None;
+        let searching = self.entries.iter().filter(|e| {
+            let caps = e.provider.capabilities();
+            caps.search && (!citation || caps.citation_search)
+        });
+        for entry in searching {
+            match can(entry) {
+                Ok(t) => return Ok((entry, t)),
+                Err(EngineError::Provider {
+                    provider,
+                    error: Error::UnsupportedQuery(reason),
+                }) => {
+                    first.get_or_insert((provider, reason));
+                }
+                Err(EngineError::Provider {
+                    provider,
+                    error: Error::Unsupported(what),
+                }) => {
+                    first.get_or_insert((provider, what.to_owned()));
+                }
+                Err(e) => return Err(e),
+            }
+        }
+        match first {
+            Some((provider, reason)) => Err(EngineError::Provider {
+                provider,
+                error: Error::UnsupportedQuery(format!("{reason}, and no other source can")),
+            }),
+            None => Err(EngineError::NoCapableProvider(match citation {
+                true => "citation search",
+                false => "search",
+            })),
+        }
+    }
+
+    /// What `entry` would be sent for `query`, with the filters it can't
+    /// apply (stripped): or why it can't search it. Fields and sorts it
+    /// lacks, a tree it can't say, a `since` it can't apply fail; the
+    /// request's filters join a tree as more of all of it; newest first
+    /// stops at this year (see [`cap_years`]). No calls.
+    fn plan_search(
+        &self,
+        entry: &Entry,
+        query: &SearchQuery,
+    ) -> Result<(SearchQuery, Vec<Filter>), EngineError> {
+        let provider = entry.provider.id();
+        let caps = entry.provider.capabilities();
+        let refuse = |what| EngineError::Provider {
+            provider: provider.clone(),
+            error: Error::Unsupported(what),
+        };
+        if !caps.search {
+            return Err(refuse("search"));
+        }
+        if query.mode == SearchMode::Citation && !caps.citation_search {
+            return Err(refuse("citation search"));
+        }
+        // Never ignored: a watch would see old works as new.
+        check_since(entry, query.since)?;
+
+        let (missing_fields, ignored_filters): (Vec<Filter>, Vec<Filter>) = query
+            .filters()
+            .into_iter()
+            .filter(|f| !caps.search_filters.contains(f))
+            .partition(|f| f.is_field());
+        if let Some(field) = missing_fields.first() {
+            return Err(refuse(match field {
+                Filter::Author => "search by author",
+                Filter::Title => "search by title",
+                _ => "search by container",
+            }));
+        }
+        if query.sort != Sort::Relevance && !caps.sorts.contains(&query.sort) {
+            return Err(refuse(match query.sort {
+                Sort::Newest => "sorting newest first",
+                _ => "sorting most cited first",
+            }));
+        }
+        let mut sent = query.clone();
+        for filter in &ignored_filters {
+            match filter {
+                Filter::Years => sent.years = None,
+                Filter::WorkType => sent.work_type = None,
+                Filter::OpenAccess => sent.open_access = None,
+                Filter::Place => sent.place = None,
+                _ => {}
+            }
+        }
+        // Newest first, records dated ahead (deposits, issues printed early,
+        // typos like 2115) would lead: unless the caller says otherwise,
+        // newest means up to this year.
+        let cap = (sent.sort == Sort::Newest && caps.search_filters.contains(&Filter::Years))
+            .then(|| (self.clock)().to_zoned(jiff::tz::TimeZone::UTC).year());
+        if let Some(tree) = sent.tree.take() {
+            // The request's own filters join the tree, as more of all of it.
+            let filters = [
+                sent.years.take().map(FilterValue::Years),
+                sent.work_type.take().map(FilterValue::WorkType),
+                sent.open_access.take().map(FilterValue::OpenAccess),
+            ];
+            let mut all = vec![tree];
+            all.extend(filters.into_iter().flatten().map(QueryNode::Filter));
+            match self.prepare_tree(entry, QueryNode::All(all), cap)? {
+                Some(tree) => sent.tree = Some(tree),
+                None if sent.extra.is_empty() => return Err(EngineError::NothingToSearch),
+                None => {}
+            }
+        } else if let Some(year) = cap
+            && sent.years.is_none_or(|y| y.to.is_none())
+        {
+            let mut years = sent.years.unwrap_or_default();
+            years.to = Some(year);
+            sent.years = Some(years);
+        }
+        Ok((sent, ignored_filters))
     }
 
     /// A tree as `entry` will search it: normalised, its leaves checked,

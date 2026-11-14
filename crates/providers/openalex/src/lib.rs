@@ -101,6 +101,11 @@ impl OpenAlex {
         capabilities.budget_status = config.api_key.is_some();
         // The singleton endpoint is free; batches are list calls.
         capabilities.max_free_batch = 1;
+        // Without a key, a cursor past the first page is refused (401,
+        // "needs a free API key", checked 2026-11-14).
+        if config.api_key.is_none() {
+            capabilities.max_pages = 1;
+        }
         OpenAlex {
             config,
             http,
@@ -167,7 +172,7 @@ impl OpenAlex {
     /// with a success; a spent quota's reset time comes in its error.
     async fn send(&self, url: String) -> Result<(HttpResponse, Usage)> {
         let resp = self.http.send(self.request(url)).await?;
-        http::check(&resp)?;
+        http::check(&resp, self.config.api_key.is_some())?;
         let usage = http::usage(&resp);
         Ok((resp, usage))
     }
@@ -517,7 +522,7 @@ impl Provider for OpenAlex {
         }
         let url = format!("{}/rate-limit", self.config.base_url.trim_end_matches('/'));
         let resp = self.http.send(self.request(url)).await?;
-        http::check(&resp)?;
+        http::check(&resp, self.config.api_key.is_some())?;
         http::rate_limit(&resp)
     }
 

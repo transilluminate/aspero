@@ -17,6 +17,21 @@ Fixed:
 - `read` carries the journal read from free text (`container`).
 - APA references without an issue ("Journal Name, 146, 106274.") give
   their volume and page.
+- One work shows the same cited-by count, open access and date whichever
+  source's record won the merge (#81). Open access is the more
+  informative (a free copy with a PDF over `is_oa: false`); between
+  records of one version (a shared DOI or PMID), the cited-by count is
+  OpenAlex's when one has it, else the larger, and `issued` the earliest
+  date (online first), the more precise of dates that overlap, with the
+  other year kept in `other_years`. `verify` now agrees with `lookup`,
+  which asks OpenAlex first.
+
+Changed:
+
+- Search hits, and a candidate's `found_by` sightings, leave `score` out
+  when the source gives none (OpenAlex sorted by citations), rather than
+  `null` (#81). The MCP `search` output schema's `score` is a number, and
+  optional, as before.
 
 ## 0.19.0
 

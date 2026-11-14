@@ -26,12 +26,17 @@ required-features = ["bindgen"]
 [features]
 # The bindings generator: `cargo run -p aspero-ffi --features bindgen --bin uniffi-bindgen`.
 bindgen = ["uniffi/cli"]
+# An MCP server over Streamable HTTP on loopback, with the app's own tools
+# (`McpServer`, `McpHost`): the xcframework build enables it.
+mcp = ["dep:aspero-mcp", "dep:async-trait"]
 
 [dependencies]
 aspero-bib = { workspace = true, features = ["docx", "styles"] }
 aspero-core.workspace = true
 aspero-engine.workspace = true
 aspero-json.workspace = true
+aspero-mcp = { workspace = true, features = ["http"], optional = true }
+async-trait = { workspace = true, optional = true }
 futures.workspace = true
 jiff.workspace = true
 serde_json.workspace = true
@@ -40,8 +45,15 @@ tokio = { workspace = true, features = ["rt-multi-thread", "sync", "macros"] }
 uniffi = "0.32.2"
 
 [dev-dependencies]
+async-trait.workspace = true
+reqwest = { workspace = true }
+serde_json.workspace = true
 tokio = { workspace = true, features = ["rt"] }
 zip = { workspace = true }
+
+[[test]]
+name = "mcp"
+required-features = ["mcp"]
 
 # Not a dist app: the xcframework workflow ships it.
 [package.metadata.dist]

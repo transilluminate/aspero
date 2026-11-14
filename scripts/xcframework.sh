@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Builds aspero-ffi for macOS apps: AsperoFFI.xcframework (a static
 # library) and its Swift bindings, zipped for a Swift package's
-# binaryTarget.
+# binaryTarget. With the `mcp` feature: the app's MCP server
+# (`McpServer`, `McpHost`).
 #
 # Usage: scripts/xcframework.sh    (needs Xcode; output in target/xcframework)
 #   MACOSX_DEPLOYMENT_TARGET  oldest macOS supported (default 26.0); also
@@ -18,7 +19,7 @@ cd "$root"
 
 rustup target add "${targets[@]}" >/dev/null
 for t in "${targets[@]}"; do
-    cargo build -q -p aspero-ffi --release --lib --target "$t"
+    cargo build -q -p aspero-ffi --release --lib --features mcp --target "$t"
 done
 
 rm -rf "$out"

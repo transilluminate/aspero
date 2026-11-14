@@ -35,6 +35,46 @@ first two, --cache-max-mb limits the size) and
 served stale if a provider fails; JSON marks them \"served\": \"cache\"/\"stale\".
 --fresh asks the providers past the cache, and caches their answers.";
 
+/// What a bare `aspero` prints: the commands by purpose, a few examples,
+/// and where to read more. `-h` and `--help` go further.
+pub const OVERVIEW: &str = concat!(
+    "aspero ",
+    env!("CARGO_PKG_VERSION"),
+    ": find and check scholarly references
+
+Check
+  verify <citation>     is this reference real, and are its details right?
+  check <file>          every entry of a .bib, .ris or CSL-JSON file, or Word document
+
+Find
+  lookup <id>...        works by DOI, PMID, PMCID, arXiv, ISBN or OpenAlex ID
+  search <keywords>     one source, by keywords, --author/--title/--journal or --query
+  identify <file>       which paper a PDF's first page is
+
+Explore
+  references <id>       the works a work cites
+  analyse <ids|file>    a set's retracted references, odd ones out, probably
+                        missing works, and related works
+
+Also
+  scan <files>          the identifiers mentioned in documents
+  styles, budget, cache, mcp
+
+Examples
+  aspero verify \"LeCun Y, Bengio Y, Hinton G. Deep learning. Nature 2015;521:436-44.\"
+  aspero search \"sepsis fluid resuscitation\" --sort most-cited
+  aspero check refs.bib
+  aspero analyse refs.bib --kinds related,probably-missing
+
+A table on a terminal, JSON when piped. More: aspero <command> --help;
+every option, exit codes and environment: aspero --help
+"
+);
+
+/// Below `-h`: where the rest is.
+const MORE: &str = "\
+More: aspero <command> --help. Every option, exit codes and environment: aspero --help";
+
 #[derive(Debug, Parser)]
 #[command(
     name = "aspero",
@@ -42,7 +82,8 @@ served stale if a provider fails; JSON marks them \"served\": \"cache\"/\"stale\
     about = "Find, resolve and verify scholarly literature",
     long_about = "Find, resolve and verify scholarly literature via OpenAlex and Crossref.\n\n\
         Output is JSON when stdout is not a terminal, so agents can pipe it.",
-    after_help = EXIT_CODES,
+    after_help = MORE,
+    after_long_help = EXIT_CODES,
 )]
 pub struct Cli {
     #[command(flatten)]
@@ -66,19 +107,24 @@ pub struct Global {
     /// Log each provider request, cache hit and retry to stderr, timed from
     /// start, so concurrency and pacing are visible. `-vv` adds the HTTP
     /// stack's own debug output.
-    #[arg(short, long, global = true, action = clap::ArgAction::Count)]
+    #[arg(short, long, global = true, action = clap::ArgAction::Count, hide_short_help = true)]
     pub verbose: u8,
 
     /// Don't read or write the answer cache (its file still paces requests
     /// shared with other aspero processes).
-    #[arg(long, global = true)]
+    #[arg(long, global = true, help_heading = "Cache", hide_short_help = true)]
     pub no_cache: bool,
 
     /// Ask the providers again, past the cache, and cache their answers:
     /// for checking again before submitting. Where a provider fails, its
     /// cached answer is served, marked stale. Not with `--no-cache` (which
     /// neither reads nor writes the cache).
-    #[arg(long, global = true, conflicts_with = "no_cache")]
+    #[arg(
+        long,
+        global = true,
+        conflicts_with = "no_cache",
+        help_heading = "Cache"
+    )]
     pub fresh: bool,
 
     /// Include abstracts, looked up at other providers when the first one
@@ -94,7 +140,7 @@ pub struct Global {
 
     /// The language of a style's terms ("et al."): `en-US` or `en-GB`. By
     /// default, the style's own.
-    #[arg(long, global = true)]
+    #[arg(long, global = true, hide_short_help = true)]
     pub locale: Option<String>,
 
     /// Stop OpenAlex's paid calls (searches, batch lookups) once today's
@@ -102,7 +148,15 @@ pub struct Global {
     /// using it), reaches this many USD, until midnight UTC. Lookups (free)
     /// go on, checks fall back to the free sources, and a search that needs
     /// OpenAlex fails (exit 5). `aspero budget` shows today's use.
-    #[arg(long, global = true, value_name = "USD", env = "ASPERO_OPENALEX_CAP", value_parser = cap)]
+    #[arg(
+        long,
+        global = true,
+        value_name = "USD",
+        env = "ASPERO_OPENALEX_CAP",
+        value_parser = cap,
+        help_heading = "Sources and budget",
+        hide_short_help = true
+    )]
     pub openalex_cap: Option<f64>,
 
     /// Sources never to ask, for lookups, checks or searches: openalex,
@@ -113,7 +167,9 @@ pub struct Global {
         global = true,
         value_name = "SOURCES",
         env = "ASPERO_DISABLED_SOURCES",
-        value_delimiter = ','
+        value_delimiter = ',',
+        help_heading = "Sources and budget",
+        hide_short_help = true
     )]
     pub without: Vec<String>,
 
@@ -124,7 +180,9 @@ pub struct Global {
         global = true,
         value_name = "DAYS",
         env = "ASPERO_CACHE_FOUND_DAYS",
-        default_value_t = 7
+        default_value_t = 7,
+        help_heading = "Cache",
+        hide_short_help = true
     )]
     pub cache_found_days: u32,
 
@@ -134,13 +192,23 @@ pub struct Global {
         global = true,
         value_name = "DAYS",
         env = "ASPERO_CACHE_NOT_FOUND_DAYS",
-        default_value_t = 1
+        default_value_t = 1,
+        help_heading = "Cache",
+        hide_short_help = true
     )]
     pub cache_not_found_days: u32,
 
     /// Limit the cache to this many MB (1,000,000 bytes): past it, the least
     /// recently used answers go first. `aspero cache stats` shows its size.
-    #[arg(long, global = true, value_name = "MB", env = "ASPERO_CACHE_MAX_MB", value_parser = clap::value_parser!(u64).range(1..))]
+    #[arg(
+        long,
+        global = true,
+        value_name = "MB",
+        env = "ASPERO_CACHE_MAX_MB",
+        value_parser = clap::value_parser!(u64).range(1..),
+        help_heading = "Cache",
+        hide_short_help = true
+    )]
     pub cache_max_mb: Option<u64>,
 }
 
@@ -244,6 +312,7 @@ Examples:
   cat dois.txt | aspero lookup -        # one identifier per line
   aspero scan --format jsonl notes.md | aspero lookup -   # or JSON lines with an \"id\"
   aspero lookup --format jsonl W2919115771")]
+    #[command(display_order = 3)]
     Lookup {
         /// Identifiers; `-` (or none, when piped) reads one per line from stdin.
         ids: Vec<String>,
@@ -292,6 +361,7 @@ Examples:
   aspero search --query '{\"all\": [{\"id\": \"10.1038/nature14539\"}, {\"not_retracted\": true}]}'
   aspero search --source europepmc --query '{\"all\": [{\"any\": [{\"id\": \"pmid:26017442\"}, {\"id\": \"PMC7254481\"}]}, {\"years\": 2015}]}'
   aspero search sepsis --since 2026-11-01 --source europepmc")]
+    #[command(display_order = 4)]
     Search {
         /// Keywords; may be left out when --author, --title, --container or
         /// --query is given.
@@ -313,6 +383,7 @@ Use `verify` for a yes/no answer; `resolve` shows every candidate.
 Examples:
   aspero resolve \"LeCun Y, Bengio Y, Hinton G. Deep learning. Nature. 2015\"
   aspero resolve --title \"Attention is all you need\" --author Vaswani --year 2017")]
+    #[command(display_order = 8)]
     Resolve {
         #[command(flatten)]
         claim: ClaimArgs,
@@ -355,6 +426,7 @@ Examples:
   aspero verify --title \"Fibrinolysis for patients with intermediate-risk pulmonary embolism\" --journal \"N Engl J Med\" --volume 370 --page 1402
   aspero verify --format jsonl - < citations.jsonl
   pbpaste | aspero verify --split -")]
+    #[command(display_order = 1)]
     Verify {
         #[command(flatten)]
         claim: ClaimArgs,
@@ -382,6 +454,7 @@ Examples:
   aspero check paper.docx
   aspero check --fail-on warning --format json thesis.bib > report.json
   cat refs.bib | aspero check -")]
+    #[command(display_order = 2)]
     Check {
         /// The .bib file; `-` reads stdin.
         path: String,
@@ -410,6 +483,7 @@ References are cached for 30 days.
 Examples:
   aspero references 10.1038/nature14539
   aspero references W2919115771 --limit 100 --cursor 25")]
+    #[command(display_order = 6)]
     References {
         /// The work: a DOI, PMID, arXiv ID, OpenAlex ID, ….
         id: String,
@@ -486,6 +560,7 @@ Examples:
   aspero analyse refs.bib --kinds related --limit 10
   aspero analyse --budget 0.01 --limit 50 - < dois.txt"
     )]
+    #[command(display_order = 7)]
     Analyse {
         /// Identifiers, or one .bib/.ris/CSL-JSON file; `-` (or none, when
         /// piped) reads identifiers from stdin, one per line.
@@ -529,6 +604,7 @@ Examples:
   aspero scan notes/*.md
   aspero scan --format jsonl page.md | aspero lookup -    # results echo each mention as `from`
   pdftotext paper.pdf - | aspero scan -")]
+    #[command(display_order = 9)]
     Scan {
         /// Text or Markdown files; `-` (or none, when piped) reads stdin.
         files: Vec<std::path::PathBuf>,
@@ -551,6 +627,7 @@ to check) or title_search. Exits 3 when nothing is sure enough.
 Examples:
   pdftotext -l 1 paper.pdf - | aspero identify --title \"$(pdfinfo paper.pdf | sed -n 's/^Title: *//p')\"
   aspero identify page1.txt --title-hint 'Deep learning'")]
+    #[command(display_order = 5)]
     Identify {
         /// The first page as text; `-` (or none, when piped) reads stdin.
         file: Option<std::path::PathBuf>,
@@ -583,6 +660,7 @@ own usage and the session's spend so far.
 Same environment (keys and contact address, as the agent passes them on),
 cache and pacing as the other commands; -v logs requests to stderr. Exits
 when stdin closes.")]
+    #[command(display_order = 13)]
     Mcp {
         /// The most one session may spend, in USD.
         #[arg(long, value_name = "USD", default_value_t = aspero_mcp::DEFAULT_BUDGET_USD, value_parser = budget)]
@@ -604,9 +682,11 @@ one.
 Examples:
   aspero budget
   aspero budget --format json")]
+    #[command(display_order = 11)]
     Budget,
 
     /// Inspect or empty the answer cache.
+    #[command(display_order = 12)]
     Cache {
         #[command(subcommand)]
         action: CacheAction,
@@ -623,6 +703,7 @@ Examples:
   aspero lookup --style vancouver 10.1038/nature14539
   aspero verify --style apa --format cite - < citations.txt
   aspero lookup --style ~/styles/the-lancet.csl 10.1038/nature14539")]
+    #[command(display_order = 10)]
     Styles {
         /// Print the bundled styles' license and authors.
         #[arg(long)]

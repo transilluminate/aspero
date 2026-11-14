@@ -24,6 +24,11 @@ use crate::exit::Exit;
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> ExitCode {
     reset_sigpipe();
+    // A bare `aspero`: the overview, not clap's usage error.
+    if std::env::args_os().len() == 1 {
+        print!("{}", args::OVERVIEW);
+        return ExitCode::SUCCESS;
+    }
     let cli = Cli::parse();
     init_logging(cli.global.verbose);
     let format = match cli.global.format {

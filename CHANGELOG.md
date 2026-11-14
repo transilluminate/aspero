@@ -6,6 +6,9 @@ Fixes from a discovery session (IV morphine titration in the ED).
 
 Changed:
 
+- A bare `aspero` prints an overview: the commands by purpose (check, find,
+  explore), examples, and where to read more. `-h` keeps to everyday
+  options; `--help` has every option, exit codes and environment.
 - Searches prefer Europe PMC to DataCite, when no source is named: a
   search OpenAlex can't say goes to the first that can (`searchCapabilities`
   lists them in that order: OpenAlex, Crossref, Europe PMC, DataCite, Open

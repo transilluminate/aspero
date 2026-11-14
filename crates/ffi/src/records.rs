@@ -1174,6 +1174,10 @@ pub struct CacheStats {
     /// Remembered "not found" answers.
     pub misses: u64,
     pub searches: u64,
+    /// The cache's size on disk (its database pages; the write-ahead log
+    /// aside), as `Config.cacheMaxMb` limits it.
+    #[uniffi(default = 0)]
+    pub bytes: u64,
 }
 
 // Searching.

@@ -35,6 +35,18 @@ Added:
   fails as `unsupported`, "Europe PMC is turned off" (new
   `EngineError::Disabled`), as `searchSupports` says. An unknown name, or
   turning every source off, is a setup error.
+- The cache's trust and size (#74): how long found records and "not
+  found" answers are trusted (`StandardConfig::cache_policy`; FFI
+  `Config.cacheFoundDays` 7 and `cacheNotFoundDays` 1; CLI
+  `--cache-found-days`, `--cache-not-found-days`), and a size limit
+  (`SqliteCache::set_max_bytes`; FFI `Config.cacheMaxMb`; CLI
+  `--cache-max-mb`): past it, the least recently used records, "not
+  found" answers, searches and links go (never the pacing slots), and the
+  file shrinks. Cache stats gain `bytes` (FFI `CacheStats.bytes`; `aspero
+  cache stats` shows it, in MB of 1,000,000 bytes, beside any limit). Use
+  is tracked in a `used_at` column added to existing caches, which are
+  kept: no rebuild. New cache files use incremental vacuuming; older ones
+  convert the first time they're evicted from.
 
 ## 0.16.1
 

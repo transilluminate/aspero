@@ -415,7 +415,31 @@ Two SQLite stores, split by whether data can be refetched:
   asked again next time, and a verdict is worked out again from the
   cached answers. A cached record counts only if it covers the requested
   fields. Failed providers fall back to stale entries: any cached record,
-  however old, or search page; never an expired "not found".
+  however old, or search page; never an expired "not found". The first
+  two are settings (#74): `StandardConfig::cache_policy`, FFI
+  `Config.cache_found_days` / `cache_not_found_days` (defaults 7 and 1;
+  0 asks every time), CLI `--cache-found-days` / `--cache-not-found-days`
+  (and `ASPERO_CACHE_*`); the rest stay as they are.
+- **Size** (#74): `Stats::bytes` (FFI `CacheStats.bytes`, `aspero cache
+  stats`) is the database's `page_count × page_size`, the file on disk
+  once the WAL is checkpointed (SQLite does so every 4 MB or so; the WAL
+  isn't counted). `SqliteCache::set_max_bytes` (FFI `Config.cache_max_mb`,
+  CLI `--cache-max-mb`, MB of 1,000,000 bytes, at least 1) holds it under
+  a limit: after each write (two `PRAGMA` reads) and when set, a cache
+  over it loses its least recently used entries (records with their
+  identifiers, "not found" answers, search pages, links; never the
+  `pacing` slots) until the pages in use are under nine tenths of it,
+  oldest first by an estimate of each row's size, and the freed pages go
+  back to the file system: new files are made `auto_vacuum = INCREMENTAL`
+  and get `incremental_vacuum` (stepped to the end: rusqlite's
+  `execute_batch` steps once, freeing one page); a file made before (no
+  auto vacuum) is converted by one `VACUUM` the first time it's evicted
+  from. Use is tracked by a `used_at` column on those four tables, added
+  by `ALTER TABLE … ADD COLUMN` beside the versioned schema rather than a
+  `SCHEMA_VERSION` bump, so existing caches are kept and 0.16 shares the
+  file unharmed (its writes leave `used_at` empty, read as `stored_at`).
+  Writes set it; reads bump it only under a limit, and only when over an
+  hour old, so an unlimited cache's reads never write.
 - **Fresh** (`CallOptions::fresh`, CLI `--fresh`, FFI `Patience.fresh`),
   for checking again before submitting: no cached answer is served as it
   is, however recent (lookups, "not found", searches, and the `edges`

@@ -5,7 +5,7 @@ use std::sync::Arc;
 use aspero_core::{Error, HttpClient, ProviderId, ResiliencePolicy};
 
 use crate::transport::{Paced, ReqwestClient};
-use crate::{Cache, Engine, EngineBuilder, Pacing, SecretString};
+use crate::{Cache, CachePolicy, Engine, EngineBuilder, Pacing, SecretString};
 
 #[cfg(feature = "crossref")]
 pub use aspero_crossref::CrossrefConfig;
@@ -63,6 +63,8 @@ pub struct StandardConfig {
     pub mailto: Option<String>,
     /// Where provider answers are cached; `None` for no cache.
     pub cache: Option<Arc<dyn Cache>>,
+    /// How long cached answers are trusted.
+    pub cache_policy: CachePolicy,
     /// Request pacing shared with other processes (usually the cache
     /// file); `None` paces this process alone.
     pub pacing: Option<Arc<dyn Pacing>>,
@@ -233,6 +235,7 @@ pub fn standard(config: StandardConfig) -> Result<Engine, Error> {
     if let Some(cache) = config.cache {
         builder = builder.cache(cache);
     }
+    builder = builder.cache_policy(config.cache_policy);
     for id in config.disabled {
         builder = builder.disabled(id);
     }

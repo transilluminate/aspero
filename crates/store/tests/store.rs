@@ -31,6 +31,11 @@ fn record(ids: &[&str], title: &str) -> SourceRecord {
     )
 }
 
+fn counts(cache: &SqliteCache) -> [u64; 5] {
+    let s = cache.stats().unwrap();
+    [s.records, s.identifiers, s.misses, s.searches, s.edges]
+}
+
 fn get(
     cache: &SqliteCache,
     provider: &ProviderId,
@@ -176,7 +181,7 @@ fn a_cache_file_persists_and_clears() {
     let cache = SqliteCache::open(&path).unwrap();
     assert_eq!(cache.stats().unwrap().records, 1);
     cache.clear().unwrap();
-    assert_eq!(cache.stats().unwrap(), Default::default());
+    assert_eq!(counts(&cache), [0; 5]);
 }
 
 #[test]
@@ -196,7 +201,7 @@ fn a_cache_from_another_schema_version_is_rebuilt() {
         conn.pragma_update(None, "user_version", 99).unwrap();
     }
     let cache = SqliteCache::open(&path).unwrap();
-    assert_eq!(cache.stats().unwrap(), Default::default());
+    assert_eq!(counts(&cache), [0; 5]);
     cache
         .put_lookups(&OA, &[(&id("W1"), Some(&record(&["W1"], "new")))], at(0))
         .unwrap();

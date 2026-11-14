@@ -861,11 +861,38 @@ fn fields_alone_search_and_what_a_source_lacks_fails() {
 fn caches_report_and_clear() {
     let dir = std::env::temp_dir().join(format!("aspero-ffi-cache-{}", std::process::id()));
     let handle = aspero(Some(dir.display().to_string()));
-    assert_eq!(handle.cache_stats().unwrap().unwrap().records, 0);
+    let stats = handle.cache_stats().unwrap().unwrap();
+    assert_eq!(stats.records, 0);
+    assert!(stats.bytes > 0, "an empty cache's pages");
     handle.clear_cache().unwrap();
     assert!(aspero(None).cache_stats().unwrap().is_none());
     drop(handle);
     std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn a_cache_limit_is_at_least_a_megabyte() {
+    let dir = std::env::temp_dir().join(format!("aspero-ffi-limit-{}", std::process::id()));
+    let config = |mb| Config {
+        cache_dir: Some(dir.display().to_string()),
+        cache_max_mb: Some(mb),
+        ..Config::default()
+    };
+    assert!(matches!(Aspero::new(config(0)), Err(AsperoError::Setup(_))));
+    let handle = Aspero::new(config(200)).unwrap();
+    assert!(handle.cache_stats().unwrap().unwrap().bytes < 200_000_000);
+    drop(handle);
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn settings_default_as_before() {
+    let config = Config::default();
+    assert_eq!(config.cache_found_days, 7);
+    assert_eq!(config.cache_not_found_days, 1);
+    assert_eq!(config.cache_max_mb, None);
+    assert_eq!(config.openalex_daily_cap, None);
+    assert!(config.disabled_sources.is_empty());
 }
 
 fn all_sources_but(kept: &[&str]) -> Vec<String> {

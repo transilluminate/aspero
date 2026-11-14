@@ -42,8 +42,9 @@ Optional environment:
 | `OPENALEX_API_KEY` | Free OpenAlex key ($1/day budget; lookups free, searches $0.001) |
 | `ASPERO_MAILTO` | Your contact address, sent to polite API pools (Crossref) |
 | `ASPERO_CACHE_DIR` | Where to keep the answer cache |
-| `ASPERO_OPENALEX_CAP` | Stop OpenAlex's paid calls once today's use reaches this many USD (`--openalex-cap`) |
-| `ASPERO_DISABLED_SOURCES` | Sources never to ask, e.g. `europepmc,openlibrary` (`--without`) |
+
+More settings (a spending cap, sources to leave out, the cache's trust and
+size) are under [Settings](#settings).
 
 ## Use
 
@@ -152,6 +153,19 @@ and pacing are the other commands'.
   it was "not found") and caches the new answers; where a source fails,
   the cached answer is served, marked stale. `--no-cache` neither reads
   nor writes the cache.
+
+## Settings
+
+Each is a global flag, or its environment variable (the app sets them in
+its `Config`):
+
+| Flag (variable) | Effect |
+|---|---|
+| `--openalex-cap USD` (`ASPERO_OPENALEX_CAP`) | Stop OpenAlex's paid calls once today's use, as OpenAlex reports it for the key, reaches this; lookups (free) go on, checks fall back to the free sources, searches that need OpenAlex fail (exit 5). `aspero budget` shows today's use. |
+| `--without europepmc,openlibrary` (`ASPERO_DISABLED_SOURCES`) | Sources never to ask: `openalex`, `crossref`, `datacite`, `doi`, `europepmc`, `openlibrary`. |
+| `--cache-found-days N` (`ASPERO_CACHE_FOUND_DAYS`) | How long a found record is trusted (default 7). |
+| `--cache-not-found-days N` (`ASPERO_CACHE_NOT_FOUND_DAYS`) | How long a "not found" is trusted (default 1). |
+| `--cache-max-mb N` (`ASPERO_CACHE_MAX_MB`) | Limit the cache's size; the least recently used answers go first. `aspero cache stats` shows the size. |
 
 ## Library
 

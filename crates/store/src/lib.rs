@@ -4,8 +4,9 @@
 //! "not found" answers, search pages and citation links ([`Edges`]).
 //! Everything in it can be fetched again, so it lives in the platform cache
 //! directory (which the OS may wipe) and has no migrations: a schema
-//! mismatch simply rebuilds it. Tables added beside the versioned schema
-//! (`CREATE TABLE IF NOT EXISTS`, as the links are) need no rebuild.
+//! mismatch simply rebuilds it. Tables and columns added beside the
+//! versioned schema (`CREATE TABLE IF NOT EXISTS`, as the links are; `ALTER
+//! TABLE … ADD COLUMN`, as use tracking is) need no rebuild.
 //!
 //! Durable data that is costly to recompute (history; derived data such as
 //! embeddings or extracted text) will live in a separate store in the data
@@ -19,9 +20,14 @@
 //! SQLite in WAL mode with a busy timeout, so several agent processes can
 //! share one cache file. The same file paces them: [`Pacing`] hands out
 //! request slots per provider across every process using it.
+//!
+//! A size limit ([`SqliteCache::set_max_bytes`]) evicts the least recently
+//! used entries (records, "not found" answers, searches, links; never the
+//! pacing slots) once the database passes it; see [`ACCESS`].
 
 use std::path::Path;
 use std::sync::Mutex;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
 use aspero_core::{Page, ProviderId, SearchQuery, SourceRecord, WorkId};
@@ -91,6 +97,24 @@ CREATE TABLE IF NOT EXISTS edges (
     PRIMARY KEY (work, direction)
 );
 ";
+
+/// The tables whose entries carry when they were last used, for evicting
+/// the least recently used first under a size limit: a `used_at` column
+/// (unix seconds) added beside the versioned schema (`ALTER TABLE … ADD
+/// COLUMN`, so adding it rebuilt nothing, and older versions sharing the
+/// file still read and write it). Rows written without it count as used
+/// when stored. Writes set it; reads bump it only while a limit is set,
+/// and at most once per [`TOUCH_EVERY`], so an unlimited cache's reads
+/// stay reads. A record's identifiers (`record_id`) go with it.
+pub const ACCESS: &[&str] = &["record", "miss", "search", "edges"];
+
+/// A read bumps an entry's `used_at` only when it's at least this old
+/// (seconds).
+const TOUCH_EVERY: i64 = 3600;
+
+/// Eviction stops below this share of the limit, so it runs now and then
+/// rather than after every write once the cache is full.
+const EVICT_TO: f64 = 0.9;
 
 /// A claimed slot further ahead than this means the clock went back (or a
 /// process misbehaved): start afresh rather than wait.
@@ -166,6 +190,9 @@ pub type CachedLookup = Entry<Option<SourceRecord>>;
 /// (stored_at).
 type LookupRow = (Option<(String, i64)>, Option<i64>);
 
+/// A row read, for tracking use: its rowid, and when it was last used.
+type Used = (i64, i64);
+
 /// What the engine needs from a cache; it depends on this, not on SQLite.
 pub trait Cache: Send + Sync {
     /// The cached answer for each of `ids` at `provider`, in order; `None`
@@ -236,10 +263,16 @@ pub struct Stats {
     pub searches: u64,
     /// Works with cached citation links (per direction).
     pub edges: u64,
+    /// The database's size, `page_count × page_size`: the file on disk
+    /// once its write-ahead log is checkpointed (SQLite does so every 4 MB
+    /// or so). A size limit applies to this.
+    pub bytes: u64,
 }
 
 pub struct SqliteCache {
     conn: Mutex<Connection>,
+    /// The size limit in bytes; `u64::MAX` for none.
+    max_bytes: AtomicU64,
 }
 
 impl SqliteCache {
@@ -274,6 +307,10 @@ impl SqliteCache {
 
     fn init(mut conn: Connection) -> Result<Self> {
         conn.busy_timeout(Duration::from_secs(5))?;
+        // Lets eviction give pages back (`incremental_vacuum`). It takes
+        // effect only on a new file; an older one is converted when first
+        // evicted from.
+        conn.pragma_update(None, "auto_vacuum", "INCREMENTAL")?;
         conn.pragma_update(None, "journal_mode", "WAL")?;
         let version = |c: &Connection| -> rusqlite::Result<i64> {
             c.pragma_query_value(None, "user_version", |r| r.get(0))
@@ -298,8 +335,10 @@ impl SqliteCache {
         }
         conn.execute_batch(PACING)?;
         conn.execute_batch(EDGES)?;
+        add_access(&mut conn)?;
         Ok(SqliteCache {
             conn: Mutex::new(conn),
+            max_bytes: AtomicU64::new(u64::MAX),
         })
     }
 
@@ -309,28 +348,126 @@ impl SqliteCache {
         self.conn.lock().unwrap_or_else(|e| e.into_inner())
     }
 
-    /// The stored rows for each of `ids`, unparsed.
-    fn lookup_rows(&self, provider: &ProviderId, ids: &[WorkId]) -> Result<Vec<LookupRow>> {
+    /// Limits the cache to `max` bytes (as [`Stats::bytes`] counts them),
+    /// or lifts the limit. Past it, the least recently used entries go
+    /// first (never the pacing slots) until it's under nine tenths of the
+    /// limit, and the pages they held are given back to the file system.
+    /// Checked now, and after each write (two `PRAGMA` reads; evicting
+    /// takes one pass over the entries' ages).
+    pub fn set_max_bytes(&self, max: Option<u64>) -> Result<()> {
+        self.max_bytes
+            .store(max.unwrap_or(u64::MAX), Ordering::Relaxed);
+        self.enforce_limit()
+    }
+
+    /// The size limit, if one is set.
+    pub fn max_bytes(&self) -> Option<u64> {
+        Some(self.max_bytes.load(Ordering::Relaxed)).filter(|m| *m != u64::MAX)
+    }
+
+    /// Evicts least recently used entries while the cache is over its
+    /// limit.
+    fn enforce_limit(&self) -> Result<()> {
+        let Some(max) = self.max_bytes() else {
+            return Ok(());
+        };
+        let mut conn = self.conn();
+        if size(&conn)?.0 <= max {
+            return Ok(());
+        }
+        let target = (max as f64 * EVICT_TO) as u64;
+        // Each round deletes the oldest entries whose rows add up to the
+        // excess, as estimated; pages only partly freed may need another.
+        for _ in 0..64 {
+            let (_, used) = size(&conn)?;
+            if used <= target || evict(&mut conn, used - target)? == 0 {
+                break;
+            }
+        }
+        give_back_pages(&conn);
+        Ok(())
+    }
+
+    /// Holds the cache to its limit after a write, which stands whether or
+    /// not evicting worked (a busy file is evicted from next time).
+    fn after_write(&self) -> Result<()> {
+        let _ = self.enforce_limit();
+        Ok(())
+    }
+
+    /// Bumps the `used_at` of rows read (`(rowid, used_at)`), under a limit
+    /// and when not bumped within [`TOUCH_EVERY`]. Best effort: a busy file
+    /// only delays it.
+    fn touch(&self, table: &str, rows: &[Used]) {
+        if self.max_bytes().is_none() {
+            return;
+        }
+        let now = Timestamp::now().as_second();
+        let stale: Vec<i64> = rows
+            .iter()
+            .filter(|(_, used)| now - used >= TOUCH_EVERY)
+            .map(|(rowid, _)| *rowid)
+            .collect();
+        if stale.is_empty() {
+            return;
+        }
+        let mut conn = self.conn();
+        let bump = || -> rusqlite::Result<()> {
+            let tx = conn.transaction()?;
+            {
+                let mut set = tx
+                    .prepare_cached(&format!("UPDATE {table} SET used_at = ?1 WHERE rowid = ?2"))?;
+                for rowid in stale {
+                    set.execute(params![now, rowid])?;
+                }
+            }
+            tx.commit()
+        };
+        let _ = bump();
+    }
+
+    /// The stored rows for each of `ids`, unparsed, and the record and miss
+    /// rows read.
+    fn lookup_rows(
+        &self,
+        provider: &ProviderId,
+        ids: &[WorkId],
+    ) -> Result<(Vec<LookupRow>, Vec<Used>, Vec<Used>)> {
         let mut conn = self.conn();
         // One read transaction: a consistent snapshot, one lock.
         let tx = conn.transaction()?;
         let mut found = tx.prepare_cached(
-            "SELECT r.record, r.stored_at FROM record_id i
+            "SELECT r.record, r.stored_at, r.rowid, COALESCE(r.used_at, r.stored_at)
+             FROM record_id i
              JOIN record r ON r.provider = i.provider AND r.native_id = i.native_id
              WHERE i.provider = ?1 AND i.work_id = ?2",
         )?;
-        let mut missed =
-            tx.prepare_cached("SELECT stored_at FROM miss WHERE provider = ?1 AND work_id = ?2")?;
+        let mut missed = tx.prepare_cached(
+            "SELECT stored_at, rowid, COALESCE(used_at, stored_at) FROM miss
+             WHERE provider = ?1 AND work_id = ?2",
+        )?;
         let mut rows = Vec::with_capacity(ids.len());
+        let (mut records, mut misses) = (Vec::new(), Vec::new());
         for id in ids {
             let key = params![provider.as_str(), id.to_string()];
-            let record = found
-                .query_row(key, |r| Ok((r.get(0)?, r.get(1)?)))
+            let record: Option<(String, i64, i64, i64)> = found
+                .query_row(key, |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)))
                 .optional()?;
-            let miss = missed.query_row(key, |r| r.get(0)).optional()?;
-            rows.push((record, miss));
+            let miss: Option<(i64, i64, i64)> = missed
+                .query_row(key, |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
+                .optional()?;
+            if let Some((_, _, rowid, used)) = &record {
+                records.push((*rowid, *used));
+            }
+            if let Some((_, rowid, used)) = miss {
+                misses.push((rowid, used));
+            }
+            rows.push((
+                record.map(|(json, at, _, _)| (json, at)),
+                miss.map(|(at, _, _)| at),
+            ));
         }
-        Ok(rows)
+        Ok((rows, records, misses))
     }
 
     pub fn stats(&self) -> Result<Stats> {
@@ -346,6 +483,7 @@ impl SqliteCache {
             misses: count("miss")?,
             searches: count("search")?,
             edges: count("edges")?,
+            bytes: size(&conn)?.0,
         })
     }
 
@@ -357,6 +495,128 @@ impl SqliteCache {
         )?;
         Ok(())
     }
+}
+
+/// Adds the [`ACCESS`] tables' `used_at` column where it's missing, under
+/// the write lock (another process may be adding it too).
+fn add_access(conn: &mut Connection) -> Result<()> {
+    let missing = |c: &Connection, table: &str| -> rusqlite::Result<bool> {
+        let n: i64 = c.query_row(
+            "SELECT COUNT(*) FROM pragma_table_info(?1) WHERE name = 'used_at'",
+            params![table],
+            |r| r.get(0),
+        )?;
+        Ok(n == 0)
+    };
+    let mut todo = Vec::new();
+    for table in ACCESS {
+        if missing(conn, table)? {
+            todo.push(*table);
+        }
+    }
+    if todo.is_empty() {
+        return Ok(());
+    }
+    let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+    for table in todo {
+        if missing(&tx, table)? {
+            tx.execute_batch(&format!("ALTER TABLE {table} ADD COLUMN used_at INTEGER;"))?;
+        }
+    }
+    tx.commit()?;
+    Ok(())
+}
+
+/// The database's size, and the part of it holding data, in bytes:
+/// `page_count × page_size`, and that less the free pages.
+fn size(conn: &Connection) -> Result<(u64, u64)> {
+    let pragma =
+        |name: &str| -> rusqlite::Result<i64> { conn.pragma_query_value(None, name, |r| r.get(0)) };
+    let (pages, free, page) = (
+        pragma("page_count")?,
+        pragma("freelist_count")?,
+        pragma("page_size")?,
+    );
+    let bytes = |n: i64| n.max(0) as u64 * page.max(0) as u64;
+    Ok((bytes(pages), bytes(pages - free)))
+}
+
+/// Deletes the least recently used entries whose rows add up to about
+/// `excess` bytes (at least one), in one transaction; how many went.
+fn evict(conn: &mut Connection, excess: u64) -> Result<usize> {
+    // A row's size as estimated from its text, plus keys and overhead.
+    const OVERHEAD: i64 = 100;
+    let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+    let oldest: Vec<(String, i64, i64)> = {
+        let mut stmt = tx.prepare(
+            "SELECT kind, rowid, bytes FROM (
+                 SELECT 'record' AS kind, rowid, COALESCE(used_at, stored_at) AS used,
+                        length(record) + length(native_id) + ?1 AS bytes FROM record
+                 UNION ALL
+                 SELECT 'miss', rowid, COALESCE(used_at, stored_at), length(work_id) + ?1
+                 FROM miss
+                 UNION ALL
+                 SELECT 'search', rowid, COALESCE(used_at, stored_at),
+                        length(query) + length(page) + ?1 FROM search
+                 UNION ALL
+                 SELECT 'edges', rowid, COALESCE(used_at, stored_at), length(ids) + ?1
+                 FROM edges
+             ) ORDER BY used, kind, rowid LIMIT 5000",
+        )?;
+        stmt.query_map(params![OVERHEAD], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?
+            .collect::<rusqlite::Result<_>>()?
+    };
+    let (mut freed, mut removed) = (0u64, 0);
+    {
+        // A record's identifiers lead nowhere once it's gone.
+        let mut forget_ids = tx.prepare_cached(
+            "DELETE FROM record_id WHERE (provider, native_id) =
+                 (SELECT provider, native_id FROM record WHERE rowid = ?1)",
+        )?;
+        for (kind, rowid, bytes) in oldest {
+            if freed >= excess && removed > 0 {
+                break;
+            }
+            let table = match kind.as_str() {
+                "record" => {
+                    forget_ids.execute(params![rowid])?;
+                    "record"
+                }
+                "miss" => "miss",
+                "search" => "search",
+                _ => "edges",
+            };
+            tx.execute(
+                &format!("DELETE FROM {table} WHERE rowid = ?1"),
+                params![rowid],
+            )?;
+            freed += bytes.max(0) as u64;
+            removed += 1;
+        }
+    }
+    tx.commit()?;
+    Ok(removed)
+}
+
+/// Gives free pages back to the file system: `incremental_vacuum`, or, for
+/// a file made before incremental vacuuming (`auto_vacuum` none), one
+/// `VACUUM` that converts it. Best effort: on a busy file the pages stay
+/// until next time (and are reused meanwhile).
+fn give_back_pages(conn: &Connection) {
+    let mode: i64 = conn
+        .pragma_query_value(None, "auto_vacuum", |r| r.get(0))
+        .unwrap_or(2);
+    let _ = match mode {
+        0 => conn.execute_batch("PRAGMA auto_vacuum = INCREMENTAL; VACUUM;"),
+        // Stepped to the end: each step frees a page (`execute_batch`
+        // steps once).
+        _ => (|| {
+            let mut stmt = conn.prepare("PRAGMA incremental_vacuum")?;
+            let mut rows = stmt.query([])?;
+            while rows.next()?.is_some() {}
+            Ok(())
+        })(),
+    };
 }
 
 /// Whether `e` says the file isn't a database, or is a damaged one.
@@ -404,7 +664,9 @@ impl Cache for SqliteCache {
         provider: &ProviderId,
         ids: &[WorkId],
     ) -> Result<Vec<Option<CachedLookup>>> {
-        let rows = self.lookup_rows(provider, ids)?;
+        let (rows, records, misses) = self.lookup_rows(provider, ids)?;
+        self.touch("record", &records);
+        self.touch("miss", &misses);
         // Parsed after the lock is released.
         let mut out = Vec::with_capacity(ids.len());
         for (record, miss) in rows {
@@ -439,7 +701,8 @@ impl Cache for SqliteCache {
         {
             let (p, at) = (provider.as_str(), at.as_second());
             let mut put_record = tx.prepare_cached(
-                "INSERT OR REPLACE INTO record (provider, native_id, record, stored_at) VALUES (?1, ?2, ?3, ?4)",
+                "INSERT OR REPLACE INTO record (provider, native_id, record, stored_at, used_at) \
+                 VALUES (?1, ?2, ?3, ?4, ?4)",
             )?;
             let mut put_id = tx.prepare_cached(
                 "INSERT OR REPLACE INTO record_id (provider, work_id, native_id) VALUES (?1, ?2, ?3)",
@@ -447,7 +710,8 @@ impl Cache for SqliteCache {
             let mut clear_miss =
                 tx.prepare_cached("DELETE FROM miss WHERE provider = ?1 AND work_id = ?2")?;
             let mut put_miss = tx.prepare_cached(
-                "INSERT OR REPLACE INTO miss (provider, work_id, stored_at) VALUES (?1, ?2, ?3)",
+                "INSERT OR REPLACE INTO miss (provider, work_id, stored_at, used_at) \
+                 VALUES (?1, ?2, ?3, ?3)",
             )?;
 
             for (requested, record) in answers {
@@ -480,7 +744,8 @@ impl Cache for SqliteCache {
             }
         }
         tx.commit()?;
-        Ok(())
+        drop(conn);
+        self.after_write()
     }
 
     fn get_search(
@@ -488,15 +753,19 @@ impl Cache for SqliteCache {
         provider: &ProviderId,
         query: &SearchQuery,
     ) -> Result<Option<Entry<Page>>> {
-        let row: Option<(String, i64)> = self
+        let row: Option<(String, i64, i64, i64)> = self
             .conn()
             .query_row(
-                "SELECT page, stored_at FROM search WHERE provider = ?1 AND query = ?2",
+                "SELECT page, stored_at, rowid, COALESCE(used_at, stored_at) FROM search
+                 WHERE provider = ?1 AND query = ?2",
                 params![provider.as_str(), serde_json::to_string(query)?],
-                |r| Ok((r.get(0)?, r.get(1)?)),
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
             )
             .optional()?;
-        row.map(|(json, at)| {
+        if let Some((_, _, rowid, used)) = &row {
+            self.touch("search", &[(*rowid, *used)]);
+        }
+        row.map(|(json, at, _, _)| {
             Ok(Entry {
                 value: serde_json::from_str(&json)?,
                 stored_at: timestamp(at),
@@ -513,7 +782,8 @@ impl Cache for SqliteCache {
         at: Timestamp,
     ) -> Result<()> {
         self.conn().execute(
-            "INSERT OR REPLACE INTO search (provider, query, page, stored_at) VALUES (?1, ?2, ?3, ?4)",
+            "INSERT OR REPLACE INTO search (provider, query, page, stored_at, used_at) \
+             VALUES (?1, ?2, ?3, ?4, ?4)",
             params![
                 provider.as_str(),
                 serde_json::to_string(query)?,
@@ -521,7 +791,7 @@ impl Cache for SqliteCache {
                 at.as_second()
             ],
         )?;
-        Ok(())
+        self.after_write()
     }
 
     fn get_edges(
@@ -529,26 +799,32 @@ impl Cache for SqliteCache {
         direction: Direction,
         works: &[WorkId],
     ) -> Result<Vec<Option<Entry<Edges>>>> {
-        let rows: Vec<Option<(String, bool, i64)>> = {
+        type Row = (String, bool, i64, i64, i64);
+        let rows: Vec<Option<Row>> = {
             let mut conn = self.conn();
             let tx = conn.transaction()?;
             let mut get = tx.prepare_cached(
-                "SELECT ids, complete, stored_at FROM edges WHERE work = ?1 AND direction = ?2",
+                "SELECT ids, complete, stored_at, rowid, COALESCE(used_at, stored_at) FROM edges
+                 WHERE work = ?1 AND direction = ?2",
             )?;
             let mut rows = Vec::with_capacity(works.len());
             for work in works {
                 let key = params![work.to_string(), direction.as_str()];
                 rows.push(
-                    get.query_row(key, |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
-                        .optional()?,
+                    get.query_row(key, |r| {
+                        Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?))
+                    })
+                    .optional()?,
                 );
             }
             rows
         };
+        let used: Vec<Used> = rows.iter().flatten().map(|r| (r.3, r.4)).collect();
+        self.touch("edges", &used);
         // Parsed after the lock is released.
         rows.into_iter()
             .map(|row| {
-                row.map(|(json, complete, at)| {
+                row.map(|(json, complete, at, _, _)| {
                     Ok(Entry {
                         value: Edges {
                             ids: serde_json::from_str(&json)?,
@@ -577,8 +853,8 @@ impl Cache for SqliteCache {
         let tx = conn.transaction()?;
         {
             let mut put = tx.prepare_cached(
-                "INSERT OR REPLACE INTO edges (work, direction, ids, complete, stored_at) \
-                 VALUES (?1, ?2, ?3, ?4, ?5)",
+                "INSERT OR REPLACE INTO edges (work, direction, ids, complete, stored_at, used_at) \
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?5)",
             )?;
             for (work, ids, complete) in rows {
                 put.execute(params![
@@ -591,6 +867,7 @@ impl Cache for SqliteCache {
             }
         }
         tx.commit()?;
-        Ok(())
+        drop(conn);
+        self.after_write()
     }
 }

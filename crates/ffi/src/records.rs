@@ -220,9 +220,6 @@ pub enum ErrorKind {
     RateLimited,
     /// The provider's usage budget is spent until it resets.
     BudgetSpent,
-    /// The app's daily cap on the provider's spend (`Config.openalexDailyCap`)
-    /// is reached until the budget resets: see `Failure.budgetCap`.
-    BudgetCapped,
     Network,
     Timeout,
     Server,
@@ -239,6 +236,10 @@ pub enum ErrorKind {
     Decode,
     InvalidId,
     Other,
+    /// The app's daily cap on the provider's spend (`Config.openalexDailyCap`)
+    /// is reached until the budget resets: see `Failure.budgetCap`. Last, so
+    /// the cases before keep their places.
+    BudgetCapped,
 }
 
 impl From<aspero_core::ErrorKind> for ErrorKind {
@@ -1107,11 +1108,11 @@ pub struct Unavailable {
 
 // Settings.
 
-/// What a provider last said of its budget.
+/// What a provider last said was left of its budget.
 #[derive(Debug, Clone, uniffi::Record)]
 pub struct Budget {
     pub provider: String,
-    /// Left today (OpenAlex: US dollars).
+    /// OpenAlex: US dollars.
     pub remaining: Option<f64>,
     pub resets_at: Option<SystemTime>,
     /// When the provider said so.

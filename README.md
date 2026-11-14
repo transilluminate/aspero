@@ -95,6 +95,10 @@ aspero analyse 10.1056/nejmoa010307 10.1056/nejmoa1401602 10.1056/nejmoa1500896
 # What's used of today's OpenAlex budget (free; needs a key)
 aspero budget
 
+# The crates and data aspero is built from, and their licences; --full
+# prints the third-party notices
+aspero licences
+
 # Watch the requests (and concurrency) as they happen
 aspero verify -v "Bishop CM. Pattern Recognition and Machine Learning. 2006"
 ```
@@ -188,3 +192,9 @@ MIT OR Apache-2.0, at your option.
 The bundled citation styles and locales are from the Citation Style
 Language project, under CC BY-SA 3.0; see `crates/bib/styles/NOTICE.md`
 and `aspero styles --credits`.
+
+The crates aspero is built from keep their own licences: `aspero licences`
+lists them, and `aspero licences --full` prints the third-party notices
+(each licence text, with the crates under it and their copyright lines).
+Apps get the same from the FFI's `dependencies()` and
+`thirdPartyNotices()`.

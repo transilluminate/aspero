@@ -700,6 +700,29 @@ macOS 26+; `UNIVERSAL=1` adds x86_64, `MACOSX_DEPLOYMENT_TARGET`
 overrides) and the Swift bindings; a workflow attaches both to each
 release. Not published to crates.io.
 
+Third-party notices ship inside the library and the CLI:
+`dependencies()` (name, version, SPDX licence, repository; the crates
+and the bundled CSL data) and `third_party_notices()`, and `aspero
+licences [--full]`. `just notices` writes them, at release, to
+`crates/{ffi,cli}/notices/` (`dependencies.json`, `notices.txt`); both
+artefacts `include_str!` their own. The generator (`crates/notices-gen`,
+not published) takes each artefact's crates from `cargo tree -e normal
+--target aarch64-apple-darwin` (features resolved for that package
+alone, as its build does: `cargo metadata` unifies them across the
+workspace and dev-dependencies, and names ~40 crates the library doesn't
+contain), and their licences, repositories and authors from `cargo
+metadata`. Licence texts are each crate's own `LICENSE*`, `COPYING*`,
+`NOTICE*` and `COPYRIGHT*` files; copyright lines are lifted out and shown
+with the crate, so identical texts (layout aside) appear once, after
+every crate under them. A crate whose files don't cover its licence
+expression gets the SPDX text from `crates/notices-gen/licenses`, and a
+licence with no template there fails the run. The CSL styles and locales
+are checked for their CC BY-SA 3.0 `<rights>` and listed as data, with
+`styles --credits`. `notices-gen`'s tests (so `just check` and CI) fail
+when the files are stale, and `just release-check` runs
+`just notices --check`: after a version bump or a dependency change, run
+`just notices`.
+
 Not until needed: priority lanes in the pacer, a daemon, a SQLite
 connection pool, and CLI keys anywhere but the environment (agents run
 headless, where a Keychain prompt after an upgrade would hang them).

@@ -1,5 +1,22 @@
 # Changelog
 
+## Unreleased
+
+Added:
+
+- Third-party notices, built in (#77). The FFI's `dependencies()` lists
+  what the library is built from (`Dependency`: `name`, `version`,
+  `license` as an SPDX expression, `repository`): every crate in it,
+  aspero's own included, and the bundled CSL styles and locales
+  (CC-BY-SA-3.0), by name. `thirdPartyNotices()` gives the full notices:
+  each licence text once, after the crates under it and their copyright
+  lines, then the citation style data's licence and authors.
+- `aspero licences` (or `licenses`) lists the CLI's crates and data with
+  their licences (a table, or JSON); `--full` prints its notices.
+- `just notices` writes both artefacts' notices (the normal dependencies,
+  for macOS, from Cargo.lock); tests fail when they're stale, and
+  `just release-check` checks them.
+
 ## 0.17.1
 
 Fixes from a discovery session (IV morphine titration in the ED).

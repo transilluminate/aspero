@@ -1,5 +1,38 @@
 # Changelog
 
+## Unreleased
+
+Fixed:
+
+- A citation naming the wrong journal no longer verifies (#80). The
+  journal a reference cites is read where it can be told (the words
+  before the volume and page, Vancouver or APA), and a journal article
+  cited in a journal that's clearly another, or a preprint cited by
+  journal, volume and page, is `plausible` at most, with
+  `checks.container` a `mismatch` and a `journal` difference whose `cited`
+  is the journal as cited. Abbreviations, "The", spelling variants and
+  names inside names ("Proc Natl Acad Sci U S A") aren't another journal;
+  books, proceedings and references without a clear journal are left
+  alone.
+- `read` carries the journal read from free text (`container`).
+- APA references without an issue ("Journal Name, 146, 106274.") give
+  their volume and page.
+- One work shows the same cited-by count, open access and date whichever
+  source's record won the merge (#81). Open access is the more
+  informative (a free copy with a PDF over `is_oa: false`); between
+  records of one version (a shared DOI or PMID), the cited-by count is
+  OpenAlex's when one has it, else the larger, and `issued` the earliest
+  date (online first), the more precise of dates that overlap, with the
+  other year kept in `other_years`. `verify` now agrees with `lookup`,
+  which asks OpenAlex first.
+
+Changed:
+
+- Search hits, and a candidate's `found_by` sightings, leave `score` out
+  when the source gives none (OpenAlex sorted by citations), rather than
+  `null` (#81). The MCP `search` output schema's `score` is a number, and
+  optional, as before.
+
 ## 0.19.1
 
 Fixed:

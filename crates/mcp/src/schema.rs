@@ -146,7 +146,7 @@ pub fn search() -> Map<String, Value> {
                 "items": object(
                     json!({
                         "rank": {"type": "integer"},
-                        "score": {"type": ["number", "null"], "description": "the source's own; compare only within one search"},
+                        "score": {"type": "number", "description": "the source's own, when it gives one; compare only within one search"},
                         "work": work(),
                     }),
                     &["rank", "work"],

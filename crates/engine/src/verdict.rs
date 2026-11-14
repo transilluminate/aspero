@@ -51,7 +51,8 @@ pub struct Verification {
     pub notes: Vec<Update>,
     /// The claim as read: its identifiers as written (a DOI cut short at a
     /// line break, with the readings tried in `alternatives`), and from
-    /// free text the year, volume and first page ([`Claim::as_read`]).
+    /// free text the year, journal (where it can be told), volume and
+    /// first page ([`Claim::as_read`]).
     pub read: Claim,
     /// The candidate the verdict is about, as an index into
     /// `report.candidates`: the matching work, or the best guess at what was
@@ -158,10 +159,10 @@ impl Reason {
 pub struct Difference {
     pub field: CitedField,
     pub actual: Option<String>,
-    /// The citation's value, as compared: the year, volume or first page
-    /// read from it, or the title, authors or journal given. `None` when
-    /// free text was searched for the work's own (title, authors,
-    /// journal).
+    /// The citation's value, as compared: the year, journal, volume or
+    /// first page read from it, or the title, authors or journal given.
+    /// `None` when free text was searched for the work's own (title,
+    /// authors).
     pub cited: Option<String>,
     /// For [`CitedField::Kind`]: what the work is (`actual` as a value).
     pub kind: Option<WorkKind>,
@@ -260,7 +261,7 @@ fn differences(claim: &Claim, c: &Candidate, known_only: bool) -> Vec<Difference
             diff(
                 CitedField::Journal,
                 w.container_title.clone(),
-                claim.container.clone(),
+                read.container.clone(),
             )
         }),
         (a.volume.agreement == Agreement::Mismatch)

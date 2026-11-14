@@ -412,9 +412,7 @@ impl Tools {
             .hits
             .iter()
             .enumerate()
-            .map(|(i, h)| {
-                json!({"rank": i + 1, "score": h.score, "work": aspero_json::work(&h.record, full)})
-            })
+            .map(|(i, h)| aspero_json::hit(i + 1, h.score, aspero_json::work(&h.record, full)))
             .collect();
         let answer = json!({
             "provider": report.provider,

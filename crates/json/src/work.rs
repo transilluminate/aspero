@@ -103,6 +103,18 @@ pub fn set_abstract(work: &mut Value, found: Option<&Abstract>) {
     }
 }
 
+/// One search hit: its 1-based `rank`, the source's own `score` (left out
+/// when the source gives none, as OpenAlex doesn't when sorting), and the
+/// work.
+pub fn hit(rank: usize, score: Option<f64>, work: Value) -> Value {
+    let mut out = json!({"rank": rank});
+    if let Some(score) = score {
+        out["score"] = json!(score);
+    }
+    out["work"] = work;
+    out
+}
+
 /// A scored candidate: confidence, per-field checks, who found it, and the
 /// work (with every identifier merged records asserted).
 pub fn candidate(c: &Candidate, full: bool) -> Value {
@@ -131,7 +143,13 @@ pub fn candidate(c: &Candidate, full: bool) -> Value {
     let found_by: Vec<Value> = c
         .sightings
         .iter()
-        .map(|s| json!({"provider": s.provider, "via": s.via.as_str(), "rank": s.rank, "score": s.score}))
+        .map(|s| {
+            let mut out = json!({"provider": s.provider, "via": s.via.as_str(), "rank": s.rank});
+            if let Some(score) = s.score {
+                out["score"] = json!(score);
+            }
+            out
+        })
         .collect();
     let mut work = work(&c.merged_record(), full);
     // Always there, null without identifiers.
@@ -199,6 +217,19 @@ mod tests {
                 "type": "article-journal",
                 "container": "Nature",
             })
+        );
+    }
+
+    #[test]
+    fn a_hit_without_a_score_leaves_it_out() {
+        let w = json!({"title": "Deep learning"});
+        assert_eq!(
+            hit(1, None, w.clone()),
+            json!({"rank": 1, "work": {"title": "Deep learning"}})
+        );
+        assert_eq!(
+            hit(2, Some(12.5), w),
+            json!({"rank": 2, "score": 12.5, "work": {"title": "Deep learning"}})
         );
     }
 

@@ -354,8 +354,9 @@ provider that can answers; OpenAlex (it needs a paid plan) and Open
 Library can't, and fail rather than ignore it.
 
 JSON: {provider, total, hits: [{rank, score, work}], ignored_filters,
-served, next_cursor, next_command, usage}. --format jsonl prints each hit
-on a line, as {rank, score, work}: `aspero search x --format jsonl | jq
+served, next_cursor, next_command, usage}; a hit's score is the source's
+own, left out when it gives none. --format jsonl prints each hit on a
+line, as {rank, score, work}: `aspero search x --format jsonl | jq
 '.work.ids'`.
 
 Examples:

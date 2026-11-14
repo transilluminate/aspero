@@ -199,8 +199,18 @@ scripts/       fixture recorders, one per provider
 - **Merging**: candidates merge only on a shared identifier (arXiv
   versions count as one work). Fuzzy matches may *suggest*, never merge: a
   wrong merge corrupts; a duplicate merely annoys. Notices merge too, with
-  detailed ones replacing bare flags, and a free copy's location is kept
-  whichever record wins. `lookup --full` fills notices (Crossref) and open
+  detailed ones replacing bare flags. Values sources give differently are
+  made the same on every merged record, so a work doesn't change with the
+  source that won (#81): open access is the more informative (free with a
+  PDF, then a page, then free, then not free with a licence, then not
+  free), whatever the version; between records of one version (sharing a
+  DOI or PMID, not a preprint and its article), the cited-by count is
+  OpenAlex's when one has it (the broadest index, and first for lookups,
+  so `verify` and `lookup` agree), else the larger, and `issued` is the
+  earliest (online first: OpenAlex's 2020-12-01 over Crossref's 2021-01),
+  or of overlapping dates the more precise. Other years stay in
+  `other_years`, where year matching finds them. A search's hits are each
+  one source's record, as it gives it. `lookup --full` fills notices (Crossref) and open
   access from other providers, keeping each value's `source`.
 
 ## Resolve, verify and check
@@ -236,12 +246,27 @@ citation styles. The rules, each from a real failure:
 - **Online and print years both count**, so either year of an
   online-first paper matches, as do years across merged records.
 - **Journal, volume and first page** come from claim fields or the text
-  (Vancouver `2017;376(26):2545`, APA `376(26), 2545`, `vol./pp.`).
-  Journals match by rule (each abbreviated word abbreviates the next
-  significant word, or initials: NEJM, JAMA), not a list, so a journal
-  mismatch only lowers the ranking. A different volume or page caps a match
-  at plausible: a citation error, and what separates an article from
-  replies printed in the same volume. Matching volume and page corroborate
+  (Vancouver `2017;376(26):2545`, APA `376(26), 2545` or `Journal, 146,
+  106274.`, `vol./pp.`). Journals match by rule (each abbreviated word
+  abbreviates the next significant word, or initials: NEJM, JAMA), not a
+  list, so a journal the rule doesn't see only lowers the ranking. A
+  different volume or page caps a match at plausible: a citation error,
+  and what separates an article from replies printed in the same volume.
+- **The wrong journal caps a journal article at plausible** (#80): a
+  common error, and a tell of invented references. From free text the
+  cited journal is read only where it can be told: the capitalised words
+  right before a styled locator (`… placenta. Environ Sci Technol.
+  2021;146:106274`, `Environmental Science & Technology, 146, 106274.`),
+  back to the sentence before; a labelled locator, a publisher (`Springer;
+  2010:12-30`), a lowercase word or a run of dotted abbreviations that may
+  have begun earlier gives none. Different means clearly another: not the
+  same by rule, neither name (abbreviated, spelling aside) inside the other
+  (`Proc Natl Acad Sci U S A` ↔ `Proceedings of the National Academy of
+  Sciences`), nor initials of part of it (PNAS). Only journal articles are
+  held to it (series, proceedings and repositories go by many names), and
+  a preprint is when the reference cites a journal, volume and page: it's
+  another version. The journal read is in `read`, and a `journal`
+  difference's `cited`. Matching volume and page corroborate
   like authors; with journal and volume agreeing, a title missing from a
   short reference doesn't count against it. Journal, volume and first page
   all agreeing verify on their own (0.9; 0.8 a year off), so running

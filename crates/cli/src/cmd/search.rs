@@ -43,7 +43,7 @@ pub async fn run(
             if let Some(a) = found(i) {
                 output::set_abstract(&mut work, a);
             }
-            json!({"rank": i + 1, "score": h.score, "work": work})
+            aspero_json::hit(i + 1, h.score, work)
         })
         .collect();
 

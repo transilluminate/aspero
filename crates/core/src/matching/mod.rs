@@ -23,7 +23,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::id::{IdKind, WorkId, starts_with_ci};
 use crate::provider::Place;
-use crate::publication::{self, first_page, journal_in, same_journal};
+use crate::publication::{self, first_page, journal_in, other_journal, same_journal};
 use crate::record::SourceRecord;
 
 use authors::{author_overlap, family_name, same_family};
@@ -70,8 +70,13 @@ const SHORT_TITLE_WORDS: usize = 3;
 const DERIVATIVE_PENALTY: f64 = 0.5;
 /// Confidence ceiling when the claimed volume or first page differs.
 const LOCATION_MISMATCH_CAP: f64 = 0.8;
-/// Multiplier when a structured claim names a different journal.
+/// Multiplier when the claim names a different journal (by
+/// [`same_journal`]'s rule, which misses some pairs): lowers the ranking.
 const JOURNAL_MISMATCH_PENALTY: f64 = 0.9;
+/// Confidence ceiling when a journal article is cited in a journal that is
+/// clearly another ([`other_journal`]): a citation error, as a wrong volume
+/// is, and a tell of invented references.
+const JOURNAL_MISMATCH_CAP: f64 = LOCATION_MISMATCH_CAP;
 
 /// Verdict thresholds on confidence.
 pub const VERIFIED: f64 = 0.85;
@@ -195,10 +200,21 @@ impl Claim {
         Some(Place::new(located.volume?, located.page?))
     }
 
+    /// The journal the claim cites: its `container`, else the journal its
+    /// text names right before the volume and page, when that can be told
+    /// with confidence ("… placenta. Environ Sci Technol. 2021;146:106274"
+    /// names "Environ Sci Technol").
+    pub fn cited_container(&self) -> Option<String> {
+        self.container
+            .clone()
+            .or_else(|| publication::cited_journal(self.text.as_deref()?))
+    }
+
     /// The claim as read: as given, with what its text says of the year
-    /// (when it gives one), volume and first page filled in where not
-    /// given. Free text's title, authors and journal aren't parsed out:
-    /// they're scored by finding a work's own in the text.
+    /// (when it gives one), journal, volume and first page filled in where
+    /// not given. Free text's title and authors aren't parsed out: they're
+    /// scored by finding a work's own in the text; the journal is read only
+    /// where it can be told ([`Claim::cited_container`]).
     pub fn as_read(&self) -> Claim {
         let mut read = self.clone();
         if read.year.is_none()
@@ -206,6 +222,7 @@ impl Claim {
         {
             read.year = Some(year);
         }
+        read.container = self.cited_container();
         let located = self.locator();
         read.volume = read.volume.or(located.volume);
         read.page = read.page.or(located.page);
@@ -310,7 +327,9 @@ pub struct Assessment {
     pub authors: FieldCheck,
     pub year: FieldCheck,
     /// The journal: `Match` when the claim names it (or an abbreviation),
-    /// `Mismatch` when a structured claim names another.
+    /// `Mismatch` when a structured claim names another, or a journal
+    /// article's reference clearly cites another
+    /// ([`Claim::cited_container`], [`other_journal`]).
     pub container: FieldCheck,
     pub volume: FieldCheck,
     /// The first page.
@@ -402,14 +421,48 @@ pub fn assess(claim: &Claim, record: &SourceRecord) -> Assessment {
         true => FieldCheck::UNKNOWN,
     };
 
+    // Only a journal article's journal is held against a citation: books'
+    // series, proceedings and repositories go by many names.
+    let article = work.work_type == Some(crate::work::WorkType::JournalArticle);
+    let cited_journal = claim.cited_container();
+    let cited_place = claim.locator();
+    // A reference giving a journal, volume and page cites the published
+    // article; a preprint of it (in no journal, at no volume) is another
+    // version, not the one cited.
+    let preprint_of_cited = work.work_type == Some(crate::work::WorkType::Preprint)
+        && work.volume.is_none()
+        && cited_journal.is_some()
+        && cited_place.volume.is_some()
+        && cited_place.page.is_some();
     let container = match (&claim.container, &work.container_title, &text) {
         (Some(claimed), Some(actual), _) => FieldCheck::exact(same_journal(claimed, actual)),
-        (None, Some(actual), Some(text)) if journal_in(&text.words, actual) => {
-            FieldCheck::exact(true)
+        (None, Some(actual), Some(text)) => {
+            let cited = cited_journal.as_deref();
+            if journal_in(&text.words, actual) || cited.is_some_and(|c| same_journal(c, actual)) {
+                FieldCheck::exact(true)
+            } else if article && cited.is_some_and(|c| other_journal(c, actual)) {
+                // Another journal, clearly named where the journal goes.
+                FieldCheck::exact(false)
+            } else {
+                FieldCheck::UNKNOWN
+            }
         }
         _ => FieldCheck::UNKNOWN,
     };
-    let located = claim.locator();
+    let container = match preprint_of_cited && container.agreement != Agreement::Match {
+        true => FieldCheck::exact(false),
+        false => container,
+    };
+    // A journal article cited in a journal clearly not its own, or a
+    // preprint cited as a journal's article.
+    let wrong_journal = container.agreement == Agreement::Mismatch
+        && (preprint_of_cited
+            || article
+                && cited_journal
+                    .as_deref()
+                    .zip(work.container_title.as_deref())
+                    .is_some_and(|(c, a)| other_journal(c, a)));
+    let located = cited_place;
     let same = |claimed: Option<&str>, actual: Option<&str>| match (claimed, actual) {
         (Some(c), Some(a)) if !c.is_empty() && !a.is_empty() => {
             FieldCheck::exact(c.trim().eq_ignore_ascii_case(a.trim()))
@@ -526,10 +579,15 @@ pub fn assess(claim: &Claim, record: &SourceRecord) -> Assessment {
     {
         confidence = confidence.min(LOCATION_MISMATCH_CAP);
     }
-    // Journal names compare by rule, which misses some pairs ("Br Med J" ↔
-    // "BMJ"), so a different journal only lowers the ranking.
+    // Journal names compare by rule, which misses some pairs, so a journal
+    // that may only be named otherwise lowers the ranking; one clearly
+    // another (the wrong journal, a common error in real and invented
+    // references) is an error in the citation, as a wrong volume is.
     if container.agreement == Agreement::Mismatch {
         confidence *= JOURNAL_MISMATCH_PENALTY;
+    }
+    if wrong_journal {
+        confidence = confidence.min(JOURNAL_MISMATCH_CAP);
     }
     // A reply, correction or commentary is not the work it responds to,
     // unless the citation says it is citing one.

@@ -65,8 +65,9 @@ pub struct Work {
     pub notice_for: Vec<NoticeFor>,
     pub open_access: Option<OpenAccess>,
     /// Works citing this one, as the source counts them (counts differ
-    /// between sources). DataCite counts only the citations it tracks, so
-    /// gives none rather than 0.
+    /// between sources; a verified work merged from several shows
+    /// OpenAlex's count when one has it, else the largest). DataCite counts
+    /// only the citations it tracks, so gives none rather than 0.
     #[uniffi(default = None)]
     pub cited_by_count: Option<u64>,
     pub fetched_at: SystemTime,
@@ -670,9 +671,9 @@ pub enum CitedField {
 pub struct Difference {
     pub field: CitedField,
     pub actual: Option<String>,
-    /// The citation's value, as compared: the year, volume or first page
-    /// read from it, or the title, authors or journal given. `nil` when
-    /// free text was searched for the work's own.
+    /// The citation's value, as compared: the year, journal, volume or
+    /// first page read from it, or the title, authors or journal given.
+    /// `nil` when free text was searched for the work's own.
     pub cited: Option<String>,
     /// For `CitedField.kind`: what the work is, as a value (`actual` in
     /// English).
@@ -888,8 +889,9 @@ pub struct Verification {
     /// and its newer version.
     pub notes: Vec<Notice>,
     /// The claim as read: identifiers as written (with the other readings
-    /// tried in `alternativeIds`), and from free text the year, volume and
-    /// first page. `nil` for an invalid claim.
+    /// tried in `alternativeIds`), and from free text the year, journal
+    /// (`container`, where it can be told), volume and first page. `nil`
+    /// for an invalid claim.
     pub read: Option<Claim>,
     /// The work the verdict is about: the match, or the best guess.
     pub best: Option<Candidate>,
@@ -1571,7 +1573,8 @@ impl SourceSearch {
 #[derive(Debug, Clone, uniffi::Record)]
 pub struct SearchHit {
     pub work: Work,
-    /// The provider's relevance score.
+    /// The provider's relevance score; `nil` when it gives none (OpenAlex
+    /// sorted by citations).
     pub score: Option<f64>,
 }
 

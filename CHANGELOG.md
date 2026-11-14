@@ -23,7 +23,7 @@ Added:
 - The cache keeps each MCP key's spend per UTC day in an additive table,
   `mcp_spend`, which rebuilds and `clear` leave alone.
 
-## Unreleased
+## 0.18.0
 
 Added:
 

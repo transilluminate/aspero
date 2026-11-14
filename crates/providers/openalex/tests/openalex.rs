@@ -103,6 +103,75 @@ fn single_doi_lookup_uses_free_endpoint_and_maps_the_work() {
     assert_eq!(usage.cost, Some(0.0));
     assert_eq!(usage.remaining, Some(remaining));
     assert_eq!(usage.resets_at, after(reset));
+    // The daily allowance and prepaid balance come with every response.
+    assert_eq!(usage.limit, Some(1.0));
+    assert_eq!(usage.prepaid_remaining, Some(0.0));
+}
+
+#[test]
+fn limit_and_prepaid_headers_are_read_when_given() {
+    let headers = [
+        ("x-ratelimit-cost-usd", "0.001"),
+        ("x-ratelimit-limit-usd", "0.1"),
+        ("x-ratelimit-remaining-usd", "0.025"),
+        ("x-ratelimit-prepaid-remaining-usd", "4.5"),
+        ("x-ratelimit-reset", "60"),
+    ];
+    let body = r#"{"meta": {"count": 0}, "results": []}"#;
+    let (oa, _) = provider([response(200, &headers, body)]);
+    let resp = block_on(oa.search(&SearchQuery::new("x"))).unwrap();
+    let usage = resp.usage.unwrap();
+    assert_eq!(usage.limit, Some(0.1));
+    assert_eq!(usage.remaining, Some(0.025));
+    assert_eq!(usage.prepaid_remaining, Some(4.5));
+    assert_eq!(usage.resets_at, after(60.0));
+
+    // Responses without them leave them unknown.
+    let (oa, _) = provider([response(200, &[("x-ratelimit-cost-usd", "0.001")], body)]);
+    let usage = block_on(oa.search(&SearchQuery::new("x")))
+        .unwrap()
+        .usage
+        .unwrap();
+    assert_eq!((usage.limit, usage.prepaid_remaining), (None, None));
+}
+
+#[test]
+fn the_budget_comes_free_from_rate_limit_with_a_key() {
+    let (oa, http) = provider([recorded("rate_limit")]);
+    assert!(oa.capabilities().budget_status);
+    let usage = block_on(oa.budget()).unwrap();
+    let req = &http.requests()[0];
+    assert_eq!(req.url, "https://api.openalex.org/rate-limit");
+    // The key goes as a header, as for every other request.
+    assert!(
+        req.headers
+            .contains(&("authorization".into(), "Bearer test-key".into()))
+    );
+    assert_eq!(usage.cost, Some(0.0));
+    assert_eq!(usage.limit, Some(1.0));
+    assert_eq!(usage.remaining, Some(0.9502));
+    assert_eq!(usage.prepaid_remaining, Some(0.0));
+    assert_eq!(
+        usage.resets_at,
+        Some("2026-11-15T00:00:00Z".parse().unwrap())
+    );
+}
+
+#[test]
+fn without_a_key_the_budget_is_never_asked() {
+    let (oa, http) = provider_with(None, []);
+    assert!(!oa.capabilities().budget_status);
+    let err = block_on(oa.budget()).unwrap_err();
+    assert!(matches!(err, Error::Unsupported(_)), "{err:?}");
+    assert!(http.requests().is_empty());
+}
+
+#[test]
+fn a_rejected_key_asking_its_budget_is_auth_rejected() {
+    let body = r#"{"error":"Authentication required","message":"You must provide a valid API key to check rate limit status"}"#;
+    let (oa, _) = provider([response(401, &[], body)]);
+    let err = block_on(oa.budget()).unwrap_err();
+    assert!(matches!(err, Error::AuthRejected { .. }), "{err:?}");
 }
 
 #[test]

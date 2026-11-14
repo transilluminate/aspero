@@ -504,6 +504,20 @@ when stdin closes.")]
         budget: f64,
     },
 
+    /// Show what's used and left of OpenAlex's daily budget.
+    #[command(after_help = "\
+With OPENALEX_API_KEY set, asks OpenAlex's /rate-limit, which costs nothing:
+  openalex: $0.0498 of $1.00 used today, resets 00:00 UTC
+
+Without a key nothing is asked (OpenAlex answers that only with a key), so
+there is nothing to show. JSON: {\"budgets\": [{\"provider\", \"limit\", \"used\",
+\"remaining\", \"prepaid_remaining\", \"resets_at\", \"seen_at\"}]}.
+
+Examples:
+  aspero budget
+  aspero budget --format json")]
+    Budget,
+
     /// Inspect or empty the answer cache.
     Cache {
         #[command(subcommand)]

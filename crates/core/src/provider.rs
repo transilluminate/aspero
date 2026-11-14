@@ -129,6 +129,9 @@ pub struct Capabilities {
     pub citations: bool,
     pub references: bool,
     pub recommend: bool,
+    /// [`Provider::budget`] can say what's left without spending any
+    /// (OpenAlex, with a key).
+    pub budget_status: bool,
 }
 
 /// Common search filters (see [`SearchQuery`]).
@@ -488,6 +491,14 @@ pub struct Usage {
     pub remaining: Option<f64>,
     /// When the budget resets.
     pub resets_at: Option<Timestamp>,
+    /// The budget for the period (OpenAlex: the daily allowance), as the
+    /// provider says it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub limit: Option<f64>,
+    /// A prepaid balance left beside the period's budget, where the
+    /// provider says one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub prepaid_remaining: Option<f64>,
 }
 
 impl Usage {
@@ -501,6 +512,8 @@ impl Usage {
             },
             remaining: later.remaining.or(self.remaining),
             resets_at: later.resets_at.or(self.resets_at),
+            limit: later.limit.or(self.limit),
+            prepaid_remaining: later.prepaid_remaining.or(self.prepaid_remaining),
         }
     }
 }
@@ -566,6 +579,13 @@ pub trait Provider: Send + Sync {
         format!("{} can't search by date added", self.id())
     }
 
+    /// What is left of the provider's budget, asked without spending any
+    /// (OpenAlex's `/rate-limit`). Called only when
+    /// [`Capabilities::budget_status`] says it can be.
+    async fn budget(&self) -> Result<Usage> {
+        Err(Error::Unsupported("budget status"))
+    }
+
     /// Works that cite `id`.
     async fn citations(
         &self,
@@ -623,16 +643,20 @@ mod tests {
         let first = Usage {
             cost: Some(0.001),
             remaining: Some(0.9),
-            resets_at: None,
+            limit: Some(1.0),
+            prepaid_remaining: Some(2.0),
+            ..Usage::default()
         };
         let second = Usage {
             cost: Some(0.0001),
-            remaining: None,
-            resets_at: None,
+            prepaid_remaining: Some(1.5),
+            ..Usage::default()
         };
         let total = first.then(second);
         assert!((total.cost.unwrap() - 0.0011).abs() < 1e-12);
         assert_eq!(total.remaining, Some(0.9));
+        assert_eq!(total.limit, Some(1.0));
+        assert_eq!(total.prepaid_remaining, Some(1.5));
     }
 
     #[test]

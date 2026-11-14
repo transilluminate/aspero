@@ -541,6 +541,31 @@ impl Aspero {
             .collect()
     }
 
+    /// Asks OpenAlex what's used and left of today's budget, for free
+    /// (`/rate-limit`, with a key), then answers as `budgets` does. Without
+    /// a key, or `offline`, nothing is asked: the budgets are as the last
+    /// responses left them.
+    #[uniffi::method(default(cancel = None))]
+    pub async fn refresh_budgets(
+        &self,
+        patience: Patience,
+        cancel: Option<Arc<CallToken>>,
+    ) -> Result<Vec<Budget>, AsperoError> {
+        let engine = self.engine(patience);
+        self.run(
+            async move {
+                engine
+                    .refresh_budgets()
+                    .await
+                    .iter()
+                    .map(|(p, b)| Budget::new(p, b))
+                    .collect()
+            },
+            cancel,
+        )
+        .await
+    }
+
     /// Whether OpenAlex accepts `key`, with one free lookup (never
     /// cached), and what it has left. Doesn't change the handle's key.
     #[uniffi::method(default(cancel = None))]

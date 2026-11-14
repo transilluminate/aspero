@@ -190,6 +190,7 @@ async fn run(cli: Cli, out: Out) -> Result<Exit, Failure> {
             estimate,
         } => cmd::graph::analyse(&engine, inputs, kinds, limit, budget, estimate, out).await,
         Command::Mcp { budget } => cmd::mcp::run(engine, budget).await,
+        Command::Budget => cmd::budget::run(&engine, out).await,
         Command::Cache { .. } | Command::Scan { .. } | Command::Styles { .. } => {
             unreachable!("handled above")
         }

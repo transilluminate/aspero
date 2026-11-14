@@ -38,6 +38,7 @@ requests=(
   "works_batch_reregistered /works?filter=doi:10.1197/j.aem.2003.09.015|10.1038/nature14539|10.5555/aspero-does-not-exist&per-page=100"
   "work_reregistered /works/doi:10.1197/j.aem.2003.09.015"
   "works_cites_page  /works?select=id,publication_year,referenced_works&sort=cited_by_count:desc&filter=cites:W2293082134|W2568812702&per-page=200&cursor=*"
+  "rate_limit        /rate-limit"
 )
 
 for entry in "${requests[@]}"; do
@@ -49,6 +50,9 @@ for entry in "${requests[@]}"; do
   # Keep only headers the provider reads; drop cookies and tracing noise.
   grep -iE '^(HTTP/|content-type|retry-after|x-ratelimit-|location)' "$out/$name.headers" \
     | tr -d '\r' >"$out/$name.headers.tmp" && mv "$out/$name.headers.tmp" "$out/$name.headers"
+  # `/rate-limit` echoes the key's first and last characters: mask them.
+  sed -E 's/"api_key":"[^"]*"/"api_key":"abc...xyz"/' "$out/$name.body" >"$out/$name.body.tmp" \
+    && mv "$out/$name.body.tmp" "$out/$name.body"
   printf '%-22s %s\n' "$name" "$(head -1 "$out/$name.headers")"
   sleep 0.2
 done

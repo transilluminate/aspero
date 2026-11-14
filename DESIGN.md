@@ -465,8 +465,18 @@ Fixtures are recorded with the provider's *exact* parameters
 fixture recorded with different parameters once hid a ranking bug.
 
 - **OpenAlex.** Key as `Authorization: Bearer` (keeps it out of URLs). Free
-  key: $1/day. Lookups by ID are free; filter batches $0.0001; searches
-  $0.001; `x-ratelimit-cost-usd` / `-remaining-usd` headers report spend.
+  key: $1/day ($0.10 without). Lookups by ID are free; filter batches
+  $0.0001; searches $0.001. Every response, free ones included, carries
+  `x-ratelimit-cost-usd`, `-limit-usd` (the daily allowance),
+  `-remaining-usd`, `-prepaid-remaining-usd` and `-reset` (seconds to
+  midnight UTC); `Usage` and the engine's `Budget` keep them (`limit`,
+  `prepaid_remaining`). `GET /rate-limit` says the same as JSON
+  (`daily_budget_usd`, `daily_remaining_usd`, `prepaid_remaining_usd`,
+  `resets_at`) for free (`daily_used_usd` unchanged across calls, no cost
+  header; checked 2026-11-14), but only to a key (401 "Authentication
+  required" without; Bearer works): `Engine::refresh_budgets` asks it,
+  and asks nothing without a key. Its body echoes the key's first and
+  last three characters, masked in the fixture.
   404s are HTML. Lists take up to 200 a page (`per-page`); filters OR up to
   100 values; `select` trims works to the fields named (citing works:
   `id,publication_year,referenced_works`, about 3 KB a work). Batch
@@ -575,7 +585,8 @@ bearer tokens, for embedding; host-provided tools; progress notifications
 `scan`, `split_references` and `split_lines` (laid-out lines with
 indents, from PDFKit), `references` and `analyse` (citation links), and
 for settings `budgets` (as last
-reported: free), `check_openalex_key` (one free lookup), `cache_stats`,
+reported: free), `refresh_budgets` (OpenAlex's `/rate-limit` with a key,
+free; nothing asked without one), `check_openalex_key` (one free lookup), `cache_stats`,
 `clear_cache` and `unavailable`. Network calls take a `Patience` (batch,
 interactive, offline, fresh).
 They return typed records (`Lookup`, `Verification`, `Work`, …), mirrors

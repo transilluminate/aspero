@@ -4,6 +4,7 @@
 //! found: those outcomes are in its output) and `Err(Failure)` when it could
 //! not run at all.
 
+pub mod budget;
 pub mod cache;
 pub mod check;
 pub mod claim;

@@ -89,6 +89,9 @@ aspero analyse refs.bib --budget 0.01       # fractions of a cent for 50 works
 aspero analyse refs.bib --kinds related     # works around the set, ~$0.006
 aspero analyse 10.1056/nejmoa010307 10.1056/nejmoa1401602 10.1056/nejmoa1500896
 
+# What's used of today's OpenAlex budget (free; needs a key)
+aspero budget
+
 # Watch the requests (and concurrency) as they happen
 aspero verify -v "Bishop CM. Pattern Recognition and Machine Learning. 2006"
 ```

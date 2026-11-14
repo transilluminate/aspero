@@ -1067,15 +1067,23 @@ pub struct Unavailable {
 
 // Settings.
 
-/// What a provider last said was left of its budget.
+/// What a provider last said of its budget.
 #[derive(Debug, Clone, uniffi::Record)]
 pub struct Budget {
     pub provider: String,
-    /// OpenAlex: US dollars.
+    /// Left today (OpenAlex: US dollars).
     pub remaining: Option<f64>,
     pub resets_at: Option<SystemTime>,
     /// When the provider said so.
     pub seen_at: SystemTime,
+    /// The daily allowance, as the provider says it (OpenAlex: $1 with a
+    /// key, $0.10 without). Used today is `limit - remaining`.
+    #[uniffi(default = None)]
+    pub limit: Option<f64>,
+    /// A prepaid balance beside the daily allowance, where the provider
+    /// says one.
+    #[uniffi(default = None)]
+    pub prepaid_remaining: Option<f64>,
 }
 
 impl Budget {
@@ -1085,6 +1093,8 @@ impl Budget {
             remaining: b.remaining,
             resets_at: b.resets_at.map(time),
             seen_at: time(b.seen_at),
+            limit: b.limit,
+            prepaid_remaining: b.prepaid_remaining,
         }
     }
 }

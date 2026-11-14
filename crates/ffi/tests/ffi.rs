@@ -870,6 +870,14 @@ fn caches_report_and_clear() {
 }
 
 #[test]
+fn without_a_key_refreshing_budgets_asks_nothing() {
+    let handle = aspero(None);
+    let budgets = block_on(handle.refresh_budgets(Patience::Batch, None)).unwrap();
+    assert!(budgets.is_empty(), "{budgets:?}");
+    assert!(handle.budgets().is_empty());
+}
+
+#[test]
 fn blank_keys_are_rejected_without_asking() {
     let checked = block_on(aspero(None).check_openalex_key("  ".into(), None)).unwrap();
     assert_eq!(checked.status, KeyStatus::Rejected);

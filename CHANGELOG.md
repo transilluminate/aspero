@@ -1,5 +1,20 @@
 # Changelog
 
+## Unreleased
+
+Added:
+
+- Budgets say what they're out of (#71): `Usage` and the engine's
+  `Budget` gain `limit` (OpenAlex's daily allowance,
+  `x-ratelimit-limit-usd`) and `prepaid_remaining`
+  (`x-ratelimit-prepaid-remaining-usd`), read from every response, free
+  lookups included; `Budget::used` is `limit − remaining`.
+  `Engine::refresh_budgets` (FFI `refreshBudgets`) asks OpenAlex's
+  `/rate-limit`, which costs nothing, with a key, and sends nothing
+  without one. FFI `Budget.limit` and `prepaidRemaining`. `aspero budget`:
+  "openalex: $0.0498 of $1.00 used today, resets 00:00 UTC". JSON usage
+  gains `limit` and `prepaid_remaining`.
+
 ## 0.16.1
 
 Fixed:

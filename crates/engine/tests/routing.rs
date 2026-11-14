@@ -390,13 +390,21 @@ async fn missing_fields_and_sorts_fail_rather_than_widen_the_search() {
     q.author = Some("LeCun".into());
     q.title = Some("Deep learning".into());
     assert_eq!(
-        unsupported(engine.search(None, &q).await),
+        unsupported(engine.search(Some("fields"), &q).await),
         "search by title"
     );
+    // Unnamed, no other source can either.
+    match engine.search(None, &q).await {
+        Err(EngineError::Provider {
+            error: Error::UnsupportedQuery(why),
+            ..
+        }) => assert_eq!(why, "search by title, and no other source can"),
+        other => panic!("{:?}", other.map(|_| ())),
+    }
     q.title = None;
     q.sort = Sort::Newest;
     assert_eq!(
-        unsupported(engine.search(None, &q).await),
+        unsupported(engine.search(Some("fields"), &q).await),
         "sorting newest first"
     );
     assert!(mock.searches.lock().unwrap().is_empty());
@@ -498,19 +506,17 @@ async fn since_picks_the_first_source_that_can_and_is_never_ignored() {
     assert_eq!(engine.search_supports(Some("first"), &keywords), None);
     assert_eq!(first.searches.lock().unwrap().len(), 1);
 
-    // None can: a clear refusal.
+    // None can: the first's reason, and that no other can.
     let engine = self::engine(vec![(first, 10)]);
     let err = engine.search(None, &q).await.unwrap_err();
-    assert!(matches!(
-        err,
-        EngineError::NoCapableProvider("search by date added")
-    ));
+    let none_can = "first can't search by date added, and no other source can";
+    assert_eq!(err.to_string(), format!("first: unsupported: {none_can}"));
     assert_eq!(err.kind(), ErrorKind::Unsupported);
     assert_eq!(
         engine
             .search_supports_since(None, &keywords, q.since)
             .as_deref(),
-        Some("no enabled provider supports search by date added")
+        Some(none_can)
     );
 }
 
@@ -673,7 +679,7 @@ async fn trees_a_source_cant_say_fail_as_search_supports_says() {
     let mock = Arc::new(mock);
     let engine = engine(vec![(mock.clone(), 10)]);
     let tree = QueryNode::Any(vec![title("a"), title("b")]);
-    let reason = "Mock can't combine terms with any";
+    let reason = "Mock can't combine terms with any, and no other source can";
     assert_eq!(engine.search_supports(None, &tree).as_deref(), Some(reason));
     assert_eq!(engine.search_supports(Some("flat"), &title("a")), None);
     match engine.search(None, &with_tree(tree)).await {
@@ -686,7 +692,7 @@ async fn trees_a_source_cant_say_fail_as_search_supports_says() {
     let abstracts = QueryNode::term(TermField::Abstract, "x");
     assert_eq!(
         engine.search_supports(None, &abstracts).as_deref(),
-        Some("Mock can't search by abstract")
+        Some("Mock can't search by abstract, and no other source can")
     );
     // Invalid values are the caller's to fix.
     let language = QueryNode::filter(FilterValue::Language("english".into()));
@@ -703,13 +709,53 @@ async fn trees_a_source_cant_say_fail_as_search_supports_says() {
     assert!(mock.searches.lock().unwrap().is_empty());
 }
 
+/// Without a source, the first that can say the whole query searches it:
+/// a tree, a sort, a field; and `search_supports` agrees. Named, a source
+/// that can't still fails.
+#[tokio::test(start_paused = true)]
+async fn unnamed_the_first_source_that_can_searches() {
+    let mut flat = tree_mock("flat", &[]);
+    flat.caps.search_any = BooleanSupport::No;
+    flat.caps.sorts = vec![Sort::Relevance];
+    let flat = Arc::new(flat);
+    let mut full = tree_mock("full", &[]);
+    full.caps.sorts = vec![Sort::Relevance, Sort::MostCited];
+    full.caps.search_filters.push(Filter::Author);
+    let full = Arc::new(full);
+    let engine = engine(vec![(flat.clone(), 10), (full.clone(), 20)]);
+
+    let tree = QueryNode::Any(vec![title("morphine"), title("titration")]);
+    assert_eq!(engine.search_supports(None, &tree), None);
+    let report = engine.search(None, &with_tree(tree.clone())).await.unwrap();
+    assert_eq!(report.provider.as_str(), "full");
+    assert_eq!(
+        engine.search_supports(Some("flat"), &tree).as_deref(),
+        Some("Mock can't combine terms with any")
+    );
+    assert!(engine.search(Some("flat"), &with_tree(tree)).await.is_err());
+
+    // A sort, a field.
+    let mut cited = SearchQuery::new("morphine");
+    cited.sort = Sort::MostCited;
+    let by = engine.search(None, &cited).await.unwrap();
+    assert_eq!(by.provider.as_str(), "full");
+    let mut author = SearchQuery::new("");
+    author.author = Some("Lvovschi".into());
+    let by = engine.search(None, &author).await.unwrap();
+    assert_eq!(by.provider.as_str(), "full");
+    // What the first can say, the first searches.
+    let plain = engine.search(None, &with_tree(title("morphine"))).await;
+    assert_eq!(plain.unwrap().provider.as_str(), "flat");
+    assert_eq!(flat.searches.lock().unwrap().len(), 1);
+}
+
 #[tokio::test(start_paused = true)]
 async fn identifiers_are_checked_before_a_source_sees_them() {
     let mock = Arc::new(tree_mock("ids", &[]));
     let engine = engine(vec![(mock.clone(), 10)]);
     let id = |v| QueryNode::term(TermField::Identifier, v);
     // A source without the field can't search by it.
-    let reason = "Mock can't search by identifier";
+    let reason = "Mock can't search by identifier, and no other source can";
     assert_eq!(
         engine
             .search_supports(None, &id("10.1038/nature14539"))
@@ -830,7 +876,7 @@ async fn relations_are_searched_by_their_openalex_work() {
         engine
             .search_supports(None, &QueryNode::relation(Relation::CitedBy, DOI_A))
             .as_deref(),
-        Some("Mock can't find the works a work cites")
+        Some("Mock can't find the works a work cites, and no other source can")
     );
 }
 

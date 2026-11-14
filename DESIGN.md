@@ -100,12 +100,17 @@ scripts/       fixture recorders, one per provider
   OpenAlex likewise. An unknown name, or every source, is a setup error
   (CLI: usage, exit 2). Checks need no particular source: any one alone
   verifies (tested with Crossref alone).
-- **Search** goes to one provider (named, or the first capable); filters it
-  can't apply are stripped and reported as ignored. Fields (author, title,
-  container) and sorts (newest, most cited) it can't apply fail
-  (`Unsupported`): dropping one would widen or reorder the search
-  silently. Relevance never fails; with only fields to rank by, it is the
-  source's own order.
+- **Search** goes to one provider: the one named, or else the first, in
+  order of preference, that can search the whole query (its mode, tree,
+  `since`, fields and sort: the same checks as a named search, no calls);
+  if none can, the first's reason fails, ", and no other source can"
+  (`UnsupportedQuery`). `search_supports` without a source likewise asks
+  whether any can (before 0.18, whether the first could). Filters a
+  provider can't apply are stripped and reported as ignored. Fields
+  (author, title, container) and sorts (newest, most cited) it can't
+  apply fail (`Unsupported`): dropping one would widen or reorder the
+  search silently. Relevance never fails; with only fields to rank by, it
+  is the source's own order.
 - **Since** (`SearchQuery::since`, a day): only works the source added
   on or after it, whenever published, for watching a search; the caller
   keeps what it has seen, and a page's `total` counts what's new. A

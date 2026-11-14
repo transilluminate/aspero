@@ -252,7 +252,9 @@ Examples:
     /// Search one provider by keywords, author, title or journal.
     #[command(after_help = "\
 Searches are not interchangeable across providers (rankings differ), so one
-provider answers: --source, or the first that can.
+provider answers: --source, or the first that can search the whole of it
+(its --query tree, --since, fields and --sort), in the order openalex,
+crossref, datacite, europepmc, openlibrary; if none can, the first's reason.
 
 Filters a provider can't apply are reported in `ignored_filters`, never
 silently dropped. A provider that can't search by --author, --title,

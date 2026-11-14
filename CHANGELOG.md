@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.18.1
+
+The 0.18.0 release, built: 0.18.0's GitHub release (binaries, the
+xcframework, Homebrew) failed to build, because its release commit held a
+stray git worktree entry. The code is the same as 0.18.0's.
+
 ## 0.18.0
 
 Added:

@@ -60,9 +60,10 @@ aspero check refs.bib
 aspero check paper.docx
 aspero check --fail-on warning --format json thesis.ris
 
-# Write what's found as BibTeX or RIS, or as a reference list in a style
+# Write what's found as BibTeX, RIS or CSL-JSON, or as a reference list in a style
 aspero lookup --format bibtex 10.1038/nature14539 arXiv:1706.03762
 aspero verify --format ris - < citations.txt
+aspero search --format csl-json "sepsis fluid resuscitation" > zotero.json
 aspero verify --style vancouver - < citations.txt   # `aspero styles` lists them
 
 # Look up identifiers: DOIs, arXiv IDs, PMIDs, PMCIDs, NBK IDs, ISBNs, URLs
@@ -106,7 +107,7 @@ aspero verify -v "Bishop CM. Pattern Recognition and Machine Learning. 2006"
 On a terminal, results are tables (a single `verify` is a short report);
 piped, they're JSON. Pick explicitly with `--format table|text|json|jsonl`:
 `text` is a detailed report per result. `lookup`, `search` and `verify`
-also take `--format bibtex|ris`, and `--style apa|vancouver|…` or a `.csl`
+also take `--format bibtex|ris|csl-json`, and `--style apa|vancouver|…` or a `.csl`
 file for a formatted reference list. Every command's `--help` has
 examples and the exit codes.
 

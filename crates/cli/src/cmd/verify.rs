@@ -54,7 +54,7 @@ pub async fn run(engine: &Engine, args: ClaimArgs, out: Out) -> Result<Exit, Fai
             let best = v.best.map(|i| &v.report.candidates[i]);
             let text = match best {
                 Some(c) if matches!(v.verdict, Verdict::Verified | Verdict::Mismatch) => {
-                    export.entry(&c.record.work, &c.ids)
+                    export.entry_at(i, &c.record.work, &c.ids)
                 }
                 _ => {
                     eprintln!("skipped {}: {}", claim.input, v.reason);
@@ -135,7 +135,7 @@ impl Results {
         self.done += 1;
         match self.format {
             Format::Jsonl => print_line(&done.item),
-            Format::Text | Format::Bibtex | Format::Ris | Format::Cite => {
+            Format::Text | Format::Bibtex | Format::Ris | Format::CslJson | Format::Cite => {
                 self.slots[i] = Some(done);
                 while let Some(Some(done)) = self.slots.get(self.next) {
                     if !done.text.is_empty() {
@@ -159,7 +159,7 @@ impl Results {
         }
         let done = self.slots.into_iter().flatten();
         match self.format {
-            Format::Jsonl | Format::Bibtex | Format::Ris | Format::Cite => {}
+            Format::Jsonl | Format::Bibtex | Format::Ris | Format::CslJson | Format::Cite => {}
             Format::Text => {
                 if let Some(text) = output::usage_text(usage) {
                     eprintln!("{text}");

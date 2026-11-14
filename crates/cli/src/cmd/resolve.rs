@@ -110,7 +110,9 @@ pub async fn run(engine: &Engine, args: ClaimArgs, out: Out) -> Result<Exit, Fai
                 }
             }
             Format::Jsonl => candidates.iter().for_each(print_line),
-            Format::Bibtex | Format::Ris | Format::Cite => unreachable!("rejected in main"),
+            Format::Bibtex | Format::Ris | Format::CslJson | Format::Cite => {
+                unreachable!("rejected in main")
+            }
             Format::Json | Format::Auto => docs.push(merged(
                 echo,
                 json!({

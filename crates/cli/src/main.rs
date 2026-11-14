@@ -50,7 +50,7 @@ async fn main() -> ExitCode {
     );
     let result = match format.is_export() && !exports {
         true => Err(Failure::usage(
-            "--format bibtex, ris and cite are for lookup, search and verify",
+            "--format bibtex, ris, csl-json and cite are for lookup, search and verify",
         )),
         false => run(cli, out.clone()).await,
     };

@@ -43,7 +43,9 @@ pub async fn references(
                 eprintln!("{text}");
             }
         }
-        Format::Bibtex | Format::Ris | Format::Cite => unreachable!("rejected in main"),
+        Format::Bibtex | Format::Ris | Format::CslJson | Format::Cite => {
+            unreachable!("rejected in main")
+        }
         Format::Json | Format::Auto => print(&doc),
     }
     Ok(Exit::Ok)
@@ -194,7 +196,9 @@ pub async fn analyse(
                 eprintln!("{text}");
             }
         }
-        Format::Bibtex | Format::Ris | Format::Cite => unreachable!("rejected in main"),
+        Format::Bibtex | Format::Ris | Format::CslJson | Format::Cite => {
+            unreachable!("rejected in main")
+        }
         Format::Json | Format::Auto => print(&doc),
     }
     Ok(exit_for(&analysis))

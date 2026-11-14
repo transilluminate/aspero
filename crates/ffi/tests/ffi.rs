@@ -178,13 +178,25 @@ fn works_export_as_bibtex_and_ris() {
         bibtex.contains("year = {2015}"),
         "a year without a date: {bibtex}"
     );
-    let ris = handle.export(vec![work], ExportFormat::Ris);
+    let ris = handle.export(vec![work.clone()], ExportFormat::Ris);
     assert!(ris.contains("DO  - 10.1038/nature14539\n"), "{ris}");
     let back = handle.read_references(ris).unwrap();
     assert_eq!(
         back.entries[0].claim.title.as_deref(),
         Some("Deep learning")
     );
+
+    // CSL-JSON reads back as written.
+    let csl = handle.export(vec![work.clone(), work.clone()], ExportFormat::CslJson);
+    let items: serde_json::Value = serde_json::from_str(&csl).unwrap();
+    assert_eq!(items[1]["id"], "lecun2015deepa");
+    let back = handle.read_references(csl).unwrap();
+    assert_eq!(back.entries.len(), 2);
+    let claim = &back.entries[0].claim;
+    assert_eq!(claim.title.as_deref(), Some("Deep learning"));
+    assert_eq!(claim.authors, ["LeCun, Yann"]);
+    assert_eq!(claim.year, Some(2015));
+    assert_eq!(claim.ids, work.ids);
 }
 
 fn work(title: &str, author: &str, year: i16) -> Work {

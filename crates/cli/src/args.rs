@@ -245,6 +245,8 @@ pub enum Format {
     Bibtex,
     /// The works found as RIS records (lookup, search, verify).
     Ris,
+    /// The works found as one CSL-JSON array (lookup, search, verify).
+    CslJson,
     /// The works found as a reference list in `--style` (lookup, search,
     /// verify).
     Cite,
@@ -258,7 +260,10 @@ impl Format {
 
     /// The works found, for a reference manager.
     pub fn is_export(self) -> bool {
-        matches!(self, Format::Bibtex | Format::Ris | Format::Cite)
+        matches!(
+            self,
+            Format::Bibtex | Format::Ris | Format::CslJson | Format::Cite
+        )
     }
 }
 
@@ -878,6 +883,13 @@ mod tests {
 
     fn parse(args: &[&str]) -> Result<Cli, clap::Error> {
         Cli::try_parse_from(std::iter::once("aspero").chain(args.iter().copied()))
+    }
+
+    #[test]
+    fn csl_json_is_an_export_format() {
+        let cli = parse(&["lookup", "--format", "csl-json", "10.1038/nature14539"]).unwrap();
+        assert_eq!(cli.global.format, Format::CslJson);
+        assert!(Format::CslJson.is_export() && !Format::CslJson.is_human());
     }
 
     #[test]

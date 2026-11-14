@@ -13,9 +13,9 @@ use hayagriva::citationberg::{
 use hayagriva::{
     BibliographyDriver, BibliographyRequest, BufWriteFormat, CitationItem, CitationRequest,
 };
-use serde_json::{Map, Value, json};
+use serde_json::{Value, json};
 
-use crate::write::{Name, name};
+use crate::write::on_arxiv;
 
 /// A bundled style: `id` is how it's asked for.
 #[derive(Debug, Clone, Copy)]
@@ -270,84 +270,41 @@ fn tidy(text: &str) -> String {
     out
 }
 
-/// A work as a CSL-JSON item keyed by its position.
+/// A work as a CSL-JSON item keyed by its position: the exported item
+/// ([`crate::csl_item`]), with what styles should print. Indexes list
+/// arXiv as a journal ("arXiv (Cornell University)"), sometimes with a
+/// later version's volume and pages: cite the preprint.
 fn item(index: usize, work: &Work, ids: &[WorkId]) -> Value {
-    let mut item = Map::new();
-    let mut put = |key: &str, value: Option<Value>| {
-        if let Some(v) = value {
-            item.insert(key.into(), v);
-        }
-    };
-    put("id", Some(json!(index.to_string())));
-    // Indexes list arXiv as a journal ("arXiv (Cornell University)"),
-    // sometimes with a later version's volume and pages: cite the preprint.
-    let on_arxiv = ids.iter().any(|id| matches!(id, WorkId::Arxiv(_)))
-        && work
-            .container_title
-            .as_deref()
-            .is_none_or(|c| c.to_lowercase().contains("arxiv"));
-    let preprint = on_arxiv || matches!(work.work_type, Some(WorkType::Preprint));
+    const PRINTED: [&str; 14] = [
+        "id",
+        "type",
+        "title",
+        "author",
+        "issued",
+        "container-title",
+        "volume",
+        "issue",
+        "page",
+        "publisher",
+        "URL",
+        "DOI",
+        "ISBN",
+        "number",
+    ];
+    let mut item = crate::csl_item(work, ids, &index.to_string());
+    item.retain(|k, _| PRINTED.contains(&k.as_str()));
+    let on_arxiv = on_arxiv(work, ids);
     let kind = match &work.work_type {
-        _ if preprint => "article",
+        _ if on_arxiv => "article",
         Some(WorkType::Other(_)) | None => "article",
         Some(t) => t.as_csl(),
     };
-    put("type", Some(json!(kind)));
-    put("title", work.title.as_ref().map(|t| json!(t)));
-    let authors: Vec<Value> = work
-        .authors
-        .iter()
-        .filter_map(|p| match name(p) {
-            Name::Person { family, given } => Some(json!({"family": family, "given": given})),
-            Name::Whole(whole) if whole.is_empty() => None,
-            Name::Whole(whole) => Some(json!({"literal": whole})),
-        })
-        .collect();
-    put("author", (!authors.is_empty()).then(|| json!(authors)));
-    put(
-        "issued",
-        work.issued.map(|d| {
-            let parts: Vec<i64> = [
-                Some(i64::from(d.year())),
-                d.month().map(i64::from),
-                d.day().map(i64::from),
-            ]
-            .into_iter()
-            .map_while(|p| p)
-            .collect();
-            json!({"date-parts": [parts]})
-        }),
-    );
-    if !on_arxiv {
-        let text = |v: &Option<String>| v.as_ref().map(|v| json!(v));
-        put("container-title", text(&work.container_title));
-        put("volume", text(&work.volume));
-        put("issue", text(&work.issue));
-        put("page", text(&work.page));
-        put("publisher", text(&work.publisher));
-    }
-    put("URL", work.url.as_ref().map(|v| json!(v)));
-    for id in ids {
-        match id {
-            WorkId::Doi(doi) if !item.contains_key("DOI") => {
-                item.insert("DOI".into(), json!(doi.to_string()));
-            }
-            WorkId::Isbn(isbn) if !item.contains_key("ISBN") => {
-                item.insert("ISBN".into(), json!(isbn.to_string()));
-            }
-            // A preprint's repository and number, as styles print them.
-            WorkId::Arxiv(arxiv) if preprint => {
-                item.entry("publisher").or_insert(json!("arXiv"));
-                item.insert("number".into(), json!(format!("arXiv:{arxiv}")));
-                if work.url.is_none() {
-                    item.insert(
-                        "URL".into(),
-                        json!(format!("https://arxiv.org/abs/{arxiv}")),
-                    );
-                }
-            }
-            _ => {}
+    item.insert("type".into(), json!(kind));
+    if on_arxiv {
+        for key in ["container-title", "volume", "issue", "page"] {
+            item.remove(key);
         }
+        item.insert("publisher".into(), json!("arXiv"));
     }
     Value::Object(item)
 }

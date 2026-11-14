@@ -543,8 +543,13 @@ impl Aspero {
     }
 
     /// Works as BibTeX entries (keys kept distinct) or RIS records, one
-    /// after another. Offline.
+    /// after another, or as a CSL-JSON array (keyed as BibTeX). Offline.
     pub fn export(&self, works: Vec<Work>, format: ExportFormat) -> String {
+        if format == ExportFormat::CslJson {
+            let core: Vec<_> = works.iter().map(Work::to_core).collect();
+            let pairs: Vec<_> = core.iter().map(|(w, ids)| (w, &ids[..])).collect();
+            return aspero_bib::csl_json(&pairs);
+        }
         let mut keys = aspero_bib::Keys::default();
         let entries: Vec<String> = works
             .iter()
@@ -553,6 +558,7 @@ impl Aspero {
                 match format {
                     ExportFormat::Ris => aspero_bib::ris(&w, &ids),
                     ExportFormat::Bibtex => aspero_bib::bibtex(&w, &ids, &keys.key(&w)),
+                    ExportFormat::CslJson => unreachable!("written above"),
                 }
             })
             .collect();

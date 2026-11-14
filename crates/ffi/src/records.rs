@@ -1768,6 +1768,9 @@ impl From<aspero_bib::ReadError> for ReadError {
 pub enum ExportFormat {
     Bibtex,
     Ris,
+    /// One CSL-JSON array, as Zotero imports it (and `readReferences`
+    /// reads it).
+    CslJson,
 }
 
 impl Work {

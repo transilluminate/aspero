@@ -455,7 +455,10 @@ Two SQLite stores, split by whether data can be refetched:
   two are settings (#74): `StandardConfig::cache_policy`, FFI
   `Config.cache_found_days` / `cache_not_found_days` (defaults 7 and 1;
   0 asks every time), CLI `--cache-found-days` / `--cache-not-found-days`
-  (and `ASPERO_CACHE_*`); the rest stay as they are.
+  (and `ASPERO_CACHE_*`); the rest stay as they are. Two tables are
+  accounting rather than answers, so rebuilds, `clear` and eviction keep
+  them: the `pacing` slots, and `mcp_spend`, each MCP key's engine spend
+  per UTC day (see Agents (MCP)).
 - **Size** (#74): `Stats::bytes` (FFI `CacheStats.bytes`, `aspero cache
   stats`) is the database's `page_count × page_size`, the file on disk
   once the WAL is checkpointed (SQLite does so every 4 MB or so; the WAL
@@ -658,17 +661,101 @@ fixture recorded with different parameters once hid a ranking bug.
   protocol errors. Descriptions and the server's instructions say results
   are third-party data, not instructions.
 
-A **`Session`** is one connection: its `Caller` (empty over stdio; tokens
-will go there) and a spend cap in USD (`--budget`, default $0.25). Tools that may spend are refused once the session has spent it,
+A **`Session`** is one connection: its `Caller` (empty over stdio; over
+HTTP, the key) and a spend cap in USD (`--budget`, default $0.25). Tools that may spend are refused once the session has spent it,
 checked before each call; a call's cost is known only after it, so the
 last one can overshoot by its own cost. Spend is the engine's reported
 usage (OpenAlex's `cost`), as the CLI totals it; every result carries the
 call's `usage` and the session's `spent_usd`, `budget_usd` and `left_usd`.
 `search_supports` is offline and never refused.
 
-Later phases (#58): Streamable HTTP on loopback behind a feature, with
-bearer tokens, for embedding; host-provided tools; progress notifications
-(a batch's results as each finishes).
+### Streamable HTTP and host tools (P1, P2)
+
+For apps that embed aspero: `aspero_mcp::http` (the `http` feature; the
+CLI builds without it and serves stdio only) and, over it, the FFI's
+`McpServer` and `McpHost` (the FFI's `mcp` feature, which
+`scripts/xcframework.sh` enables).
+
+- **Interface.** `McpServer.start(aspero, config, host)` (async; throws
+  `McpError`: `portInUse { port }`, `toolNameClash { name }`,
+  `setup { message }`) serves through the app's own `Aspero` handle, so
+  its OpenAlex key, cap, disabled sources and cache apply and no second
+  engine is built. `McpServerConfig`: `port` (23130), `keys`,
+  `sessionBudgetUsd` ($0.25), `engineTools` (true; false serves only the
+  app's tools). `McpKey`: `id`, `name`, `scopes`, `sha256` (hex),
+  `dailyBudgetUsd` ($1). Then `setKeys` (at once), `hostToolsChanged`
+  (re-reads the host's tools; throws on a clash, keeping the old ones),
+  `port`, `status` (running, port, open sessions, the last request and
+  its key's name, each key's last use) and `stop` (ends the sessions and
+  frees the port before returning). The app implements `McpHost`:
+  `tools()` (each a `HostTool`: name, title, description, input and
+  output JSON Schemas, scope), `async call(name, arguments, caller)`
+  (arguments a JSON object; `McpCaller` is the key's id, name and scopes;
+  answers `HostToolResult { structured, summary }` or throws
+  `HostToolError`: invalid arguments, not found, refused, failed) and
+  `activity(McpActivity)`.
+- **Transport.** `rmcp`'s Streamable HTTP service (a tower service; no
+  axum) at `/mcp`, under a small hyper (HTTP/1.1) server of ours, bound to
+  `127.0.0.1` only. The port is the app's choice and never moves: taken,
+  `start` throws. Sessions are the protocol's (`initialize`, then
+  `Mcp-Session-Id`), each with its own handler and budget; only the
+  revisions with `initialize` are offered, and a call outside a session
+  is refused, so budgets can't be dodged by going sessionless. Stopping
+  closes every session, cancels their streams, closes the listener, and
+  waits up to two seconds for requests in flight.
+- **Auth, on every request, in order.** The path; `Host` must be
+  `127.0.0.1:<port>` or `localhost:<port>` and any `Origin` is refused
+  (both 403, before auth); `Authorization: Bearer <token>`: the token's
+  SHA-256 is compared with every key's in constant time (`subtle`'s
+  `ct_eq`, all keys whatever matches), 401 with no detail otherwise; a
+  session id must be one this key (same id and hash) opened, else 404.
+  `rmcp`'s own Host and Origin checks are configured the same, behind
+  ours. `setKeys` swaps the list atomically: a session whose key is gone
+  or re-hashed is closed, and its next request fails auth.
+- **Scopes.** `sources` for the engine tools; `readHistory` and
+  `writeHistory` for the app's, each declaring one. `tools/list` shows a
+  key only what it may call; a call without the scope is a tool error
+  ("this key can't use … : it lacks the … scope") and the app isn't
+  asked. Host tools are annotated read-only unless `writeHistory`; none is
+  destructive, and there's no delete scope.
+- **Host tools.** Names must differ from the engine tools' (even with
+  `engineTools` off) and each other's, or `start` / `hostToolsChanged`
+  throws `toolNameClash`; schemas must be JSON objects. A call's
+  arguments must hold the input schema's `required` fields (checked
+  here; the rest of the schema is the app's to check), then the app has
+  30 s; a `HostToolError` or a timeout is a tool error (`isError`) with
+  its message, and `structured` must be a JSON object: the result's
+  `structuredContent`, with `summary` as its text. Host tools cost $0.
+- **Budgets.** Per session, as over stdio. Per key per UTC day: engine
+  spend only, refused (a tool error; free tools still work) once a paid
+  call would start at or past `dailyBudgetUsd`, overshooting as sessions
+  do. Kept in the cache file (`mcp_spend (key_id, day, usd)`, beside the
+  versioned schema like the pacing slots: rebuilds, `clear` and eviction
+  keep it; days over a month old are pruned), so restarts don't reset it;
+  in memory without a cache. A spend that can't be read refuses the
+  key's paid calls.
+- **Activity.** After every tool call (engine or app, success, error or
+  refusal), the app's `activity` gets the key's name, the tool, a few
+  words ("searched ‘lactate clearance’", "looked up 3 works", "verified 2
+  citations", "identified a document"; an app tool's summary's first
+  line; "error: …"), whether it failed, and its cost, on a thread of its
+  own, in order, never holding up a request.
+
+**Threat model.** The server is for agents on the same machine, acting
+for the user. Loopback only: nothing off the machine can connect. Every
+request needs a key the app minted and can revoke; aspero holds only
+SHA-256 hashes (the app keeps tokens in the Keychain), compared in
+constant time. Browsers are the remaining local attacker: a page can
+send requests to loopback, but it sends an `Origin` (refused) and, with
+DNS rebinding, its own host name in `Host` (refused); it can't read a
+token. Other local processes running as the user could read the app's
+data anyway, so a key bounds what an agent may do (scopes, budgets), not
+who the user is. No tool deletes anything; writes go only through the
+app's `writeHistory` tools, which the app implements and can refuse.
+Results are third-party data, and say so.
+
+Next (#58, P3): notifications (progress, the app's tools changing) and
+resources.
 
 ## Apps (FFI)
 
@@ -696,7 +783,10 @@ so any executor can await them. Cancellation is explicit: UniFFI's Swift
 bindings (0.32) don't pass a `Task`'s cancellation to Rust, so calls take
 an optional `CallToken` the app cancels from `withTaskCancellationHandler`;
 the call's task is aborted and it throws `Cancelled`. Mentions carry
-`utf16` ranges for `NSString`. Hold one handle per app. `just xcframework` builds `AsperoFFI.xcframework` (static, arm64,
+`utf16` ranges for `NSString`. Hold one handle per app. With the `mcp`
+feature (on in the xcframework), `McpServer` serves agents over HTTP
+through the handle, and the app's own tools through `McpHost` (see
+Agents (MCP)). `just xcframework` builds `AsperoFFI.xcframework` (static, arm64,
 macOS 26+; `UNIVERSAL=1` adds x86_64, `MACOSX_DEPLOYMENT_TARGET`
 overrides) and the Swift bindings; a workflow attaches both to each
 release. Not published to crates.io.
@@ -709,7 +799,8 @@ licences [--full]`. `just notices` writes them, at release, to
 artefacts `include_str!` their own. The generator (`crates/notices-gen`,
 not published) takes each artefact's crates from `cargo tree -e
 normal,no-proc-macro --target aarch64-apple-darwin` (features resolved
-for that package alone, as its build does: `cargo metadata` unifies them
+for that package alone, with the ones its build enables, the FFI's `mcp`,
+as its build does: `cargo metadata` unifies them
 across the workspace and dev-dependencies, and names ~40 crates the
 library doesn't contain). Proc macros run when building and aren't in
 what ships; their own dependencies resolve for the building machine, so
@@ -770,8 +861,8 @@ its container; different schema versions would rebuild each other's).
 
 - Whether to cap OpenAlex spend per CLI command, as MCP sessions are
   (`--openalex-cap` caps the day, not a command).
-- The MCP session budget's default (provisional $1.00), and a per-token
-  cap, before Streamable HTTP.
+- The MCP budgets' defaults ($0.25 a session, $1 a key a day) once agents
+  have used them for a while.
 - Whether a lookup should ever hedge (ask two providers at once) for
   latency.
 

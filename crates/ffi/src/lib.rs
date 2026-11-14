@@ -23,6 +23,8 @@ use futures::StreamExt;
 use tokio::sync::watch;
 use tokio::task::JoinHandle;
 
+#[cfg(feature = "mcp")]
+pub mod mcp;
 mod notices;
 pub mod records;
 

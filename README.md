@@ -144,6 +144,23 @@ on OpenAlex searches; once it has, tools that may spend are refused. Every
 result reports its usage and the session's spend. The environment, cache
 and pacing are the other commands'.
 
+### Agents (MCP) in an app
+
+An app that embeds aspero (the FFI's `McpServer`, in the xcframework) can
+serve the same tools, and its own, over Streamable HTTP on
+`http://127.0.0.1:<port>/mcp` (default port 23130), to agents holding a
+bearer key the app minted:
+
+```sh
+claude mcp add --transport http aspero http://127.0.0.1:23130/mcp \
+  --header "Authorization: Bearer <token>"
+```
+
+Only loopback, only with a key (aspero keeps its SHA-256, never the
+token), and never from a browser. Each key has scopes (the sources;
+reading or adding to the app's history) and a daily budget; each session
+its own budget. The app hears of every tool call as it happens.
+
 ## How it behaves
 
 - **Cheap**: free sources first; paid OpenAlex searches only when needed,
@@ -180,6 +197,12 @@ server is `aspero-mcp`. Apps use `aspero-ffi`: Swift bindings and an
 `.xcframework` attached to each release (`just xcframework` builds them).
 See [DESIGN.md](DESIGN.md) for the architecture, scoring rules, provider
 gotchas and plans.
+
+Swift 6: the bindings UniFFI 0.32 generates (`aspero_ffi.swift`) don't yet
+compile in Swift 6 language mode: its support for async foreign traits
+(`McpHost`) passes non-`Sendable` closures to a `Task`. Compile that file's
+target in Swift 5 mode (in SwiftPM, `swiftSettings:
+[.swiftLanguageMode(.v5)]`); code using it can stay in Swift 6.
 
 ## Development
 

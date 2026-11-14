@@ -12,10 +12,18 @@
 //! - [`serve_stdio`] (and [`serve`], over any byte stream): the protocol,
 //!   via the official SDK (`rmcp`), on top of [`Tools`].
 //!
+//! - With the `http` feature, [`http::HttpServer`]: Streamable HTTP on
+//!   loopback for apps that embed aspero, with bearer keys and their
+//!   [`Scope`]s, budgets per session and per key per day, and tools the
+//!   app provides ([`http::Host`]).
+//!
 //! A session is one connection: over stdio, the agent that launched the
-//! server. It carries the [`Caller`] and the spend cap.
+//! server; over HTTP, an `initialize` and the requests after it. It carries
+//! the [`Caller`] and the spend cap.
 
 mod args;
+#[cfg(feature = "http")]
+pub mod http;
 mod schema;
 mod server;
 mod session;
@@ -23,7 +31,7 @@ mod summary;
 mod tools;
 
 pub use server::{serve, serve_stdio};
-pub use session::{Caller, DEFAULT_BUDGET_USD, Session};
+pub use session::{Caller, DEFAULT_BUDGET_USD, Scope, Session};
 pub use tools::{
     MAX_CITATIONS, MAX_IDS, MAX_LIMIT, Output, ToolError, ToolErrorKind, ToolSpec, Tools,
 };

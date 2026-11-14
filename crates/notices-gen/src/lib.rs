@@ -34,6 +34,8 @@ pub const FIX: &str = "run `just notices`";
 pub struct Artefact {
     /// The package it's built from.
     pub package: &'static str,
+    /// The features it's built with.
+    pub features: &'static [&'static str],
     /// What it is, for the notices' header.
     pub what: &'static str,
     /// Where its notices go, from the workspace root.
@@ -43,11 +45,14 @@ pub struct Artefact {
 pub const ARTEFACTS: [Artefact; 2] = [
     Artefact {
         package: "aspero-ffi",
+        // As scripts/xcframework.sh builds it.
+        features: &["mcp"],
         what: "The aspero-ffi library (AsperoFFI.xcframework)",
         dir: "crates/ffi/notices",
     },
     Artefact {
         package: "aspero",
+        features: &[],
         what: "The aspero command-line tool",
         dir: "crates/cli/notices",
     },
@@ -74,6 +79,9 @@ pub fn workspace_root() -> PathBuf {
 pub fn generate(root: &Path) -> Result<Vec<Output>, Error> {
     let metadata = MetadataCommand::new()
         .manifest_path(root.join("Cargo.toml"))
+        // Every feature: a lookup table for the artefacts' crates, some of
+        // which only an artefact's features bring in.
+        .features(cargo_metadata::CargoOpt::AllFeatures)
         .other_options(vec![
             "--filter-platform".to_owned(),
             TARGET.to_owned(),
@@ -83,7 +91,7 @@ pub fn generate(root: &Path) -> Result<Vec<Output>, Error> {
     let data = Data::read(root)?;
     let mut outputs = Vec::new();
     for artefact in ARTEFACTS {
-        let crates = closure(&metadata, root, artefact.package)?
+        let crates = closure(&metadata, root, &artefact)?
             .into_iter()
             .map(|p| Crate::read(p, &metadata))
             .collect::<Result<Vec<_>, _>>()?;
@@ -125,18 +133,22 @@ pub fn stale(root: &Path, outputs: &[Output]) -> Vec<PathBuf> {
 /// dependencies also resolve for the machine building, not the target,
 /// so counting them would make the list depend on where it's generated.)
 ///
-/// `cargo tree` says which: it resolves features for this package alone,
-/// as `cargo build -p` does, where `cargo metadata` unifies them across
-/// the workspace and its dev-dependencies (and so names crates the
-/// artefact doesn't contain).
+/// `cargo tree` says which: it resolves features for this package alone
+/// (with the artefact's own), as `cargo build -p` does, where `cargo
+/// metadata` unifies them across the workspace and its dev-dependencies
+/// (and so names crates the artefact doesn't contain).
 fn closure<'m>(
     metadata: &'m Metadata,
     root: &Path,
-    package: &str,
+    artefact: &Artefact,
 ) -> Result<Vec<&'m Package>, Error> {
     let cargo = std::env::var_os("CARGO").unwrap_or_else(|| "cargo".into());
-    let out = Command::new(cargo)
-        .args(["tree", "--quiet", "--locked", "--package", package])
+    let mut tree = Command::new(cargo);
+    tree.args(["tree", "--quiet", "--locked", "--package", artefact.package]);
+    if !artefact.features.is_empty() {
+        tree.args(["--features", &artefact.features.join(",")]);
+    }
+    let out = tree
         .args(["--edges", "normal,no-proc-macro", "--target", TARGET])
         .args(["--prefix", "none", "--format", "{p}"])
         .arg("--manifest-path")

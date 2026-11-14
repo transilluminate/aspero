@@ -232,9 +232,16 @@ impl ServerHandler for Handler {
     ) -> Result<InitializeResult, ErrorData> {
         self.initialized.store(true, Ordering::Relaxed);
         context.peer.set_peer_info(request.clone());
-        self.negotiate_initialize(&request)
+        let result = self.negotiate_initialize(&request)?;
+        // Told when the key's scopes or the host's tools change.
+        if let Ok(key) = authed(&context) {
+            self.shared.listen(&key, context.peer.clone());
+        }
+        Ok(result)
     }
 
+    /// The tools the request's key may call, by its scopes and the host's
+    /// tools now.
     async fn list_tools(
         &self,
         _: Option<PaginatedRequestParams>,

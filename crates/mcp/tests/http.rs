@@ -269,6 +269,70 @@ impl Agent {
             .cloned()
             .unwrap_or_else(|| panic!("{name}: {answer}"))
     }
+
+    /// The session's GET stream, where the server says things unasked.
+    async fn listen(&self) -> Stream {
+        let mut request = self
+            .http
+            .get(&self.url)
+            .header("accept", "text/event-stream")
+            .header("mcp-session-id", self.session.as_deref().unwrap())
+            .header("mcp-protocol-version", "2025-06-18");
+        if let Some(token) = &self.token {
+            request = request.bearer_auth(token);
+        }
+        let response = request.send().await.unwrap();
+        assert_eq!(response.status().as_u16(), 200);
+        Stream {
+            response,
+            buffer: String::new(),
+        }
+    }
+}
+
+/// A session's SSE stream, read as it comes.
+struct Stream {
+    response: reqwest::Response,
+    buffer: String,
+}
+
+const LIST_CHANGED: &str = "notifications/tools/list_changed";
+
+impl Stream {
+    /// The method of the next message within `wait`, skipping priming
+    /// events and pings; `None` if none comes.
+    async fn next(&mut self, wait: Duration) -> Option<String> {
+        let deadline = tokio::time::Instant::now() + wait;
+        loop {
+            while let Some(end) = self.buffer.find("\n\n") {
+                let event: String = self.buffer.drain(..end + 2).collect();
+                let method = event
+                    .lines()
+                    .filter_map(|l| l.strip_prefix("data:"))
+                    .filter_map(|d| serde_json::from_str::<Value>(d.trim()).ok())
+                    .find_map(|v| v["method"].as_str().map(String::from));
+                if method.is_some() {
+                    return method;
+                }
+            }
+            match tokio::time::timeout_at(deadline, self.response.chunk()).await {
+                Ok(Ok(Some(bytes))) => self
+                    .buffer
+                    .push_str(&String::from_utf8_lossy(&bytes).replace("\r\n", "\n")),
+                _ => return None,
+            }
+        }
+    }
+
+    /// Whether `notifications/tools/list_changed` comes, soon.
+    async fn told(&mut self) -> bool {
+        self.next(Duration::from_secs(5)).await.as_deref() == Some(LIST_CHANGED)
+    }
+
+    /// Whether nothing comes for a while.
+    async fn quiet(&mut self) -> bool {
+        self.next(Duration::from_millis(300)).await.is_none()
+    }
 }
 
 fn text(result: &Value) -> &str {
@@ -713,5 +777,154 @@ async fn a_keys_daily_budget_outlasts_a_restart() {
     // Free tools still work.
     let supports = json!({"query": {"title": "x"}});
     assert!(!is_error(&agent.call("search_supports", supports).await));
+    server.stop().await;
+}
+
+const READ_TOOLS: [&str; 4] = [
+    "history_search",
+    "history_fail",
+    "history_slow",
+    "history_bad",
+];
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_scope_change_tells_the_keys_sessions_and_relists() {
+    let host = FakeHost::new();
+    let server = start(&host).await;
+    let port = server.port();
+
+    let mut reader = Agent::new(port, READER);
+    let info = reader.initialize().await;
+    assert_eq!(info["capabilities"]["tools"]["listChanged"], true, "{info}");
+    assert_eq!(reader.tools().await, READ_TOOLS);
+    let mut heard = reader.listen().await;
+    let mut full = Agent::new(port, FULL);
+    full.initialize().await;
+    let mut full_heard = full.listen().await;
+
+    // The same keys again: nothing to say.
+    server.set_keys(keys());
+    assert!(heard.quiet().await);
+
+    // Writing allowed: the reader's session hears, and lists the write tool.
+    let with_reader = |scopes: &[Scope]| {
+        vec![
+            key("full", FULL, &[Sources, ReadHistory, WriteHistory], 100.0),
+            key("reader", READER, scopes, 100.0),
+        ]
+    };
+    server.set_keys(with_reader(&[ReadHistory, WriteHistory]));
+    assert!(heard.told().await);
+    assert!(heard.quiet().await, "told once");
+    assert!(
+        full_heard.quiet().await,
+        "another key's session hears nothing"
+    );
+    let listed = reader.tools().await;
+    assert!(listed.contains(&"history_add".to_owned()), "{listed:?}");
+    let result = reader.call("history_add", json!({"doi": "10.1/x"})).await;
+    assert!(!is_error(&result), "{result}");
+
+    // The same scopes in another order: no change.
+    server.set_keys(with_reader(&[WriteHistory, ReadHistory]));
+    assert!(heard.quiet().await);
+
+    // And taken away again.
+    server.set_keys(with_reader(&[ReadHistory]));
+    assert!(heard.told().await);
+    assert_eq!(reader.tools().await, READ_TOOLS);
+    let result = reader.call("history_add", json!({"doi": "10.1/x"})).await;
+    assert!(is_error(&result), "{result}");
+
+    // A key removed still ends its sessions.
+    server.set_keys(vec![key(
+        "full",
+        FULL,
+        &[Sources, ReadHistory, WriteHistory],
+        100.0,
+    )]);
+    assert_eq!(reader.request("tools/list", json!({})).await.0, 401);
+    assert_eq!(full.tools().await.len(), ENGINE.len() + 5);
+    server.stop().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_change_waits_for_the_client_to_listen() {
+    let host = FakeHost::new();
+    let server = start(&host).await;
+    let mut reader = Agent::new(server.port(), READER);
+    reader.initialize().await;
+
+    server.set_keys(vec![key(
+        "reader",
+        READER,
+        &[ReadHistory, WriteHistory],
+        1.0,
+    )]);
+    // No stream open yet: kept, and said once there is one.
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    let mut heard = reader.listen().await;
+    assert!(heard.told().await);
+    assert!(reader.tools().await.contains(&"history_add".to_owned()));
+    server.stop().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn new_host_tools_are_told_to_every_session() {
+    let host = FakeHost::new();
+    let server = start(&host).await;
+    let mut reader = Agent::new(server.port(), READER);
+    reader.initialize().await;
+    let mut reader_heard = reader.listen().await;
+    let mut full = Agent::new(server.port(), FULL);
+    full.initialize().await;
+    let mut full_heard = full.listen().await;
+
+    host.tools
+        .lock()
+        .unwrap()
+        .push(tool("history_count", ReadHistory, &[]));
+    server.host_tools_changed().unwrap();
+    assert!(reader_heard.told().await);
+    assert!(full_heard.told().await);
+    assert!(reader.tools().await.contains(&"history_count".to_owned()));
+    assert!(full.tools().await.contains(&"history_count".to_owned()));
+
+    // A clash keeps the tools, and tells no one.
+    host.tools
+        .lock()
+        .unwrap()
+        .push(tool("lookup", ReadHistory, &[]));
+    assert!(server.host_tools_changed().is_err());
+    assert!(reader_heard.quiet().await);
+    server.stop().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn clients_that_never_listen_hold_up_no_one() {
+    let host = FakeHost::new();
+    let server = start(&host).await;
+    let mut agents = Vec::new();
+    for _ in 0..3 {
+        let mut agent = Agent::new(server.port(), READER);
+        agent.initialize().await;
+        agents.push(agent);
+    }
+    // Many changes, no streams open: neither call waits on a client.
+    let started = std::time::Instant::now();
+    for i in 0..200 {
+        let scopes: &[Scope] = if i % 2 == 0 {
+            &[ReadHistory, WriteHistory]
+        } else {
+            &[ReadHistory]
+        };
+        server.set_keys(vec![key("reader", READER, scopes, 1.0)]);
+        server.host_tools_changed().unwrap();
+    }
+    assert!(started.elapsed() < Duration::from_secs(2));
+    // The sessions still answer, by the last scopes.
+    for agent in &mut agents {
+        assert_eq!(agent.tools().await, READ_TOOLS);
+    }
     server.stop().await;
 }

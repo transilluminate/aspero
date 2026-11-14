@@ -23,6 +23,16 @@ Added:
 - The cache keeps each MCP key's spend per UTC day in an additive table,
   `mcp_spend`, which rebuilds and `clear` leave alone.
 
+- Swift 6: compile the generated bindings in Swift 5 language mode; UniFFI
+  0.32's async foreign-trait support (`McpHost`) isn't yet Swift 6 clean
+  (see the README).
+
+## 0.18.1
+
+The 0.18.0 release, built: 0.18.0's GitHub release (binaries, the
+xcframework, Homebrew) failed to build, because its release commit held a
+stray git worktree entry. The code is the same as 0.18.0's.
+
 ## 0.18.0
 
 Added:

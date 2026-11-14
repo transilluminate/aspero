@@ -468,10 +468,16 @@ impl Group {
 
 impl Engine {
     fn openalex_entry(&self) -> Result<&Entry, EngineError> {
-        self.entries
+        let found = self
+            .entries
             .iter()
-            .find(|e| e.provider.id().as_str() == OPENALEX)
-            .ok_or(EngineError::NoCapableProvider("citation links"))
+            .find(|e| e.provider.id().as_str() == OPENALEX);
+        found.ok_or_else(
+            || match self.disabled.iter().find(|p| p.as_str() == OPENALEX) {
+                Some(off) => EngineError::Disabled(off.clone()),
+                None => EngineError::NoCapableProvider("citation links"),
+            },
+        )
     }
 
     /// A page of the works `id` cites: `limit` from `cursor` (from a

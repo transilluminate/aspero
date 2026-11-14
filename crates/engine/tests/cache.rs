@@ -202,6 +202,44 @@ async fn misses_expire_sooner_than_records() {
 }
 
 #[tokio::test]
+async fn the_trust_in_cached_answers_is_configurable() {
+    NOW.with(|n| n.set(0));
+    let provider = Arc::new(Counting::new(FieldSet::ALL));
+    let mut policy = ResiliencePolicy::default();
+    policy.max_retries = 0;
+    // Found records for 3 days, "not found" not at all.
+    let mut trust = aspero_engine::CachePolicy::default();
+    trust.records = std::time::Duration::from_secs(3 * DAY as u64);
+    trust.misses = std::time::Duration::ZERO;
+    let engine = Engine::builder()
+        .provider(provider.clone(), policy, 0)
+        .cache(Arc::new(SqliteCache::open_in_memory().unwrap()))
+        .cache_policy(trust)
+        .clock(clock)
+        .build();
+    let known = ids(&["10.1000/known"]);
+    let invented = ids(&["10.1000/invented"]);
+    engine.lookup(&known, FieldSet::DEFAULT).await;
+    engine.lookup(&invented, FieldSet::DEFAULT).await;
+    assert_eq!(provider.calls(), 2);
+
+    advance(1);
+    let again = engine.lookup(&invented, FieldSet::DEFAULT).await;
+    assert_eq!(
+        served(&again),
+        [(false, Served::Live)],
+        "misses aren't trusted"
+    );
+    advance(2 * DAY);
+    let cached = engine.lookup(&known, FieldSet::DEFAULT).await;
+    assert_eq!(served(&cached), [(true, Served::Cache)]);
+    advance(2 * DAY);
+    let expired = engine.lookup(&known, FieldSet::DEFAULT).await;
+    assert_eq!(served(&expired), [(true, Served::Live)], "past 3 days");
+    assert_eq!(provider.calls(), 4);
+}
+
+#[tokio::test]
 async fn a_failing_provider_falls_back_to_stale_records() {
     let (engine, provider) = setup();
     engine

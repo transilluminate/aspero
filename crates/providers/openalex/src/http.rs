@@ -1,8 +1,16 @@
 //! OpenAlex HTTP statuses and usage headers, mapped into aspero's contract.
 //!
-//! Observed (2026-11-10): every response carries `x-ratelimit-cost-usd`,
-//! `x-ratelimit-remaining-usd` and `x-ratelimit-reset` (seconds to midnight
-//! UTC). 404s are an HTML page; 400s are JSON `{error, message}`.
+//! Observed (2026-11-10, 2026-11-14): every response, free lookups
+//! included, carries `x-ratelimit-cost-usd`, `x-ratelimit-limit-usd` (the
+//! daily allowance: 1 with a key, 0.1 without), `x-ratelimit-remaining-usd`
+//! (left of it today), `x-ratelimit-prepaid-remaining-usd` and
+//! `x-ratelimit-reset` (seconds to midnight UTC). 404s are an HTML page;
+//! 400s are JSON `{error, message}`.
+//!
+//! `GET /rate-limit` (key required, as a Bearer header or `api_key`; 401
+//! "Authentication required" without) says the same as JSON, costs
+//! nothing (`daily_used_usd` unchanged across calls, checked 2026-11-14)
+//! and carries no `x-ratelimit-*` headers.
 
 use std::time::Duration;
 
@@ -18,10 +26,47 @@ pub(crate) fn usage(resp: &HttpResponse) -> Usage {
     let mut usage = Usage::default();
     usage.cost = num("x-ratelimit-cost-usd");
     usage.remaining = num("x-ratelimit-remaining-usd");
+    usage.limit = num("x-ratelimit-limit-usd");
+    usage.prepaid_remaining = num("x-ratelimit-prepaid-remaining-usd");
     usage.resets_at = num("x-ratelimit-reset")
         .and_then(|secs| Duration::try_from_secs_f64(secs).ok())
         .and_then(|d| resp.received_at.checked_add(d).ok());
     usage
+}
+
+/// The budget `/rate-limit` reports: `{"rate_limit": {"daily_budget_usd",
+/// "daily_remaining_usd", "prepaid_remaining_usd", "resets_at", …}}`.
+pub(crate) fn rate_limit(resp: &HttpResponse) -> Result<Usage, Error> {
+    #[derive(serde::Deserialize)]
+    struct Body {
+        rate_limit: RateLimit,
+    }
+    #[derive(serde::Deserialize)]
+    struct RateLimit {
+        daily_budget_usd: Option<f64>,
+        daily_used_usd: Option<f64>,
+        daily_remaining_usd: Option<f64>,
+        prepaid_remaining_usd: Option<f64>,
+        resets_at: Option<String>,
+        resets_in_seconds: Option<f64>,
+    }
+    let body: Body = serde_json::from_slice(&resp.body).map_err(Error::decode)?;
+    let r = body.rate_limit;
+    let mut usage = Usage::default();
+    usage.cost = Some(0.0);
+    usage.limit = r.daily_budget_usd;
+    usage.remaining = r
+        .daily_remaining_usd
+        .or_else(|| Some(r.daily_budget_usd? - r.daily_used_usd?));
+    usage.prepaid_remaining = r.prepaid_remaining_usd;
+    usage.resets_at = r
+        .resets_at
+        .and_then(|t| t.parse::<jiff::Timestamp>().ok())
+        .or_else(|| {
+            let d = Duration::try_from_secs_f64(r.resets_in_seconds?).ok()?;
+            resp.received_at.checked_add(d).ok()
+        });
+    Ok(usage)
 }
 
 /// `Ok` for 2xx; otherwise the matching [`Error`]. 404 is `NotFound`, which

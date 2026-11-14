@@ -43,6 +43,9 @@ Optional environment:
 | `ASPERO_MAILTO` | Your contact address, sent to polite API pools (Crossref) |
 | `ASPERO_CACHE_DIR` | Where to keep the answer cache |
 
+More settings (a spending cap, sources to leave out, the cache's trust and
+size) are under [Settings](#settings).
+
 ## Use
 
 ```sh
@@ -88,6 +91,9 @@ aspero analyse refs.bib --estimate          # what it would cost, free
 aspero analyse refs.bib --budget 0.01       # fractions of a cent for 50 works
 aspero analyse refs.bib --kinds related     # works around the set, ~$0.006
 aspero analyse 10.1056/nejmoa010307 10.1056/nejmoa1401602 10.1056/nejmoa1500896
+
+# What's used of today's OpenAlex budget (free; needs a key)
+aspero budget
 
 # Watch the requests (and concurrency) as they happen
 aspero verify -v "Bishop CM. Pattern Recognition and Machine Learning. 2006"
@@ -147,6 +153,19 @@ and pacing are the other commands'.
   it was "not found") and caches the new answers; where a source fails,
   the cached answer is served, marked stale. `--no-cache` neither reads
   nor writes the cache.
+
+## Settings
+
+Each is a global flag, or its environment variable (the app sets them in
+its `Config`):
+
+| Flag (variable) | Effect |
+|---|---|
+| `--openalex-cap USD` (`ASPERO_OPENALEX_CAP`) | Stop OpenAlex's paid calls once today's use, as OpenAlex reports it for the key, reaches this; lookups (free) go on, checks fall back to the free sources, searches that need OpenAlex fail (exit 5). `aspero budget` shows today's use. |
+| `--without europepmc,openlibrary` (`ASPERO_DISABLED_SOURCES`) | Sources never to ask: `openalex`, `crossref`, `datacite`, `doi`, `europepmc`, `openlibrary`. |
+| `--cache-found-days N` (`ASPERO_CACHE_FOUND_DAYS`) | How long a found record is trusted (default 7). |
+| `--cache-not-found-days N` (`ASPERO_CACHE_NOT_FOUND_DAYS`) | How long a "not found" is trusted (default 1). |
+| `--cache-max-mb N` (`ASPERO_CACHE_MAX_MB`) | Limit the cache's size; the least recently used answers go first. `aspero cache stats` shows the size. |
 
 ## Library
 

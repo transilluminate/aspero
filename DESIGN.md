@@ -89,6 +89,17 @@ scripts/       fixture recorders, one per provider
   batches verify 4 claims at a time. Results are applied in a fixed order so
   merging is deterministic. Per-provider pacing still applies, so
   concurrency overlaps different providers' waits rather than loading one.
+- **Choosing sources** (#73): `StandardConfig::disable` (FFI
+  `Config.disabled_sources`, CLI `--without` / `ASPERO_DISABLED_SOURCES`)
+  takes sources by the names results give (`SOURCES`: openalex,
+  crossref, datacite, doi, europepmc, openlibrary). Those are never built,
+  so never asked, for lookups, checks or searches, and
+  `search_providers` (FFI `searchCapabilities`) leaves them out; a search
+  naming one fails with `EngineError::Disabled` (kind unsupported, "Europe
+  PMC is turned off"), as `search_supports` says; citation links without
+  OpenAlex likewise. An unknown name, or every source, is a setup error
+  (CLI: usage, exit 2). Checks need no particular source: any one alone
+  verifies (tested with Crossref alone).
 - **Search** goes to one provider (named, or the first capable); filters it
   can't apply are stripped and reported as ignored. Fields (author, title,
   container) and sorts (newest, most cited) it can't apply fail
@@ -404,7 +415,31 @@ Two SQLite stores, split by whether data can be refetched:
   asked again next time, and a verdict is worked out again from the
   cached answers. A cached record counts only if it covers the requested
   fields. Failed providers fall back to stale entries: any cached record,
-  however old, or search page; never an expired "not found".
+  however old, or search page; never an expired "not found". The first
+  two are settings (#74): `StandardConfig::cache_policy`, FFI
+  `Config.cache_found_days` / `cache_not_found_days` (defaults 7 and 1;
+  0 asks every time), CLI `--cache-found-days` / `--cache-not-found-days`
+  (and `ASPERO_CACHE_*`); the rest stay as they are.
+- **Size** (#74): `Stats::bytes` (FFI `CacheStats.bytes`, `aspero cache
+  stats`) is the database's `page_count × page_size`, the file on disk
+  once the WAL is checkpointed (SQLite does so every 4 MB or so; the WAL
+  isn't counted). `SqliteCache::set_max_bytes` (FFI `Config.cache_max_mb`,
+  CLI `--cache-max-mb`, MB of 1,000,000 bytes, at least 1) holds it under
+  a limit: after each write (two `PRAGMA` reads) and when set, a cache
+  over it loses its least recently used entries (records with their
+  identifiers, "not found" answers, search pages, links; never the
+  `pacing` slots) until the pages in use are under nine tenths of it,
+  oldest first by an estimate of each row's size, and the freed pages go
+  back to the file system: new files are made `auto_vacuum = INCREMENTAL`
+  and get `incremental_vacuum` (stepped to the end: rusqlite's
+  `execute_batch` steps once, freeing one page); a file made before (no
+  auto vacuum) is converted by one `VACUUM` the first time it's evicted
+  from. Use is tracked by a `used_at` column on those four tables, added
+  by `ALTER TABLE … ADD COLUMN` beside the versioned schema rather than a
+  `SCHEMA_VERSION` bump, so existing caches are kept and 0.16 shares the
+  file unharmed (its writes leave `used_at` empty, read as `stored_at`).
+  Writes set it; reads bump it only under a limit, and only when over an
+  hour old, so an unlimited cache's reads never write.
 - **Fresh** (`CallOptions::fresh`, CLI `--fresh`, FFI `Patience.fresh`),
   for checking again before submitting: no cached answer is served as it
   is, however recent (lookups, "not found", searches, and the `edges`
@@ -451,6 +486,27 @@ verify a few claims at once and yield each as it finishes, so a slow
 claim doesn't hold up the rest, and a batch never queues so many requests
 that a caller sharing the engine waits behind it.
 
+A **daily cap** (`EngineBuilder::daily_cap`, `StandardConfig`/FFI
+`openalex_daily_cap`, CLI `--openalex-cap` / `ASPERO_OPENALEX_CAP`, USD)
+stops a provider's paid calls short of its own budget (#72). The day's
+use is the provider's figure, `limit − remaining` from the last response
+or refresh, so it counts everything using the key; once it reaches the
+cap, until the reset: searches (and graph pages) fail with
+`Error::BudgetCapped { cap, used, resets_at }` (kind `budget_capped`,
+category throttled, exit 5) before anything is sent, falling back like
+any failure (a stale cached page; the next provider in a check, so
+verify carries on with Crossref and the rest); lookups go
+`Capabilities::max_free_batch` IDs at a time (OpenAlex: 1, free) rather
+than in paid batches. After `resets_at` the use is unknown again. Unknown
+use: with a key, one free refresh (`/rate-limit`, no retries, 5 s; one at
+a time, and not again for a minute after one that couldn't say) decides
+the first paid call, so a day already past the cap stops at once;
+without a key the call is taken as under the cap and the cap applies from
+its response on. A call is checked before it's sent and its cost known
+only after, so the last call, or calls in flight together, can pass the
+cap by their own cost. The cap is no part of health: free calls go on,
+and `unavailable` doesn't list it.
+
 Pacing is **shared across processes** through the cache file: each
 request claims its provider's next slot in a `pacing` table (one write
 transaction), so parallel agents keep to one rate between them, even with
@@ -465,8 +521,18 @@ Fixtures are recorded with the provider's *exact* parameters
 fixture recorded with different parameters once hid a ranking bug.
 
 - **OpenAlex.** Key as `Authorization: Bearer` (keeps it out of URLs). Free
-  key: $1/day. Lookups by ID are free; filter batches $0.0001; searches
-  $0.001; `x-ratelimit-cost-usd` / `-remaining-usd` headers report spend.
+  key: $1/day ($0.10 without). Lookups by ID are free; filter batches
+  $0.0001; searches $0.001. Every response, free ones included, carries
+  `x-ratelimit-cost-usd`, `-limit-usd` (the daily allowance),
+  `-remaining-usd`, `-prepaid-remaining-usd` and `-reset` (seconds to
+  midnight UTC); `Usage` and the engine's `Budget` keep them (`limit`,
+  `prepaid_remaining`). `GET /rate-limit` says the same as JSON
+  (`daily_budget_usd`, `daily_remaining_usd`, `prepaid_remaining_usd`,
+  `resets_at`) for free (`daily_used_usd` unchanged across calls, no cost
+  header; checked 2026-11-14), but only to a key (401 "Authentication
+  required" without; Bearer works): `Engine::refresh_budgets` asks it,
+  and asks nothing without a key. Its body echoes the key's first and
+  last three characters, masked in the fixture.
   404s are HTML. Lists take up to 200 a page (`per-page`); filters OR up to
   100 values; `select` trims works to the fields named (citing works:
   `id,publication_year,referenced_works`, about 3 KB a work). Batch
@@ -575,7 +641,8 @@ bearer tokens, for embedding; host-provided tools; progress notifications
 `scan`, `split_references` and `split_lines` (laid-out lines with
 indents, from PDFKit), `references` and `analyse` (citation links), and
 for settings `budgets` (as last
-reported: free), `check_openalex_key` (one free lookup), `cache_stats`,
+reported: free), `refresh_budgets` (OpenAlex's `/rate-limit` with a key,
+free; nothing asked without one), `check_openalex_key` (one free lookup), `cache_stats`,
 `clear_cache` and `unavailable`. Network calls take a `Patience` (batch,
 interactive, offline, fresh).
 They return typed records (`Lookup`, `Verification`, `Work`, …), mirrors
@@ -636,7 +703,8 @@ its container; different schema versions would rebuild each other's).
 
 ## Open questions
 
-- Whether to cap OpenAlex spend per CLI command, as MCP sessions are.
+- Whether to cap OpenAlex spend per CLI command, as MCP sessions are
+  (`--openalex-cap` caps the day, not a command).
 - The MCP session budget's default (provisional $1.00), and a per-token
   cap, before Streamable HTTP.
 - Whether a lookup should ever hedge (ask two providers at once) for

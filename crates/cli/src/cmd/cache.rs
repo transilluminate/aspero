@@ -9,7 +9,14 @@ use super::{Failure, Out, print};
 use crate::args::{CacheAction, Format};
 use crate::exit::Exit;
 
-pub fn run(path: PathBuf, action: CacheAction, out: Out) -> Result<Exit, Failure> {
+/// `max_bytes`: the size limit `--cache-max-mb` sets, shown beside the
+/// size (stats doesn't evict: the next write does).
+pub fn run(
+    path: PathBuf,
+    action: CacheAction,
+    max_bytes: Option<u64>,
+    out: Out,
+) -> Result<Exit, Failure> {
     if let CacheAction::Path = action {
         match out.format {
             Format::Text | Format::Table => println!("{}", path.display()),
@@ -29,18 +36,19 @@ pub fn run(path: PathBuf, action: CacheAction, out: Out) -> Result<Exit, Failure
         cache.clear().map_err(failed)?;
     }
     let stats = cache.stats().map_err(failed)?;
-    let bytes = std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
+    let mb = |bytes: u64| bytes as f64 / 1_000_000.0;
+    let limit = max_bytes.map_or(String::new(), |m| format!(" of {:.0} MB", mb(m)));
     match out.format {
         Format::Text | Format::Table => println!(
             "{}\n  {} records ({} identifiers), {} not-found answers, {} searches, \
-             {} works' citation links, {:.1} MB",
+             {} works' citation links, {:.1} MB{limit}",
             path.display(),
             stats.records,
             stats.identifiers,
             stats.misses,
             stats.searches,
             stats.edges,
-            bytes as f64 / 1_048_576.0
+            mb(stats.bytes)
         ),
         _ => print(&json!({
             "path": path,
@@ -49,7 +57,8 @@ pub fn run(path: PathBuf, action: CacheAction, out: Out) -> Result<Exit, Failure
             "misses": stats.misses,
             "searches": stats.searches,
             "edges": stats.edges,
-            "bytes": bytes,
+            "bytes": stats.bytes,
+            "max_bytes": max_bytes,
         })),
     }
     Ok(Exit::Ok)

@@ -32,6 +32,17 @@ pub enum Error {
     #[error("usage quota exhausted{}", reset_hint(.resets_at))]
     QuotaExhausted { resets_at: Option<Timestamp> },
 
+    /// The caller's own daily cap on the provider's spend is reached: `used`
+    /// (the day's use as the provider reports it, shared by everything
+    /// using the key) is at least `cap`, so its paid calls stop until
+    /// `resets_at`. Free calls go on; fall back to other providers.
+    #[error("stopped at the daily cap of ${cap:.4} (${used:.4} used today){}", reset_hint(.resets_at))]
+    BudgetCapped {
+        cap: f64,
+        used: f64,
+        resets_at: Option<Timestamp>,
+    },
+
     #[error("network error: {0}")]
     Network(#[source] Source),
 
@@ -112,6 +123,9 @@ pub enum ErrorKind {
     RateLimited,
     /// The provider's usage budget is spent until it resets.
     BudgetSpent,
+    /// The caller's daily cap on the provider's spend is reached until the
+    /// budget resets.
+    BudgetCapped,
     Network,
     Timeout,
     /// The provider answered with a server error.
@@ -130,11 +144,45 @@ pub enum ErrorKind {
     InvalidId,
 }
 
+/// `ErrorKind::ALL`: each kind once. An exhaustive match over the same
+/// list makes a new kind fail to compile until it's listed.
+macro_rules! listed_kinds {
+    ($($kind:ident),* $(,)?) => {
+        /// Every kind, for front ends to test their mappings.
+        pub const ALL: &[ErrorKind] = &[$(ErrorKind::$kind),*];
+
+        #[allow(dead_code)]
+        const fn listed(&self) {
+            match self {
+                $(ErrorKind::$kind => {})*
+            }
+        }
+    };
+}
+
 impl ErrorKind {
+    listed_kinds!(
+        RateLimited,
+        BudgetSpent,
+        BudgetCapped,
+        Network,
+        Timeout,
+        Server,
+        NotCached,
+        CircuitOpen,
+        KeyRejected,
+        NotFound,
+        BadRequest,
+        Unsupported,
+        Decode,
+        InvalidId,
+    );
+
     pub fn as_str(self) -> &'static str {
         match self {
             ErrorKind::RateLimited => "rate_limited",
             ErrorKind::BudgetSpent => "budget_spent",
+            ErrorKind::BudgetCapped => "budget_capped",
             ErrorKind::Network => "network",
             ErrorKind::Timeout => "timeout",
             ErrorKind::Server => "server",
@@ -181,6 +229,7 @@ impl Error {
         match self {
             Error::RateLimited { .. } => ErrorKind::RateLimited,
             Error::QuotaExhausted { .. } => ErrorKind::BudgetSpent,
+            Error::BudgetCapped { .. } => ErrorKind::BudgetCapped,
             Error::Network(_) => ErrorKind::Network,
             Error::Timeout => ErrorKind::Timeout,
             Error::Server { .. } => ErrorKind::Server,
@@ -202,7 +251,9 @@ impl Error {
             | Error::Server { .. }
             | Error::CircuitOpen { .. }
             | Error::Offline => ErrorCategory::Unavailable,
-            Error::RateLimited { .. } | Error::QuotaExhausted { .. } => ErrorCategory::Throttled,
+            Error::RateLimited { .. }
+            | Error::QuotaExhausted { .. }
+            | Error::BudgetCapped { .. } => ErrorCategory::Throttled,
             Error::AuthRejected { .. } => ErrorCategory::Auth,
             Error::NotFound => ErrorCategory::NotFound,
             Error::BadRequest(_) | Error::InvalidId(_) => ErrorCategory::Usage,
@@ -241,6 +292,31 @@ mod tests {
     fn quota_and_auth_are_not_retryable() {
         assert!(!Error::QuotaExhausted { resets_at: None }.is_retryable());
         assert!(!Error::AuthRejected { message: None }.is_retryable());
+    }
+
+    #[test]
+    fn a_reached_cap_throttles_without_retrying_or_tripping() {
+        let e = Error::BudgetCapped {
+            cap: 0.5,
+            used: 0.5012,
+            resets_at: Some(Timestamp::UNIX_EPOCH),
+        };
+        assert!(!e.is_retryable() && !e.trips_breaker());
+        assert_eq!(e.category(), ErrorCategory::Throttled);
+        assert_eq!(e.kind(), ErrorKind::BudgetCapped);
+        assert_eq!(
+            e.to_string(),
+            "stopped at the daily cap of $0.5000 ($0.5012 used today) (resets at 1970-01-01T00:00:00Z)"
+        );
+    }
+
+    #[test]
+    fn every_kind_is_listed_once() {
+        let mut names: Vec<&str> = ErrorKind::ALL.iter().map(|k| k.as_str()).collect();
+        let listed = names.len();
+        names.sort_unstable();
+        names.dedup();
+        assert_eq!(names.len(), listed);
     }
 
     #[test]

@@ -24,9 +24,14 @@ Environment:
   OPENALEX_API_KEY  OpenAlex key ($1/day free budget; $0.10/day without)
   ASPERO_MAILTO     contact address for polite API pools (Crossref)
   ASPERO_CACHE_DIR  where to keep the answer cache (default: platform cache dir)
+  ASPERO_OPENALEX_CAP  --openalex-cap
+  ASPERO_DISABLED_SOURCES  --without
+  ASPERO_CACHE_FOUND_DAYS, ASPERO_CACHE_NOT_FOUND_DAYS, ASPERO_CACHE_MAX_MB
+                    --cache-found-days, --cache-not-found-days, --cache-max-mb
 
 Answers are cached (records 7 days, not-found 1 day, searches 1 day,
-references 30 days) and
+references 30 days; --cache-found-days and --cache-not-found-days change the
+first two, --cache-max-mb limits the size) and
 served stale if a provider fails; JSON marks them \"served\": \"cache\"/\"stale\".
 --fresh asks the providers past the cache, and caches their answers.";
 
@@ -91,6 +96,68 @@ pub struct Global {
     /// default, the style's own.
     #[arg(long, global = true)]
     pub locale: Option<String>,
+
+    /// Stop OpenAlex's paid calls (searches, batch lookups) once today's
+    /// use, as OpenAlex reports it for the key (shared with anything else
+    /// using it), reaches this many USD, until midnight UTC. Lookups (free)
+    /// go on, checks fall back to the free sources, and a search that needs
+    /// OpenAlex fails (exit 5). `aspero budget` shows today's use.
+    #[arg(long, global = true, value_name = "USD", env = "ASPERO_OPENALEX_CAP", value_parser = cap)]
+    pub openalex_cap: Option<f64>,
+
+    /// Sources never to ask, for lookups, checks or searches: openalex,
+    /// crossref, datacite, doi, europepmc, openlibrary (comma-separated or
+    /// repeated). Checks carry on with the rest; a search naming one fails.
+    #[arg(
+        long,
+        global = true,
+        value_name = "SOURCES",
+        env = "ASPERO_DISABLED_SOURCES",
+        value_delimiter = ','
+    )]
+    pub without: Vec<String>,
+
+    /// Days a found record (with its notices) is trusted before the source
+    /// is asked again; older, it's still served if the source fails.
+    #[arg(
+        long,
+        global = true,
+        value_name = "DAYS",
+        env = "ASPERO_CACHE_FOUND_DAYS",
+        default_value_t = 7
+    )]
+    pub cache_found_days: u32,
+
+    /// Days a "not found" is trusted before asking again.
+    #[arg(
+        long,
+        global = true,
+        value_name = "DAYS",
+        env = "ASPERO_CACHE_NOT_FOUND_DAYS",
+        default_value_t = 1
+    )]
+    pub cache_not_found_days: u32,
+
+    /// Limit the cache to this many MB (1,000,000 bytes): past it, the least
+    /// recently used answers go first. `aspero cache stats` shows its size.
+    #[arg(long, global = true, value_name = "MB", env = "ASPERO_CACHE_MAX_MB", value_parser = clap::value_parser!(u64).range(1..))]
+    pub cache_max_mb: Option<u64>,
+}
+
+impl Global {
+    /// How long cached answers are trusted.
+    pub fn cache_policy(&self) -> aspero_engine::CachePolicy {
+        let days = |n: u32| std::time::Duration::from_secs(u64::from(n) * 86_400);
+        let mut policy = aspero_engine::CachePolicy::default();
+        policy.records = days(self.cache_found_days);
+        policy.misses = days(self.cache_not_found_days);
+        policy
+    }
+
+    /// The cache's size limit in bytes.
+    pub fn cache_max_bytes(&self) -> Option<u64> {
+        self.cache_max_mb.map(|mb| mb.saturating_mul(1_000_000))
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
@@ -504,6 +571,20 @@ when stdin closes.")]
         budget: f64,
     },
 
+    /// Show what's used and left of OpenAlex's daily budget.
+    #[command(after_help = "\
+With OPENALEX_API_KEY set, asks OpenAlex's /rate-limit, which costs nothing:
+  openalex: $0.0498 of $1.00 used today, resets 00:00 UTC
+
+Without a key nothing is asked (OpenAlex answers that only with a key), so
+there is nothing to show. JSON: {\"budgets\": [{\"provider\", \"limit\", \"used\",
+\"remaining\", \"prepaid_remaining\", \"resets_at\", \"seen_at\"}]}.
+
+Examples:
+  aspero budget
+  aspero budget --format json")]
+    Budget,
+
     /// Inspect or empty the answer cache.
     Cache {
         #[command(subcommand)]
@@ -526,6 +607,14 @@ Examples:
         #[arg(long)]
         credits: bool,
     },
+}
+
+/// `--openalex-cap`: zero or more dollars.
+fn cap(s: &str) -> Result<f64, String> {
+    match s.trim().parse::<f64>() {
+        Ok(usd) if usd.is_finite() && usd >= 0.0 => Ok(usd),
+        _ => Err(format!("{s:?} is not an amount of USD")),
+    }
 }
 
 /// `--budget`: a positive number of dollars.
@@ -672,6 +761,53 @@ mod tests {
         assert!(parse(&["--fresh", "verify", claim]).unwrap().global.fresh);
         let after = parse(&["lookup", "10.1038/nature14539", "--fresh"]).unwrap();
         assert!(after.global.fresh && !after.global.no_cache);
+    }
+
+    #[test]
+    fn the_openalex_cap_is_an_amount() {
+        let cli = parse(&["--openalex-cap", "0.5", "search", "x"]).unwrap();
+        assert_eq!(cli.global.openalex_cap, Some(0.5));
+        let after = parse(&["search", "x", "--openalex-cap", "0"]).unwrap();
+        assert_eq!(after.global.openalex_cap, Some(0.0));
+        for bad in ["-1", "half", "inf"] {
+            let error = parse(&["--openalex-cap", bad, "search", "x"]).expect_err(bad);
+            assert_eq!(error.exit_code(), 2);
+        }
+    }
+
+    #[test]
+    fn sources_turned_off_are_a_list() {
+        let cli = parse(&["--without", "europepmc,openlibrary", "verify", "x"]).unwrap();
+        assert_eq!(cli.global.without, ["europepmc", "openlibrary"]);
+        let repeated = parse(&["verify", "x", "--without", "doi", "--without", "crossref"]);
+        assert_eq!(repeated.unwrap().global.without, ["doi", "crossref"]);
+    }
+
+    #[test]
+    fn cache_trust_and_size_are_settings() {
+        let defaults = parse(&["verify", "x"]).unwrap().global;
+        assert_eq!(
+            defaults.cache_policy(),
+            aspero_engine::CachePolicy::default()
+        );
+        assert_eq!(defaults.cache_max_bytes(), None);
+        let set = parse(&[
+            "--cache-found-days",
+            "3",
+            "--cache-not-found-days",
+            "0",
+            "--cache-max-mb",
+            "200",
+            "verify",
+            "x",
+        ])
+        .unwrap()
+        .global;
+        assert_eq!(set.cache_policy().records.as_secs(), 3 * 86_400);
+        assert_eq!(set.cache_policy().misses.as_secs(), 0);
+        assert_eq!(set.cache_max_bytes(), Some(200_000_000));
+        let zero = parse(&["--cache-max-mb", "0", "verify", "x"]).expect_err("0 MB");
+        assert_eq!(zero.exit_code(), 2);
     }
 
     #[test]

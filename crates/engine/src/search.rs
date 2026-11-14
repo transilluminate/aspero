@@ -209,7 +209,7 @@ impl Engine {
             tracing::info!(target: "aspero::cache", provider = %provider, text = %sent.text, "search served from cache");
             return Ok(report(page, None, Served::Cache));
         }
-        match self.call(entry, || entry.provider.search(&sent)).await {
+        match self.call_paid(entry, || entry.provider.search(&sent)).await {
             Ok(resp) => {
                 self.remember_search(&provider, &sent, &resp.value);
                 Ok(report(resp.value, resp.usage, Served::Live))
@@ -233,11 +233,17 @@ impl Engine {
         since: bool,
     ) -> Result<&Entry, EngineError> {
         match source {
-            Some(name) => self
+            Some(name) => match self
                 .entries
                 .iter()
                 .find(|e| e.provider.id().as_str() == name)
-                .ok_or_else(|| EngineError::UnknownProvider(name.to_owned())),
+            {
+                Some(entry) => Ok(entry),
+                None => Err(match self.disabled.iter().find(|p| p.as_str() == name) {
+                    Some(off) => EngineError::Disabled(off.clone()),
+                    None => EngineError::UnknownProvider(name.to_owned()),
+                }),
+            },
             None => self
                 .entries
                 .iter()

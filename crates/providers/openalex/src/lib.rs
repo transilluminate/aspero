@@ -5,7 +5,9 @@
 //! So lookups of one ID use the free singleton endpoint, batches use one
 //! `filter` call per identifier kind, and search is the only real expense.
 //!
-//! Every call reports its cost and remaining budget in [`Usage`] (USD).
+//! Every call reports its cost, the daily allowance, what's left of it and
+//! any prepaid balance in [`Usage`] (USD); with a key, `/rate-limit` says
+//! the same for free ([`Provider::budget`]).
 //!
 //! Works have no filter on their journal's name, so a search by container
 //! first finds the sources so named (one more search, $0.001) and keeps
@@ -95,6 +97,10 @@ impl OpenAlex {
         capabilities.search_none = BooleanSupport::Anywhere;
         capabilities.search_nesting = true;
         capabilities.relations = vec![Relation::Cites, Relation::CitedBy];
+        // `/rate-limit` answers only with a key.
+        capabilities.budget_status = config.api_key.is_some();
+        // The singleton endpoint is free; batches are list calls.
+        capabilities.max_free_batch = 1;
         OpenAlex {
             config,
             http,
@@ -502,6 +508,17 @@ impl Provider for OpenAlex {
 
     fn express(&self, tree: &QueryNode) -> std::result::Result<(), String> {
         tree::translate(tree, &self.capabilities).map(|_| ())
+    }
+
+    /// `/rate-limit`: free, and only with a key (none is asked without).
+    async fn budget(&self) -> Result<Usage> {
+        if self.config.api_key.is_none() {
+            return Err(Error::Unsupported("OpenAlex budget status without a key"));
+        }
+        let url = format!("{}/rate-limit", self.config.base_url.trim_end_matches('/'));
+        let resp = self.http.send(self.request(url)).await?;
+        http::check(&resp)?;
+        http::rate_limit(&resp)
     }
 
     /// `from_created_date` and `sort=created_date` are "daily sync", for

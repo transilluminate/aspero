@@ -54,6 +54,7 @@ macro_rules! every_variant {
 mod abstracts;
 mod batch;
 mod budget;
+mod cap;
 mod check;
 mod enrich;
 mod graph;
@@ -105,7 +106,7 @@ pub use standard::EuropePmcConfig;
 pub use standard::OpenAlexConfig;
 #[cfg(feature = "openlibrary")]
 pub use standard::OpenLibraryConfig;
-pub use standard::{StandardConfig, standard};
+pub use standard::{SOURCES, SourcesError, StandardConfig, source_name, standard};
 pub use verdict::{CitedField, Difference, Reason, Verdict, Verification, describe_update};
 pub use versions::VersionsReport;
 
@@ -206,6 +207,14 @@ pub struct Engine {
     inflight: Arc<InFlight>,
     health: Arc<Health>,
     budgets: Arc<Budgets>,
+    /// Daily caps on providers' spend (see [`cap`]).
+    caps: Arc<Vec<(ProviderId, f64)>>,
+    /// Providers turned off: named in a search, they say so.
+    disabled: Arc<Vec<ProviderId>>,
+    /// One free budget refresh at a time, for the caps.
+    refreshing: Arc<tokio::sync::Mutex<()>>,
+    /// When a refresh last failed to say the day's use.
+    refreshed: Arc<std::sync::Mutex<Option<tokio::time::Instant>>>,
 }
 
 #[derive(Clone)]
@@ -220,6 +229,8 @@ pub struct EngineBuilder {
     cache: Option<Arc<dyn Cache>>,
     cache_policy: CachePolicy,
     clock: Clock,
+    caps: Vec<(ProviderId, f64)>,
+    disabled: Vec<ProviderId>,
 }
 
 impl EngineBuilder {
@@ -258,6 +269,25 @@ impl EngineBuilder {
         self
     }
 
+    /// Names a provider turned off (and so not registered): a search
+    /// naming it fails with [`EngineError::Disabled`] rather than as
+    /// unknown.
+    pub fn disabled(mut self, provider: ProviderId) -> Self {
+        if !self.disabled.contains(&provider) {
+            self.disabled.push(provider);
+        }
+        self
+    }
+
+    /// Stops `provider`'s paid calls once its day's use, as it reports it
+    /// (`limit − remaining`), reaches `usd`, until its budget resets; free
+    /// calls go on. See [`Error::BudgetCapped`].
+    pub fn daily_cap(mut self, provider: ProviderId, usd: f64) -> Self {
+        self.caps.retain(|(p, _)| *p != provider);
+        self.caps.push((provider, usd));
+        self
+    }
+
     pub fn build(mut self) -> Engine {
         self.entries.sort_by_key(|(priority, _)| *priority);
         Engine {
@@ -270,6 +300,10 @@ impl EngineBuilder {
             inflight: Arc::default(),
             health: Arc::default(),
             budgets: Arc::default(),
+            caps: Arc::new(self.caps),
+            disabled: Arc::new(self.disabled),
+            refreshing: Arc::default(),
+            refreshed: Arc::default(),
         }
     }
 }
@@ -279,6 +313,9 @@ impl EngineBuilder {
 pub enum EngineError {
     #[error("no enabled provider is named {0:?}")]
     UnknownProvider(String),
+    /// A provider the caller turned off ([`StandardConfig::disable`]).
+    #[error("{} is turned off", source_name(.0.as_str()))]
+    Disabled(ProviderId),
     #[error("no enabled provider supports {0}")]
     NoCapableProvider(&'static str),
     /// A search with no keywords, no author, title or container, and no
@@ -310,13 +347,16 @@ impl EngineError {
     pub fn category(&self) -> ErrorCategory {
         match self {
             EngineError::UnknownProvider(_) => ErrorCategory::Usage,
+            EngineError::Disabled(_) => ErrorCategory::Unsupported,
             EngineError::NoCapableProvider(_) => ErrorCategory::Unsupported,
             EngineError::NothingToSearch | EngineError::InvalidQuery(_) => ErrorCategory::Usage,
             EngineError::Unresolved { kind, .. } => match kind {
                 ErrorKind::NotFound => ErrorCategory::NotFound,
                 ErrorKind::BadRequest | ErrorKind::InvalidId => ErrorCategory::Usage,
                 ErrorKind::Unsupported => ErrorCategory::Unsupported,
-                ErrorKind::RateLimited | ErrorKind::BudgetSpent => ErrorCategory::Throttled,
+                ErrorKind::RateLimited | ErrorKind::BudgetSpent | ErrorKind::BudgetCapped => {
+                    ErrorCategory::Throttled
+                }
                 ErrorKind::KeyRejected => ErrorCategory::Auth,
                 ErrorKind::Decode => ErrorCategory::Protocol,
                 _ => ErrorCategory::Unavailable,
@@ -328,6 +368,7 @@ impl EngineError {
     pub fn kind(&self) -> ErrorKind {
         match self {
             EngineError::UnknownProvider(_) => ErrorKind::BadRequest,
+            EngineError::Disabled(_) => ErrorKind::Unsupported,
             EngineError::NoCapableProvider(_) => ErrorKind::Unsupported,
             EngineError::NothingToSearch | EngineError::InvalidQuery(_) => ErrorKind::BadRequest,
             EngineError::Unresolved { kind, .. } => *kind,
@@ -344,6 +385,8 @@ impl Engine {
             cache: None,
             cache_policy: CachePolicy::default(),
             clock: Timestamp::now,
+            caps: Vec::new(),
+            disabled: Vec::new(),
         }
     }
 
@@ -396,6 +439,11 @@ impl Engine {
     /// `ttl`, and not by a call past the cache ([`CallOptions::fresh`]).
     pub(crate) fn current<T>(&self, entry: &aspero_store::Entry<T>, ttl: Duration) -> bool {
         self.options.reads_cache() && entry.is_fresh((self.clock)(), ttl)
+    }
+
+    /// Providers turned off, never asked.
+    pub fn disabled(&self) -> &[ProviderId] {
+        &self.disabled
     }
 
     /// Registered providers, in priority order.

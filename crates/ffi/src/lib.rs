@@ -15,7 +15,8 @@ use std::sync::Arc;
 
 use aspero_core::{Cursor, Error, SearchQuery, Sort, WorkType, YearRange};
 use aspero_engine::{
-    CallOptions, Engine, EngineError, Extras, SecretString, SqliteCache, StandardConfig, standard,
+    CachePolicy, CallOptions, Engine, EngineError, Extras, SecretString, SqliteCache,
+    StandardConfig, standard,
 };
 use aspero_json::InputClaim;
 use futures::StreamExt;
@@ -43,6 +44,64 @@ pub struct Config {
     /// Where to keep the answer cache (`cache.sqlite` inside); `None` for
     /// no cache.
     pub cache_dir: Option<String>,
+    /// Stops OpenAlex's paid calls (searches, batch lookups) once today's
+    /// use, as OpenAlex reports it for the key (shared with anything else
+    /// using it), reaches this many US dollars, until the budget resets.
+    /// Free lookups go on and checks fall back to the free sources; a
+    /// search that needs OpenAlex fails as `budgetCapped`, its
+    /// `Failure.budgetCap` saying the cap, what's used and when it resets.
+    /// With a key, a free budget refresh decides the first paid call of
+    /// the day. `None`: no cap but OpenAlex's own.
+    #[uniffi(default = None)]
+    pub openalex_daily_cap: Option<f64>,
+    /// Sources never to ask, for lookups, checks or searches, by the names
+    /// `SearchResults.provider` gives: `openalex`, `crossref`, `datacite`,
+    /// `doi`, `europepmc`, `openlibrary`. `searchCapabilities` leaves them
+    /// out, and a search naming one fails as `unsupported` ("Europe PMC is
+    /// turned off"). An unknown name, or every source, is a setup error.
+    #[uniffi(default = [])]
+    pub disabled_sources: Vec<String>,
+    /// How many days a found record (with its notices: retractions,
+    /// corrections) is trusted before the source is asked again; older,
+    /// it's still served if the source fails. 0 asks every time.
+    #[uniffi(default = 7)]
+    pub cache_found_days: u32,
+    /// How many days a "not found" is trusted before asking again (works
+    /// get registered). 0 asks every time.
+    #[uniffi(default = 1)]
+    pub cache_not_found_days: u32,
+    /// The cache's size limit, in megabytes (1,000,000 bytes) as
+    /// `CacheStats.bytes` counts them: past it, the least recently used
+    /// answers go first, checked after each write. `None`: no limit. At
+    /// least 1.
+    #[uniffi(default = None)]
+    pub cache_max_mb: Option<u64>,
+}
+
+impl Default for Config {
+    fn default() -> Self {
+        Config {
+            mailto: None,
+            openalex_key: None,
+            cache_dir: None,
+            openalex_daily_cap: None,
+            disabled_sources: Vec::new(),
+            cache_found_days: 7,
+            cache_not_found_days: 1,
+            cache_max_mb: None,
+        }
+    }
+}
+
+impl Config {
+    /// How long cached answers are trusted, from the days given.
+    fn cache_policy(&self) -> CachePolicy {
+        let days = |n: u32| std::time::Duration::from_secs(u64::from(n) * 86_400);
+        let mut policy = CachePolicy::default();
+        policy.records = days(self.cache_found_days);
+        policy.misses = days(self.cache_not_found_days);
+        policy
+    }
 }
 
 /// How patient a call is.
@@ -142,18 +201,37 @@ impl Aspero {
     #[uniffi::constructor]
     pub fn new(config: Config) -> Result<Arc<Self>, AsperoError> {
         let setup = |e: String| AsperoError::Setup(e);
+        let cache_policy = config.cache_policy();
+        let max_bytes = match config.cache_max_mb {
+            Some(0) => return Err(setup("the cache's size limit must be at least 1 MB".into())),
+            mb => mb.map(|mb| mb.saturating_mul(1_000_000)),
+        };
         let cache = match &config.cache_dir {
             Some(dir) => {
                 let path = std::path::Path::new(dir).join("cache.sqlite");
-                Some(Arc::new(
-                    SqliteCache::open(&path).map_err(|e| setup(e.to_string()))?,
-                ))
+                let cache = SqliteCache::open(&path).map_err(|e| setup(e.to_string()))?;
+                cache
+                    .set_max_bytes(max_bytes)
+                    .map_err(|e| setup(e.to_string()))?;
+                Some(Arc::new(cache))
             }
             None => None,
         };
         let mailto = config.mailto.filter(|m| !m.trim().is_empty());
         let key = config.openalex_key.filter(|k| !k.trim().is_empty());
         let mut standard_config = StandardConfig::all(key.map(SecretString::from));
+        if let Some(cap) = config.openalex_daily_cap
+            && !(cap.is_finite() && cap >= 0.0)
+        {
+            return Err(setup(format!(
+                "the OpenAlex daily cap must be zero or more US dollars, not {cap}"
+            )));
+        }
+        standard_config.openalex_daily_cap = config.openalex_daily_cap;
+        standard_config
+            .disable(&config.disabled_sources)
+            .map_err(|e| setup(e.to_string()))?;
+        standard_config.cache_policy = cache_policy;
         standard_config.mailto = mailto.clone();
         standard_config.pacing = cache.clone().map(|c| c as _);
         standard_config.cache = cache.clone().map(|c| c as _);
@@ -541,6 +619,31 @@ impl Aspero {
             .collect()
     }
 
+    /// Asks OpenAlex what's used and left of today's budget, for free
+    /// (`/rate-limit`, with a key), then answers as `budgets` does. Without
+    /// a key, or `offline`, nothing is asked: the budgets are as the last
+    /// responses left them.
+    #[uniffi::method(default(cancel = None))]
+    pub async fn refresh_budgets(
+        &self,
+        patience: Patience,
+        cancel: Option<Arc<CallToken>>,
+    ) -> Result<Vec<Budget>, AsperoError> {
+        let engine = self.engine(patience);
+        self.run(
+            async move {
+                engine
+                    .refresh_budgets()
+                    .await
+                    .iter()
+                    .map(|(p, b)| Budget::new(p, b))
+                    .collect()
+            },
+            cancel,
+        )
+        .await
+    }
+
     /// Whether OpenAlex accepts `key`, with one free lookup (never
     /// cached), and what it has left. Doesn't change the handle's key.
     #[uniffi::method(default(cancel = None))]
@@ -578,6 +681,7 @@ impl Aspero {
             identifiers: s.identifiers,
             misses: s.misses,
             searches: s.searches,
+            bytes: s.bytes,
         }))
     }
 
@@ -691,6 +795,25 @@ async fn verify_all(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn cache_days_set_how_long_answers_are_trusted() {
+        const DAY: u64 = 86_400;
+        let default = Config::default().cache_policy();
+        assert_eq!(default, CachePolicy::default());
+        let config = Config {
+            cache_found_days: 3,
+            cache_not_found_days: 0,
+            ..Config::default()
+        };
+        let policy = config.cache_policy();
+        assert_eq!(policy.records.as_secs(), 3 * DAY);
+        assert_eq!(policy.misses.as_secs(), 0);
+        // The rest keep their defaults.
+        assert_eq!(policy.searches, default.searches);
+        assert_eq!(policy.references, default.references);
+        assert_eq!(policy.cited_by, default.cited_by);
+    }
 
     #[test]
     fn each_patience_has_its_options() {

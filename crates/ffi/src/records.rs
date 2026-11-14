@@ -236,6 +236,10 @@ pub enum ErrorKind {
     Decode,
     InvalidId,
     Other,
+    /// The app's daily cap on the provider's spend (`Config.openalexDailyCap`)
+    /// is reached until the budget resets: see `Failure.budgetCap`. Last, so
+    /// the cases before keep their places.
+    BudgetCapped,
 }
 
 impl From<aspero_core::ErrorKind> for ErrorKind {
@@ -244,6 +248,7 @@ impl From<aspero_core::ErrorKind> for ErrorKind {
         match kind {
             K::RateLimited => ErrorKind::RateLimited,
             K::BudgetSpent => ErrorKind::BudgetSpent,
+            K::BudgetCapped => ErrorKind::BudgetCapped,
             K::Network => ErrorKind::Network,
             K::Timeout => ErrorKind::Timeout,
             K::Server => ErrorKind::Server,
@@ -267,18 +272,54 @@ pub struct Failure {
     pub kind: ErrorKind,
     /// In English.
     pub message: String,
+    /// For `budgetCapped`: the cap, what's used and when it resets, to
+    /// word ("Stopped at your $0.50 daily cap; resets at 01:00").
+    #[uniffi(default = None)]
+    pub budget_cap: Option<BudgetCap>,
+}
+
+/// A daily cap reached: paid calls to the provider stop until `resetsAt`.
+#[derive(Debug, Clone, PartialEq, uniffi::Record)]
+pub struct BudgetCap {
+    /// The cap (US dollars), as `Config.openalexDailyCap` set it.
+    pub cap: f64,
+    /// Used today, as the provider reports it: by everything using the key.
+    pub used: f64,
+    /// When the provider's budget resets (OpenAlex: midnight UTC).
+    pub resets_at: Option<SystemTime>,
 }
 
 impl From<&engine::EngineError> for Failure {
     fn from(e: &engine::EngineError) -> Self {
-        let provider = match e {
-            engine::EngineError::Provider { provider, .. } => Some(provider.to_string()),
-            _ => None,
+        let (provider, budget_cap) = match e {
+            engine::EngineError::Provider { provider, error } => {
+                (Some(provider.to_string()), BudgetCap::of(error))
+            }
+            engine::EngineError::Disabled(provider) => (Some(provider.to_string()), None),
+            _ => (None, None),
         };
         Failure {
             provider,
             kind: e.kind().into(),
             message: e.to_string(),
+            budget_cap,
+        }
+    }
+}
+
+impl BudgetCap {
+    pub(crate) fn of(error: &aspero_core::Error) -> Option<BudgetCap> {
+        match error {
+            aspero_core::Error::BudgetCapped {
+                cap,
+                used,
+                resets_at,
+            } => Some(BudgetCap {
+                cap: *cap,
+                used: *used,
+                resets_at: resets_at.map(time),
+            }),
+            _ => None,
         }
     }
 }
@@ -1076,6 +1117,14 @@ pub struct Budget {
     pub resets_at: Option<SystemTime>,
     /// When the provider said so.
     pub seen_at: SystemTime,
+    /// The daily allowance, as the provider says it (OpenAlex: $1 with a
+    /// key, $0.10 without). Used today is `limit - remaining`.
+    #[uniffi(default = None)]
+    pub limit: Option<f64>,
+    /// A prepaid balance beside the daily allowance, where the provider
+    /// says one.
+    #[uniffi(default = None)]
+    pub prepaid_remaining: Option<f64>,
 }
 
 impl Budget {
@@ -1085,6 +1134,8 @@ impl Budget {
             remaining: b.remaining,
             resets_at: b.resets_at.map(time),
             seen_at: time(b.seen_at),
+            limit: b.limit,
+            prepaid_remaining: b.prepaid_remaining,
         }
     }
 }
@@ -1124,6 +1175,10 @@ pub struct CacheStats {
     /// Remembered "not found" answers.
     pub misses: u64,
     pub searches: u64,
+    /// The cache's size on disk (its database pages; the write-ahead log
+    /// aside), as `Config.cacheMaxMb` limits it.
+    #[uniffi(default = 0)]
+    pub bytes: u64,
 }
 
 // Searching.
@@ -2474,6 +2529,10 @@ mod tests {
         for r in engine::OddReason::ALL {
             assert_eq!(name(OddReason::from(*r)), r.as_str());
         }
+        // Failures.
+        for k in aspero_core::ErrorKind::ALL {
+            assert_eq!(name(ErrorKind::from(*k)), k.as_str());
+        }
 
         // `IdElsewhere` cites a candidate.
         let record = SourceRecord::new(
@@ -2497,6 +2556,36 @@ mod tests {
         for r in engine::Reason::ALL {
             assert_eq!(name(Reason::new(r, &candidates)), r.as_str());
         }
+    }
+
+    #[test]
+    fn a_reached_cap_carries_its_figures() {
+        let resets = Timestamp::from_second(1_794_700_800).unwrap();
+        let e = engine::EngineError::Provider {
+            provider: ProviderId::from_static("openalex"),
+            error: aspero_core::Error::BudgetCapped {
+                cap: 0.5,
+                used: 0.5012,
+                resets_at: Some(resets),
+            },
+        };
+        let failure = Failure::from(&e);
+        assert_eq!(failure.kind, ErrorKind::BudgetCapped);
+        assert_eq!(failure.provider.as_deref(), Some("openalex"));
+        assert_eq!(
+            failure.budget_cap,
+            Some(BudgetCap {
+                cap: 0.5,
+                used: 0.5012,
+                resets_at: Some(time(resets)),
+            })
+        );
+        // Other failures carry none.
+        let other = engine::EngineError::Provider {
+            provider: ProviderId::from_static("openalex"),
+            error: aspero_core::Error::Timeout,
+        };
+        assert_eq!(Failure::from(&other).budget_cap, None);
     }
 
     /// aspero-bib's enums have no `ALL`, so only the values known now are

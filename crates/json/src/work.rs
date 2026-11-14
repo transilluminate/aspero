@@ -82,6 +82,12 @@ pub fn usage_one(u: &Usage) -> Value {
     if let Some(t) = u.resets_at {
         out.insert("resets_at".into(), json!(t.to_string()));
     }
+    if let Some(l) = u.limit {
+        out.insert("limit".into(), json!(l));
+    }
+    if let Some(p) = u.prepaid_remaining {
+        out.insert("prepaid_remaining".into(), json!(p));
+    }
     Value::Object(out)
 }
 

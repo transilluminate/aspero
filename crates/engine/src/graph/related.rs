@@ -719,7 +719,10 @@ impl Engine {
                 read.failed = true;
                 break;
             }
-            match self.call(entry, || entry.provider.search(&query)).await {
+            match self
+                .call_paid(entry, || entry.provider.search(&query))
+                .await
+            {
                 Ok(resp) => {
                     read.paid += 1;
                     if let Some(u) = resp.usage {

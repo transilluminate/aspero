@@ -17,7 +17,7 @@ use aspero_engine::{CallOptions, Engine, SecretString, SqliteCache, StandardConf
 use clap::Parser;
 use serde_json::json;
 
-use crate::args::{Cli, Command, Format};
+use crate::args::{Cli, Command, Format, Global};
 use crate::cmd::{Failure, Out};
 use crate::exit::Exit;
 
@@ -123,12 +123,17 @@ fn cache_path() -> Result<PathBuf, Failure> {
     Ok(dir.join("cache.sqlite"))
 }
 
-/// The cache file. One that can't be opened is a warning, not a failure:
-/// everything works without it, just slower and costlier.
-fn open_cache() -> Option<Arc<SqliteCache>> {
-    let opened = cache_path()
-        .map_err(|f| f.message)
-        .and_then(|path| SqliteCache::open(&path).map_err(|e| format!("{e} ({})", path.display())));
+/// The cache file, held to `max_bytes`. One that can't be opened is a
+/// warning, not a failure: everything works without it, just slower and
+/// costlier.
+fn open_cache(max_bytes: Option<u64>) -> Option<Arc<SqliteCache>> {
+    let opened = cache_path().map_err(|f| f.message).and_then(|path| {
+        let cache = SqliteCache::open(&path).map_err(|e| format!("{e} ({})", path.display()))?;
+        if let Err(e) = cache.set_max_bytes(max_bytes) {
+            eprintln!("warning: couldn't hold the cache to its size limit: {e}");
+        }
+        Ok(cache)
+    });
     match opened {
         Ok(cache) => Some(Arc::new(cache)),
         Err(message) => {
@@ -142,9 +147,18 @@ fn open_cache() -> Option<Arc<SqliteCache>> {
 /// config file and keyring (DESIGN §7) come later.
 /// `file` paces requests across processes (parallel agents), and caches
 /// answers unless `no_cache`.
-fn engine(file: Option<Arc<SqliteCache>>, no_cache: bool) -> Result<Engine, Failure> {
+fn engine(
+    file: Option<Arc<SqliteCache>>,
+    no_cache: bool,
+    global: &Global,
+) -> Result<Engine, Failure> {
     let mut config = StandardConfig::all(env("OPENALEX_API_KEY").map(SecretString::from));
     config.mailto = env("ASPERO_MAILTO");
+    config.openalex_daily_cap = global.openalex_cap;
+    config.cache_policy = global.cache_policy();
+    config
+        .disable(&global.without)
+        .map_err(|e| Failure::usage(format!("--without: {e}")))?;
     config.pacing = file.clone().map(|c| c as _);
     config.cache = file.filter(|_| !no_cache).map(|c| c as _);
     standard(config).map_err(|e| Failure {
@@ -155,12 +169,15 @@ fn engine(file: Option<Arc<SqliteCache>>, no_cache: bool) -> Result<Engine, Fail
 
 async fn run(cli: Cli, out: Out) -> Result<Exit, Failure> {
     match cli.command {
-        Command::Cache { action } => return cmd::cache::run(cache_path()?, action, out),
+        Command::Cache { action } => {
+            return cmd::cache::run(cache_path()?, action, cli.global.cache_max_bytes(), out);
+        }
         Command::Scan { files } => return cmd::scan::run(files, out),
         Command::Styles { credits } => return cmd::styles::run(credits, out),
         _ => {}
     }
-    let mut engine = engine(open_cache(), cli.global.no_cache)?;
+    let file = open_cache(cli.global.cache_max_bytes());
+    let mut engine = engine(file, cli.global.no_cache, &cli.global)?;
     if cli.global.fresh {
         engine = engine.with_options(CallOptions::fresh());
     }
@@ -190,6 +207,7 @@ async fn run(cli: Cli, out: Out) -> Result<Exit, Failure> {
             estimate,
         } => cmd::graph::analyse(&engine, inputs, kinds, limit, budget, estimate, out).await,
         Command::Mcp { budget } => cmd::mcp::run(engine, budget).await,
+        Command::Budget => cmd::budget::run(&engine, out).await,
         Command::Cache { .. } | Command::Scan { .. } | Command::Styles { .. } => {
             unreachable!("handled above")
         }

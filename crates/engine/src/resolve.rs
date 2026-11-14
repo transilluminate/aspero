@@ -20,8 +20,8 @@
 
 use aspero_core::matching::{self, id_agreement, same_work_id};
 use aspero_core::{
-    Agreement, Assessment, Claim, FieldSet, Filter, IdKind, ProviderId, SearchQuery, SourceRecord,
-    Update, Usage, WorkId, YearRange,
+    Agreement, Assessment, Claim, FieldSet, Filter, IdKind, OpenAccess, PartialDate, ProviderId,
+    SearchQuery, SourceRecord, Update, Usage, WorkId, YearRange,
 };
 
 use futures::future::{Either, join_all, select};
@@ -99,16 +99,26 @@ impl Candidate {
     }
 }
 
-/// Merges another record of the same work into a candidate: its
-/// identifiers and notices, every year reported, a free copy's location,
-/// and the record itself if it matches the claim better.
+/// The source whose cited-by count a merged work shows when it has one:
+/// the broadest index.
+const COUNTS: &str = "openalex";
+
+/// Merges another record of the same work (found in `sightings`) into a
+/// candidate: its identifiers, notices and sightings, every year reported,
+/// and the record itself if it matches the claim better. Whichever record
+/// wins, the work shows the same values whichever source answered first
+/// ([`merged_values`]).
 fn absorb(
     claim: &Claim,
     c: &mut Candidate,
     ids: &[WorkId],
     updates: &[Update],
+    sightings: Vec<Sighting>,
     mut record: SourceRecord,
 ) {
+    let counted = |sightings: &[Sighting]| sightings.iter().any(|s| s.provider.as_str() == COUNTS);
+    let counts = (counted(&c.sightings), counted(&sightings));
+    c.sightings.extend(sightings);
     for id in ids.iter().chain(&record.ids) {
         if !c.ids.iter().any(|known| same_work_id(known, id)) {
             c.ids.push(id.clone());
@@ -119,18 +129,91 @@ fn absorb(
     // Pool the years every source reports (online-first vs print,
     // editions), then keep the better-matching record.
     let pooled: Vec<i16> = years(&c.record).chain(years(&record)).collect();
+    merged_values(&mut c.record, &mut record, counts);
     add_years(&mut c.record, &pooled);
     add_years(&mut record, &pooled);
-    // And keep a free copy's location, whichever record wins.
-    let oa = |r: &SourceRecord| r.work.open_access.clone();
-    let known = oa(&c.record).or_else(|| oa(&record));
-    c.record.work.open_access.clone_from(&known);
-    record.work.open_access = record.work.open_access.take().or(known);
     c.assessment = matching::assess(claim, &c.record);
     let assessment = matching::assess(claim, &record);
     if assessment.confidence > c.assessment.confidence {
         c.record = record;
         c.assessment = assessment;
+    }
+}
+
+/// Values sources give differently for one work, made the same on both
+/// records so the work doesn't change with the source that won the merge
+/// (#81). `counts` says whether each side's cited-by count is OpenAlex's.
+///
+/// - Open access: the more informative, whatever the version (a free
+///   preprint is a free copy): free with a PDF, then free with a page,
+///   then free, then not free (with a licence first), then unknown.
+/// - Between records of one version (sharing a DOI or PMID, so not a
+///   preprint and its article):
+///   - cited-by count: OpenAlex's when either has one, else the larger;
+///   - issued: the earliest (online first, then in print: OpenAlex's
+///     2020-12-01 over Crossref's 2021-01), and of dates that overlap
+///     (2021 and 2021-01-05) the more precise. The other date's year stays
+///     in `other_years`, where verification's year matching finds it.
+fn merged_values(a: &mut SourceRecord, b: &mut SourceRecord, counts: (bool, bool)) {
+    let oa = best_open_access(&a.work.open_access, &b.work.open_access).clone();
+    a.work.open_access.clone_from(&oa);
+    b.work.open_access = oa;
+
+    let shared = a.ids.iter().any(|x| {
+        matches!(x.kind(), IdKind::Doi | IdKind::Pmid) && b.ids.iter().any(|y| same_work_id(x, y))
+    });
+    if !shared {
+        return;
+    }
+    let count = match (a.work.cited_by_count, b.work.cited_by_count, counts) {
+        (Some(n), _, (true, _)) | (_, Some(n), (_, true)) => Some(n),
+        (x, y, _) => x.max(y),
+    };
+    a.work.cited_by_count = count;
+    b.work.cited_by_count = count;
+    let issued = match (a.work.issued, b.work.issued) {
+        (Some(x), Some(y)) => Some(earliest(x, y)),
+        (x, y) => x.or(y),
+    };
+    a.work.issued = issued;
+    b.work.issued = issued;
+}
+
+/// The more informative of two open-access records; on a tie, the first.
+fn best_open_access<'a>(
+    a: &'a Option<OpenAccess>,
+    b: &'a Option<OpenAccess>,
+) -> &'a Option<OpenAccess> {
+    let rank = |oa: &Option<OpenAccess>| {
+        oa.as_ref().map(|oa| {
+            (
+                oa.is_oa,
+                oa.pdf_url.is_some(),
+                oa.url.is_some(),
+                oa.license.is_some(),
+            )
+        })
+    };
+    if rank(b) > rank(a) { b } else { a }
+}
+
+/// Of two dates of one work, the earlier; of two that overlap ("2021"
+/// and "2021-01-05"), the more precise; on a tie, the first.
+fn earliest(a: PartialDate, b: PartialDate) -> PartialDate {
+    let bounds = |d: PartialDate| {
+        let start = (d.year(), d.month().unwrap_or(1), d.day().unwrap_or(1));
+        let end = (d.year(), d.month().unwrap_or(12), d.day().unwrap_or(31));
+        (start, end)
+    };
+    let precision =
+        |d: PartialDate| usize::from(d.month().is_some()) + usize::from(d.day().is_some());
+    let ((a_start, a_end), (b_start, b_end)) = (bounds(a), bounds(b));
+    if b_end < a_start {
+        b
+    } else if a_end < b_start || precision(a) >= precision(b) {
+        a
+    } else {
+        b
     }
 }
 
@@ -475,9 +558,7 @@ impl Accumulator<'_> {
         };
         let mut at = match candidates.iter().position(|c| shares(c, &record.ids)) {
             Some(i) => {
-                let c = &mut candidates[i];
-                c.sightings.push(sighting);
-                absorb(claim, c, &[], &[], record);
+                absorb(claim, &mut candidates[i], &[], &[], vec![sighting], record);
                 i
             }
             None => {
@@ -501,8 +582,14 @@ impl Accumulator<'_> {
             let (keep, gone) = (at.min(j), at.max(j));
             let gone = candidates.remove(gone);
             let c = &mut candidates[keep];
-            c.sightings.extend(gone.sightings);
-            absorb(claim, c, &gone.ids, &gone.updates, gone.record);
+            absorb(
+                claim,
+                c,
+                &gone.ids,
+                &gone.updates,
+                gone.sightings,
+                gone.record,
+            );
             at = keep;
         }
         // Judge claimed identifiers against everything known about the work.
@@ -687,9 +774,178 @@ fn distinct(titles: Vec<String>) -> Vec<String> {
 
 #[cfg(test)]
 mod tests {
-    use aspero_core::UpdateKind;
+    use aspero_core::{Raw, UpdateKind, Work, WorkType};
+    use jiff::Timestamp;
 
     use super::*;
+
+    /// Plasticenta as a source has it (#81).
+    fn plasticenta(
+        source: &'static str,
+        ids: &[&str],
+        issued: &str,
+        cited_by: Option<u64>,
+        oa: Option<OpenAccess>,
+    ) -> SourceRecord {
+        let mut work = Work::default();
+        work.title = Some("Plasticenta: First evidence of microplastics in human placenta".into());
+        work.authors = vec![aspero_core::Person::literal("Antonio Ragusa")];
+        work.issued = Some(issued.parse().unwrap());
+        work.work_type = Some(WorkType::JournalArticle);
+        work.cited_by_count = cited_by;
+        work.open_access = oa;
+        SourceRecord::new(
+            ProviderId::from_static(source),
+            ids.iter().map(|i| i.parse().unwrap()).collect(),
+            work,
+            FieldSet::ALL,
+            Raw {
+                media_type: "application/json".into(),
+                body: "{}".into(),
+            },
+            Timestamp::UNIX_EPOCH,
+        )
+    }
+
+    fn open_access(is_oa: bool, pdf: Option<&str>, license: Option<&str>) -> OpenAccess {
+        let mut oa = OpenAccess::default();
+        oa.is_oa = is_oa;
+        oa.pdf_url = pdf.map(str::to_owned);
+        oa.license = license.map(str::to_owned);
+        oa
+    }
+
+    const DOI: &str = "doi:10.1016/j.envint.2020.106274";
+
+    /// Sources answering in either order give one work the same values.
+    #[test]
+    fn a_merged_work_shows_the_same_values_whichever_source_wins() {
+        let records = || {
+            [
+                plasticenta(
+                    "crossref",
+                    &[DOI],
+                    "2021-01",
+                    Some(3339),
+                    Some(open_access(false, None, Some("cc-by-nc-nd"))),
+                ),
+                plasticenta(
+                    "openalex",
+                    &["openalex:W3109968655", DOI],
+                    "2020-12-01",
+                    Some(3794),
+                    Some(open_access(
+                        true,
+                        Some("https://x/pdf"),
+                        Some("cc-by-nc-nd"),
+                    )),
+                ),
+                plasticenta(
+                    "europepmc",
+                    &["pmid:33395930", DOI],
+                    "2021-01-01",
+                    Some(4000),
+                    None,
+                ),
+            ]
+        };
+        let claims = [
+            Claim::from_text("Ragusa A. Plasticenta. Environ Int. 2021;146:106274."),
+            Claim::from_text("Ragusa A. Plasticenta. 2020."),
+        ];
+        for claim in &claims {
+            for order in [[0, 1, 2], [2, 1, 0], [1, 0, 2], [2, 0, 1]] {
+                let mut acc = Accumulator {
+                    claim,
+                    report: ResolveReport::default(),
+                };
+                let all = records();
+                for i in order {
+                    let record = all[i].clone();
+                    let sighting = Sighting {
+                        provider: record.source.clone(),
+                        via: Via::TitleSearch,
+                        rank: 1,
+                        score: None,
+                    };
+                    acc.add(record, sighting);
+                }
+                let [c] = &acc.report.candidates[..] else {
+                    panic!("one work: {order:?}");
+                };
+                let w = &c.record.work;
+                assert_eq!(w.cited_by_count, Some(3794), "OpenAlex's: {order:?}");
+                let oa = w.open_access.as_ref().unwrap();
+                assert!(oa.is_oa && oa.pdf_url.is_some(), "{order:?}");
+                assert_eq!(w.issued.unwrap().to_string(), "2020-12-01", "{order:?}");
+                assert!(w.other_years.contains(&2021), "{order:?}");
+                assert_eq!(c.sightings.len(), 3);
+            }
+        }
+    }
+
+    #[test]
+    fn without_openalex_the_larger_count_and_versions_keep_their_own() {
+        let mut a = plasticenta("crossref", &[DOI], "2021-01", Some(3339), None);
+        let mut b = plasticenta("europepmc", &[DOI], "2021-01-04", Some(3400), None);
+        merged_values(&mut a, &mut b, (false, false));
+        assert_eq!(
+            (a.work.cited_by_count, b.work.cited_by_count),
+            (Some(3400), Some(3400))
+        );
+        assert_eq!(a.work.issued.unwrap().to_string(), "2021-01-04");
+
+        // A preprint and its article (no shared DOI or PMID) keep their
+        // own count and date; a free copy is still shared.
+        let mut article = plasticenta(
+            "crossref",
+            &[DOI, "arxiv:2001.00001"],
+            "2021",
+            Some(10),
+            None,
+        );
+        let mut preprint = plasticenta(
+            "openalex",
+            &["doi:10.1101/2020.07.15.198325", "arxiv:2001.00001"],
+            "2020-07-15",
+            Some(9),
+            Some(open_access(true, None, None)),
+        );
+        merged_values(&mut article, &mut preprint, (false, true));
+        assert_eq!(article.work.cited_by_count, Some(10));
+        assert_eq!(article.work.issued.unwrap().to_string(), "2021");
+        assert!(article.work.open_access.as_ref().is_some_and(|oa| oa.is_oa));
+    }
+
+    #[test]
+    fn the_more_informative_open_access_wins() {
+        let free_pdf = Some(open_access(true, Some("https://x/pdf"), None));
+        let free = Some(open_access(true, None, None));
+        let licensed = Some(open_access(false, None, Some("cc-by")));
+        let closed = Some(open_access(false, None, None));
+        let ladder = [&free_pdf, &free, &licensed, &closed, &None];
+        for (i, better) in ladder.iter().enumerate() {
+            for worse in &ladder[i..] {
+                assert_eq!(best_open_access(better, worse), *better);
+                assert_eq!(best_open_access(worse, better), *better);
+            }
+        }
+    }
+
+    #[test]
+    fn the_earliest_date_then_the_most_precise() {
+        let date = |s: &str| s.parse::<PartialDate>().unwrap();
+        for (a, b, want) in [
+            ("2020-12-01", "2021-01", "2020-12-01"),
+            ("2021-01", "2020-12-01", "2020-12-01"),
+            ("2021", "2021-01-05", "2021-01-05"),
+            ("2021-01-05", "2021", "2021-01-05"),
+            ("2020", "2021-03-05", "2020"),
+            ("2021-01", "2021-01", "2021-01"),
+        ] {
+            assert_eq!(earliest(date(a), date(b)).to_string(), want, "{a} {b}");
+        }
+    }
 
     fn update(kind: UpdateKind, notice: Option<&str>) -> Update {
         let mut u = Update::new(kind);

@@ -199,8 +199,18 @@ scripts/       fixture recorders, one per provider
 - **Merging**: candidates merge only on a shared identifier (arXiv
   versions count as one work). Fuzzy matches may *suggest*, never merge: a
   wrong merge corrupts; a duplicate merely annoys. Notices merge too, with
-  detailed ones replacing bare flags, and a free copy's location is kept
-  whichever record wins. `lookup --full` fills notices (Crossref) and open
+  detailed ones replacing bare flags. Values sources give differently are
+  made the same on every merged record, so a work doesn't change with the
+  source that won (#81): open access is the more informative (free with a
+  PDF, then a page, then free, then not free with a licence, then not
+  free), whatever the version; between records of one version (sharing a
+  DOI or PMID, not a preprint and its article), the cited-by count is
+  OpenAlex's when one has it (the broadest index, and first for lookups,
+  so `verify` and `lookup` agree), else the larger, and `issued` is the
+  earliest (online first: OpenAlex's 2020-12-01 over Crossref's 2021-01),
+  or of overlapping dates the more precise. Other years stay in
+  `other_years`, where year matching finds them. A search's hits are each
+  one source's record, as it gives it. `lookup --full` fills notices (Crossref) and open
   access from other providers, keeping each value's `source`.
 
 ## Resolve, verify and check

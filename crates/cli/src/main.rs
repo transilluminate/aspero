@@ -150,6 +150,9 @@ fn engine(
     let mut config = StandardConfig::all(env("OPENALEX_API_KEY").map(SecretString::from));
     config.mailto = env("ASPERO_MAILTO");
     config.openalex_daily_cap = global.openalex_cap;
+    config
+        .disable(&global.without)
+        .map_err(|e| Failure::usage(format!("--without: {e}")))?;
     config.pacing = file.clone().map(|c| c as _);
     config.cache = file.filter(|_| !no_cache).map(|c| c as _);
     standard(config).map_err(|e| Failure {

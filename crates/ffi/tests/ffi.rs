@@ -868,6 +868,121 @@ fn caches_report_and_clear() {
     std::fs::remove_dir_all(dir).unwrap();
 }
 
+fn all_sources_but(kept: &[&str]) -> Vec<String> {
+    aspero_engine::SOURCES
+        .iter()
+        .map(|(name, _)| name.to_string())
+        .filter(|name| !kept.contains(&name.as_str()))
+        .collect()
+}
+
+#[test]
+fn sources_turned_off_are_left_out_and_say_so() {
+    let handle = Aspero::new(Config {
+        disabled_sources: vec!["europepmc".into(), "openlibrary".into()],
+        ..Config::default()
+    })
+    .unwrap();
+    let names: Vec<String> = handle
+        .search_capabilities()
+        .into_iter()
+        .map(|s| s.source)
+        .collect();
+    assert_eq!(names, ["openalex", "crossref", "datacite"]);
+
+    let request = SearchRequest {
+        source: Some("europepmc".into()),
+        ..search_request("sepsis")
+    };
+    let found = block_on(handle.search(request, Patience::Batch, None)).unwrap();
+    let failure = found.failure.unwrap();
+    assert_eq!(failure.kind, ErrorKind::Unsupported);
+    assert_eq!(failure.message, "Europe PMC is turned off");
+    assert_eq!(failure.provider.as_deref(), Some("europepmc"));
+    assert_eq!(
+        handle
+            .search_supports(
+                Some("europepmc".into()),
+                term(SearchField::Keywords, "x"),
+                None
+            )
+            .as_deref(),
+        Some("Europe PMC is turned off")
+    );
+}
+
+#[test]
+fn unknown_sources_and_none_left_are_setup_errors() {
+    for disabled in [vec!["pubmed".to_string()], all_sources_but(&[])] {
+        let made = Aspero::new(Config {
+            disabled_sources: disabled.clone(),
+            ..Config::default()
+        });
+        assert!(matches!(made, Err(AsperoError::Setup(_))), "{disabled:?}");
+    }
+}
+
+#[test]
+fn checks_work_with_one_source_left() {
+    use aspero_core::{FieldSet, PartialDate, Person, ProviderId, Raw, SourceRecord, WorkId};
+    use aspero_engine::{Cache, SqliteCache};
+
+    let dir = std::env::temp_dir().join(format!("aspero-ffi-one-{}", std::process::id()));
+    // Crossref's record of the work, cached as an earlier check left it.
+    let doi: WorkId = "10.1038/nature14539".parse().unwrap();
+    let mut work = aspero_core::Work::default();
+    work.title = Some("Deep learning".into());
+    work.authors = vec![
+        Person::new("Yann", "LeCun"),
+        Person::new("Yoshua", "Bengio"),
+        Person::new("Geoffrey", "Hinton"),
+    ];
+    work.issued = Some(PartialDate::from_year(2015));
+    work.container_title = Some("Nature".into());
+    work.volume = Some("521".into());
+    work.page = Some("436-444".into());
+    let now = jiff::Timestamp::now();
+    let crossref = ProviderId::from_static("crossref");
+    let record = SourceRecord::new(
+        crossref.clone(),
+        vec![doi.clone()],
+        work,
+        FieldSet::ALL,
+        Raw {
+            media_type: "application/json".into(),
+            body: "{}".into(),
+        },
+        now,
+    );
+    let cache = SqliteCache::open(&dir.join("cache.sqlite")).unwrap();
+    cache
+        .put_lookups(&crossref, &[(&doi, Some(&record))], now)
+        .unwrap();
+    drop(cache);
+
+    let handle = Aspero::new(Config {
+        cache_dir: Some(dir.display().to_string()),
+        disabled_sources: all_sources_but(&["crossref"]),
+        ..Config::default()
+    })
+    .unwrap();
+    let names: Vec<String> = handle
+        .search_capabilities()
+        .into_iter()
+        .map(|s| s.source)
+        .collect();
+    assert_eq!(names, ["crossref"]);
+    let claim = text(
+        "LeCun Y, Bengio Y, Hinton G. Deep learning. Nature. 2015;521:436-444. \
+         doi:10.1038/nature14539",
+    );
+    let checked = block_on(handle.verify(vec![claim], false, Patience::Offline, None)).unwrap();
+    let v = &checked.results[0];
+    assert_eq!(v.verdict, Verdict::Verified, "{v:?}");
+    drop(handle);
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
 #[test]
 fn a_daily_cap_must_be_an_amount() {
     for cap in [-0.5, f64::NAN, f64::INFINITY] {

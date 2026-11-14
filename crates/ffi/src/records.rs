@@ -294,6 +294,7 @@ impl From<&engine::EngineError> for Failure {
             engine::EngineError::Provider { provider, error } => {
                 (Some(provider.to_string()), BudgetCap::of(error))
             }
+            engine::EngineError::Disabled(provider) => (Some(provider.to_string()), None),
             _ => (None, None),
         };
         Failure {

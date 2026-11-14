@@ -53,6 +53,13 @@ pub struct Config {
     /// the day. `None`: no cap but OpenAlex's own.
     #[uniffi(default = None)]
     pub openalex_daily_cap: Option<f64>,
+    /// Sources never to ask, for lookups, checks or searches, by the names
+    /// `SearchResults.provider` gives: `openalex`, `crossref`, `datacite`,
+    /// `doi`, `europepmc`, `openlibrary`. `searchCapabilities` leaves them
+    /// out, and a search naming one fails as `unsupported` ("Europe PMC is
+    /// turned off"). An unknown name, or every source, is a setup error.
+    #[uniffi(default = [])]
+    pub disabled_sources: Vec<String>,
 }
 
 /// How patient a call is.
@@ -172,6 +179,9 @@ impl Aspero {
             )));
         }
         standard_config.openalex_daily_cap = config.openalex_daily_cap;
+        standard_config
+            .disable(&config.disabled_sources)
+            .map_err(|e| setup(e.to_string()))?;
         standard_config.mailto = mailto.clone();
         standard_config.pacing = cache.clone().map(|c| c as _);
         standard_config.cache = cache.clone().map(|c| c as _);

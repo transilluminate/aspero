@@ -2,7 +2,7 @@
 
 use std::sync::Arc;
 
-use aspero_core::{Error, HttpClient, ResiliencePolicy};
+use aspero_core::{Error, HttpClient, ProviderId, ResiliencePolicy};
 
 use crate::transport::{Paced, ReqwestClient};
 use crate::{Cache, Engine, EngineBuilder, Pacing, SecretString};
@@ -19,6 +19,41 @@ pub use aspero_europepmc::EuropePmcConfig;
 pub use aspero_openalex::OpenAlexConfig;
 #[cfg(feature = "openlibrary")]
 pub use aspero_openlibrary::OpenLibraryConfig;
+
+/// The built-in sources, in lookup priority order: each one's name (as
+/// results' `provider` gives it) and what it's called.
+pub const SOURCES: &[(&str, &str)] = &[
+    ("openalex", "OpenAlex"),
+    ("crossref", "Crossref"),
+    ("datacite", "DataCite"),
+    ("doi", "doi.org"),
+    ("europepmc", "Europe PMC"),
+    ("openlibrary", "Open Library"),
+];
+
+/// What a built-in source is called ("Europe PMC" for `europepmc`); other
+/// names as they are.
+pub fn source_name(id: &str) -> &str {
+    SOURCES
+        .iter()
+        .find(|(name, _)| *name == id)
+        .map_or(id, |(_, called)| called)
+}
+
+/// Why sources couldn't be turned off.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[non_exhaustive]
+pub enum SourcesError {
+    #[error("no source is named {0:?} (sources: {names})", names = names())]
+    Unknown(String),
+    #[error("every source is turned off: leave at least one")]
+    NoneLeft,
+}
+
+fn names() -> String {
+    let names: Vec<&str> = SOURCES.iter().map(|(name, _)| *name).collect();
+    names.join(", ")
+}
 
 /// Settings for the compiled-in providers. `None` disables a provider.
 #[derive(Clone, Default)]
@@ -47,6 +82,9 @@ pub struct StandardConfig {
     pub europepmc: Option<EuropePmcConfig>,
     #[cfg(feature = "openlibrary")]
     pub openlibrary: Option<OpenLibraryConfig>,
+    /// Sources turned off with [`disable`](Self::disable): a search naming
+    /// one fails saying so ([`EngineError::Disabled`](crate::EngineError::Disabled)).
+    pub disabled: Vec<ProviderId>,
 }
 
 impl StandardConfig {
@@ -74,6 +112,94 @@ impl StandardConfig {
             openlibrary: Some(OpenLibraryConfig::default()),
             ..StandardConfig::default()
         }
+    }
+
+    /// Turns off the sources `names` names (as [`SOURCES`] and results'
+    /// `provider` do: `europepmc`, `openlibrary`, …): they are never built
+    /// or asked, for lookups, checks or searches, and a search naming one
+    /// fails saying it's turned off. Names are trimmed and compared
+    /// ignoring case; blanks are skipped. An unknown name, or turning every
+    /// source off, is an error, and changes nothing.
+    pub fn disable<S: AsRef<str>>(&mut self, names: &[S]) -> Result<(), SourcesError> {
+        let mut ids = Vec::new();
+        for name in names {
+            let name = name.as_ref().trim().to_ascii_lowercase();
+            if name.is_empty() {
+                continue;
+            }
+            let Some((known, _)) = SOURCES.iter().find(|(n, _)| *n == name) else {
+                return Err(SourcesError::Unknown(name));
+            };
+            let id = ProviderId::from_static(known);
+            if !ids.contains(&id) {
+                ids.push(id);
+            }
+        }
+        let mut left = self.clone();
+        for id in &ids {
+            left.turn_off(id.as_str());
+        }
+        if left.enabled() == 0 {
+            return Err(SourcesError::NoneLeft);
+        }
+        for id in ids {
+            if !left.disabled.contains(&id) {
+                left.disabled.push(id);
+            }
+        }
+        *self = left;
+        Ok(())
+    }
+
+    /// Removes one compiled-in source's settings.
+    fn turn_off(&mut self, name: &str) {
+        match name {
+            #[cfg(feature = "openalex")]
+            "openalex" => self.openalex = None,
+            #[cfg(feature = "crossref")]
+            "crossref" => self.crossref = None,
+            #[cfg(feature = "datacite")]
+            "datacite" => self.datacite = None,
+            #[cfg(feature = "doi")]
+            "doi" => self.doi = None,
+            #[cfg(feature = "europepmc")]
+            "europepmc" => self.europepmc = None,
+            #[cfg(feature = "openlibrary")]
+            "openlibrary" => self.openlibrary = None,
+            // Not compiled in: off already.
+            _ => {}
+        }
+    }
+
+    /// How many sources are set to be built.
+    fn enabled(&self) -> usize {
+        #[allow(unused_mut)]
+        let mut on = 0;
+        #[cfg(feature = "openalex")]
+        {
+            on += usize::from(self.openalex.is_some());
+        }
+        #[cfg(feature = "crossref")]
+        {
+            on += usize::from(self.crossref.is_some());
+        }
+        #[cfg(feature = "datacite")]
+        {
+            on += usize::from(self.datacite.is_some());
+        }
+        #[cfg(feature = "doi")]
+        {
+            on += usize::from(self.doi.is_some());
+        }
+        #[cfg(feature = "europepmc")]
+        {
+            on += usize::from(self.europepmc.is_some());
+        }
+        #[cfg(feature = "openlibrary")]
+        {
+            on += usize::from(self.openlibrary.is_some());
+        }
+        on
     }
 }
 
@@ -106,6 +232,9 @@ pub fn standard(config: StandardConfig) -> Result<Engine, Error> {
     let mut builder: EngineBuilder = Engine::builder();
     if let Some(cache) = config.cache {
         builder = builder.cache(cache);
+    }
+    for id in config.disabled {
+        builder = builder.disabled(id);
     }
 
     #[cfg(feature = "openalex")]

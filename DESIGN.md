@@ -89,6 +89,17 @@ scripts/       fixture recorders, one per provider
   batches verify 4 claims at a time. Results are applied in a fixed order so
   merging is deterministic. Per-provider pacing still applies, so
   concurrency overlaps different providers' waits rather than loading one.
+- **Choosing sources** (#73): `StandardConfig::disable` (FFI
+  `Config.disabled_sources`, CLI `--without` / `ASPERO_DISABLED_SOURCES`)
+  takes sources by the names results give (`SOURCES`: openalex,
+  crossref, datacite, doi, europepmc, openlibrary). Those are never built,
+  so never asked, for lookups, checks or searches, and
+  `search_providers` (FFI `searchCapabilities`) leaves them out; a search
+  naming one fails with `EngineError::Disabled` (kind unsupported, "Europe
+  PMC is turned off"), as `search_supports` says; citation links without
+  OpenAlex likewise. An unknown name, or every source, is a setup error
+  (CLI: usage, exit 2). Checks need no particular source: any one alone
+  verifies (tested with Crossref alone).
 - **Search** goes to one provider (named, or the first capable); filters it
   can't apply are stripped and reported as ignored. Fields (author, title,
   container) and sorts (newest, most cited) it can't apply fail

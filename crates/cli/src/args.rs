@@ -25,6 +25,7 @@ Environment:
   ASPERO_MAILTO     contact address for polite API pools (Crossref)
   ASPERO_CACHE_DIR  where to keep the answer cache (default: platform cache dir)
   ASPERO_OPENALEX_CAP  --openalex-cap
+  ASPERO_DISABLED_SOURCES  --without
 
 Answers are cached (records 7 days, not-found 1 day, searches 1 day,
 references 30 days) and
@@ -100,6 +101,18 @@ pub struct Global {
     /// OpenAlex fails (exit 5). `aspero budget` shows today's use.
     #[arg(long, global = true, value_name = "USD", env = "ASPERO_OPENALEX_CAP", value_parser = cap)]
     pub openalex_cap: Option<f64>,
+
+    /// Sources never to ask, for lookups, checks or searches: openalex,
+    /// crossref, datacite, doi, europepmc, openlibrary (comma-separated or
+    /// repeated). Checks carry on with the rest; a search naming one fails.
+    #[arg(
+        long,
+        global = true,
+        value_name = "SOURCES",
+        env = "ASPERO_DISABLED_SOURCES",
+        value_delimiter = ','
+    )]
+    pub without: Vec<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
@@ -715,6 +728,14 @@ mod tests {
             let error = parse(&["--openalex-cap", bad, "search", "x"]).expect_err(bad);
             assert_eq!(error.exit_code(), 2);
         }
+    }
+
+    #[test]
+    fn sources_turned_off_are_a_list() {
+        let cli = parse(&["--without", "europepmc,openlibrary", "verify", "x"]).unwrap();
+        assert_eq!(cli.global.without, ["europepmc", "openlibrary"]);
+        let repeated = parse(&["verify", "x", "--without", "doi", "--without", "crossref"]);
+        assert_eq!(repeated.unwrap().global.without, ["doi", "crossref"]);
     }
 
     #[test]

@@ -27,6 +27,14 @@ Added:
   call; without one, unknown use counts as under the cap. Core
   `ErrorKind::ALL` lists every kind; `Capabilities` gains `budget_status`
   and `max_free_batch`.
+- Choosing sources (#73): `StandardConfig::disable` (FFI
+  `Config.disabledSources`; CLI `--without europepmc,openlibrary` /
+  `ASPERO_DISABLED_SOURCES`) turns sources off by the names results give
+  (`SOURCES`, with `source_name` for showing them). They are never built
+  or asked; `searchCapabilities` leaves them out, and a search naming one
+  fails as `unsupported`, "Europe PMC is turned off" (new
+  `EngineError::Disabled`), as `searchSupports` says. An unknown name, or
+  turning every source off, is a setup error.
 
 ## 0.16.1
 

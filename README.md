@@ -43,6 +43,7 @@ Optional environment:
 | `ASPERO_MAILTO` | Your contact address, sent to polite API pools (Crossref) |
 | `ASPERO_CACHE_DIR` | Where to keep the answer cache |
 | `ASPERO_OPENALEX_CAP` | Stop OpenAlex's paid calls once today's use reaches this many USD (`--openalex-cap`) |
+| `ASPERO_DISABLED_SOURCES` | Sources never to ask, e.g. `europepmc,openlibrary` (`--without`) |
 
 ## Use
 

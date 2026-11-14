@@ -44,11 +44,13 @@ pub const OVERVIEW: &str = concat!(
 
 Check
   verify <citation>     is this reference real, and are its details right?
-  check <file>          every entry of a .bib, .ris or CSL-JSON file, or Word document
+  check <file>          every entry of a .bib, .ris or CSL-JSON file, or the
+                        citations in a Word document
 
 Find
   lookup <id>...        works by DOI, PMID, PMCID, arXiv, ISBN or OpenAlex ID
-  search <keywords>     one source, by keywords, --author/--title/--journal or --query
+  search <keywords>     one source: keywords, --author/--title/--journal,
+                        or --query for all/any/none
   identify <file>       which paper a PDF's first page is
 
 Explore
@@ -61,7 +63,7 @@ Also
   styles, budget, cache, mcp
 
 Examples
-  aspero verify \"LeCun Y, Bengio Y, Hinton G. Deep learning. Nature 2015;521:436-44.\"
+  aspero verify \"LeCun Y, Bengio Y, Hinton G. Deep learning. Nature 2015.\"
   aspero search \"sepsis fluid resuscitation\" --sort most-cited
   aspero check refs.bib
   aspero analyse refs.bib --kinds related,probably-missing
@@ -84,6 +86,7 @@ More: aspero <command> --help. Every option, exit codes and environment: aspero 
         Output is JSON when stdout is not a terminal, so agents can pipe it.",
     after_help = MORE,
     after_long_help = EXIT_CODES,
+    max_term_width = 100,
 )]
 pub struct Cli {
     #[command(flatten)]
@@ -389,7 +392,7 @@ Examples:
         claim: ClaimArgs,
     },
 
-    /// Check that a citation refers to a real work, and that its details agree.
+    /// Check that a citation is real, and that its details agree.
     #[command(after_help = "\
 Verdicts:
   verified      a matching work exists (and so do its claimed identifiers)
@@ -432,6 +435,8 @@ Examples:
         claim: ClaimArgs,
     },
 
+    /// Check every entry of a reference file or Word document.
+    ///
     /// Check every entry of a BibTeX/BibLaTeX, RIS or CSL-JSON file, or the
     /// Zotero or Mendeley citations in a Word document, CI-style.
     #[command(after_help = "\
@@ -495,9 +500,9 @@ Examples:
         cursor: Option<String>,
     },
 
-    /// Check and extend a set of works through their citation links.
+    /// Check and extend a set of works via their citations.
     #[command(
-        visible_alias = "analyze",
+        alias = "analyze",
         after_help = "\
 The set is identifiers (arguments, or one per stdin line), or a .bib, .ris
 or CSL-JSON file whose entries' identifiers are used (entries without one
@@ -581,7 +586,7 @@ Examples:
         estimate: bool,
     },
 
-    /// List the identifiers mentioned in documents, without looking them up.
+    /// List the identifiers in documents, without looking them up.
     #[command(after_help = "\
 Finds DOIs, PMIDs, PMCIDs, NCBI Bookshelf IDs (NBK…), arXiv IDs and ISBNs
 in text or Markdown: one record per mention, with file, line, column, the
@@ -639,7 +644,7 @@ Examples:
         title_hint: Option<String>,
     },
 
-    /// Serve aspero's tools to an AI agent over the Model Context Protocol.
+    /// Serve aspero's tools to AI agents (MCP, over stdio).
     #[command(after_help = "\
 Speaks MCP on stdin and stdout (logs go to stderr), for an agent to launch.
 With Claude Code, for example:

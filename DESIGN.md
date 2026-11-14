@@ -566,7 +566,10 @@ fixture recorded with different parameters once hid a ranking bug.
   `resets_at`) for free (`daily_used_usd` unchanged across calls, no cost
   header; checked 2026-11-14), but only to a key (401 "Authentication
   required" without; Bearer works): `Engine::refresh_budgets` asks it,
-  and asks nothing without a key. Its body echoes the key's first and
+  and asks nothing without a key. `aspero budget` without a key (the CLI
+  alone; the FFI's `refreshBudgets` still asks nothing) looks one work up
+  alone, past the cache (free; limit $0.10, checked 2026-11-14), and
+  reads the budget from its headers. Its body echoes the key's first and
   last three characters, masked in the fixture.
   404s are HTML. Lists take up to 200 a page (`per-page`); filters OR up to
   100 values; `select` trims works to the fields named (citing works:

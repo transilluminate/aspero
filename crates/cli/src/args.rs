@@ -594,9 +594,12 @@ when stdin closes.")]
 With OPENALEX_API_KEY set, asks OpenAlex's /rate-limit, which costs nothing:
   openalex: $0.0498 of $1.00 used today, resets 00:00 UTC
 
-Without a key nothing is asked (OpenAlex answers that only with a key), so
-there is nothing to show. JSON: {\"budgets\": [{\"provider\", \"limit\", \"used\",
-\"remaining\", \"prepaid_remaining\", \"resets_at\", \"seen_at\"}]}.
+Without a key, /rate-limit doesn't answer, so one work is looked up alone,
+past the cache (free), and its response's headers say the budget:
+  openalex: $0.0153 of $0.10 used today (no key), resets 00:00 UTC
+JSON: {\"budgets\": [{\"provider\", \"limit\", \"used\", \"remaining\",
+\"prepaid_remaining\", \"resets_at\", \"seen_at\"}]}, and \"key\": false without
+one.
 
 Examples:
   aspero budget

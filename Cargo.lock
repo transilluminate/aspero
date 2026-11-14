@@ -129,6 +129,7 @@ dependencies = [
  "aspero-engine",
  "aspero-json",
  "aspero-mcp",
+ "aspero-openalex",
  "async-trait",
  "clap",
  "comfy-table",

@@ -39,6 +39,8 @@ tracing-subscriber = { workspace = true, features = ["registry"] }
 libc = "0.2.191"
 
 [dev-dependencies]
+aspero-core = { workspace = true, features = ["testing"] }
+aspero-openalex.workspace = true
 async-trait.workspace = true
 tempfile.workspace = true
 

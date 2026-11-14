@@ -61,10 +61,14 @@ tokio-util = { version = "0.7.20", optional = true }
 [dev-dependencies]
 async-trait.workspace = true
 jiff.workspace = true
-reqwest = { workspace = true, features = ["json"] }
+reqwest.workspace = true
 rmcp = { workspace = true, features = ["client"] }
 tempfile.workspace = true
-tokio = { workspace = true, features = ["macros", "rt", "rt-multi-thread", "io-util", "net", "time"] }
+tokio = { workspace = true, features = ["macros", "rt", "rt-multi-thread", "io-util", "net", "time", "signal"] }
+
+[[example]]
+name = "http_server"
+required-features = ["http"]
 
 [[test]]
 name = "http"

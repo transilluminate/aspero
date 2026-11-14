@@ -106,12 +106,6 @@
       "repository": "https://github.com/transilluminate/aspero"
     },
     {
-      "name": "async-trait",
-      "version": "0.1.92",
-      "license": "MIT OR Apache-2.0",
-      "repository": "https://github.com/dtolnay/async-trait"
-    },
-    {
       "name": "atomic-waker",
       "version": "1.1.2",
       "license": "Apache-2.0 OR MIT",
@@ -179,12 +173,6 @@
     },
     {
       "name": "clap_builder",
-      "version": "4.6.7",
-      "license": "MIT OR Apache-2.0",
-      "repository": "https://github.com/clap-rs/clap"
-    },
-    {
-      "name": "clap_derive",
       "version": "4.6.7",
       "license": "MIT OR Apache-2.0",
       "repository": "https://github.com/clap-rs/clap"
@@ -260,18 +248,6 @@
       "version": "0.5.0",
       "license": "MIT OR Apache-2.0",
       "repository": "https://github.com/dirs-dev/dirs-sys-rs"
-    },
-    {
-      "name": "displaydoc",
-      "version": "0.2.7",
-      "license": "MIT OR Apache-2.0",
-      "repository": "https://github.com/yaahc/displaydoc"
-    },
-    {
-      "name": "document-features",
-      "version": "0.2.12",
-      "license": "MIT OR Apache-2.0",
-      "repository": "https://github.com/slint-ui/document-features"
     },
     {
       "name": "dyn-clone",
@@ -358,12 +334,6 @@
       "repository": "https://github.com/rust-lang/futures-rs"
     },
     {
-      "name": "futures-macro",
-      "version": "0.3.34",
-      "license": "MIT OR Apache-2.0",
-      "repository": "https://github.com/rust-lang/futures-rs"
-    },
-    {
       "name": "futures-sink",
       "version": "0.3.34",
       "license": "MIT OR Apache-2.0",
@@ -404,12 +374,6 @@
       "version": "0.10.1",
       "license": "MIT OR Apache-2.0",
       "repository": "https://github.com/typst/hayagriva"
-    },
-    {
-      "name": "heck",
-      "version": "0.5.0",
-      "license": "MIT OR Apache-2.0",
-      "repository": "https://github.com/withoutboats/heck"
     },
     {
       "name": "http",
@@ -604,12 +568,6 @@
       "repository": "https://github.com/unicode-org/icu4x"
     },
     {
-      "name": "litrs",
-      "version": "1.0.1",
-      "license": "MIT OR Apache-2.0",
-      "repository": "https://github.com/LukasKalbertodt/litrs"
-    },
-    {
       "name": "lock_api",
       "version": "0.4.14",
       "license": "MIT OR Apache-2.0",
@@ -676,18 +634,6 @@
       "repository": "https://github.com/Amanieu/parking_lot"
     },
     {
-      "name": "paste",
-      "version": "1.0.15",
-      "license": "MIT OR Apache-2.0",
-      "repository": "https://github.com/dtolnay/paste"
-    },
-    {
-      "name": "pastey",
-      "version": "0.2.3",
-      "license": "MIT OR Apache-2.0",
-      "repository": "https://github.com/as1100k/pastey"
-    },
-    {
       "name": "percent-encoding",
       "version": "2.3.2",
       "license": "MIT OR Apache-2.0",
@@ -706,31 +652,13 @@
       "repository": "https://github.com/unicode-org/icu4x"
     },
     {
-      "name": "proc-macro2",
-      "version": "1.0.107",
-      "license": "MIT OR Apache-2.0",
-      "repository": "https://github.com/dtolnay/proc-macro2"
-    },
-    {
       "name": "quick-xml",
       "version": "0.38.4",
       "license": "MIT",
       "repository": "https://github.com/tafia/quick-xml"
     },
     {
-      "name": "quote",
-      "version": "1.0.47",
-      "license": "MIT OR Apache-2.0",
-      "repository": "https://github.com/dtolnay/quote"
-    },
-    {
       "name": "ref-cast",
-      "version": "1.0.27",
-      "license": "MIT OR Apache-2.0",
-      "repository": "https://github.com/dtolnay/ref-cast"
-    },
-    {
-      "name": "ref-cast-impl",
       "version": "1.0.27",
       "license": "MIT OR Apache-2.0",
       "repository": "https://github.com/dtolnay/ref-cast"
@@ -802,12 +730,6 @@
       "repository": "https://github.com/GREsau/schemars"
     },
     {
-      "name": "schemars_derive",
-      "version": "1.2.3",
-      "license": "MIT",
-      "repository": "https://github.com/GREsau/schemars"
-    },
-    {
       "name": "scopeguard",
       "version": "1.2.0",
       "license": "MIT OR Apache-2.0",
@@ -840,18 +762,6 @@
     {
       "name": "serde_core",
       "version": "1.0.229",
-      "license": "MIT OR Apache-2.0",
-      "repository": "https://github.com/serde-rs/serde"
-    },
-    {
-      "name": "serde_derive",
-      "version": "1.0.229",
-      "license": "MIT OR Apache-2.0",
-      "repository": "https://github.com/serde-rs/serde"
-    },
-    {
-      "name": "serde_derive_internals",
-      "version": "0.30.0",
       "license": "MIT OR Apache-2.0",
       "repository": "https://github.com/serde-rs/serde"
     },
@@ -916,40 +826,16 @@
       "repository": "https://github.com/Peternator7/strum"
     },
     {
-      "name": "strum_macros",
-      "version": "0.27.2",
-      "license": "MIT",
-      "repository": "https://github.com/Peternator7/strum"
-    },
-    {
       "name": "subtle",
       "version": "2.6.1",
       "license": "BSD-3-Clause",
       "repository": "https://github.com/dalek-cryptography/subtle"
     },
     {
-      "name": "syn",
-      "version": "2.0.119",
-      "license": "MIT OR Apache-2.0",
-      "repository": "https://github.com/dtolnay/syn"
-    },
-    {
-      "name": "syn",
-      "version": "3.0.10",
-      "license": "MIT OR Apache-2.0",
-      "repository": "https://github.com/dtolnay/syn"
-    },
-    {
       "name": "sync_wrapper",
       "version": "1.0.2",
       "license": "Apache-2.0",
       "repository": "https://github.com/Actyx/sync_wrapper"
-    },
-    {
-      "name": "synstructure",
-      "version": "0.14.0",
-      "license": "MIT",
-      "repository": "https://github.com/mystor/synstructure"
     },
     {
       "name": "terminal_size",
@@ -959,12 +845,6 @@
     },
     {
       "name": "thiserror",
-      "version": "2.0.21",
-      "license": "MIT OR Apache-2.0",
-      "repository": "https://github.com/dtolnay/thiserror"
-    },
-    {
-      "name": "thiserror-impl",
       "version": "2.0.21",
       "license": "MIT OR Apache-2.0",
       "repository": "https://github.com/dtolnay/thiserror"
@@ -990,12 +870,6 @@
     {
       "name": "tokio",
       "version": "1.54.1",
-      "license": "MIT",
-      "repository": "https://github.com/tokio-rs/tokio"
-    },
-    {
-      "name": "tokio-macros",
-      "version": "2.7.2",
       "license": "MIT",
       "repository": "https://github.com/tokio-rs/tokio"
     },
@@ -1042,12 +916,6 @@
       "repository": "https://github.com/tokio-rs/tracing"
     },
     {
-      "name": "tracing-attributes",
-      "version": "0.1.31",
-      "license": "MIT",
-      "repository": "https://github.com/tokio-rs/tracing"
-    },
-    {
       "name": "tracing-core",
       "version": "0.1.36",
       "license": "MIT",
@@ -1082,12 +950,6 @@
       "version": "0.9.6",
       "license": "MIT OR Apache-2.0",
       "repository": "https://github.com/zbraniecki/unic-locale"
-    },
-    {
-      "name": "unicode-ident",
-      "version": "1.0.27",
-      "license": "(MIT OR Apache-2.0) AND Unicode-3.0",
-      "repository": "https://github.com/dtolnay/unicode-ident"
     },
     {
       "name": "unicode-normalization",
@@ -1186,19 +1048,7 @@
       "repository": "https://github.com/unicode-org/icu4x"
     },
     {
-      "name": "yoke-derive",
-      "version": "0.8.4",
-      "license": "Unicode-3.0",
-      "repository": "https://github.com/unicode-org/icu4x"
-    },
-    {
       "name": "zerofrom",
-      "version": "0.1.8",
-      "license": "Unicode-3.0",
-      "repository": "https://github.com/unicode-org/icu4x"
-    },
-    {
-      "name": "zerofrom-derive",
       "version": "0.1.8",
       "license": "Unicode-3.0",
       "repository": "https://github.com/unicode-org/icu4x"
@@ -1206,12 +1056,6 @@
     {
       "name": "zeroize",
       "version": "1.9.1",
-      "license": "Apache-2.0 OR MIT",
-      "repository": "https://github.com/RustCrypto/utils"
-    },
-    {
-      "name": "zeroize_derive",
-      "version": "1.5.0",
       "license": "Apache-2.0 OR MIT",
       "repository": "https://github.com/RustCrypto/utils"
     },
@@ -1224,12 +1068,6 @@
     {
       "name": "zerovec",
       "version": "0.11.9",
-      "license": "Unicode-3.0",
-      "repository": "https://github.com/unicode-org/icu4x"
-    },
-    {
-      "name": "zerovec-derive",
-      "version": "0.11.7",
       "license": "Unicode-3.0",
       "repository": "https://github.com/unicode-org/icu4x"
     },

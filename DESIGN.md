@@ -707,11 +707,14 @@ and the bundled CSL data) and `third_party_notices()`, and `aspero
 licences [--full]`. `just notices` writes them, at release, to
 `crates/{ffi,cli}/notices/` (`dependencies.json`, `notices.txt`); both
 artefacts `include_str!` their own. The generator (`crates/notices-gen`,
-not published) takes each artefact's crates from `cargo tree -e normal
---target aarch64-apple-darwin` (features resolved for that package
-alone, as its build does: `cargo metadata` unifies them across the
-workspace and dev-dependencies, and names ~40 crates the library doesn't
-contain), and their licences, repositories and authors from `cargo
+not published) takes each artefact's crates from `cargo tree -e
+normal,no-proc-macro --target aarch64-apple-darwin` (features resolved
+for that package alone, as its build does: `cargo metadata` unifies them
+across the workspace and dev-dependencies, and names ~40 crates the
+library doesn't contain). Proc macros run when building and aren't in
+what ships; their own dependencies resolve for the building machine, so
+counting them would make the list depend on where it's generated. It
+takes their licences, repositories and authors from `cargo
 metadata`. Licence texts are each crate's own `LICENSE*`, `COPYING*`,
 `NOTICE*` and `COPYRIGHT*` files; copyright lines are lifted out and shown
 with the crate, so identical texts (layout aside) appear once, after

@@ -119,8 +119,11 @@ pub fn stale(root: &Path, outputs: &[Output]) -> Vec<PathBuf> {
 }
 
 /// The packages `package` is built from, itself included: its normal
-/// dependencies, theirs, and so on (proc macros count; build and dev
-/// dependencies don't), sorted by name (ignoring case), then version.
+/// dependencies, theirs, and so on, sorted by name (ignoring case), then
+/// version. Proc macros, build and dev dependencies don't count: they run
+/// when building and aren't in what ships. (A proc macro's own
+/// dependencies also resolve for the machine building, not the target,
+/// so counting them would make the list depend on where it's generated.)
 ///
 /// `cargo tree` says which: it resolves features for this package alone,
 /// as `cargo build -p` does, where `cargo metadata` unifies them across
@@ -134,7 +137,7 @@ fn closure<'m>(
     let cargo = std::env::var_os("CARGO").unwrap_or_else(|| "cargo".into());
     let out = Command::new(cargo)
         .args(["tree", "--quiet", "--locked", "--package", package])
-        .args(["--edges", "normal", "--target", TARGET])
+        .args(["--edges", "normal,no-proc-macro", "--target", TARGET])
         .args(["--prefix", "none", "--format", "{p}"])
         .arg("--manifest-path")
         .arg(root.join("Cargo.toml"))

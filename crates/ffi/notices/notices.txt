@@ -1,7 +1,7 @@
 Third-party software and data in aspero 0.17.1
 
 The aspero-ffi library (AsperoFFI.xcframework), built for
-aarch64-apple-darwin, is made from the 183 Rust crates below, aspero's own
+aarch64-apple-darwin, is made from the 153 Rust crates below, aspero's own
 among them. It also bundles the citation style data at the end. Each licence
 or notice text appears once, after the crates under it and their copyright
 notices.
@@ -25,29 +25,20 @@ Used by:
   aspero-openalex 0.17.1 (Copyright (c) 2026 Adrian Robinson)
   aspero-openlibrary 0.17.1 (Copyright (c) 2026 Adrian Robinson)
   aspero-store 0.17.1 (Copyright (c) 2026 Adrian Robinson)
-  async-trait 0.1.92 (authors: David Tolnay)
   constant_time_eq 0.6.1 (authors: Cesar Eduardo Barros)
   itoa 1.0.19 (authors: David Tolnay)
   libc 0.2.191 (Copyright (c) The Rust Project Developers)
-  paste 1.0.15 (authors: David Tolnay)
   pin-project-lite 0.2.17
-  proc-macro2 1.0.107 (authors: David Tolnay, Alex Crichton)
-  quote 1.0.47 (authors: David Tolnay)
   ryu 1.0.23 (authors: David Tolnay)
   semver 1.0.28 (authors: David Tolnay)
   serde 1.0.229 (authors: Erick Tryzelaar, David Tolnay)
   serde_core 1.0.229 (authors: Erick Tryzelaar, David Tolnay)
-  serde_derive 1.0.229 (authors: Erick Tryzelaar, David Tolnay)
   serde_json 1.0.154
   serde_path_to_error 0.1.20 (authors: David Tolnay)
   serde_yaml 0.9.34+deprecated (authors: David Tolnay)
-  syn 2.0.119 (authors: David Tolnay)
-  syn 3.0.10 (authors: David Tolnay)
   sync_wrapper 1.0.2 (authors: Actyx AG)
   thiserror 2.0.21 (authors: David Tolnay)
-  thiserror-impl 2.0.21 (authors: David Tolnay)
   typed-path 0.13.0 (authors: Chip Senkbeil)
-  unicode-ident 1.0.27 (Copyright © 1991-2023 Unicode, Inc.)
   unscanny 0.1.0 (authors: Laurenz)
 
                               Apache License
@@ -239,18 +230,15 @@ Used by:
   citationberg 0.7.0 (Copyright 2023 Martin Haug)
   core-foundation 0.10.1 (Copyright (c) 2012-2013 Mozilla Foundation)
   core-foundation-sys 0.8.7 (Copyright (c) 2012-2013 Mozilla Foundation)
-  displaydoc 0.2.7 (authors: Jane Lusby)
   equivalent 1.0.3 (Copyright (c) 2016--2023)
   errno 0.3.14 (Copyright (c) 2014 Chris Wong)
   fastrand 2.5.0 (authors: Stjepan Glavina)
   flate2 1.1.11 (Copyright (c) 2014-2026 Alex Crichton)
   form_urlencoded 1.2.2 (Copyright (c) 2013-2016 The rust-url developers)
-  fs-err 3.3.2 (authors: Andrew Hickman)
   futures 0.3.34 (Copyright (c) 2016 Alex Crichton; Copyright (c) 2017 The Tokio Authors)
   futures-channel 0.3.34 (Copyright (c) 2016 Alex Crichton; Copyright (c) 2017 The Tokio Authors)
   futures-core 0.3.34 (Copyright (c) 2016 Alex Crichton; Copyright (c) 2017 The Tokio Authors)
   futures-io 0.3.34 (Copyright (c) 2016 Alex Crichton; Copyright (c) 2017 The Tokio Authors)
-  futures-macro 0.3.34 (Copyright (c) 2016 Alex Crichton; Copyright (c) 2017 The Tokio Authors)
   futures-sink 0.3.34 (Copyright (c) 2016 Alex Crichton; Copyright (c) 2017 The Tokio Authors)
   futures-task 0.3.34 (Copyright (c) 2016 Alex Crichton; Copyright (c) 2017 The Tokio Authors)
   futures-util 0.3.34 (Copyright (c) 2016 Alex Crichton; Copyright (c) 2017 The Tokio Authors)
@@ -274,7 +262,6 @@ Used by:
   secrecy 0.10.3 (Copyright (c) 2019-2024 iqlusion)
   security-framework 3.7.0 (Copyright (c) 2015 Steven Fackler)
   security-framework-sys 2.17.0 (Copyright (c) 2015 Steven Fackler)
-  siphasher 1.0.4 (Copyright 2012-2016 The Rust Project Developers.; Copyright 2016-2026 Frank Denis.)
   smallvec 1.16.5 (Copyright (c) 2018 The Servo Project Developers)
   socket2 0.6.5 (Copyright (c) 2014 Alex Crichton)
   stable_deref_trait 1.2.1 (Copyright (c) 2017 Robert Grosse)
@@ -292,7 +279,6 @@ Used by:
   utf_types 1.0.0 (Copyright Mozilla Foundation)
   write16 1.0.0 (Copyright Mozilla Foundation)
   zeroize 1.9.1 (Copyright (c) 2018-2026 The RustCrypto Project Developers)
-  zeroize_derive 1.5.0 (Copyright (c) 2019-2026 The RustCrypto Project Developers)
 
                               Apache License
                         Version 2.0, January 2004
@@ -916,11 +902,6 @@ Used by:
   fallible-iterator 0.3.0 (Copyright (c) 2015 The rust-openssl-verify Developers)
   fallible-streaming-iterator 0.1.9 (Copyright (c) 2016 The fallible-streaming-iterator Developers)
   ipnet 2.12.2 (Copyright 2017 Juniper Networks, Inc.)
-  serde_spanned 1.1.3 (Copyright Individual contributors; Copyright (c) Individual contributors)
-  toml 1.2.1+spec-1.1.0 (Copyright Individual contributors; Copyright (c) Individual contributors)
-  toml_datetime 1.1.3+spec-1.1.0 (Copyright Individual contributors; Copyright (c) Individual contributors)
-  toml_parser 1.1.5+spec-1.1.0 (Copyright Individual contributors; Copyright (c) Individual contributors)
-  toml_writer 1.2.0+spec-1.1.0 (Copyright Individual contributors; Copyright (c) Individual contributors)
 
                                  Apache License
                            Version 2.0, January 2004
@@ -2538,7 +2519,6 @@ MIT License (MIT)
 
 Used by:
   anyhow 1.0.104 (authors: David Tolnay)
-  async-trait 0.1.92 (authors: David Tolnay)
   atomic-waker 1.1.2 (Copyright (c) 2016 Alex Crichton; Copyright (c) 2017 The Tokio Authors)
   biblatex 0.12.0 (authors: Martin Haug)
   bitflags 2.13.2 (Copyright (c) 2014 The Rust Project Developers)
@@ -2550,7 +2530,6 @@ Used by:
   citationberg 0.7.0 (Copyright 2023 Martin Haug)
   core-foundation 0.10.1 (Copyright (c) 2012-2013 Mozilla Foundation)
   core-foundation-sys 0.8.7 (Copyright (c) 2012-2013 Mozilla Foundation)
-  displaydoc 0.2.7 (authors: Jane Lusby)
   equivalent 1.0.3 (Copyright (c) 2016--2023)
   errno 0.3.14 (Copyright (c) 2014 Chris Wong)
   fallible-iterator 0.3.0 (Copyright (c) 2015 The rust-openssl-verify Developers)
@@ -2558,12 +2537,10 @@ Used by:
   fastrand 2.5.0 (authors: Stjepan Glavina)
   flate2 1.1.11 (Copyright (c) 2014-2026 Alex Crichton)
   form_urlencoded 1.2.2 (Copyright (c) 2013-2016 The rust-url developers)
-  fs-err 3.3.2 (authors: Andrew Hickman)
   futures 0.3.34 (Copyright (c) 2016 Alex Crichton; Copyright (c) 2017 The Tokio Authors)
   futures-channel 0.3.34 (Copyright (c) 2016 Alex Crichton; Copyright (c) 2017 The Tokio Authors)
   futures-core 0.3.34 (Copyright (c) 2016 Alex Crichton; Copyright (c) 2017 The Tokio Authors)
   futures-io 0.3.34 (Copyright (c) 2016 Alex Crichton; Copyright (c) 2017 The Tokio Authors)
-  futures-macro 0.3.34 (Copyright (c) 2016 Alex Crichton; Copyright (c) 2017 The Tokio Authors)
   futures-sink 0.3.34 (Copyright (c) 2016 Alex Crichton; Copyright (c) 2017 The Tokio Authors)
   futures-task 0.3.34 (Copyright (c) 2016 Alex Crichton; Copyright (c) 2017 The Tokio Authors)
   futures-util 0.3.34 (Copyright (c) 2016 Alex Crichton; Copyright (c) 2017 The Tokio Authors)
@@ -2588,11 +2565,8 @@ Used by:
   log 0.4.35 (Copyright (c) 2014 The Rust Project Developers)
   mio 1.2.4 (Copyright (c) 2014 Carl Lerche and other MIO contributors)
   once_cell 1.21.4 (authors: Aleksey Kladov)
-  paste 1.0.15 (authors: David Tolnay)
   percent-encoding 2.3.2 (Copyright (c) 2013-2025 The rust-url developers)
   pin-project-lite 0.2.17
-  proc-macro2 1.0.107 (authors: David Tolnay, Alex Crichton)
-  quote 1.0.47 (authors: David Tolnay)
   reqwest 0.13.5 (Copyright 2016 Sean McArthur; Copyright (c) 2016-2026 Sean McArthur)
   rusqlite 0.41.1 (Copyright (c) 2014 The rusqlite developers)
   rustix 1.1.6 (authors: Dan Gohman, Jakub Konka)
@@ -2601,40 +2575,27 @@ Used by:
   semver 1.0.28 (authors: David Tolnay)
   serde 1.0.229 (authors: Erick Tryzelaar, David Tolnay)
   serde_core 1.0.229 (authors: Erick Tryzelaar, David Tolnay)
-  serde_derive 1.0.229 (authors: Erick Tryzelaar, David Tolnay)
   serde_json 1.0.154
   serde_path_to_error 0.1.20 (authors: David Tolnay)
-  serde_spanned 1.1.3 (Copyright Individual contributors; Copyright (c) Individual contributors)
   serde_yaml 0.9.34+deprecated (authors: David Tolnay)
-  siphasher 1.0.4 (Copyright 2012-2016 The Rust Project Developers.; Copyright 2016-2026 Frank Denis.)
   slab 0.4.12 (Copyright (c) 2019 Carl Lerche)
   smallvec 1.16.5 (Copyright (c) 2018 The Servo Project Developers)
   socket2 0.6.5 (Copyright (c) 2014 Alex Crichton)
   stable_deref_trait 1.2.1 (Copyright (c) 2017 Robert Grosse)
-  syn 2.0.119 (authors: David Tolnay)
-  syn 3.0.10 (authors: David Tolnay)
-  synstructure 0.14.0 (Copyright 2016 Nika Layzell)
   tempfile 3.27.0 (Copyright (c) 2015 Steven Allen)
   thiserror 2.0.21 (authors: David Tolnay)
-  thiserror-impl 2.0.21 (authors: David Tolnay)
   tinyvec 1.13.3 (Copyright (c) 2019 Daniel "Lokathor" Gee.)
   tokio-rustls 0.26.6 (Copyright 2017 quininer kel; Copyright (c) 2017 quininer kel)
-  toml 1.2.1+spec-1.1.0 (Copyright Individual contributors; Copyright (c) Individual contributors)
-  toml_datetime 1.1.3+spec-1.1.0 (Copyright Individual contributors; Copyright (c) Individual contributors)
-  toml_parser 1.1.5+spec-1.1.0 (Copyright Individual contributors; Copyright (c) Individual contributors)
-  toml_writer 1.2.0+spec-1.1.0 (Copyright Individual contributors; Copyright (c) Individual contributors)
   tower 0.5.3 (Copyright (c) 2019 Tower Contributors)
   tower-http 0.6.11 (Copyright (c) 2019-2021 Tower Contributors)
   tower-layer 0.3.3 (Copyright (c) 2019 Tower Contributors)
   tower-service 0.3.3 (Copyright (c) 2019 Tower Contributors)
   tracing 0.1.44 (Copyright (c) 2019 Tokio Contributors)
-  tracing-attributes 0.1.31 (Copyright (c) 2019 Tokio Contributors)
   tracing-core 0.1.36 (Copyright (c) 2019 Tokio Contributors)
   try-lock 0.2.5 (Copyright (c) 2018-2023 Sean McArthur; Copyright (c) 2016 Alex Crichton)
   typed-path 0.13.0 (authors: Chip Senkbeil)
   unic-langid 0.9.6 (authors: Zibi Braniecki)
   unic-langid-impl 0.9.6 (authors: Zibi Braniecki)
-  unicode-ident 1.0.27 (Copyright © 1991-2023 Unicode, Inc.)
   unicode-normalization 0.1.26 (Copyright (c) 2015 The Rust Project Developers; Copyright © 1991-2023 Unicode, Inc.)
   unicode-segmentation 1.13.3 (Copyright (c) 2015 The Rust Project Developers)
   unsafe-libyaml 0.2.11 (authors: David Tolnay)
@@ -2643,10 +2604,8 @@ Used by:
   utf8_iter 1.1.0 (Copyright Mozilla Foundation)
   utf_types 1.0.0 (Copyright Mozilla Foundation)
   want 0.3.2 (Copyright (c) 2018-2019 Sean McArthur)
-  winnow 1.0.5
   write16 1.0.0 (Copyright Mozilla Foundation)
   zeroize 1.9.1 (Copyright (c) 2018-2026 The RustCrypto Project Developers)
-  zeroize_derive 1.5.0 (Copyright (c) 2019-2026 The RustCrypto Project Developers)
   zmij 1.0.23 (authors: David Tolnay)
 
 Permission is hereby granted, free of charge, to any
@@ -2694,9 +2653,7 @@ Used by:
   secrecy 0.10.3 (Copyright (c) 2019-2024 iqlusion)
   static_assertions 1.1.0 (Copyright (c) 2017 Nikolai Vazquez)
   strum 0.27.2 (Copyright (c) 2019 Peter Glotfelty)
-  strum_macros 0.27.2 (Copyright (c) 2019 Peter Glotfelty)
   tokio 1.54.1 (Copyright (c) Tokio Contributors)
-  tokio-macros 2.7.2 (Copyright (c) 2019 Yoshua Wuyts; Copyright (c) Tokio Contributors)
   unscanny 0.1.0 (authors: Laurenz)
 
 MIT License
@@ -2859,9 +2816,6 @@ Mozilla Public License 2.0 (MPL-2.0)
 Used by:
   uniffi 0.32.2
   uniffi_core 0.32.2
-  uniffi_internal_macros 0.32.2
-  uniffi_macros 0.32.2
-  uniffi_meta 0.32.2
   uniffi_pipeline 0.32.2
 
 Mozilla Public License Version 2.0
@@ -3251,17 +3205,6 @@ This project is dual-licensed under the Unlicense and MIT licenses.
 You may use this code under the terms of either license.
 
 ================================================================================
-Notice (COPYING)
-
-Used by:
-  siphasher 1.0.4 (Copyright 2012-2016 The Rust Project Developers.; Copyright 2016-2026 Frank Denis.)
-
-Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
-http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
-<LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
-option.
-
-================================================================================
 Notice (COPYRIGHT)
 
 Used by:
@@ -3517,12 +3460,9 @@ Used by:
   tinystr 0.8.5 (Copyright © 2020-2024 Unicode, Inc.)
   writeable 0.6.4 (Copyright © 2020-2024 Unicode, Inc.)
   yoke 0.8.4 (Copyright © 2020-2024 Unicode, Inc.)
-  yoke-derive 0.8.4 (Copyright © 2020-2024 Unicode, Inc.)
   zerofrom 0.1.8 (Copyright © 2020-2024 Unicode, Inc.)
-  zerofrom-derive 0.1.8 (Copyright © 2020-2024 Unicode, Inc.)
   zerotrie 0.2.5 (Copyright © 2020-2024 Unicode, Inc.)
   zerovec 0.11.9 (Copyright © 2020-2024 Unicode, Inc.)
-  zerovec-derive 0.11.7 (Copyright © 2020-2024 Unicode, Inc.)
 
 UNICODE LICENSE V3
 
@@ -3573,7 +3513,6 @@ ICU 1.8.1 to ICU 57.1 © 1995-2016 International Business Machines Corporation a
 Unicode License v3 (Unicode-3.0)
 
 Used by:
-  unicode-ident 1.0.27 (Copyright © 1991-2023 Unicode, Inc.)
   unicode-normalization 0.1.26 (Copyright (c) 2015 The Rust Project Developers; Copyright © 1991-2023 Unicode, Inc.)
 
 UNICODE LICENSE V3

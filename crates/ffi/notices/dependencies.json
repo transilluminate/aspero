@@ -64,6 +64,12 @@
       "repository": "https://github.com/transilluminate/aspero"
     },
     {
+      "name": "aspero-mcp",
+      "version": "0.17.1",
+      "license": "MIT OR Apache-2.0",
+      "repository": "https://github.com/transilluminate/aspero"
+    },
+    {
       "name": "aspero-openalex",
       "version": "0.17.1",
       "license": "MIT OR Apache-2.0",
@@ -118,6 +124,12 @@
       "repository": "https://github.com/bitflags/bitflags"
     },
     {
+      "name": "block-buffer",
+      "version": "0.12.1",
+      "license": "MIT OR Apache-2.0",
+      "repository": "https://github.com/RustCrypto/utils"
+    },
+    {
       "name": "bytes",
       "version": "1.12.1",
       "license": "MIT",
@@ -148,6 +160,18 @@
       "repository": "https://github.com/rust-lang/cfg-if"
     },
     {
+      "name": "chacha20",
+      "version": "0.10.2",
+      "license": "MIT OR Apache-2.0",
+      "repository": "https://github.com/RustCrypto/stream-ciphers"
+    },
+    {
+      "name": "chrono",
+      "version": "0.4.45",
+      "license": "MIT OR Apache-2.0",
+      "repository": "https://github.com/chronotope/chrono"
+    },
+    {
       "name": "citationberg",
       "version": "0.7.0",
       "license": "MIT OR Apache-2.0",
@@ -172,10 +196,22 @@
       "repository": "https://github.com/servo/core-foundation-rs"
     },
     {
+      "name": "cpufeatures",
+      "version": "0.3.1",
+      "license": "MIT OR Apache-2.0",
+      "repository": "https://github.com/RustCrypto/utils"
+    },
+    {
       "name": "crc32fast",
       "version": "1.5.5",
       "license": "MIT OR Apache-2.0",
       "repository": "https://github.com/srijs/rust-crc32fast"
+    },
+    {
+      "name": "crypto-common",
+      "version": "0.2.2",
+      "license": "MIT OR Apache-2.0",
+      "repository": "https://github.com/RustCrypto/traits"
     },
     {
       "name": "CSL locales (2)",
@@ -188,6 +224,18 @@
       "version": "af0aea3",
       "license": "CC-BY-SA-3.0",
       "repository": "https://github.com/citation-style-language/styles"
+    },
+    {
+      "name": "digest",
+      "version": "0.11.3",
+      "license": "MIT OR Apache-2.0",
+      "repository": "https://github.com/RustCrypto/traits"
+    },
+    {
+      "name": "dyn-clone",
+      "version": "1.0.20",
+      "license": "MIT OR Apache-2.0",
+      "repository": "https://github.com/dtolnay/dyn-clone"
     },
     {
       "name": "equivalent",
@@ -251,6 +299,12 @@
     },
     {
       "name": "futures-core",
+      "version": "0.3.34",
+      "license": "MIT OR Apache-2.0",
+      "repository": "https://github.com/rust-lang/futures-rs"
+    },
+    {
+      "name": "futures-executor",
       "version": "0.3.34",
       "license": "MIT OR Apache-2.0",
       "repository": "https://github.com/rust-lang/futures-rs"
@@ -332,6 +386,18 @@
       "version": "1.10.1",
       "license": "MIT OR Apache-2.0",
       "repository": "https://github.com/seanmonstar/httparse"
+    },
+    {
+      "name": "httpdate",
+      "version": "1.0.3",
+      "license": "MIT OR Apache-2.0",
+      "repository": "https://github.com/pyfisch/httpdate"
+    },
+    {
+      "name": "hybrid-array",
+      "version": "0.4.15",
+      "license": "MIT OR Apache-2.0",
+      "repository": "https://github.com/RustCrypto/hybrid-array"
     },
     {
       "name": "hyper",
@@ -514,6 +580,12 @@
       "repository": "https://github.com/nix-rust/nix"
     },
     {
+      "name": "num-traits",
+      "version": "0.2.19",
+      "license": "MIT OR Apache-2.0",
+      "repository": "https://github.com/rust-num/num-traits"
+    },
+    {
       "name": "once_cell",
       "version": "1.21.4",
       "license": "MIT OR Apache-2.0",
@@ -544,10 +616,34 @@
       "repository": "https://github.com/tafia/quick-xml"
     },
     {
+      "name": "rand",
+      "version": "0.10.3",
+      "license": "MIT OR Apache-2.0",
+      "repository": "https://github.com/rust-random/rand"
+    },
+    {
+      "name": "rand_core",
+      "version": "0.10.1",
+      "license": "MIT OR Apache-2.0",
+      "repository": "https://github.com/rust-random/rand_core"
+    },
+    {
+      "name": "ref-cast",
+      "version": "1.0.27",
+      "license": "MIT OR Apache-2.0",
+      "repository": "https://github.com/dtolnay/ref-cast"
+    },
+    {
       "name": "reqwest",
       "version": "0.13.5",
       "license": "MIT OR Apache-2.0",
       "repository": "https://github.com/seanmonstar/reqwest"
+    },
+    {
+      "name": "rmcp",
+      "version": "3.8.0",
+      "license": "Apache-2.0",
+      "repository": "https://github.com/modelcontextprotocol/rust-sdk/"
     },
     {
       "name": "roman-numerals-rs",
@@ -596,6 +692,12 @@
       "version": "1.0.23",
       "license": "Apache-2.0 OR BSL-1.0",
       "repository": "https://github.com/dtolnay/ryu"
+    },
+    {
+      "name": "schemars",
+      "version": "1.2.3",
+      "license": "MIT",
+      "repository": "https://github.com/GREsau/schemars"
     },
     {
       "name": "secrecy",
@@ -652,6 +754,12 @@
       "repository": "https://github.com/dtolnay/serde-yaml"
     },
     {
+      "name": "sha2",
+      "version": "0.11.1",
+      "license": "MIT OR Apache-2.0",
+      "repository": "https://github.com/RustCrypto/hashes"
+    },
+    {
       "name": "slab",
       "version": "0.4.12",
       "license": "MIT",
@@ -668,6 +776,12 @@
       "version": "0.6.5",
       "license": "MIT OR Apache-2.0",
       "repository": "https://github.com/rust-lang/socket2"
+    },
+    {
+      "name": "sse-stream",
+      "version": "0.2.6",
+      "license": "MIT OR Apache-2.0",
+      "repository": "https://github.com/4t145/sse-stream/"
     },
     {
       "name": "stable_deref_trait",
@@ -736,6 +850,18 @@
       "repository": "https://github.com/rustls/tokio-rustls"
     },
     {
+      "name": "tokio-stream",
+      "version": "0.1.19",
+      "license": "MIT",
+      "repository": "https://github.com/tokio-rs/tokio"
+    },
+    {
+      "name": "tokio-util",
+      "version": "0.7.20",
+      "license": "MIT",
+      "repository": "https://github.com/tokio-rs/tokio"
+    },
+    {
       "name": "tower",
       "version": "0.5.3",
       "license": "MIT",
@@ -782,6 +908,12 @@
       "version": "0.13.0",
       "license": "MIT OR Apache-2.0",
       "repository": "https://github.com/chipsenkbeil/typed-path"
+    },
+    {
+      "name": "typenum",
+      "version": "1.20.1",
+      "license": "MIT OR Apache-2.0",
+      "repository": "https://github.com/paholg/typenum"
     },
     {
       "name": "unic-langid",
@@ -866,6 +998,12 @@
       "version": "1.0.0",
       "license": "Apache-2.0 OR MIT",
       "repository": "https://github.com/hsivonen/utf_types"
+    },
+    {
+      "name": "uuid",
+      "version": "1.29.2",
+      "license": "Apache-2.0 OR MIT",
+      "repository": "https://github.com/uuid-rs/uuid"
     },
     {
       "name": "want",

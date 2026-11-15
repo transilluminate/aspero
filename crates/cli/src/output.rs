@@ -6,7 +6,7 @@ use aspero_core::{
     Agreement, Hit, IdKind, ProviderId, SourceRecord, UpdateKind, Usage, Work, WorkId,
 };
 use aspero_engine::{Abstract, Candidate, describe_update};
-pub use aspero_json::{candidate, set_abstract, usage, work};
+pub use aspero_json::{candidate, set_abstract, usage};
 
 /// Abstract characters shown in tables; JSON has the full text.
 const TABLE_ABSTRACT: usize = 600;

@@ -458,21 +458,7 @@ impl Tools {
 
     async fn run_search(&self, source: Option<&str>, query: &SearchQuery, full: bool) -> Answer {
         let report = self.engine.search(source, query).await?;
-        let page = &report.page;
-        let hits: Vec<Value> = page
-            .hits
-            .iter()
-            .enumerate()
-            .map(|(i, h)| aspero_json::hit(i + 1, h.score, aspero_json::work(&h.record, full)))
-            .collect();
-        let answer = json!({
-            "provider": report.provider,
-            "total": page.total,
-            "next_cursor": page.next.as_ref().map(|c| &c.0),
-            "ignored_filters": report.ignored_filters,
-            "served": report.served.as_str(),
-            "hits": hits,
-        });
+        let answer = aspero_json::search_page(&report, full);
         let usage = report
             .usage
             .map(|u| vec![(report.provider.clone(), u)])

@@ -2,7 +2,7 @@
 
 use aspero_core::{Cursor, SearchQuery, Sort, SourceRecord, WorkType, YearRange};
 use aspero_engine::Engine;
-use serde_json::{Value, json};
+use serde_json::json;
 
 use super::{Failure, Out, print, print_line, shell_quote};
 use crate::args::{Format, SearchOptions, SortBy};
@@ -34,21 +34,19 @@ pub async fn run(
         None
     };
     let found = |i: usize| abstracts.as_ref().map(|a| a.found[i].as_ref());
-    let hits: Vec<Value> = page
-        .hits
-        .iter()
-        .enumerate()
-        .map(|(i, h)| {
-            let mut work = output::work(&h.record, out.full);
-            if let Some(a) = found(i) {
-                output::set_abstract(&mut work, a);
-            }
-            aspero_json::hit(i + 1, h.score, work)
-        })
-        .collect();
+    let mut doc = aspero_json::search_page(&report, out.full);
+    for i in 0..page.hits.len() {
+        if let Some(a) = found(i) {
+            output::set_abstract(&mut doc["hits"][i]["work"], a);
+        }
+    }
 
     match out.format {
-        Format::Jsonl => hits.iter().for_each(print_line),
+        Format::Jsonl => doc["hits"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .for_each(print_line),
         Format::Table => {
             println!("{}", hits_table(&page.hits));
             for (i, hit) in page.hits.iter().enumerate() {
@@ -84,15 +82,7 @@ pub async fn run(
             print!("{}", export.finish());
         }
         Format::Json | Format::Auto => {
-            let mut doc = json!({
-                "provider": report.provider,
-                "total": page.total,
-                "next_cursor": page.next.as_ref().map(|c| &c.0),
-                "next_command": next,
-                "ignored_filters": report.ignored_filters,
-                "served": report.served.as_str(),
-                "hits": hits,
-            });
+            doc["next_command"] = json!(next);
             if let Some(u) = &report.usage {
                 doc["usage"] = json!({ report.provider.to_string(): aspero_json::usage_one(u) });
             }

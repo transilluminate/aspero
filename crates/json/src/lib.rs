@@ -21,7 +21,7 @@ pub use lookup::{Status, input as input_lookup};
 pub use query::{QueryTree, parse_query};
 pub use scan::mention;
 pub use verify::{invalid_claim, verification};
-pub use work::{candidate, hit, set_abstract, usage, usage_one, work};
+pub use work::{candidate, hit, search_page, set_abstract, usage, usage_one, work};
 
 use serde_json::Value;
 

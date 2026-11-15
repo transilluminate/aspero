@@ -32,7 +32,9 @@ pub use derivative::{
     WorkKind, claim_mentions_derivative, derivative_kind, derivative_work_kind, is_derivative,
 };
 use text::{Normalised, content_words, words};
-pub use text::{normalise, search_terms, shared_title, title_similarity, unmarked};
+pub use text::{
+    normalise, search_terms, shared_title, title_similarity, unmarked, whole_title_similarity,
+};
 
 /// Field weights in the confidence (before penalties).
 const W_TITLE: f64 = 0.5;
@@ -115,6 +117,13 @@ pub struct Claim {
     /// a line break), to try only if the claimed one doesn't exist.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub alternatives: Vec<Alternative>,
+    /// The site the claim was read from (an article page's host:
+    /// `jamanetwork.com`), as a hint of the publisher: never compared as a
+    /// journal, nor reported as a difference. Without identifiers, its
+    /// publisher's works are searched for the title, and preferred between
+    /// candidates that match about as well ([`crate::site`]).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub site: Option<String>,
 }
 
 /// Another reading of a claimed identifier.
@@ -236,6 +245,16 @@ impl Claim {
             (Some(year), _) => vec![year],
             (None, Some(text)) => Normalised::new(text).years(),
             _ => Vec::new(),
+        }
+    }
+
+    /// The DOI prefixes of the claim's site's publisher, when the claim
+    /// names no identifier: what the site hints ([`crate::site`]). With
+    /// identifiers, the site says nothing they don't.
+    pub fn site_prefixes(&self) -> &'static [&'static str] {
+        match &self.site {
+            Some(site) if self.ids.is_empty() => crate::site::doi_prefixes(site),
+            _ => &[],
         }
     }
 

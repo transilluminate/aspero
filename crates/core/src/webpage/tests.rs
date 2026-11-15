@@ -348,8 +348,25 @@ fn the_address_is_never_an_identifier_itself() {
     let c = p.claim.unwrap();
     assert!(c.ids.is_empty());
     assert_eq!(c.title.as_deref(), Some("Semaglutide and Kidney Outcomes"));
-    // Never the journal from the address.
+    // Never the journal from the address: its host is the site, a hint.
     assert_eq!(c.container, None);
+    assert_eq!(c.site.as_deref(), Some("jamanetwork.com"));
+    assert_eq!(c.site_prefixes(), ["10.1001"]);
+}
+
+#[test]
+fn the_site_is_the_addresss_host_even_with_identifiers() {
+    let url = "https://WWW.ScienceDirect.com/science/article/pii/S2772940026000032";
+    let c = claim_from_page(None, url, None).claim.unwrap();
+    assert_eq!(c.site.as_deref(), Some("sciencedirect.com"));
+    // Identifiers say which work: the site then hints nothing.
+    assert!(c.site_prefixes().is_empty());
+    let html = meta("citation_title", "Air pollution and stroke in adults");
+    let c = claim_from_page(Some(&html), "https://pubs.acs.org/doi/abs/x", None)
+        .claim
+        .unwrap();
+    assert_eq!(c.site.as_deref(), Some("pubs.acs.org"));
+    assert_eq!(c.site_prefixes(), ["10.1021"]);
 }
 
 #[test]

@@ -40,7 +40,7 @@ pub enum InputLookup {
 pub struct Looked {
     pub result: LookupResult,
     /// Found only with the trailing punctuation kept.
-    pub with_punctuation: bool,
+    pub found_with_trailing_punctuation: bool,
     /// With `full`: where the record contradicts the DOI's registry.
     pub disagreements: Vec<Disagreement>,
     /// With `full`: the latest version, if the work was superseded.
@@ -113,7 +113,7 @@ impl Engine {
             .zip(abstracts)
             .map(
                 |(((result, disagreements), latest), abstract_text)| Looked {
-                    with_punctuation: retried.contains(&result.id),
+                    found_with_trailing_punctuation: retried.contains(&result.id),
                     result,
                     disagreements,
                     latest,

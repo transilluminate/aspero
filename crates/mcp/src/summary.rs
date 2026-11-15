@@ -143,7 +143,7 @@ fn work_line(work: &Value) -> String {
         .map(Vec::as_slice)
         .unwrap_or_default();
     let author = authors.first().and_then(|a| a["name"].as_str());
-    let id = work["canonical"]
+    let id = work["canonical_id"]
         .as_str()
         .or_else(|| work["ids"][0].as_str());
     let mut line = clip(title, 160);

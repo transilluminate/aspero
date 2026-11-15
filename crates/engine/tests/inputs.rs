@@ -31,8 +31,8 @@ async fn inputs_keep_their_place_and_punctuated_dois_are_retried() {
         InputLookup::Looked(l) => l,
         InputLookup::Invalid(e) => panic!("{e}"),
     };
-    assert!(looked(0).result.record.is_some() && looked(0).with_punctuation);
+    assert!(looked(0).result.record.is_some() && looked(0).found_with_trailing_punctuation);
     assert!(matches!(report.items[1], InputLookup::Invalid(_)));
     // Found as parsed (the dot read as punctuation): no retry needed.
-    assert!(looked(2).result.record.is_some() && !looked(2).with_punctuation);
+    assert!(looked(2).result.record.is_some() && !looked(2).found_with_trailing_punctuation);
 }

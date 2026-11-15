@@ -12,7 +12,7 @@ pub fn work(record: &SourceRecord, full: bool) -> Value {
     out.insert("ids".into(), json!(record.ids));
     // One key per work, whichever identifier found it: for deduping.
     if let Some(id) = aspero_core::canonical(&record.ids) {
-        out.insert("canonical".into(), json!(id));
+        out.insert("canonical_id".into(), json!(id));
     }
     let mut put = |key: &str, value: Option<Value>| {
         if let Some(v) = value {
@@ -175,7 +175,7 @@ pub fn candidate(c: &Candidate, full: bool) -> Value {
         .collect();
     let mut work = work(&c.merged_record(), full);
     // Always there, null without identifiers.
-    work["canonical"] = json!(aspero_core::canonical(&c.ids));
+    work["canonical_id"] = json!(aspero_core::canonical(&c.ids));
     json!({
         "confidence": (a.confidence * 100.0).round() / 100.0,
         "checks": checks,
@@ -227,7 +227,7 @@ mod tests {
             json!({
                 "source": "crossref",
                 "ids": ["doi:10.1038/nature14539"],
-                "canonical": "doi:10.1038/nature14539",
+                "canonical_id": "doi:10.1038/nature14539",
                 "title": "Deep learning",
                 "authors": [
                     {"name": "Yann LeCun"},

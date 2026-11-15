@@ -47,8 +47,9 @@ pub struct Work {
     /// The provider the record came from.
     pub source: String,
     pub ids: Vec<String>,
-    /// One identifier per work, whichever found it: for deduplicating.
-    pub canonical: Option<String>,
+    /// The work's one identifier, the same whichever identifier found it:
+    /// for deduplicating.
+    pub canonical_id: Option<String>,
     pub title: Option<String>,
     pub authors: Vec<Author>,
     /// `2015`, `2015-05` or `2015-05-27`.
@@ -86,7 +87,7 @@ impl Work {
         Work {
             source: record.source.to_string(),
             ids: record.ids.iter().map(ToString::to_string).collect(),
-            canonical: aspero_core::canonical(&record.ids).map(ToString::to_string),
+            canonical_id: aspero_core::canonical(&record.ids).map(ToString::to_string),
             title: w.title.clone(),
             authors: w
                 .authors
@@ -417,7 +418,8 @@ pub struct Attempt {
     pub outcome: AttemptOutcome,
     /// For failures.
     pub kind: Option<ErrorKind>,
-    pub message: Option<String>,
+    /// For failures: what went wrong, in English.
+    pub error: Option<String>,
 }
 
 /// Where a record contradicts its DOI's registry.
@@ -451,12 +453,13 @@ pub struct Lookup {
     pub status: LookupStatus,
     pub work: Option<Work>,
     /// For works found.
-    pub freshness: Option<Freshness>,
+    pub served: Option<Freshness>,
     pub attempts: Vec<Attempt>,
     /// Why the input isn't an identifier, or isn't supported.
     pub error: Option<String>,
-    /// Found only with the DOI's trailing punctuation kept.
-    pub with_punctuation: bool,
+    /// The DOI missed with its trailing punctuation stripped, and was
+    /// found with it kept.
+    pub found_with_trailing_punctuation: bool,
     /// With `full`: the latest version, if superseded.
     pub latest: Option<Work>,
     /// With `full`.
@@ -472,10 +475,10 @@ impl Lookup {
                     id: None,
                     status: LookupStatus::Invalid,
                     work: None,
-                    freshness: None,
+                    served: None,
                     attempts: Vec::new(),
                     error: Some(e.to_string()),
-                    with_punctuation: false,
+                    found_with_trailing_punctuation: false,
                     latest: None,
                     disagreements: Vec::new(),
                 };
@@ -483,7 +486,7 @@ impl Lookup {
             InputLookup::Looked(looked) => looked,
         };
         let mut lookup = Lookup::from_result(input, &looked.result);
-        lookup.with_punctuation = looked.with_punctuation;
+        lookup.found_with_trailing_punctuation = looked.found_with_trailing_punctuation;
         lookup.latest = looked.latest.as_ref().map(Work::from_record);
         lookup.disagreements = looked.disagreements.iter().map(Into::into).collect();
         lookup
@@ -498,7 +501,7 @@ impl Lookup {
             Status::Failed(_) => LookupStatus::Failed,
             _ => LookupStatus::NotFound,
         };
-        let freshness = result.served().map(Freshness::from);
+        let served = result.served().map(Freshness::from);
         let attempts = result
             .attempts
             .iter()
@@ -517,7 +520,7 @@ impl Lookup {
                     provider: a.provider.to_string(),
                     outcome,
                     kind: failure.map(|e| e.kind().into()),
-                    message: failure.map(ToString::to_string),
+                    error: failure.map(ToString::to_string),
                 }
             })
             .collect();
@@ -527,10 +530,10 @@ impl Lookup {
             id: Some(result.id.to_string()),
             status,
             work,
-            freshness,
+            served,
             attempts,
             error: result.unsupported(),
-            with_punctuation: false,
+            found_with_trailing_punctuation: false,
             latest: None,
             disagreements: Vec::new(),
         }
@@ -1233,7 +1236,7 @@ pub struct SearchRequest {
     /// $0.001 a page).
     #[uniffi(default = None)]
     pub source: Option<String>,
-    /// A previous page's `next`, with the same request otherwise. Crossref
+    /// A previous page's `nextCursor`, with the same request otherwise. Crossref
     /// sorted by `newest` pages by offset, and orders works sharing a date
     /// differently from one request to the next, so its pages may repeat
     /// or skip such works.
@@ -1615,8 +1618,8 @@ pub struct SearchResults {
     /// Total matches, if the provider reports it.
     pub total: Option<u64>,
     /// The cursor for the next page; none on the last.
-    pub next: Option<String>,
-    pub freshness: Option<Freshness>,
+    pub next_cursor: Option<String>,
+    pub served: Option<Freshness>,
     /// Why there are no hits, if the search failed.
     pub failure: Option<Failure>,
     pub usage: Vec<ProviderUsage>,
@@ -1633,8 +1636,8 @@ impl SearchResults {
                 provider: None,
                 hits: Vec::new(),
                 total: None,
-                next: None,
-                freshness: None,
+                next_cursor: None,
+                served: None,
                 failure: Some(Failure::from(&e)),
                 usage: Vec::new(),
                 ignored_filters: Vec::new(),
@@ -1651,8 +1654,8 @@ impl SearchResults {
                     })
                     .collect(),
                 total: report.page.total,
-                next: report.page.next.map(|c| c.0),
-                freshness: Some(report.served.into()),
+                next_cursor: report.page.next.map(|c| c.0),
+                served: Some(report.served.into()),
                 failure: None,
                 usage: report
                     .usage

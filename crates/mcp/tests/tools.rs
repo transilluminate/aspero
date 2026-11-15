@@ -93,7 +93,10 @@ async fn search_takes_a_query_tree_as_the_cli_does() {
     assert_eq!(v["total"], 42);
     assert_eq!(v["hits"][0]["rank"], 1);
     assert_eq!(v["hits"][0]["work"]["title"], "Deep learning");
-    assert_eq!(v["hits"][0]["work"]["canonical"], "doi:10.1038/nature14539");
+    assert_eq!(
+        v["hits"][0]["work"]["canonical_id"],
+        "doi:10.1038/nature14539"
+    );
     // Lean: no abstract, no fetch time.
     assert!(v["hits"][0]["work"].get("abstract").is_none());
     assert_eq!(v["usage"], json!({"openalex": {"cost_usd": SEARCH_COST}}));
@@ -270,7 +273,7 @@ async fn verify_takes_one_citation_or_a_batch_and_keeps_its_order() {
     let result = &one.structured["results"][0];
     assert_eq!(result["verdict"], "verified", "{result}");
     assert_eq!(
-        result["match"]["work"]["canonical"],
+        result["match"]["work"]["canonical_id"],
         "doi:10.1038/nature14539"
     );
     assert!(

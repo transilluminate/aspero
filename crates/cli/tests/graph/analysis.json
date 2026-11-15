@@ -32,7 +32,7 @@
               "name": "Ed Rivers"
             }
           ],
-          "canonical": "openalex:W10",
+          "canonical_id": "openalex:W10",
           "ids": [
             "openalex:W10"
           ],
@@ -54,7 +54,7 @@
               "name": "Fay Dell"
             }
           ],
-          "canonical": "openalex:W11",
+          "canonical_id": "openalex:W11",
           "ids": [
             "openalex:W11"
           ],
@@ -84,7 +84,7 @@
               "name": "Ed Rivers"
             }
           ],
-          "canonical": "openalex:W10",
+          "canonical_id": "openalex:W10",
           "ids": [
             "openalex:W10"
           ],
@@ -107,7 +107,7 @@
               "name": "Fay Dell"
             }
           ],
-          "canonical": "openalex:W11",
+          "canonical_id": "openalex:W11",
           "ids": [
             "openalex:W11"
           ],
@@ -131,7 +131,7 @@
               "name": "Hal Singer"
             }
           ],
-          "canonical": "openalex:W60",
+          "canonical_id": "openalex:W60",
           "ids": [
             "openalex:W60"
           ],
@@ -154,7 +154,7 @@
               "name": "Gil Hart"
             }
           ],
-          "canonical": "openalex:W50",
+          "canonical_id": "openalex:W50",
           "ids": [
             "openalex:W50"
           ],
@@ -176,7 +176,7 @@
               "name": "Jane Doe"
             }
           ],
-          "canonical": "doi:10.1234/retracted",
+          "canonical_id": "doi:10.1234/retracted",
           "ids": [
             "openalex:W40",
             "doi:10.1234/retracted"
@@ -212,7 +212,7 @@
             "name": "Bo Chen"
           }
         ],
-        "canonical": "doi:10.1234/a",
+        "canonical_id": "doi:10.1234/a",
         "cited_by_count": 2,
         "ids": [
           "openalex:W1",
@@ -235,7 +235,7 @@
             "name": "Bo Chen"
           }
         ],
-        "canonical": "doi:10.1234/b",
+        "canonical_id": "doi:10.1234/b",
         "cited_by_count": 1,
         "ids": [
           "openalex:W2",
@@ -258,7 +258,7 @@
             "name": "Cy Dee"
           }
         ],
-        "canonical": "doi:10.1234/book",
+        "canonical_id": "doi:10.1234/book",
         "ids": [
           "openalex:W3",
           "doi:10.1234/book"
@@ -280,7 +280,7 @@
             "name": "Di Wool"
           }
         ],
-        "canonical": "doi:10.1234/knitting",
+        "canonical_id": "doi:10.1234/knitting",
         "ids": [
           "openalex:W4",
           "doi:10.1234/knitting"

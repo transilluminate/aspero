@@ -13,7 +13,7 @@
             "name": "Ed Rivers"
           }
         ],
-        "canonical": "openalex:W10",
+        "canonical_id": "openalex:W10",
         "ids": [
           "openalex:W10"
         ],
@@ -31,7 +31,7 @@
             "name": "Fay Dell"
           }
         ],
-        "canonical": "openalex:W11",
+        "canonical_id": "openalex:W11",
         "ids": [
           "openalex:W11"
         ],
@@ -56,7 +56,7 @@
         "name": "Bo Chen"
       }
     ],
-    "canonical": "doi:10.1234/a",
+    "canonical_id": "doi:10.1234/a",
     "cited_by_count": 2,
     "ids": [
       "openalex:W1",

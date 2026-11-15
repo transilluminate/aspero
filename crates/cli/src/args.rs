@@ -278,7 +278,7 @@ path (…/10.3389/fneur.2019.01343/full, page suffixes dropped):
 Bare digits are ambiguous; prefix them (pmid:, corpusid:).
 
 JSON works:
-  canonical    the work's key, the same whichever of its IDs found it (a
+  canonical_id the work's key, the same whichever of its IDs found it (a
                DOI, else arXiv, PMID, PMCID, …): dedupe works on it
   authors      [{\"name\": \"Yann LeCun\", \"orcid\": \"...\"}, ...], the same
                shape with or without --full (which adds given and family)

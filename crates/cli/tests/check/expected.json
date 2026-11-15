@@ -41,7 +41,7 @@
               "name": "Geoffrey Hinton"
             }
           ],
-          "canonical": "doi:10.1038/nature14539",
+          "canonical_id": "doi:10.1038/nature14539",
           "ids": [
             "doi:10.1038/nature14539"
           ],
@@ -107,7 +107,7 @@
               "name": "Geoffrey Hinton"
             }
           ],
-          "canonical": "doi:10.1038/nature14539",
+          "canonical_id": "doi:10.1038/nature14539",
           "ids": [
             "doi:10.1038/nature14539"
           ],
@@ -167,7 +167,7 @@
               "name": "Niki Parmar"
             }
           ],
-          "canonical": "arxiv:1706.03762",
+          "canonical_id": "arxiv:1706.03762",
           "ids": [
             "openalex:W2626778328",
             "arxiv:1706.03762",
@@ -229,7 +229,7 @@
               "name": "Geoffrey Hinton"
             }
           ],
-          "canonical": "doi:10.1145/3448250",
+          "canonical_id": "doi:10.1145/3448250",
           "ids": [
             "doi:10.1145/3448250"
           ],
@@ -292,7 +292,7 @@
               "name": "Jane Doe"
             }
           ],
-          "canonical": "doi:10.1234/retracted",
+          "canonical_id": "doi:10.1234/retracted",
           "ids": [
             "doi:10.1234/retracted"
           ],
@@ -366,7 +366,7 @@
               "name": "Geoffrey Hinton"
             }
           ],
-          "canonical": "doi:10.1038/nature14539",
+          "canonical_id": "doi:10.1038/nature14539",
           "ids": [
             "doi:10.1038/nature14539"
           ],

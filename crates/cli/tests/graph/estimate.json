@@ -22,7 +22,7 @@
             "name": "Bo Chen"
           }
         ],
-        "canonical": "doi:10.1234/a",
+        "canonical_id": "doi:10.1234/a",
         "cited_by_count": 2,
         "ids": [
           "openalex:W1",
@@ -45,7 +45,7 @@
             "name": "Bo Chen"
           }
         ],
-        "canonical": "doi:10.1234/b",
+        "canonical_id": "doi:10.1234/b",
         "cited_by_count": 1,
         "ids": [
           "openalex:W2",
@@ -68,7 +68,7 @@
             "name": "Cy Dee"
           }
         ],
-        "canonical": "doi:10.1234/book",
+        "canonical_id": "doi:10.1234/book",
         "ids": [
           "openalex:W3",
           "doi:10.1234/book"
@@ -90,7 +90,7 @@
             "name": "Di Wool"
           }
         ],
-        "canonical": "doi:10.1234/knitting",
+        "canonical_id": "doi:10.1234/knitting",
         "ids": [
           "openalex:W4",
           "doi:10.1234/knitting"

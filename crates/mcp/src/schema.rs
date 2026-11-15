@@ -26,7 +26,7 @@ fn work() -> Value {
         &json!({
             "source": {"type": "string", "description": "the provider whose record this is"},
             "ids": {"type": "array", "items": {"type": "string"}, "description": "every identifier, prefixed: doi:…, arxiv:…, pmid:…"},
-            "canonical": {
+            "canonical_id": {
                 "type": ["string", "null"],
                 "description": "the work's key, the same whichever identifier found it: dedupe on it",
             },
@@ -181,7 +181,10 @@ pub fn lookup() -> Map<String, Value> {
             "work": work(),
             "error": {"type": "string"},
             "attempts": {"type": "array", "items": {"type": "object"}, "description": "each provider asked, when not found (or with full)"},
-            "note": {"type": "string"},
+            "found_with_trailing_punctuation": {
+                "type": "boolean",
+                "description": "the DOI missed with its trailing punctuation stripped, and was found with it kept",
+            },
             "latest": work(),
             "disagreements": {"type": "array", "items": {"type": "object"}},
         }),

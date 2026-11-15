@@ -146,7 +146,7 @@ fn works_export_as_bibtex_and_ris() {
     let work = Work {
         source: "test".into(),
         ids: read.entries[0].claim.ids.clone(),
-        canonical: None,
+        canonical_id: None,
         title: read.entries[0].claim.title.clone(),
         authors: vec![Author {
             name: "Yann LeCun".into(),
@@ -204,7 +204,7 @@ fn work(title: &str, author: &str, year: i16) -> Work {
     Work {
         source: "test".into(),
         ids: Vec::new(),
-        canonical: None,
+        canonical_id: None,
         title: Some(title.into()),
         authors: vec![Author {
             name: author.into(),

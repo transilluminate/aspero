@@ -234,6 +234,8 @@ impl ServerHandler for Handler {
         ))
     }
 
+    // rmcp's ServerHandler method, async by the trait.
+    #[allow(clippy::unused_async_trait_impl)]
     async fn initialize(
         &self,
         request: InitializeRequestParams,
@@ -255,6 +257,8 @@ impl ServerHandler for Handler {
 
     /// The tools the request's key may call, by its scopes and the host's
     /// tools now.
+    // rmcp's ServerHandler method, async by the trait.
+    #[allow(clippy::unused_async_trait_impl)]
     async fn list_tools(
         &self,
         _: Option<PaginatedRequestParams>,

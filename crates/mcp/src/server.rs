@@ -117,6 +117,8 @@ impl ServerHandler for Handler {
         server_info(INSTRUCTIONS)
     }
 
+    // rmcp's ServerHandler method, async by the trait.
+    #[allow(clippy::unused_async_trait_impl)]
     async fn list_tools(
         &self,
         _: Option<PaginatedRequestParams>,

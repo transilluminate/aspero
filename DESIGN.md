@@ -733,7 +733,10 @@ CLI builds without it and serves stdio only) and, over it, the FFI's
   `start` throws. Sessions are the protocol's (`initialize`, then
   `Mcp-Session-Id`), each with its own handler and budget; only the
   revisions with `initialize` are offered, and a call outside a session
-  is refused, so budgets can't be dodged by going sessionless. Stopping
+  is refused, so budgets can't be dodged by going sessionless. A key has
+  at most 16 sessions open (closed, or ended idle after rmcp's five
+  minutes); another `initialize` is refused, 429 with a line saying so.
+  Stopping
   first, at once, refuses further requests (503), cancels the sessions'
   streams and closes the listener; then closes every session and waits up
   to two seconds for requests in flight. A stop cut short (the app's task

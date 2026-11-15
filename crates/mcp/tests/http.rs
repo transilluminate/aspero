@@ -752,6 +752,51 @@ async fn a_stop_cut_short_finishes_when_called_again() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn a_key_has_sixteen_sessions_open_at_most() {
+    let host = FakeHost::new();
+    let server = start(&host).await;
+    let port = server.port();
+    let mut open = Vec::new();
+    for _ in 0..16 {
+        let mut agent = Agent::new(port, FULL);
+        agent.initialize().await;
+        open.push(agent);
+    }
+    let more = Agent::new(port, FULL);
+    let init = json!({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {
+        "protocolVersion": "2025-06-18",
+        "capabilities": {},
+        "clientInfo": {"name": "more", "version": "1.0"},
+    }});
+    let refused = more.post(&init).await;
+    assert_eq!(refused.status().as_u16(), 429);
+    assert!(
+        refused
+            .text()
+            .await
+            .unwrap()
+            .starts_with("this key has 16 MCP sessions open, the most it may"),
+    );
+    // Another key's are its own.
+    Agent::new(port, READER).initialize().await;
+    // One ended, another opens.
+    let ended = open.pop().unwrap();
+    let deleted = ended
+        .http
+        .delete(&ended.url)
+        .bearer_auth(FULL)
+        .header("mcp-session-id", ended.session.as_deref().unwrap())
+        .header("mcp-protocol-version", "2025-06-18")
+        .send()
+        .await
+        .unwrap();
+    assert!(deleted.status().is_success(), "{deleted:?}");
+    Agent::new(port, FULL).initialize().await;
+    assert_eq!(server.status().sessions, 17);
+    server.stop().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn a_session_spends_its_budget_and_no_more() {
     let host = FakeHost::new();
     let mut config = config(free_port());

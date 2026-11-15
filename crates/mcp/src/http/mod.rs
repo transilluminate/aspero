@@ -88,6 +88,10 @@ pub const PATH: &str = "/mcp";
 
 const SESSION_ID: &str = "mcp-session-id";
 
+/// Sessions a key may have open at once; more are refused (429) until one
+/// ends (closed, or idle for five minutes).
+pub const MAX_SESSIONS_PER_KEY: usize = 16;
+
 /// A bearer key the app minted. aspero sees only its token's hash.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Key {
@@ -336,9 +340,45 @@ struct State {
     usage: Mutex<Usage>,
     /// Cancelled once the server is stopping: no request is served after.
     stopping: CancellationToken,
+    /// Sessions each key (by id) is opening: not yet in `owners`.
+    opening: Mutex<HashMap<String, usize>>,
+}
+
+/// A place held for a session a key is opening, until its owner is on
+/// record.
+struct Opening<'a> {
+    state: &'a State,
+    key_id: String,
+}
+
+impl Drop for Opening<'_> {
+    fn drop(&mut self) {
+        let mut opening = self.state.opening.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(n) = opening.get_mut(&self.key_id) {
+            *n -= 1;
+            if *n == 0 {
+                opening.remove(&self.key_id);
+            }
+        }
+    }
 }
 
 type Body = BoxBody<Bytes, Infallible>;
+
+/// 429, saying why: the key has as many sessions open as it may.
+fn too_many_sessions() -> Response<Body> {
+    let message = format!(
+        "this key has {MAX_SESSIONS_PER_KEY} MCP sessions open, the most it may: end one \
+         (DELETE {PATH} with its Mcp-Session-Id) or let one go idle for five minutes first"
+    );
+    let mut response = Response::new(Full::new(Bytes::from(message)).boxed());
+    *response.status_mut() = StatusCode::TOO_MANY_REQUESTS;
+    response.headers_mut().insert(
+        http::header::CONTENT_TYPE,
+        http::HeaderValue::from_static("text/plain; charset=utf-8"),
+    );
+    response
+}
 
 fn plain(status: StatusCode) -> Response<Body> {
     let mut response = Response::new(Full::new(Bytes::new()).boxed());
@@ -387,6 +427,16 @@ impl State {
                 return plain(StatusCode::NOT_FOUND);
             }
         }
+        // A request outside a session may open one: the key's place for it.
+        let _opening = match &session {
+            None if request.method() == Method::POST => {
+                match self.place(&credential.key.id).await {
+                    Some(opening) => Some(opening),
+                    None => return too_many_sessions(),
+                }
+            }
+            _ => None,
+        };
         self.used(&credential);
         let delete = request.method() == Method::DELETE;
         request.extensions_mut().insert(Authed(credential.clone()));
@@ -438,6 +488,27 @@ impl State {
             // them.
             let _ = self.manager.close_session(&id.into()).await;
         }
+    }
+
+    /// Holds a place for a session the key `key_id` may open, unless it
+    /// has [`MAX_SESSIONS_PER_KEY`] open or opening.
+    async fn place(&self, key_id: &str) -> Option<Opening<'_>> {
+        let live = self.manager.sessions.read().await;
+        let mut owners = self.owners.lock().unwrap_or_else(|e| e.into_inner());
+        // Sessions that ended on their own (idle) don't count.
+        owners.retain(|id, _| live.contains_key(id.as_str()));
+        drop(live);
+        let open = owners.values().filter(|o| o.key_id == key_id).count();
+        let mut opening = self.opening.lock().unwrap_or_else(|e| e.into_inner());
+        let n = opening.entry(key_id.to_owned()).or_default();
+        if open + *n >= MAX_SESSIONS_PER_KEY {
+            return None;
+        }
+        *n += 1;
+        Some(Opening {
+            state: self,
+            key_id: key_id.to_owned(),
+        })
     }
 
     fn used(&self, credential: &Credential) {
@@ -550,6 +621,7 @@ impl HttpServer {
             owners: Mutex::default(),
             usage: Mutex::default(),
             stopping: cancel.clone(),
+            opening: Mutex::default(),
         });
         let task = tokio::spawn(accept(listener, state.clone(), cancel.clone()));
         tracing::info!(target: "aspero::mcp", port, "MCP server listening on 127.0.0.1");

@@ -217,11 +217,10 @@ mod tests {
             &(serde_json::to_string_pretty(&json).unwrap() + "\n"),
         );
         let keys = keys(&entries);
-        let lines: String = entries
-            .iter()
-            .zip(&report.entries)
-            .map(|(e, c)| format!("{}\n", aspero_json::check::entry(e, c, &keys, true)))
-            .collect();
+        let mut lines = String::new();
+        for (e, c) in entries.iter().zip(&report.entries) {
+            let _ = writeln!(lines, "{}", aspero_json::check::entry(e, c, &keys, true));
+        }
         pinned("check/expected.jsonl", &lines);
         pinned("check/expected.txt", &text(path, &entries, &report));
     }

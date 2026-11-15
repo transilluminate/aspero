@@ -163,12 +163,7 @@ impl Engine {
             analysis.related = (!estimate_only).then_some(found);
         }
         if estimate_only {
-            let settled = analysis.seeds.iter().all(|s| {
-                !matches!(
-                    s.problem,
-                    Some(SeedProblem::ProviderFailed | SeedProblem::OverBudget)
-                )
-            });
+            let settled = analysis.seeds.iter().all(Seed::settled);
             analysis.estimate = Some(Estimate {
                 requests: spend.requests,
                 usd: spend.requests as f64 * LIST_PRICE,

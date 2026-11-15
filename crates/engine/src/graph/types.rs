@@ -152,6 +152,15 @@ impl Seed {
         }
     }
 
+    /// Resolved, or settled unresolved (not stopped by a failure or the
+    /// budget: asking again won't change the answer).
+    pub(super) fn settled(&self) -> bool {
+        !matches!(
+            self.problem,
+            Some(SeedProblem::ProviderFailed | SeedProblem::OverBudget)
+        )
+    }
+
     /// Its OpenAlex work id, when resolved.
     pub fn work(&self) -> Option<&WorkId> {
         self.record.as_ref().and_then(openalex_id)
@@ -389,13 +398,7 @@ impl Analysis {
     /// Every seed resolved or settled (found or not), and every analysis
     /// run to the end.
     pub fn complete(&self) -> bool {
-        let seeds = self.seeds.iter().all(|s| {
-            !matches!(
-                s.problem,
-                Some(SeedProblem::ProviderFailed | SeedProblem::OverBudget)
-            )
-        });
-        seeds
+        self.seeds.iter().all(Seed::settled)
             && self.incomplete.is_none()
             && self
                 .retracted_references

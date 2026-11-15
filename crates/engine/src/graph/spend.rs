@@ -2,7 +2,7 @@
 //! missing, related), and what counts as one of the set.
 
 use aspero_core::matching::{same_work, same_work_id};
-use aspero_core::{FieldSet, ProviderId, SourceRecord, Usage, WorkId};
+use aspero_core::{ErrorKind, FieldSet, ProviderId, SourceRecord, Usage, WorkId};
 
 use super::{Incomplete, IncompleteKind, LIST_PRICE, MAX_FILTER, Seed};
 use crate::{Engine, Entry, Outcome, add_usage};
@@ -151,17 +151,20 @@ impl Engine {
             .lookup_at(entry, ids, FieldSet::DEFAULT, &mut usage)
             .await;
         spend.add(usage, paid);
+        // The caller's daily cap stopping a batch is the budget.
         let failed = failed_lookups(&answers, what);
-        if failed > 0 {
-            looked.stop = Some(
-                Incomplete::new(
-                    IncompleteKind::ProviderFailed,
-                    ids.len() - failed,
-                    ids.len(),
-                )
-                .from(provider),
-            );
-        }
+        let capped = answers
+            .iter()
+            .filter(|(a, _)| matches!(&a.outcome, Outcome::Failed(e) if e.kind() == ErrorKind::BudgetCapped))
+            .count();
+        let done = ids.len() - failed;
+        looked.stop = match (failed > capped, capped > 0) {
+            (true, _) => Some(
+                Incomplete::new(IncompleteKind::ProviderFailed, done, ids.len()).from(provider),
+            ),
+            (false, true) => Some(Incomplete::new(IncompleteKind::Budget, done, ids.len())),
+            (false, false) => None,
+        };
         looked.records = answers.into_iter().map(|(_, r)| r).collect();
         looked
     }

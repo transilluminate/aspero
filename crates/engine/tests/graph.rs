@@ -34,6 +34,8 @@ struct Alex {
     blind: Vec<WorkId>,
     /// Identifiers whose lookups fail, with a server error.
     broken: Vec<WorkId>,
+    /// The day's use, when it reports it (out of $1), as a key does.
+    day: Mutex<Option<f64>>,
 }
 
 impl Alex {
@@ -41,6 +43,7 @@ impl Alex {
         let mut caps = Capabilities::default();
         caps.lookup_kinds = vec![IdKind::Doi, IdKind::Arxiv, IdKind::Pmid, IdKind::OpenAlex];
         caps.max_batch = 100;
+        caps.max_free_batch = 1;
         caps.fields = FieldSet::ALL;
         caps.search = true;
         Alex {
@@ -52,7 +55,25 @@ impl Alex {
             searches: Mutex::default(),
             blind: Vec::new(),
             broken: Vec::new(),
+            day: Mutex::default(),
         }
+    }
+
+    /// Reports the day's use (out of $1) with each answer.
+    fn metered(self) -> Self {
+        *self.day.lock().unwrap() = Some(0.0);
+        self
+    }
+
+    /// What a call costs, and the day's use after it when metered.
+    fn charge(&self, cost: f64) -> Usage {
+        let mut usage = usage(cost);
+        if let Some(used) = self.day.lock().unwrap().as_mut() {
+            *used += cost;
+            usage.limit = Some(1.0);
+            usage.remaining = Some(1.0 - *used);
+        }
+        usage
     }
 
     /// Finds no work by `ids`, as OpenAlex's batch filter finds none by
@@ -188,7 +209,7 @@ impl Provider for Alex {
             })
             .collect();
         let cost = if ids.len() > 1 { 0.0001 } else { 0.0 };
-        Ok(Response::with_usage(lookups, usage(cost)))
+        Ok(Response::with_usage(lookups, self.charge(cost)))
     }
 
     async fn search(&self, query: &SearchQuery) -> Result<Response<Page>> {
@@ -200,7 +221,7 @@ impl Provider for Alex {
         if let Some(cited) = filter.strip_prefix("cites:") {
             return Ok(Response::with_usage(
                 self.citing(cited, query),
-                usage(0.0001),
+                self.charge(0.0001),
             ));
         }
         let ids = filter
@@ -216,7 +237,7 @@ impl Provider for Alex {
             .collect();
         Ok(Response::with_usage(
             Page::new(hits, None, None),
-            usage(0.0001),
+            self.charge(0.0001),
         ))
     }
 }
@@ -1459,4 +1480,93 @@ async fn the_cap_on_pages_holds_for_works_cited_little() {
     let stop = run.related.unwrap().incomplete.unwrap();
     assert_eq!(stop.kind, IncompleteKind::Capped);
     assert_eq!((stop.done, stop.total), (75 * 150, 120 * 150));
+}
+
+fn capped_engine(alex: Arc<Alex>, cap: f64) -> Engine {
+    Engine::builder()
+        .provider(alex, policy(), 10)
+        .daily_cap(OPENALEX, cap)
+        .build()
+}
+
+/// The caller's own daily cap on OpenAlex stopping related works' pages,
+/// or the retraction check, is the budget, not a failing provider.
+#[tokio::test(start_paused = true)]
+async fn a_daily_cap_stops_like_a_budget() {
+    // The day reaches the cap with the seeds' batch: the check is refused.
+    let alex = Arc::new(Alex::new(library()).metered());
+    let analysis = capped_engine(alex.clone(), 0.0001)
+        .analyse(
+            &inputs(&SEEDS),
+            &[AnalysisKind::RetractedReferences],
+            None,
+            false,
+        )
+        .await
+        .unwrap();
+    let stop = analysis.retracted_references.unwrap().incomplete.unwrap();
+    assert_eq!(stop.kind, IncompleteKind::Budget);
+    assert_eq!(stop.provider, None);
+    assert!(alex.searches().is_empty());
+
+    // It reaches the cap with the first pages: the classic's next stop.
+    let alex = Arc::new(Alex::new(with_classic()).metered());
+    let analysis = capped_engine(alex.clone(), 0.0003)
+        .analyse(
+            &inputs(&CLASSIC),
+            &[AnalysisKind::Related { limit: 5 }],
+            None,
+            false,
+        )
+        .await
+        .unwrap();
+    let stop = analysis.related.unwrap().incomplete.unwrap();
+    assert_eq!(stop.kind, IncompleteKind::Budget, "{stop:?}");
+    assert_eq!(stop.stage, Some(Stage::Citing));
+    assert!(alex.citing_pages().len() < 11, "{:?}", alex.citing_pages());
+}
+
+/// A retraction check failing, then the budget stopping a later one: the
+/// failure is what it says (the budget hid it).
+#[tokio::test(start_paused = true)]
+async fn a_failed_retraction_check_is_not_hidden_by_the_budget() {
+    let mut works = library();
+    // 250 more references: three checks.
+    works[3]
+        .references
+        .as_mut()
+        .unwrap()
+        .extend((1000..1250).map(|n| format!("W{n}").parse::<WorkId>().unwrap()));
+    let alex = Arc::new(Alex::new(works));
+    let cache = Arc::new(SqliteCache::open_in_memory().unwrap());
+    let engine = engine(alex.clone(), Some(cache));
+    let kinds = [AnalysisKind::OddOneOut];
+    engine
+        .analyse(&inputs(&SEEDS), &kinds, None, false)
+        .await
+        .unwrap();
+    // The first check fails, retries and all (four).
+    alex.failures.lock().unwrap().extend(
+        std::iter::repeat_with(|| Error::Server {
+            status: 503,
+            message: None,
+        })
+        .take(5),
+    );
+    // Seeds cached; the first check fails, the second is paid, the third
+    // refused.
+    let analysis = engine
+        .analyse(
+            &inputs(&SEEDS),
+            &[AnalysisKind::RetractedReferences],
+            Some(0.0001),
+            false,
+        )
+        .await
+        .unwrap();
+    let stop = analysis.retracted_references.unwrap().incomplete.unwrap();
+    assert_eq!(stop.kind, IncompleteKind::ProviderFailed);
+    assert_eq!(stop.provider, Some(OPENALEX));
+    assert_eq!((stop.done, stop.total), (100, 257));
+    assert_eq!(alex.searches().len(), 6);
 }

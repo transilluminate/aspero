@@ -422,9 +422,11 @@ from `cites:` pages); G3 OpenCitations as a free source of citing works.
     set's `cited_by_count`s promise (`capped` when a work was sampled);
     `coupling`, pages read of coupling's sample; `lookup`, works answered
     of those asked about. A failure (`provider_failed`, with the
-    `provider`) comes first, then `budget`, then `capped`, and is logged
-    at warn (the CLI shows warnings without `-v`, but not each failed
-    request). Before, a failed lookup or coupling page said
+    `provider`) comes first, then `budget` (the caller's daily cap on
+    OpenAlex too: it is theirs, not a failing provider), then `capped`,
+    and is logged at warn (the CLI shows warnings without `-v`, but not
+    each failed request); stops not said (one per section) are logged at
+    warn too. A retraction check failing likewise outranks the budget. Before, a failed lookup or coupling page said
     `provider_failed` with every citing work read (done = total), and
     nothing said why.
   - *Without a key* (seen 2026-11-14) OpenAlex refuses a cursor past the

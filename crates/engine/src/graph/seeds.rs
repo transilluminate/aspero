@@ -4,7 +4,7 @@
 use std::collections::BTreeSet;
 
 use aspero_core::matching::{same_work, same_work_id};
-use aspero_core::{FieldSet, IdKind, SourceRecord, WorkId};
+use aspero_core::{ErrorKind, FieldSet, IdKind, SourceRecord, WorkId};
 use futures::StreamExt;
 
 use super::{Incomplete, IncompleteKind, MAX_FILTER, Seed, SeedProblem, Spend, openalex_id};
@@ -170,6 +170,14 @@ impl Engine {
                     message: None,
                     same_as: None,
                 },
+                // The caller's daily cap on OpenAlex is the budget.
+                Some((Outcome::Failed(e), None)) if e.kind() == ErrorKind::BudgetCapped => {
+                    Seed::unresolved(
+                        input,
+                        SeedProblem::OverBudget,
+                        format!("not looked up: {e}"),
+                    )
+                }
                 Some((Outcome::Failed(e), None)) => Seed::unresolved(
                     input,
                     SeedProblem::ProviderFailed,

@@ -2,7 +2,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use aspero_core::{IdKind, ProviderId, SearchQuery, SourceRecord, Update, WorkId};
+use aspero_core::{ErrorKind, IdKind, ProviderId, SearchQuery, SourceRecord, Update, WorkId};
 
 use super::{
     Incomplete, IncompleteKind, MAX_FILTER, OPENALEX, RetractedReference, Section, Seed, Spend,
@@ -26,8 +26,7 @@ impl Engine {
         let cited: Vec<&WorkId> = cited.into_iter().collect();
         let provider = ProviderId::from_static(OPENALEX);
         let mut retracted: BTreeMap<WorkId, (SourceRecord, String)> = BTreeMap::new();
-        let (mut done, mut failed) = (0, false);
-        let mut incomplete = None;
+        let (mut done, mut failed, mut budget) = (0, false, false);
         for chunk in cited.chunks(MAX_FILTER) {
             let query = retracted_query(chunk);
             let paid = match self.cached_search(&provider, &query) {
@@ -39,7 +38,7 @@ impl Engine {
                 continue;
             }
             if !spend.allows(paid as usize) {
-                incomplete = Some(Incomplete::new(IncompleteKind::Budget, done, cited.len()));
+                budget = true;
                 break;
             }
             match self.search(Some(OPENALEX), &query).await {
@@ -54,18 +53,31 @@ impl Engine {
                     }
                     done += chunk.len();
                 }
+                Err(e) if e.kind() == ErrorKind::BudgetCapped => {
+                    tracing::info!(target: "aspero::graph", error = %e, "retraction check stopped at the daily cap");
+                    budget = true;
+                    break;
+                }
                 Err(e) => {
                     tracing::warn!(target: "aspero::graph", error = %e, "retraction check failed");
                     failed = true;
                 }
             }
         }
-        if failed && incomplete.is_none() {
-            incomplete = Some(
-                Incomplete::new(IncompleteKind::ProviderFailed, done, cited.len())
-                    .from(provider.clone()),
-            );
-        }
+        // A failure first, as related works say it; the budget too, logged.
+        let incomplete = match (failed, budget) {
+            (true, also) => {
+                if also {
+                    tracing::warn!(target: "aspero::graph", done, total = cited.len(), "retraction check stopped at the budget too");
+                }
+                Some(
+                    Incomplete::new(IncompleteKind::ProviderFailed, done, cited.len())
+                        .from(provider.clone()),
+                )
+            }
+            (false, true) => Some(Incomplete::new(IncompleteKind::Budget, done, cited.len())),
+            (false, false) => None,
+        };
         if spend.estimating {
             return Section::new(Vec::new(), None);
         }

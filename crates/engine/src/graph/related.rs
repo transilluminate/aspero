@@ -39,7 +39,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use aspero_core::{Cursor, Page, ProviderId, SearchQuery, SourceRecord, Usage, WorkId};
+use aspero_core::{Cursor, ErrorKind, Page, ProviderId, SearchQuery, SourceRecord, Usage, WorkId};
 use aspero_store::{Direction, Edges};
 use futures::StreamExt;
 
@@ -140,6 +140,8 @@ struct Read {
     /// The last page was read.
     finished: bool,
     failed: bool,
+    /// Stopped by the budget (the caller's daily cap on OpenAlex).
+    budget: bool,
     usage: Vec<(ProviderId, Usage)>,
 }
 
@@ -193,7 +195,8 @@ struct Stop {
 impl Stops {
     /// What stopped related works, the first stage that failed first, then
     /// the first stopped by the budget, then a sample (`done` of `total`
-    /// citing works read): each with its stage and how far that got.
+    /// citing works read): each with its stage and how far that got. Only
+    /// one is said; the others are logged (a warning each), not hidden.
     fn incomplete(&self, (done, total): (u64, u64), provider: &ProviderId) -> Option<Incomplete> {
         let stages = [
             (Stage::Citing, self.citing, (done, total)),
@@ -207,13 +210,24 @@ impl Stops {
             }
             i
         };
-        if let Some(&s) = stages.iter().find(|(_, s, _)| s.failed) {
-            return Some(at(IncompleteKind::ProviderFailed, s));
+        let failed = stages.iter().filter(|(_, s, _)| s.failed);
+        let budget = stages.iter().filter(|(_, s, _)| s.budget);
+        let mut all = failed
+            .map(|&s| at(IncompleteKind::ProviderFailed, s))
+            .chain(budget.map(|&s| at(IncompleteKind::Budget, s)))
+            .chain((done < total).then(|| at(IncompleteKind::Capped, stages[0])));
+        let first = all.next()?;
+        for also in all {
+            tracing::warn!(
+                target: "aspero::graph",
+                kind = also.kind.as_str(),
+                stage = also.stage.map(Stage::as_str),
+                done = also.done,
+                total = also.total,
+                "related works stopped here too"
+            );
         }
-        if let Some(&s) = stages.iter().find(|(_, s, _)| s.budget) {
-            return Some(at(IncompleteKind::Budget, s));
-        }
-        (done < total).then(|| at(IncompleteKind::Capped, stages[0]))
+        Some(first)
     }
 }
 
@@ -336,7 +350,7 @@ impl Engine {
             let mut read = reads.next().expect("a read per filter");
             spend.add(std::mem::take(&mut read.usage), read.paid);
             stops.citing.failed |= read.failed;
-            stops.citing.budget |= *n < c.pages && !read.finished && !read.failed;
+            stops.citing.budget |= read.budget || (*n < c.pages && !read.finished && !read.failed);
             for work in &c.works {
                 // Alone, every work read cites it; sharing, those whose
                 // references say so.
@@ -364,8 +378,8 @@ impl Engine {
             let mut read = reads.next().expect("a read for coupling");
             spend.add(std::mem::take(&mut read.usage), read.paid);
             stops.coupling.failed |= read.failed;
-            stops.coupling.budget |=
-                coupling_allotted < coupling_paid && !read.finished && !read.failed;
+            stops.coupling.budget |= read.budget
+                || (coupling_allotted < coupling_paid && !read.finished && !read.failed);
             stops.coupling_pages = (
                 (coupling_cached + read.paid) as u64,
                 (coupling_cached + coupling_paid) as u64,
@@ -546,6 +560,11 @@ impl Engine {
                     if cursor.is_none() || empty {
                         break;
                     }
+                }
+                Err(e) if e.kind() == ErrorKind::BudgetCapped => {
+                    tracing::info!(target: "aspero::graph", error = %e, %filter, "citing works stopped at the daily cap");
+                    read.budget = true;
+                    break;
                 }
                 Err(e) => {
                     tracing::warn!(target: "aspero::graph", error = %e, %filter, "citing works failed");

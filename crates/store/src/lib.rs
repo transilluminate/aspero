@@ -10,7 +10,7 @@
 //!
 //! Durable data that is costly to recompute (history; derived data such as
 //! embeddings or extracted text) will live in a separate store in the data
-//! directory, with real migrations (DESIGN §5).
+//! directory, with real migrations (DESIGN "Storage").
 //!
 //! The cache keeps entries and when they were stored; it applies no policy.
 //! Freshness, field coverage and stale-on-error are the engine's decisions.
@@ -271,6 +271,12 @@ pub trait Pacing: Send + Sync {
     fn claim_slot(&self, provider: &str, interval: Duration, now: Timestamp) -> Result<Timestamp>;
 }
 
+/// `mb` megabytes (1,000,000 bytes, as size limits are given) in bytes,
+/// saturating.
+pub fn megabytes(mb: u64) -> u64 {
+    mb.saturating_mul(1_000_000)
+}
+
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct Stats {
@@ -408,9 +414,8 @@ impl SqliteCache {
 
     /// Holds the cache to its limit after a write, which stands whether or
     /// not evicting worked (a busy file is evicted from next time).
-    fn after_write(&self) -> Result<()> {
+    fn after_write(&self) {
         let _ = self.enforce_limit();
-        Ok(())
     }
 
     /// Bumps the `used_at` of rows read (`(rowid, used_at)`), under a limit
@@ -796,7 +801,8 @@ impl Cache for SqliteCache {
         }
         tx.commit()?;
         drop(conn);
-        self.after_write()
+        self.after_write();
+        Ok(())
     }
 
     fn get_search(
@@ -842,7 +848,8 @@ impl Cache for SqliteCache {
                 at.as_second()
             ],
         )?;
-        self.after_write()
+        self.after_write();
+        Ok(())
     }
 
     fn get_edges(
@@ -919,6 +926,7 @@ impl Cache for SqliteCache {
         }
         tx.commit()?;
         drop(conn);
-        self.after_write()
+        self.after_write();
+        Ok(())
     }
 }

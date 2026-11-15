@@ -244,12 +244,7 @@ impl Engine {
         let cached = self.cached_lookups(&provider, &ids, FieldSet::DEFAULT);
         let mut answers: Vec<Option<Answer>> = cached
             .into_iter()
-            .map(|c| {
-                c.map(|record| match record {
-                    Some(r) => (Outcome::Found, Some(r), Served::Cache),
-                    None => (Outcome::NotFound, None, Served::Cache),
-                })
-            })
+            .map(|c| c.answer().map(|(o, r)| (o, r, Served::Cache)))
             .collect();
         let pending: Vec<usize> = (0..asks.len()).filter(|&k| answers[k].is_none()).collect();
         let pending_ids: Vec<WorkId> = pending.iter().map(|&k| asks[k].1.clone()).collect();

@@ -152,8 +152,9 @@ fn open_cache(max_bytes: Option<u64>) -> Option<Arc<SqliteCache>> {
     }
 }
 
-/// Credentials and contact details come from the environment for now; the
-/// config file and keyring (DESIGN §7) come later.
+/// Credentials and contact details come from the environment, not a
+/// keyring: agents run headless, where a Keychain prompt would hang them
+/// (DESIGN "Apps (FFI)"). A config file may come later (DESIGN "Future").
 /// `file` paces requests across processes (parallel agents), and caches
 /// answers unless `no_cache`.
 fn engine(
@@ -182,8 +183,8 @@ async fn run(cli: Cli, out: Out) -> Result<Exit, Failure> {
             return cmd::cache::run(cache_path()?, action, cli.global.cache_max_bytes(), out);
         }
         Command::Scan { files } => return cmd::scan::run(files, out),
-        Command::Styles { credits } => return cmd::styles::run(credits, out),
-        Command::Licences => return cmd::licences::run(out),
+        Command::Styles { credits } => return Ok(cmd::styles::run(credits, out)),
+        Command::Licences => return Ok(cmd::licences::run(out)),
         _ => {}
     }
     let file = open_cache(cli.global.cache_max_bytes());

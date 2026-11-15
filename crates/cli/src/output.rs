@@ -6,7 +6,7 @@ use aspero_core::{
     Agreement, Hit, IdKind, ProviderId, SourceRecord, UpdateKind, Usage, Work, WorkId,
 };
 use aspero_engine::{Abstract, Candidate, describe_update};
-pub use aspero_json::{candidate, set_abstract, usage, work};
+pub use aspero_json::{candidate, set_abstract, usage};
 
 /// Abstract characters shown in tables; JSON has the full text.
 const TABLE_ABSTRACT: usize = 600;
@@ -35,7 +35,11 @@ impl Exporter {
                     "--format cite needs --style (`aspero styles` lists them)",
                 ));
             }
-            (crate::args::Format::Cite, Some(s)) if s.ends_with(".csl") => {
+            (crate::args::Format::Cite, Some(s))
+                if std::path::Path::new(s)
+                    .extension()
+                    .is_some_and(|e| e.eq_ignore_ascii_case("csl")) =>
+            {
                 let xml = std::fs::read_to_string(s)
                     .map_err(|e| Failure::usage(format!("could not read {s}: {e}")))?;
                 let style = aspero_bib::cite::Style::from_xml(&xml)

@@ -1,7 +1,7 @@
-//! Works, candidates and usage.
+//! Works, candidates, search pages and usage.
 
 use aspero_core::{Person, ProviderId, SourceRecord, Usage};
-use aspero_engine::{Abstract, Candidate};
+use aspero_engine::{Abstract, Candidate, SearchReport};
 use serde_json::{Map, Value, json};
 
 /// One work: lean by default, every known field with `full`.
@@ -113,6 +113,28 @@ pub fn hit(rank: usize, score: Option<f64>, work: Value) -> Value {
     }
     out["work"] = work;
     out
+}
+
+/// A page of search results: who answered, the `total`, the
+/// `next_cursor`, the `ignored_filters`, how it was `served`, and the
+/// `hits` (works lean, or every field with `full`). Usage is the caller's
+/// to add.
+pub fn search_page(report: &SearchReport, full: bool) -> Value {
+    let page = &report.page;
+    let hits: Vec<Value> = page
+        .hits
+        .iter()
+        .enumerate()
+        .map(|(i, h)| hit(i + 1, h.score, work(&h.record, full)))
+        .collect();
+    json!({
+        "provider": report.provider,
+        "total": page.total,
+        "next_cursor": page.next.as_ref().map(|c| &c.0),
+        "ignored_filters": report.ignored_filters,
+        "served": report.served.as_str(),
+        "hits": hits,
+    })
 }
 
 /// A scored candidate: confidence, per-field checks, who found it, and the
@@ -230,6 +252,32 @@ mod tests {
         assert_eq!(
             hit(2, Some(12.5), w),
             json!({"rank": 2, "score": 12.5, "work": {"title": "Deep learning"}})
+        );
+    }
+
+    #[test]
+    fn a_search_page_says_who_answered_and_what_was_ignored() {
+        let report = SearchReport {
+            provider: ProviderId::from_static("crossref"),
+            page: aspero_core::Page::new(
+                vec![aspero_core::Hit::new(record(), Some(12.5))],
+                Some(40),
+                Some(aspero_core::Cursor("next".into())),
+            ),
+            ignored_filters: vec![aspero_core::Filter::OpenAccess],
+            usage: None,
+            served: aspero_engine::Served::Cache,
+        };
+        assert_eq!(
+            search_page(&report, false),
+            json!({
+                "provider": "crossref",
+                "total": 40,
+                "next_cursor": "next",
+                "ignored_filters": ["open_access"],
+                "served": "cache",
+                "hits": [{"rank": 1, "score": 12.5, "work": work(&record(), false)}],
+            })
         );
     }
 

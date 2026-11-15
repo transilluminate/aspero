@@ -133,13 +133,12 @@ impl Engine {
         let wants = |f: fn(&AnalysisKind) -> bool| kinds.iter().any(f);
         let mut analysis = Analysis {
             seeds,
-            incomplete,
+            incomplete: incomplete.into_iter().collect(),
             with_references,
             retracted_references: None,
             odd_one_out: None,
             probably_missing: None,
             related: None,
-            not_yet: Vec::new(),
             estimate: None,
             usage: Vec::new(),
         };

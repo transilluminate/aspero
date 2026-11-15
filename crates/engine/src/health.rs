@@ -83,7 +83,8 @@ impl Health {
         })
     }
 
-    /// Providers refusing calls now, and why.
+    /// Providers refusing calls now, and why: a spent quota whose reset
+    /// the provider didn't say gives when it will be tried again.
     pub(crate) fn unavailable(&self, now: Timestamp) -> Vec<(ProviderId, Error)> {
         let providers = lock(&self.providers);
         let at = Instant::now();
@@ -93,7 +94,15 @@ impl Health {
                 if let Some((error, until)) = &s.blocked
                     && until.is_none_or(|u| at < u)
                 {
-                    return Some((p.clone(), error.clone()));
+                    let error = match (error, until) {
+                        (Error::QuotaExhausted { resets_at: None }, Some(u)) => {
+                            Error::QuotaExhausted {
+                                resets_at: Some(wall(now, *u - at)),
+                            }
+                        }
+                        _ => error.clone(),
+                    };
+                    return Some((p.clone(), error));
                 }
                 let until = s.open_until.filter(|u| at < *u)?;
                 let until = Some(wall(now, until - at));

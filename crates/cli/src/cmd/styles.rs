@@ -3,18 +3,18 @@
 use aspero_bib::cite;
 use serde_json::json;
 
-use super::{Failure, Out, print};
+use super::{Out, print};
 use crate::args::Format;
 use crate::exit::Exit;
 use crate::output;
 
-pub fn run(credits: bool, out: Out) -> Result<Exit, Failure> {
+pub fn run(credits: bool, out: Out) -> Exit {
     if credits {
         match out.format {
             Format::Json | Format::Jsonl => print(&json!({"credits": cite::credits()})),
             _ => print!("{}", cite::credits()),
         }
-        return Ok(Exit::Ok);
+        return Exit::Ok;
     }
     match out.format {
         Format::Json | Format::Jsonl => print(&json!({
@@ -31,5 +31,5 @@ pub fn run(credits: bool, out: Out) -> Result<Exit, Failure> {
             println!("{table}");
         }
     }
-    Ok(Exit::Ok)
+    Exit::Ok
 }

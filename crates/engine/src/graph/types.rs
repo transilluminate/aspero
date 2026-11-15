@@ -273,16 +273,28 @@ impl Stage {
 #[non_exhaustive]
 pub struct Section<T> {
     pub items: Vec<T>,
-    pub incomplete: Option<Incomplete>,
+    /// Every stop, once each: failures first, then the budget, then a
+    /// cap; for related works, each in stage order. Empty when complete.
+    pub incomplete: Vec<Incomplete>,
 }
 
 impl<T> Section<T> {
-    pub(super) fn new(items: Vec<T>, incomplete: Option<Incomplete>) -> Self {
-        Section { items, incomplete }
+    /// `items`, stopped by each of `incomplete` (repeats dropped).
+    pub(super) fn new(items: Vec<T>, incomplete: Vec<Incomplete>) -> Self {
+        let mut once: Vec<Incomplete> = Vec::with_capacity(incomplete.len());
+        for i in incomplete {
+            if !once.contains(&i) {
+                once.push(i);
+            }
+        }
+        Section {
+            items,
+            incomplete: once,
+        }
     }
 
     pub fn complete(&self) -> bool {
-        self.incomplete.is_none()
+        self.incomplete.is_empty()
     }
 }
 
@@ -378,8 +390,9 @@ pub struct Estimate {
 pub struct Analysis {
     /// One per input, in order.
     pub seeds: Vec<Seed>,
-    /// Resolving the seeds stopped early (the budget ran out).
-    pub incomplete: Option<Incomplete>,
+    /// What stopped resolving the seeds early (the budget running out);
+    /// empty when nothing did.
+    pub incomplete: Vec<Incomplete>,
     /// Works of the set (seeds merged) with known references: what "cited
     /// by k of n" counts out of.
     pub with_references: usize,
@@ -387,8 +400,6 @@ pub struct Analysis {
     pub odd_one_out: Option<Section<OddOne>>,
     pub probably_missing: Option<Section<Missing>>,
     pub related: Option<Section<RelatedWork>>,
-    /// Kinds asked for that aren't built yet (none, now).
-    pub not_yet: Vec<AnalysisKind>,
     /// With `estimate_only`: the cost of running it, in place of the
     /// analyses.
     pub estimate: Option<Estimate>,
@@ -400,7 +411,7 @@ impl Analysis {
     /// run to the end.
     pub fn complete(&self) -> bool {
         self.seeds.iter().all(Seed::settled)
-            && self.incomplete.is_none()
+            && self.incomplete.is_empty()
             && self
                 .retracted_references
                 .as_ref()

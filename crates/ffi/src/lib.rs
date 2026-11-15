@@ -99,11 +99,7 @@ impl Default for Config {
 impl Config {
     /// How long cached answers are trusted, from the days given.
     fn cache_policy(&self) -> CachePolicy {
-        let days = |n: u32| std::time::Duration::from_secs(u64::from(n) * 86_400);
-        let mut policy = CachePolicy::default();
-        policy.records = days(self.cache_found_days);
-        policy.misses = days(self.cache_not_found_days);
-        policy
+        CachePolicy::from_days(self.cache_found_days, self.cache_not_found_days)
     }
 }
 
@@ -207,7 +203,7 @@ impl Aspero {
         let cache_policy = config.cache_policy();
         let max_bytes = match config.cache_max_mb {
             Some(0) => return Err(setup("the cache's size limit must be at least 1 MB".into())),
-            mb => mb.map(|mb| mb.saturating_mul(1_000_000)),
+            mb => mb.map(aspero_engine::megabytes),
         };
         let cache = match &config.cache_dir {
             Some(dir) => {
@@ -441,11 +437,15 @@ impl Aspero {
 
     /// Analyses of the set of works `seeds` names (identifiers as
     /// written): retracted references, odd ones out, probably missing
-    /// works. Each seed resolves cheaply (asked once) or says why not;
-    /// paid requests stop before `budget_usd` would be passed, and what
-    /// stopped says how far it got. With `estimate_only`, nothing paid is
-    /// asked: `estimate` says what a run would cost.
-    #[uniffi::method(default(budget_usd = None, cancel = None))]
+    /// works, and related works (the best `related_limit` around the set,
+    /// by co-citation and coupling). Each seed resolves cheaply (asked
+    /// once) or says why not; paid requests stop before `budget_usd` would
+    /// be passed, and what stopped says how far it got. With
+    /// `estimate_only`, nothing paid is asked: `estimate` says what a run
+    /// would cost.
+    #[uniffi::method(default(budget_usd = None, related_limit = 20, cancel = None))]
+    // Swift takes options as defaulted parameters, not an options record.
+    #[allow(clippy::too_many_arguments)]
     pub async fn analyse(
         &self,
         seeds: Vec<String>,
@@ -453,13 +453,16 @@ impl Aspero {
         budget_usd: Option<f64>,
         estimate_only: bool,
         patience: Patience,
+        related_limit: u32,
         cancel: Option<Arc<CallToken>>,
     ) -> Result<Analysis, AsperoError> {
         let engine = self.engine(patience);
         self.run(
             async move {
-                let kinds: Vec<aspero_engine::AnalysisKind> =
-                    kinds.into_iter().map(Into::into).collect();
+                let kinds: Vec<aspero_engine::AnalysisKind> = kinds
+                    .into_iter()
+                    .map(|k| k.to_engine(related_limit))
+                    .collect();
                 let analysis = engine
                     .analyse(&seeds, &kinds, budget_usd, estimate_only)
                     .await;
@@ -626,7 +629,7 @@ impl Aspero {
         Ok(cite::cite(&pairs, &style, locale.as_deref(), markup)
             .into_iter()
             .map(|c| CitedEntry {
-                index: c.index as u32,
+                index: records::count(c.index),
                 label: c.label,
                 text: c.text,
                 in_text: c.in_text,
@@ -729,6 +732,7 @@ impl Aspero {
             misses: s.misses,
             searches: s.searches,
             bytes: s.bytes,
+            edges: s.edges,
         }))
     }
 

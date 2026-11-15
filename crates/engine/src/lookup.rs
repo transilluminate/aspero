@@ -15,6 +15,29 @@ pub enum Outcome {
     Failed(Error),
 }
 
+/// A cached answer to a lookup, as one call may use it.
+#[derive(Debug, Clone)]
+// As big as the `Option<Option<SourceRecord>>` it stands for, and as
+// short-lived: a call's answers, moved out as they're read.
+#[allow(clippy::large_enum_variant)]
+pub(crate) enum Cached {
+    Found(SourceRecord),
+    NotFound,
+    /// Nothing usable cached: ask the provider (or, falling back, fail).
+    Uncached,
+}
+
+impl Cached {
+    /// The outcome and record to answer with; `None` when uncached.
+    pub(crate) fn answer(self) -> Option<(Outcome, Option<SourceRecord>)> {
+        match self {
+            Cached::Found(record) => Some((Outcome::Found, Some(record))),
+            Cached::NotFound => Some((Outcome::NotFound, None)),
+            Cached::Uncached => None,
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct Attempt {
     pub provider: ProviderId,
@@ -150,14 +173,10 @@ impl Engine {
             .into_iter()
             .enumerate()
         {
-            answers[i] = match cached {
-                Some(Some(record)) => {
+            answers[i] = match cached.answer() {
+                Some((outcome, record)) => {
                     from_cache += 1;
-                    Some((attempt(Outcome::Found, Served::Cache), Some(record)))
-                }
-                Some(None) => {
-                    from_cache += 1;
-                    Some((attempt(Outcome::NotFound, Served::Cache), None))
+                    Some((attempt(outcome, Served::Cache), record))
                 }
                 None => {
                     pending.push(i);
@@ -241,9 +260,8 @@ impl Engine {
                 .iter()
                 .zip(self.fallback_lookups(&provider, &affected_ids))
             {
-                answers[i] = Some(match stale {
-                    Some(Some(record)) => (attempt(Outcome::Found, Served::Stale), Some(record)),
-                    Some(None) => (attempt(Outcome::NotFound, Served::Stale), None),
+                answers[i] = Some(match stale.answer() {
+                    Some((outcome, record)) => (attempt(outcome, Served::Stale), record),
                     None => (attempt(Outcome::Failed(error.clone()), Served::Live), None),
                 });
             }
@@ -275,29 +293,32 @@ impl Engine {
     // Cache access. Cache failures are never fatal: a broken cache behaves
     // like an empty one, and failed writes are skipped.
 
-    /// For each ID, a fresh cached answer covering `fields`:
-    /// `Some(Some(record))`, `Some(None)` for a fresh "not found", or `None`
-    /// to ask the provider (always, past the cache).
+    /// For each ID, a fresh cached answer covering `fields`: a record, a
+    /// fresh "not found", or uncached to ask the provider (always, past
+    /// the cache).
     pub(crate) fn cached_lookups(
         &self,
         provider: &ProviderId,
         ids: &[WorkId],
         fields: FieldSet,
-    ) -> Vec<Option<Option<SourceRecord>>> {
+    ) -> Vec<Cached> {
         let policy = self.cache_policy;
         self.cache_entries(provider, ids)
             .into_iter()
             .map(|entry| {
-                let entry = entry?;
-                match entry.value {
-                    Some(ref record)
-                        if self.current(&entry, policy.records)
-                            && fields.is_subset(record.fields) =>
-                    {
-                        Some(entry.value)
+                let Some(entry) = entry else {
+                    return Cached::Uncached;
+                };
+                let fresh = match &entry.value {
+                    Some(record) => {
+                        self.current(&entry, policy.records) && fields.is_subset(record.fields)
                     }
-                    None if self.current(&entry, policy.misses) => Some(None),
-                    _ => None,
+                    None => self.current(&entry, policy.misses),
+                };
+                match (fresh, entry.value) {
+                    (true, Some(record)) => Cached::Found(record),
+                    (true, None) => Cached::NotFound,
+                    (false, _) => Cached::Uncached,
                 }
             })
             .collect()
@@ -306,23 +327,18 @@ impl Engine {
     /// For each ID, the cached answer to serve as stale when the provider
     /// fails: any record, however old, or a "not found" within its
     /// lifetime (which only a call past the cache gets this far with;
-    /// older ones aren't served). `None` where there's neither.
-    fn fallback_lookups(
-        &self,
-        provider: &ProviderId,
-        ids: &[WorkId],
-    ) -> Vec<Option<Option<SourceRecord>>> {
+    /// older ones aren't served). Uncached where there's neither.
+    fn fallback_lookups(&self, provider: &ProviderId, ids: &[WorkId]) -> Vec<Cached> {
         let now = (self.clock)();
         self.cache_entries(provider, ids)
             .into_iter()
-            .map(|entry| {
-                let entry = entry?;
-                match entry.value {
-                    Some(record) => Some(Some(record)),
-                    None => entry
-                        .is_fresh(now, self.cache_policy.misses)
-                        .then_some(None),
-                }
+            .map(|entry| match entry {
+                Some(e) => match e.value {
+                    Some(record) => Cached::Found(record),
+                    None if e.is_fresh(now, self.cache_policy.misses) => Cached::NotFound,
+                    None => Cached::Uncached,
+                },
+                None => Cached::Uncached,
             })
             .collect()
     }
@@ -344,9 +360,8 @@ impl Engine {
         fresh
             .into_iter()
             .zip(any)
-            .map(|answer| match answer {
-                (Some(Some(record)), _) => (attempt(Outcome::Found, Served::Cache), Some(record)),
-                (Some(None), _) => (attempt(Outcome::NotFound, Served::Cache), None),
+            .map(|(fresh, any)| match (fresh.answer(), any) {
+                (Some((outcome, record)), _) => (attempt(outcome, Served::Cache), record),
                 (None, Some(record)) => (attempt(Outcome::Found, Served::Stale), Some(record)),
                 (None, None) => (attempt(Outcome::Failed(Error::Offline), Served::Live), None),
             })

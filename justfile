@@ -9,6 +9,8 @@ check:
     cargo fmt --all --check
     cargo clippy --workspace --all-targets --all-features -- -D warnings
     cargo test --workspace --all-features
+    cargo check -p aspero-engine --no-default-features
+    cargo check -p aspero-engine --no-default-features --features crossref
 
 # Format, and apply clippy's suggested fixes.
 fix:

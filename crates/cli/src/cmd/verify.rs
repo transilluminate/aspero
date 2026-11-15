@@ -94,7 +94,7 @@ pub async fn run(engine: &Engine, args: ClaimArgs, out: Out) -> Result<Exit, Fai
     }
     let exit = results.finish(verified.usage());
     print!("{}", export.finish());
-    exit
+    Ok(exit)
 }
 
 /// One claim's result: its JSON, its text, and its verdict (`None` when
@@ -153,7 +153,7 @@ impl Results {
         }
     }
 
-    fn finish(self, usage: &[(ProviderId, Usage)]) -> Result<Exit, Failure> {
+    fn finish(self, usage: &[(ProviderId, Usage)]) -> Exit {
         if self.show_progress {
             eprint!("\r\x1b[K");
         }
@@ -186,7 +186,7 @@ impl Results {
                 print(&json!({"results": items, "usage": output::usage(usage)}));
             }
         }
-        Ok(self.exit)
+        self.exit
     }
 }
 

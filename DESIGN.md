@@ -429,18 +429,21 @@ from `cites:` pages); G3 OpenCitations as a free source of citing works.
   - Citing works dated more than a year before a work of the set they cite
     are set aside: OpenAlex gave a 2001 paper on mustard 300 references,
     2014 sepsis trials among them.
-  - `incomplete` names the `stage` that stopped, and `done` of `total`
-    count that stage's things: `citing`, citing works read of those the
-    set's `cited_by_count`s promise (`capped` when a work was sampled);
-    `coupling`, pages read of coupling's sample; `lookup`, works answered
-    of those asked about. A failure (`provider_failed`, with the
-    `provider`) comes first, then `budget` (the caller's daily cap on
-    OpenAlex too: it is theirs, not a failing provider), then `capped`,
-    and is logged at warn (the CLI shows warnings without `-v`, but not
-    each failed request); stops not said (one per section) are logged at
-    warn too. A retraction check failing likewise outranks the budget. Before, a failed lookup or coupling page said
-    `provider_failed` with every citing work read (done = total), and
-    nothing said why.
+  - `incomplete` lists every stop, each naming the `stage` that stopped,
+    with `done` of `total` counting that stage's things: `citing`, citing
+    works read of those the set's `cited_by_count`s promise; `coupling`,
+    pages read of coupling's sample; `lookup`, works answered of those
+    asked about. Failures (`provider_failed`, with the `provider`) come
+    first, then `budget` (the caller's daily cap on OpenAlex too: it is
+    theirs, not a failing provider), each in stage order, then `capped`
+    (at `citing`) when the plan sampled a much cited work or a work of
+    unknown count wasn't read to the end, whatever else stopped the
+    reading; each stop once. A retraction check says a failure, then the
+    budget, likewise; so does a lookup of probably missing works. Before,
+    one stop was said per section (the rest only logged), so a budget
+    hid a sample and a failed coupling page; and before that, a failed
+    lookup or coupling page said `provider_failed` with every citing work
+    read (done = total), and nothing said why.
   - *Without a key* (seen 2026-11-14) OpenAlex refuses a cursor past the
     first page: 401 "Paging past the first page with cursor= needs a free
     API key". It had read as a rejected key, which stops the engine
@@ -456,8 +459,10 @@ from `cites:` pages); G3 OpenCitations as a free source of citing works.
 - **Spend.** Analyses run cheapest first (odd one out, probably missing,
   retracted references, related works). With a budget (US dollars), each
   paid request is refused when it could take the spend past it; what was
-  stopped says so: `incomplete: {kind: budget|provider_failed|capped,
-  done, total}`. `estimate_only` resolves seeds from the cache and free
+  stopped says so: `incomplete` lists each stop, `{kind:
+  budget|provider_failed|capped, done, total}`, and is empty when the
+  analysis (or the seeds' resolving, at the top level) ran to the end.
+  `estimate_only` resolves seeds from the cache and free
   lookups of one id (which the run then finds cached) and counts the rest
   exactly: requests not answerable from the cache, and without a cache
   the seeds' batches too (the run asks for them again). With related
@@ -844,12 +849,18 @@ Next (#58, P3): progress notifications and resources.
 ## Apps (FFI)
 
 `aspero-ffi` (UniFFI) gives apps one `Aspero` handle: `lookup`, `verify`,
-`verify_each` (a callback per result as it finishes), `search` (with
+`verify_each` (a callback per result as it finishes), `identify` (which
+work a PDF's first page is), `search` (with
 `searchCapabilities` saying what each source can search by, and
 `searchSupports` whether it can search a query tree, and optionally
 `since` a day), offline
 `scan`, `split_references` and `split_lines` (laid-out lines with
-indents, from PDFKit), `references` and `analyse` (citation links), and
+indents, from PDFKit), `read_references` (BibTeX, RIS or CSL-JSON) and
+`read_docx` (a Word document's Zotero or Mendeley citations), `export`
+(BibTeX, RIS, CSL-JSON) and `cite` (a reference list in a bundled or
+given CSL style, with `citation_styles`, `style_project` and
+`style_credits` to list and credit them), `references` and `analyse`
+(citation links, related works among them), and
 for settings `budgets` (as last
 reported: free), `refresh_budgets` (OpenAlex's `/rate-limit` with a key,
 free; nothing asked without one), `check_openalex_key` (one free lookup), `cache_stats`,
@@ -932,11 +943,9 @@ its container; different schema versions would rebuild each other's).
 - **Configuration**: TOML config (enable/order providers, per-provider
   resilience overrides); `auth status` distinguishing rejected from
   rate-limited.
-- **Discovery**: related works (co-citation, coupling: citation links
-  G2), OpenCitations (G3), watches ("new since last run"), history and
-  sessions.
-- **Integration**: CSL-JSON export, DOI-as-citekey builds, Zotero
-  interop.
+- **Discovery**: OpenCitations (G3), watches ("new since last run"),
+  history and sessions.
+- **Integration**: DOI-as-citekey builds, Zotero interop.
 - **hayagriva workarounds** in `bib/src/cite.rs` (a default `<name/>`;
   spaces before punctuation tidied): drop them once a release includes
   typst/hayagriva#520 and fixes empty date-part delimiters.

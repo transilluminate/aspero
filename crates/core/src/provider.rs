@@ -126,9 +126,6 @@ pub struct Capabilities {
     /// Identifier kinds whose "not found" here is final: no other provider
     /// can know them (doi.org for DOIs), so lookups stop asking.
     pub final_misses: Vec<IdKind>,
-    pub citations: bool,
-    pub references: bool,
-    pub recommend: bool,
     /// [`Provider::budget`] can say what's left without spending any
     /// (OpenAlex, with a key).
     pub budget_status: bool,
@@ -591,40 +588,6 @@ pub trait Provider: Send + Sync {
     /// [`Capabilities::budget_status`] says it can be.
     async fn budget(&self) -> Result<Usage> {
         Err(Error::Unsupported("budget status"))
-    }
-
-    /// Works that cite `id`.
-    async fn citations(
-        &self,
-        id: &WorkId,
-        page: &PageReq,
-        fields: FieldSet,
-    ) -> Result<Response<Page>> {
-        let _ = (id, page, fields);
-        Err(Error::Unsupported("citations"))
-    }
-
-    /// Works that `id` cites.
-    async fn references(
-        &self,
-        id: &WorkId,
-        page: &PageReq,
-        fields: FieldSet,
-    ) -> Result<Response<Page>> {
-        let _ = (id, page, fields);
-        Err(Error::Unsupported("references"))
-    }
-
-    /// Works similar to `positive` and unlike `negative`.
-    async fn recommend(
-        &self,
-        positive: &[WorkId],
-        negative: &[WorkId],
-        page: &PageReq,
-        fields: FieldSet,
-    ) -> Result<Response<Page>> {
-        let _ = (positive, negative, page, fields);
-        Err(Error::Unsupported("recommend"))
     }
 }
 

@@ -417,7 +417,8 @@ fn analyses_say_why_each_seed_is_unresolved() {
     ];
     let seeds = vec!["10.1234/never-seen".into(), "not an id".into()];
     let analysis =
-        block_on(handle.analyse(seeds, kinds, Some(0.01), false, Patience::Offline, None)).unwrap();
+        block_on(handle.analyse(seeds, kinds, Some(0.01), false, Patience::Offline, 20, None))
+            .unwrap();
     let problems: Vec<_> = analysis.seeds.iter().map(|s| s.problem).collect();
     assert_eq!(
         problems,
@@ -429,7 +430,7 @@ fn analyses_say_why_each_seed_is_unresolved() {
     assert!(analysis.not_yet.is_empty());
     // Nothing to read about: no seed resolved.
     let related = analysis.related.unwrap();
-    assert!(related.items.is_empty() && related.incomplete.is_none());
+    assert!(related.items.is_empty() && related.incomplete.is_empty());
     assert!(analysis.odd_one_out.unwrap().items.is_empty());
     assert!(!analysis.complete);
     assert!(analysis.failure.is_none());
@@ -438,6 +439,18 @@ fn analyses_say_why_each_seed_is_unresolved() {
         block_on(handle.references("not an id".into(), None, 25, Patience::Offline, None)).unwrap();
     assert_eq!(page.failure.unwrap().kind, ErrorKind::InvalidId);
     assert_eq!(page.coverage, Coverage::Unknown);
+    // A work the cache doesn't have: the failing provider is named.
+    let page = block_on(handle.references(
+        "10.1234/never-seen".into(),
+        None,
+        25,
+        Patience::Offline,
+        None,
+    ))
+    .unwrap();
+    let failure = page.failure.unwrap();
+    assert_eq!(failure.kind, ErrorKind::NotCached);
+    assert!(failure.provider.is_some(), "{failure:?}");
 }
 
 #[test]
@@ -959,6 +972,7 @@ fn caches_report_and_clear() {
     let handle = aspero(Some(dir.display().to_string()));
     let stats = handle.cache_stats().unwrap().unwrap();
     assert_eq!(stats.records, 0);
+    assert_eq!(stats.edges, 0);
     assert!(stats.bytes > 0, "an empty cache's pages");
     handle.clear_cache().unwrap();
     assert!(aspero(None).cache_stats().unwrap().is_none());

@@ -81,7 +81,7 @@ impl Engine {
     ) -> Option<String> {
         let can = |entry: &Entry| {
             check_since(entry, since)?;
-            self.prepare_tree(entry, tree.clone(), None)
+            Self::prepare_tree(entry, tree.clone(), None)
         };
         let result = match source {
             Some(name) => self.named_entry(name).and_then(can),
@@ -328,7 +328,7 @@ impl Engine {
             ];
             let mut all = vec![tree];
             all.extend(filters.into_iter().flatten().map(QueryNode::Filter));
-            match self.prepare_tree(entry, QueryNode::All(all), cap)? {
+            match Self::prepare_tree(entry, QueryNode::All(all), cap)? {
                 Some(tree) => sent.tree = Some(tree),
                 None if sent.extra.is_empty() => return Err(EngineError::NothingToSearch),
                 None => {}
@@ -349,7 +349,6 @@ impl Engine {
     /// decision behind both [`search`](Self::search) and
     /// [`search_supports`](Self::search_supports).
     fn prepare_tree(
-        &self,
         entry: &Entry,
         tree: QueryNode,
         newest_cap: Option<i16>,
@@ -417,6 +416,8 @@ impl Engine {
             id: id.to_owned(),
             reason,
             kind,
+            provider: None,
+            error: None,
         };
         let work: WorkId = id.parse().map_err(|e: aspero_core::IdError| {
             unresolved(e.to_string(), aspero_core::ErrorKind::InvalidId)
@@ -445,11 +446,17 @@ impl Engine {
                     ));
                 }
                 let failed = result.attempts.iter().find_map(|a| match &a.outcome {
-                    crate::Outcome::Failed(e) => Some(e),
+                    crate::Outcome::Failed(e) => Some((&a.provider, e)),
                     _ => None,
                 });
                 return Err(match failed {
-                    Some(e) => unresolved(format!("the lookup failed: {e}"), e.kind()),
+                    Some((provider, e)) => EngineError::Unresolved {
+                        id: id.to_owned(),
+                        reason: format!("the lookup failed: {e}"),
+                        kind: e.kind(),
+                        provider: Some(provider.clone()),
+                        error: Some(Box::new(e.clone())),
+                    },
                     None => unresolved(
                         "no such work found".into(),
                         aspero_core::ErrorKind::NotFound,

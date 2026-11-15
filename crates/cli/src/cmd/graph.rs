@@ -272,17 +272,14 @@ fn exit_for(a: &Analysis) -> Exit {
             _ => Exit::Ok,
         });
     let stopped = [
-        a.retracted_references
-            .as_ref()
-            .and_then(|s| s.incomplete.as_ref()),
-        a.odd_one_out.as_ref().and_then(|s| s.incomplete.as_ref()),
-        a.probably_missing
-            .as_ref()
-            .and_then(|s| s.incomplete.as_ref()),
-        a.related.as_ref().and_then(|s| s.incomplete.as_ref()),
+        a.retracted_references.as_ref().map(|s| &s.incomplete),
+        a.odd_one_out.as_ref().map(|s| &s.incomplete),
+        a.probably_missing.as_ref().map(|s| &s.incomplete),
+        a.related.as_ref().map(|s| &s.incomplete),
     ];
     let failed = stopped
         .into_iter()
+        .flatten()
         .flatten()
         .filter(|i| i.kind == IncompleteKind::ProviderFailed)
         .map(|_| Exit::Unavailable);
@@ -374,7 +371,7 @@ fn analysis_text(a: &Analysis, doc: &Value, related: bool) -> String {
                 r.source
             ));
         }
-        if let Some(i) = &found.incomplete {
+        for i in &found.incomplete {
             out.push_str(&stopped(i, "references checked"));
         }
     }
@@ -416,7 +413,7 @@ fn analysis_text(a: &Analysis, doc: &Value, related: bool) -> String {
                 by.join(" ")
             ));
         }
-        if let Some(i) = &found.incomplete {
+        for i in &found.incomplete {
             out.push_str(&stopped(i, "works looked up"));
         }
     }
@@ -443,14 +440,11 @@ fn analysis_text(a: &Analysis, doc: &Value, related: bool) -> String {
                 seeds.join(" ")
             ));
         }
-        if let Some(i) = &found.incomplete {
+        for i in &found.incomplete {
             out.push_str(&stopped(i, "citing works read"));
         }
     }
-    for kind in &a.not_yet {
-        out.push_str(&format!("\n{}: not yet\n", kind.as_str().replace('_', " ")));
-    }
-    if let Some(i) = &a.incomplete {
+    for i in &a.incomplete {
         out.push_str(&format!("\nSeeds{}", stopped(i, "looked up")));
     }
     if let Some(e) = &a.estimate {

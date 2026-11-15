@@ -35,10 +35,6 @@ impl ArxivId {
             version: None,
         }
     }
-
-    pub fn is_old_style(&self) -> bool {
-        self.id.contains('/')
-    }
 }
 
 /// Splits a trailing `vN` off, if `s` ends with one after a digit.

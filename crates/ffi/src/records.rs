@@ -23,6 +23,11 @@ fn time(t: Timestamp) -> SystemTime {
     SystemTime::from(t)
 }
 
+/// A count or index as the app's `u32`, saturating (no list is that long).
+pub(crate) fn count(n: usize) -> u32 {
+    u32::try_from(n).unwrap_or(u32::MAX)
+}
+
 #[derive(Debug, Clone, uniffi::Record)]
 pub struct Author {
     pub name: String,
@@ -297,6 +302,12 @@ impl From<&engine::EngineError> for Failure {
                 (Some(provider.to_string()), BudgetCap::of(error))
             }
             engine::EngineError::Disabled(provider) => (Some(provider.to_string()), None),
+            engine::EngineError::Unresolved {
+                provider, error, ..
+            } => (
+                provider.as_ref().map(ToString::to_string),
+                error.as_deref().and_then(BudgetCap::of),
+            ),
             _ => (None, None),
         };
         Failure {
@@ -333,6 +344,14 @@ pub struct ProviderUsage {
     /// Left in the budget period.
     pub remaining: Option<f64>,
     pub resets_at: Option<SystemTime>,
+    /// The budget for the period (OpenAlex: the daily allowance), as the
+    /// provider says it.
+    #[uniffi(default = None)]
+    pub limit: Option<f64>,
+    /// A prepaid balance left beside the period's budget, where the
+    /// provider says one.
+    #[uniffi(default = None)]
+    pub prepaid_remaining: Option<f64>,
 }
 
 pub(crate) fn usage(usage: &[(aspero_core::ProviderId, aspero_core::Usage)]) -> Vec<ProviderUsage> {
@@ -343,6 +362,8 @@ pub(crate) fn usage(usage: &[(aspero_core::ProviderId, aspero_core::Usage)]) -> 
             cost: u.cost,
             remaining: u.remaining,
             resets_at: u.resets_at.map(time),
+            limit: u.limit,
+            prepaid_remaining: u.prepaid_remaining,
         })
         .collect()
 }
@@ -462,9 +483,6 @@ impl Lookup {
             InputLookup::Looked(looked) => looked,
         };
         let mut lookup = Lookup::from_result(input, &looked.result);
-        if let (Some(work), Some(found)) = (&mut lookup.work, &looked.abstract_text) {
-            work.abstract_text = found.as_ref().map(|a| a.text.clone());
-        }
         lookup.with_punctuation = looked.with_punctuation;
         lookup.latest = looked.latest.as_ref().map(Work::from_record);
         lookup.disagreements = looked.disagreements.iter().map(Into::into).collect();
@@ -488,6 +506,10 @@ impl Lookup {
                 let (outcome, failure) = match &a.outcome {
                     Outcome::Found => (AttemptOutcome::Found, None),
                     Outcome::Failed(e) => (AttemptOutcome::Failed, Some(e)),
+                    Outcome::NotFound => (AttemptOutcome::NotFound, None),
+                    // `Outcome` is non-exhaustive: an outcome added later
+                    // found nothing usable here, and it isn't a failure the
+                    // app could word, so it shows as not found.
                     _ => (AttemptOutcome::NotFound, None),
                 };
                 Attempt {
@@ -817,7 +839,7 @@ impl From<CoreAgreement> for Agreement {
             CoreAgreement::Match => Agreement::Match,
             CoreAgreement::Partial => Agreement::Partial,
             CoreAgreement::Mismatch => Agreement::Mismatch,
-            _ => Agreement::Unknown,
+            CoreAgreement::Unknown => Agreement::Unknown,
         }
     }
 }
@@ -910,7 +932,7 @@ impl Verification {
         full: bool,
     ) -> Self {
         Verification {
-            index: index as u32,
+            index: count(index),
             input: claim.input.clone(),
             key: key(claim),
             verdict: v.verdict.into(),
@@ -929,7 +951,7 @@ impl Verification {
 
     pub(crate) fn invalid(index: usize, claim: &InputClaim, why: &str) -> Self {
         Verification {
-            index: index as u32,
+            index: count(index),
             input: claim.input.clone(),
             key: key(claim),
             verdict: Verdict::Invalid,
@@ -1181,6 +1203,10 @@ pub struct CacheStats {
     /// aside), as `Config.cacheMaxMb` limits it.
     #[uniffi(default = 0)]
     pub bytes: u64,
+    /// Works with cached citation links, counted once per direction (the
+    /// works one cites, the works citing it).
+    #[uniffi(default = 0)]
+    pub edges: u64,
 }
 
 // Searching.
@@ -1591,6 +1617,10 @@ pub struct SearchResults {
     /// Why there are no hits, if the search failed.
     pub failure: Option<Failure>,
     pub usage: Vec<ProviderUsage>,
+    /// Filters asked for that the source can't apply, so ignored (a query
+    /// tree's never are: they fail).
+    #[uniffi(default = [])]
+    pub ignored_filters: Vec<SearchFilter>,
 }
 
 impl SearchResults {
@@ -1604,6 +1634,7 @@ impl SearchResults {
                 freshness: None,
                 failure: Some(Failure::from(&e)),
                 usage: Vec::new(),
+                ignored_filters: Vec::new(),
             },
             Ok(report) => SearchResults {
                 provider: Some(report.provider.to_string()),
@@ -1624,6 +1655,11 @@ impl SearchResults {
                     .usage
                     .map(|u| usage(&[(report.provider.clone(), u)]))
                     .unwrap_or_default(),
+                ignored_filters: report
+                    .ignored_filters
+                    .iter()
+                    .filter_map(|&f| SearchFilter::from_core(f))
+                    .collect(),
             },
         }
     }
@@ -1959,7 +1995,7 @@ impl From<aspero_bib::docx::DocxReferences> for DocxReferences {
         DocxReferences {
             entries: d.entries.into_iter().map(Into::into).collect(),
             manager: d.manager.map(Into::into),
-            citations: d.citations as u32,
+            citations: count(d.citations),
             text: d.text,
         }
     }
@@ -2088,24 +2124,22 @@ pub enum AnalysisKind {
     OddOneOut,
     /// The best `limit` works several seeds cite that the set lacks.
     ProbablyMissing { limit: u32 },
-    /// The best 20 works around the set, by co-citation and bibliographic
-    /// coupling (`related`).
+    /// The best works around the set, by co-citation and bibliographic
+    /// coupling (`related`): as many as `analyse`'s `relatedLimit`.
     Related,
 }
 
-/// Related works listed: as many as `aspero analyse` lists by default.
-const RELATED_LIMIT: u32 = 20;
-
-impl From<AnalysisKind> for engine::AnalysisKind {
-    fn from(k: AnalysisKind) -> Self {
-        match k {
+impl AnalysisKind {
+    /// The engine's kind, `related_limit` the number of related works.
+    pub(crate) fn to_engine(self, related_limit: u32) -> engine::AnalysisKind {
+        match self {
             AnalysisKind::RetractedReferences => engine::AnalysisKind::RetractedReferences,
             AnalysisKind::OddOneOut => engine::AnalysisKind::OddOneOut,
             AnalysisKind::ProbablyMissing { limit } => {
                 engine::AnalysisKind::ProbablyMissing { limit }
             }
             AnalysisKind::Related => engine::AnalysisKind::Related {
-                limit: RELATED_LIMIT,
+                limit: related_limit,
             },
         }
     }
@@ -2179,7 +2213,7 @@ pub struct Seed {
 impl Seed {
     fn new(index: usize, s: &engine::Seed) -> Self {
         Seed {
-            index: index as u32,
+            index: count(index),
             input: s.input.clone(),
             id: s.work().map(ToString::to_string),
             work: s.record.as_ref().map(Work::from_record),
@@ -2187,7 +2221,7 @@ impl Seed {
             references: s.references().map(|r| r.len() as u64),
             problem: s.problem.map(Into::into),
             message: s.message.clone(),
-            same_as: s.same_as.map(|i| i as u32),
+            same_as: s.same_as.map(count),
         }
     }
 }
@@ -2214,14 +2248,46 @@ impl From<engine::IncompleteKind> for IncompleteKind {
     }
 }
 
+/// A stage of related works, and what its `Incomplete`'s `done` and
+/// `total` count.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Enum)]
+pub enum AnalysisStage {
+    /// Reading the works citing the set: citing works read, of those the
+    /// seeds' citation counts promise.
+    Citing,
+    /// Reading the works citing the set's most shared references (the
+    /// coupling sample): pages read, of those meant to be.
+    Coupling,
+    /// Looking the best up: works answered, of those asked about.
+    Lookup,
+}
+
+impl From<engine::Stage> for AnalysisStage {
+    fn from(s: engine::Stage) -> Self {
+        match s {
+            engine::Stage::Citing => AnalysisStage::Citing,
+            engine::Stage::Coupling => AnalysisStage::Coupling,
+            engine::Stage::Lookup => AnalysisStage::Lookup,
+            _ => AnalysisStage::Lookup,
+        }
+    }
+}
+
 /// How far a stopped step got: `done` of `total` (seeds looked up,
-/// references checked, works looked up, citing works read), to word as
-/// "checked 1,200 of 4,300".
-#[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Record)]
+/// references checked, works looked up; for related works, as its `stage`
+/// counts), to word as "checked 1,200 of 4,300".
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
 pub struct Incomplete {
     pub kind: IncompleteKind,
     pub done: u64,
     pub total: u64,
+    /// Which stage of related works stopped; `nil` for the other
+    /// analyses.
+    #[uniffi(default = None)]
+    pub stage: Option<AnalysisStage>,
+    /// The provider that failed, for `providerFailed`.
+    #[uniffi(default = None)]
+    pub provider: Option<String>,
 }
 
 impl From<&engine::Incomplete> for Incomplete {
@@ -2230,6 +2296,8 @@ impl From<&engine::Incomplete> for Incomplete {
             kind: i.kind.into(),
             done: i.done,
             total: i.total,
+            stage: i.stage.map(Into::into),
+            provider: i.provider.as_ref().map(ToString::to_string),
         }
     }
 }
@@ -2247,8 +2315,9 @@ pub struct RetractedReference {
 #[derive(Debug, Clone, uniffi::Record)]
 pub struct RetractedReferences {
     pub items: Vec<RetractedReference>,
-    /// What stopped the check, if anything.
-    pub incomplete: Option<Incomplete>,
+    /// What stopped the check: a failure, then the budget; empty when
+    /// nothing did.
+    pub incomplete: Vec<Incomplete>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Enum)]
@@ -2256,7 +2325,9 @@ pub enum OddReason {
     /// It cites no other seed, none cites it, and it shares no
     /// references with any.
     NoLinks,
-    /// Its references are unknown and no other seed cites it.
+    /// Its references are unknown and no other seed cites it, or a seed
+    /// whose references are unknown may cite it: whether it belongs can't
+    /// be told.
     NoReferenceData,
 }
 
@@ -2279,7 +2350,8 @@ pub struct OddOne {
 #[derive(Debug, Clone, uniffi::Record)]
 pub struct OddOnesOut {
     pub items: Vec<OddOne>,
-    pub incomplete: Option<Incomplete>,
+    /// What stopped it; empty when nothing did.
+    pub incomplete: Vec<Incomplete>,
 }
 
 /// A work several seeds cite that the set lacks.
@@ -2299,7 +2371,8 @@ pub struct MissingWork {
 #[derive(Debug, Clone, uniffi::Record)]
 pub struct ProbablyMissing {
     pub items: Vec<MissingWork>,
-    pub incomplete: Option<Incomplete>,
+    /// What stopped it; empty when nothing did.
+    pub incomplete: Vec<Incomplete>,
 }
 
 /// A work around the set, and why: co-cited with it, sharing its
@@ -2327,9 +2400,11 @@ pub struct RelatedWork {
 #[derive(Debug, Clone, uniffi::Record)]
 pub struct RelatedWorks {
     pub items: Vec<RelatedWork>,
-    /// What stopped it: `capped` when a much cited seed's citing works
-    /// were sampled; `done` of `total` citing works read.
-    pub incomplete: Option<Incomplete>,
+    /// Every stop, in order: stages that failed, then those the budget
+    /// stopped, then `capped` when a much cited seed's citing works were
+    /// sampled; `done` of `total` as each one's `stage` counts them. Empty
+    /// when nothing stopped it.
+    pub incomplete: Vec<Incomplete>,
 }
 
 /// What an analysis would cost.
@@ -2355,14 +2430,14 @@ pub struct Analysis {
     pub retracted_references: Option<RetractedReferences>,
     pub odd_one_out: Option<OddOnesOut>,
     pub probably_missing: Option<ProbablyMissing>,
-    /// Kinds asked for that aren't built yet (none, now).
+    /// Always empty; kept for compatibility (every kind is built).
     pub not_yet: Vec<AnalysisKind>,
     /// With `estimateOnly`: the cost of running it, in place of findings.
     pub estimate: Option<Estimate>,
     /// Every seed settled and every analysis run to the end.
     pub complete: bool,
-    /// Resolving the seeds stopped early.
-    pub incomplete: Option<Incomplete>,
+    /// What stopped resolving the seeds early; empty when nothing did.
+    pub incomplete: Vec<Incomplete>,
     /// Why there's no analysis at all (no OpenAlex).
     pub failure: Option<Failure>,
     pub usage: Vec<ProviderUsage>,
@@ -2385,14 +2460,14 @@ impl Analysis {
                     not_yet: Vec::new(),
                     estimate: None,
                     complete: false,
-                    incomplete: None,
+                    incomplete: Vec::new(),
                     failure: Some(Failure::from(&e)),
                     usage: Vec::new(),
                     related: None,
                 };
             }
         };
-        let incomplete = |i: &Option<engine::Incomplete>| i.as_ref().map(Incomplete::from);
+        let incomplete = |i: &[engine::Incomplete]| i.iter().map(Incomplete::from).collect();
         Analysis {
             seeds: a
                 .seeds
@@ -2400,7 +2475,7 @@ impl Analysis {
                 .enumerate()
                 .map(|(i, s)| Seed::new(i, s))
                 .collect(),
-            with_references: a.with_references as u32,
+            with_references: count(a.with_references),
             retracted_references: a
                 .retracted_references
                 .as_ref()
@@ -2409,7 +2484,7 @@ impl Analysis {
                         .items
                         .iter()
                         .map(|r| RetractedReference {
-                            seed: r.seed as u32,
+                            seed: count(r.seed),
                             cites: Work::from_record(&r.cites),
                             source: r.source.clone(),
                         })
@@ -2421,7 +2496,7 @@ impl Analysis {
                     .items
                     .iter()
                     .map(|o| OddOne {
-                        seed: o.seed as u32,
+                        seed: count(o.seed),
                         reason: o.reason.into(),
                     })
                     .collect(),
@@ -2435,13 +2510,13 @@ impl Analysis {
                         id: m.id.to_string(),
                         ids: m.ids.iter().map(ToString::to_string).collect(),
                         work: m.record.as_ref().map(Work::from_record),
-                        cited_by: m.cited_by.iter().map(|&i| i as u32).collect(),
-                        count: m.count() as u32,
+                        cited_by: m.cited_by.iter().copied().map(count).collect(),
+                        count: count(m.count()),
                     })
                     .collect(),
                 incomplete: incomplete(&s.incomplete),
             }),
-            not_yet: a.not_yet.iter().map(|&k| k.into()).collect(),
+            not_yet: Vec::new(),
             estimate: a.estimate.map(|e| Estimate {
                 requests: e.requests,
                 usd: e.usd,
@@ -2460,9 +2535,9 @@ impl Analysis {
                         ids: r.ids.iter().map(ToString::to_string).collect(),
                         work: r.record.as_ref().map(Work::from_record),
                         score: r.score,
-                        co_cited_with: r.co_cited_with as u32,
-                        shared_references: r.shared_references as u32,
-                        seeds: r.seeds.iter().map(|&i| i as u32).collect(),
+                        co_cited_with: count(r.co_cited_with),
+                        shared_references: count(r.shared_references),
+                        seeds: r.seeds.iter().copied().map(count).collect(),
                     })
                     .collect(),
                 incomplete: incomplete(&s.incomplete),
@@ -2558,7 +2633,7 @@ mod tests {
         for k in engine::AnalysisKind::ALL {
             let kind = AnalysisKind::from(*k);
             assert_eq!(name(kind), k.as_str());
-            assert_eq!(engine::AnalysisKind::from(kind), *k);
+            assert_eq!(kind.to_engine(20), *k);
         }
         for c in engine::Coverage::ALL {
             assert_eq!(name(Coverage::from(*c)), c.as_str());
@@ -2571,6 +2646,9 @@ mod tests {
         }
         for r in engine::OddReason::ALL {
             assert_eq!(name(OddReason::from(*r)), r.as_str());
+        }
+        for s in engine::Stage::ALL {
+            assert_eq!(name(AnalysisStage::from(*s)), s.as_str());
         }
         // Failures.
         for k in aspero_core::ErrorKind::ALL {
@@ -2602,6 +2680,52 @@ mod tests {
     }
 
     #[test]
+    fn usage_carries_the_budget_and_prepaid_balance() {
+        let mut u = aspero_core::Usage::default();
+        u.cost = Some(0.001);
+        u.limit = Some(1.0);
+        u.prepaid_remaining = Some(4.5);
+        let used = usage(&[(ProviderId::from_static("openalex"), u)]);
+        assert_eq!(used[0].provider, "openalex");
+        assert_eq!(used[0].limit, Some(1.0));
+        assert_eq!(used[0].prepaid_remaining, Some(4.5));
+        assert_eq!(used[0].remaining, None);
+    }
+
+    #[test]
+    fn a_stop_says_its_stage_and_provider() {
+        let stopped = engine::Incomplete::new(engine::IncompleteKind::ProviderFailed, 3, 8)
+            .at(engine::Stage::Coupling)
+            .from(ProviderId::from_static("openalex"));
+        let i = Incomplete::from(&stopped);
+        assert_eq!((i.done, i.total), (3, 8));
+        assert_eq!(i.stage, Some(AnalysisStage::Coupling));
+        assert_eq!(i.provider.as_deref(), Some("openalex"));
+        let budget = engine::Incomplete::new(engine::IncompleteKind::Budget, 1, 2);
+        let i = Incomplete::from(&budget);
+        assert_eq!((i.stage, i.provider), (None, None));
+    }
+
+    #[test]
+    fn searches_say_which_filters_were_ignored() {
+        let report = engine::SearchReport {
+            provider: ProviderId::from_static("crossref"),
+            page: aspero_core::Page::default(),
+            // `place` is internal: the app never asks for it by name.
+            ignored_filters: vec![Filter::Years, Filter::Place, Filter::OpenAccess],
+            usage: None,
+            served: Served::Live,
+        };
+        let results = SearchResults::new(Ok(report));
+        assert_eq!(
+            results.ignored_filters,
+            [SearchFilter::Years, SearchFilter::OpenAccess]
+        );
+        let failed = SearchResults::new(Err(engine::EngineError::NoCapableProvider("search")));
+        assert!(failed.ignored_filters.is_empty());
+    }
+
+    #[test]
     fn a_reached_cap_carries_its_figures() {
         let resets = Timestamp::from_second(1_794_700_800).unwrap();
         let e = engine::EngineError::Provider {
@@ -2623,6 +2747,21 @@ mod tests {
                 resets_at: Some(time(resets)),
             })
         );
+        // So does a relation's work left unresolved by the cap.
+        let unresolved = engine::EngineError::Unresolved {
+            id: "10.1038/nature14539".into(),
+            reason: "the lookup failed: …".into(),
+            kind: aspero_core::ErrorKind::BudgetCapped,
+            provider: Some(ProviderId::from_static("openalex")),
+            error: Some(Box::new(aspero_core::Error::BudgetCapped {
+                cap: 0.5,
+                used: 0.5012,
+                resets_at: Some(resets),
+            })),
+        };
+        let failure = Failure::from(&unresolved);
+        assert_eq!(failure.provider.as_deref(), Some("openalex"));
+        assert_eq!(failure.budget_cap.map(|c| c.cap), Some(0.5));
         // Other failures carry none.
         let other = engine::EngineError::Provider {
             provider: ProviderId::from_static("openalex"),

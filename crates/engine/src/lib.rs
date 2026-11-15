@@ -119,7 +119,7 @@ use aspero_core::{
     SourceRecord, Usage,
 };
 pub use aspero_store::{
-    Cache, Direction, Edges, Pacing, SqliteCache, Stats as CacheStats, StoreError,
+    Cache, Direction, Edges, Pacing, SqliteCache, Stats as CacheStats, StoreError, megabytes,
 };
 pub use inputs::{Extras, InputLookup, InputsReport, Looked};
 use jiff::Timestamp;
@@ -139,9 +139,9 @@ pub const SEARCH_LIMIT: u32 = 5;
 /// A clock, injectable so cache expiry is testable.
 pub type Clock = fn() -> Timestamp;
 
-/// How long cached answers are trusted (DESIGN §5). Past these, a provider
-/// is asked again; if it then fails, the old answer is served as stale.
-/// Provider failures and verdicts are never cached.
+/// How long cached answers are trusted (DESIGN "Storage"). Past these, a
+/// provider is asked again; if it then fails, the old answer is served as
+/// stale. Provider failures and verdicts are never cached.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct CachePolicy {
@@ -154,6 +154,19 @@ pub struct CachePolicy {
     pub references: Duration,
     /// Pages of the works citing a work, which grow.
     pub cited_by: Duration,
+}
+
+impl CachePolicy {
+    /// Found records trusted for `found` days and "not found" answers for
+    /// `not_found` days (0: ask every time), the rest as by default.
+    pub fn from_days(found: u32, not_found: u32) -> Self {
+        let days = |n: u32| Duration::from_secs(u64::from(n) * 86_400);
+        CachePolicy {
+            records: days(found),
+            misses: days(not_found),
+            ..CachePolicy::default()
+        }
+    }
 }
 
 impl Default for CachePolicy {
@@ -335,6 +348,12 @@ pub enum EngineError {
         id: String,
         reason: String,
         kind: ErrorKind,
+        /// The provider whose failure left it unresolved, if one did.
+        provider: Option<ProviderId>,
+        /// That provider's error (`kind` is its kind), boxed to keep the
+        /// enum small.
+        #[source]
+        error: Option<Box<Error>>,
     },
     #[error("{provider}: {error}")]
     Provider {

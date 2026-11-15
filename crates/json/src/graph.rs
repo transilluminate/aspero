@@ -2,8 +2,9 @@
 //!
 //! Works are lean (or full) `work` objects; the works of a set are named by
 //! their index in `seeds`. Anything stopped early says so: `complete` is
-//! false, and `incomplete` gives a kind (`capped`, `budget`,
-//! `provider_failed`) and how far it got (`done` of `total`).
+//! false, and `incomplete` lists every stop (empty when there were none),
+//! each a kind (`capped`, `budget`, `provider_failed`) and how far it got
+//! (`done` of `total`).
 
 use aspero_engine::{
     Analysis, Estimate, Incomplete, Missing, OddOne, ReferencesPage, RelatedWork,
@@ -47,8 +48,8 @@ pub fn references(input: &str, page: &ReferencesPage, full: bool) -> Value {
 }
 
 /// The analyses: every seed, then each analysis asked for (related works
-/// last), kinds not built yet, an estimate (with `estimate_only`),
-/// `complete`, and the usage.
+/// last), an estimate (with `estimate_only`), `complete`, `incomplete`,
+/// and the usage.
 pub fn analysis(a: &Analysis, full: bool) -> Value {
     let mut out = Map::new();
     let seeds: Vec<Value> = a
@@ -77,17 +78,11 @@ pub fn analysis(a: &Analysis, full: bool) -> Value {
     if let Some(found) = &a.related {
         out.insert("related".into(), section(found, |r| related(r, full)));
     }
-    if !a.not_yet.is_empty() {
-        let kinds: Vec<&str> = a.not_yet.iter().map(|k| k.as_str()).collect();
-        out.insert("not_yet".into(), json!(kinds));
-    }
     if let Some(e) = &a.estimate {
         out.insert("estimate".into(), estimate(e));
     }
     out.insert("complete".into(), json!(a.complete()));
-    if let Some(i) = &a.incomplete {
-        out.insert("incomplete".into(), incomplete(i));
-    }
+    out.insert("incomplete".into(), incompletes(&a.incomplete));
     out.insert("usage".into(), work::usage(&a.usage));
     Value::Object(out)
 }
@@ -104,8 +99,8 @@ const SECTIONS: [(&str, &str); 4] = [
 /// each item of each analysis tagged with its section (`retracted`,
 /// `odd_one_out`, `probably_missing`, `related`), then a `summary`: the
 /// rest of the document (`with_references`, `complete`, `incomplete`,
-/// `estimate`, `not_yet`, `usage`), with each analysis' own `complete`
-/// and `incomplete` under its name.
+/// `estimate`, `usage`), with each analysis' own `complete` and
+/// `incomplete` under its name.
 pub fn analysis_lines(doc: &Value) -> Vec<Value> {
     let tagged = |section: &str, item: &Value| {
         let mut line = Map::new();
@@ -199,15 +194,19 @@ pub fn seed(index: usize, s: &Seed, full: bool) -> Value {
     Value::Object(out)
 }
 
-/// An analysis' findings: `complete`, `incomplete` when not, and `items`.
+/// An analysis' findings: `complete`, `incomplete` (what stopped it,
+/// empty when complete), and `items`.
 fn section<T>(s: &Section<T>, item: impl Fn(&T) -> Value) -> Value {
     let mut out = Map::new();
     out.insert("complete".into(), json!(s.complete()));
-    if let Some(i) = &s.incomplete {
-        out.insert("incomplete".into(), incomplete(i));
-    }
+    out.insert("incomplete".into(), incompletes(&s.incomplete));
     out.insert("items".into(), s.items.iter().map(item).collect());
     Value::Object(out)
+}
+
+/// Every stop, in order, each as [`incomplete`] gives it.
+fn incompletes(stops: &[Incomplete]) -> Value {
+    stops.iter().map(incomplete).collect()
 }
 
 /// `{kind, done, total}`: what stopped a step, and how far it got; with
@@ -298,13 +297,14 @@ mod tests {
         let doc = json!({
             "seeds": [{"index": 0, "input": "10.1/a", "status": "resolved"}],
             "with_references": 1,
-            "odd_one_out": {"complete": true, "items": []},
+            "odd_one_out": {"complete": true, "incomplete": [], "items": []},
             "related": {
                 "complete": false,
-                "incomplete": {"kind": "capped", "stage": "citing", "done": 200, "total": 900},
+                "incomplete": [{"kind": "capped", "stage": "citing", "done": 200, "total": 900}],
                 "items": [{"id": "openalex:W1", "score": 1.0}, {"id": "openalex:W2", "score": 0.5}],
             },
             "complete": false,
+            "incomplete": [],
             "usage": {"openalex": {"cost": 0.0002}},
         });
         assert_eq!(
@@ -316,12 +316,13 @@ mod tests {
                 json!({
                     "section": "summary",
                     "with_references": 1,
-                    "odd_one_out": {"complete": true},
+                    "odd_one_out": {"complete": true, "incomplete": []},
                     "related": {
                         "complete": false,
-                        "incomplete": {"kind": "capped", "stage": "citing", "done": 200, "total": 900},
+                        "incomplete": [{"kind": "capped", "stage": "citing", "done": 200, "total": 900}],
                     },
                     "complete": false,
+                    "incomplete": [],
                     "usage": {"openalex": {"cost": 0.0002}},
                 }),
             ]

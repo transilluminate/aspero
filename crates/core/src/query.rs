@@ -341,7 +341,9 @@ impl QueryNode {
     fn collect_leaves<'a>(&'a self, out: &mut Vec<&'a QueryNode>) {
         match self {
             QueryNode::All(nodes) | QueryNode::Any(nodes) | QueryNode::None(nodes) => {
-                nodes.iter().for_each(|n| n.collect_leaves(out));
+                for n in nodes {
+                    n.collect_leaves(out);
+                }
             }
             leaf => out.push(leaf),
         }

@@ -110,7 +110,9 @@ impl Scripted {
     fn found(&self, node: &QueryNode, out: &mut Vec<SourceRecord>) {
         match node {
             QueryNode::All(nodes) | QueryNode::Any(nodes) => {
-                nodes.iter().for_each(|n| self.found(n, out));
+                for n in nodes {
+                    self.found(n, out);
+                }
             }
             QueryNode::Term(t) if t.field == TermField::Title => out.extend(self.titled(&t.value)),
             QueryNode::Relation(r) => {

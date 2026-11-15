@@ -528,7 +528,9 @@ fn check_since(entry: &Entry, since: Option<Date>) -> Result<(), EngineError> {
 fn relation_ids<'a>(tree: &'a mut QueryNode, out: &mut Vec<&'a mut String>) {
     match tree {
         QueryNode::All(nodes) | QueryNode::Any(nodes) | QueryNode::None(nodes) => {
-            nodes.iter_mut().for_each(|n| relation_ids(n, out));
+            for n in nodes {
+                relation_ids(n, out);
+            }
         }
         QueryNode::Relation(r) => out.push(&mut r.id),
         _ => {}

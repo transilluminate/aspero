@@ -231,7 +231,9 @@ fn tree() -> impl Strategy<Value = QueryNode> {
 fn text_terms<'a>(node: &'a mut QueryNode, out: &mut Vec<&'a mut Term>) {
     match node {
         QueryNode::All(nodes) | QueryNode::Any(nodes) | QueryNode::None(nodes) => {
-            nodes.iter_mut().for_each(|n| text_terms(n, out));
+            for n in nodes {
+                text_terms(n, out);
+            }
         }
         QueryNode::Term(t) if !matches!(t.field, TermField::AuthorId | TermField::Identifier) => {
             out.push(t);

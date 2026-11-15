@@ -208,8 +208,70 @@ scripts/       fixture recorders, one per provider
   number only in the record's resource URL, which can't be filtered on,
   and no `alternative-id`: checked 2026-11-15; nothing else free maps
   it); Oxford Academic's `/article/<vol>/<issue>/<page>/<id>` (only the
-  page's `citation_doi` says, and aspero doesn't fetch pages); OpenReview
+  page's `citation_doi` says, and aspero doesn't fetch pages: a caller
+  that has the page hands over its markup, see Pages); OpenReview
   (its ids aren't in Crossref, nor in any other source aspero asks).
+- **Pages** (`webpage::claim_from_page`, FFI `claimFromPage`, `verify
+  --html FILE --url URL [--title TEXT]`): a claim from a publisher's
+  article page as a browser rendered it, for the addresses above that
+  don't say. The caller has the page's markup (its `<head>` and JSON-LD
+  scripts will do), or often only its address and the title a browser
+  gave it (a window's, a shared page's or a dropped link's); aspero never
+  fetches a page, and the function is pure (no network, no clock). Read, each claim field from the
+  first that gives it: Highwire `citation_*` tags (DOI, PMID, PMCID, arXiv,
+  PII, ISBN; title; each author; journal, else its abbreviation, the
+  conference or the book; volume; first and last page; the year of the
+  publication date, else `citation_date`, else the online date), PRISM
+  (`prism.doi`, publication name, volume, pages, date), Dublin Core (`dc.`
+  or `dcterms.`, any case: identifier, title, creator, date, and source as
+  the journal only when it reads as a name), then schema.org JSON-LD (the
+  first `ScholarlyArticle`, `MedicalScholarlyArticle` or `Article` at a
+  block's top, in its `@graph` or a page's `mainEntity`, never one nested
+  deeper such as a citation: identifier, `sameAs`, `@id`, headline or
+  name, authors, `datePublished`, pagination, and up `isPartOf` only a
+  `PublicationVolume`'s number and a `Periodical`'s name, not a
+  `WebSite`'s). For a title only: then `og:title`, else `<title>`, then
+  the title given. Every identifier any of them gives (each value parsed
+  as the identifiers are, so normalisation is shared, or scanned), then
+  the address's as `scan` reads it, is claimed, each once; only the
+  address's are `from_url`. `source` is the first vocabulary in that
+  order that gave an identifier or the title (`url` when none did). With
+  no identifier and no title there's no claim, rather than a junk one.
+  The journal is only ever the page's metadata, never guessed from the
+  host: a wrong one makes `verify` report a journal mismatch and cap at
+  plausible. Authors keep page order and their written form ("Last,
+  First" or "First Last", as claims take them), blanks and "et al."
+  dropped, at most 50.
+  - The markup is read by a small hand-written scanner, not a parser
+    (and no new dependency): tags and attributes in any quoting and case,
+    values entity-decoded (`&amp;`, `&#39;`, `&#x2019;`, common named
+    ones), comments, declarations and closing tags skipped, and the
+    contents of `<script>` (except `application/ld+json`, parsed with
+    serde_json, CDATA wrapping aside), `<style>`, `<textarea>` and
+    `<template>` never read as markup, so a `citation_doi` inside a
+    script's string is not the page's. Anything scans: a whole page, a
+    `<head>`, a fragment, junk. Caps: the first 2 MiB, 20,000 tags, 32
+    JSON-LD blocks; values over 1,000 characters are ignored. JAMA's
+    head with its inline scripts is ~145 KB.
+  - Titles (`<title>`, `og:title`, the title given) lose the site's
+    furniture, segment by segment from the end, after ` | `, ` - `, ` – `,
+    ` — `, ` · `: a known site or browser name (`JAMA Network`,
+    `ScienceDirect`, `Oxford Academic`, `Wiley Online Library`, `Google
+    Chrome`, `Mozilla Firefox`, …), the host's name (`The Lancet` on
+    `thelancet.com`), a year or names ending in one (Wiley's and Sage's
+    bylines), `Proceedings of …`, or a short title-cased segment (five
+    words, 40 characters) after a title of three words or more (`| Brain
+    |`). Prefixes go when they're a known site or the host before ` | `
+    (`Frontiers | …`), one of a few sites before `: ` (`ScienceDirect:
+    …`), `(PDF) `, `Full article: `, MDPI's `… | Free Full-Text | ` or
+    arXiv's `[1706.03762] `; Cell Press's `: Cell` suffixes too. A colon
+    in a title otherwise stays the title's. What's left must be a title:
+    not link text or furniture ("Full Text", "PDF (2 MB)", "Abstract",
+    "Download PDF", "View Article", "here", "doi"), a challenge or error
+    page ("Just a moment...", "Page not found"), a site's name alone, an
+    address or identifier; and a given title (a dragged link's name) at
+    least three words and 15 characters, a page's own two words.
+- **Scanning** (`id::scan`, `aspero scan`) finds every identifier
 - **Scanning** (`id::scan`, `aspero scan`) finds every identifier
   mentioned in a document, with its position and text as written; which
   mentions matter is the caller's call. Shapes that prose imitates (bare
@@ -903,7 +965,9 @@ work a PDF's first page is), `search` (with
 `searchCapabilities` saying what each source can search by, and
 `searchSupports` whether it can search a query tree, and optionally
 `since` a day), offline
-`scan`, `split_references` and `split_lines` (laid-out lines with
+`scan`, `claim_from_page` (an article page's claim, from its rendered
+markup, address and dragged title: see Pages), `split_references` and
+`split_lines` (laid-out lines with
 indents, from PDFKit), `read_references` (BibTeX, RIS or CSL-JSON) and
 `read_docx` (a Word document's Zotero or Mendeley citations), `export`
 (BibTeX, RIS, CSL-JSON) and `cite` (a reference list in a bundled or
@@ -981,6 +1045,9 @@ its container; different schema versions would rebuild each other's).
 - **Full text** via a text-extractor seam filling derived data (any tool),
   after fetching legal OA PDFs (Unpaywall, arXiv, Europe PMC).
 - **`check --fix`**: write suggested DOIs and corrections back to the .bib.
+- **Pages over MCP**: a tool taking a page's markup and address (Pages),
+  for agents that hold a page; not yet, as agents mostly have only the
+  address, which `verify` and `lookup` already read.
 - **Preprint since published**: suggest the journal version of arXiv
   entries (OpenAlex locations, Crossref relations).
 - **Scoring**: venue as a signal; down-weight derivative records

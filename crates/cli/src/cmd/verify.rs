@@ -1,7 +1,7 @@
 //! `aspero verify`: does a citation refer to a real work, with matching
 //! details?
 
-use aspero_core::{ProviderId, Usage};
+use aspero_core::{PageSource, ProviderId, Usage};
 use aspero_engine::{
     Candidate, Difference, Engine, Reason, Verdict, Verification, describe_update,
 };
@@ -10,18 +10,29 @@ use futures::StreamExt;
 use serde_json::{Value, json};
 
 use super::claim::claims;
-use super::{Failure, Out, print, print_line};
-use crate::args::{ClaimArgs, Format};
+use super::{Failure, Out, print, print_line, read_stdin};
+use crate::args::{ClaimArgs, Format, PageArgs};
 use crate::exit::Exit;
 use crate::grid::{self, Col, Grid, Text};
 use crate::output::{self, Level};
 use crate::term::{self, Paint, Progress};
 
-pub async fn run(engine: &Engine, args: ClaimArgs, out: Out) -> Result<Exit, Failure> {
+pub async fn run(
+    engine: &Engine,
+    args: ClaimArgs,
+    page: PageArgs,
+    out: Out,
+) -> Result<Exit, Failure> {
     let limit = args.limit;
-    let split_list = args.split;
-    let (text, fields) = split(args);
-    let claims = claims(text, fields, split_list)?;
+    let (claims, page_source) = if let Some(url) = &page.url {
+        let html = page.html.as_deref().map(read_page).transpose()?;
+        let (claim, source) = from_page(html.as_deref(), url, args.title.as_deref())?;
+        (vec![claim], Some(source))
+    } else {
+        let split_list = args.split;
+        let (text, fields) = split(args);
+        (claims(text, fields, split_list)?, None)
+    };
     if claims.is_empty() {
         return Err(Failure::usage("no claims given"));
     }
@@ -56,7 +67,7 @@ pub async fn run(engine: &Engine, args: ClaimArgs, out: Out) -> Result<Exit, Fai
     while let Some((k, v)) = verified.next().await {
         let i = positions[k];
         let claim = &claims[i];
-        let mut item = aspero_json::verification(claim.echo(), &v, out.full);
+        let mut item = aspero_json::verification(echo(claim, page_source), &v, out.full);
         if out.format.is_export() {
             // The work the citation refers to, when that's known: verified,
             // or found under other identifiers than those cited.
@@ -82,6 +93,9 @@ pub async fn run(engine: &Engine, args: ClaimArgs, out: Out) -> Result<Exit, Fai
             continue;
         }
         let mut text = verdict_text(&claim.input, &v);
+        if let Some(source) = page_source {
+            text = read_from(&text, source);
+        }
         if out.abstracts
             && let Some(best) = v.best_match.map(|i| &v.report.candidates[i])
         {
@@ -107,6 +121,56 @@ pub async fn run(engine: &Engine, args: ClaimArgs, out: Out) -> Result<Exit, Fai
     let exit = results.finish(verified.usage());
     print!("{}", export.finish());
     Ok(exit)
+}
+
+/// An article page's markup, from a file or (`-`) stdin. Pages saved in
+/// another encoding read with what isn't UTF-8 replaced: the metadata
+/// that matters is mostly ASCII.
+fn read_page(path: &str) -> Result<String, Failure> {
+    if path == "-" {
+        return read_stdin();
+    }
+    std::fs::read(path)
+        .map(|bytes| String::from_utf8_lossy(&bytes).into_owned())
+        .map_err(|e| Failure::usage(format!("could not read {path}: {e}")))
+}
+
+/// The claim an article page makes (see `aspero_core::webpage`), with
+/// its address as the input, and what answered.
+pub(super) fn from_page(
+    html: Option<&str>,
+    url: &str,
+    title: Option<&str>,
+) -> Result<(InputClaim, PageSource), Failure> {
+    let page = aspero_core::claim_from_page(html, url, title);
+    let Some(claim) = page.claim else {
+        return Err(Failure {
+            exit: Exit::NotFound,
+            message: format!("{url}: nothing on the page or in its address says which work it is"),
+        });
+    };
+    let claim = InputClaim {
+        input: url.to_owned(),
+        key: None,
+        claim: Ok(claim),
+    };
+    Ok((claim, page.source))
+}
+
+/// A claim's echo, saying what answered when it was read from a page.
+fn echo(claim: &InputClaim, page_source: Option<PageSource>) -> Value {
+    let mut echo = claim.echo();
+    if let Some(source) = page_source {
+        echo["page_source"] = json!(source);
+    }
+    echo
+}
+
+/// `text` with where its claim was read from after its first line.
+fn read_from(text: &str, source: PageSource) -> String {
+    let (first, rest) = text.split_once('\n').unwrap_or((text, ""));
+    let note = term::paint(&format!("read from {}", source.describe()), Paint::Dim);
+    format!("{first}\n  {note}\n{rest}")
 }
 
 /// One claim's result: its JSON, its text, its table row, and its verdict
@@ -350,6 +414,57 @@ pub(super) fn verdict_text(input: &str, v: &Verification) -> String {
 mod tests {
     use super::*;
     use crate::cmd::testing::{Scripted, engine, pinned, work};
+
+    /// `verify --html jama.html --url …`: the page's DOI is claimed, and
+    /// the JSON says the Highwire tags answered.
+    #[tokio::test]
+    async fn a_page_verifies_as_its_doi() {
+        let html = std::fs::read_to_string(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../core/tests/fixtures/pages/jama.html"
+        ))
+        .unwrap();
+        let url = "https://jamanetwork.com/journals/jama/article-abstract/2856706";
+        let (claim, source) = from_page(Some(&html), url, None).unwrap();
+        assert_eq!(source, PageSource::Highwire);
+        let c = claim.claim.as_ref().unwrap();
+        let ids: Vec<String> = c.ids.iter().map(ToString::to_string).collect();
+        assert_eq!(ids, ["doi:10.1001/jama.2026.19482"]);
+
+        let title = c.title.clone().unwrap();
+        let engine = engine(vec![Scripted::new(
+            "openalex",
+            vec![work(
+                &["10.1001/jama.2026.19482"],
+                &title,
+                &["Gregory W. Albers", "Jeremy Josef Heit"],
+                2026,
+            )],
+        )]);
+        let v = engine.verify(c, 5).await;
+        assert_eq!(v.verdict, Verdict::Verified, "{}", v.reason_text);
+        let item = aspero_json::verification(echo(&claim, Some(source)), &v, false);
+        assert_eq!(item["page_source"], "highwire");
+        assert_eq!(item["input"], url);
+        assert_eq!(item["claim"]["ids"][0], "doi:10.1001/jama.2026.19482");
+        assert!(
+            read_from(&verdict_text(url, &v), source)
+                .lines()
+                .nth(1)
+                .unwrap()
+                .contains("read from the page's Highwire tags")
+        );
+
+        // A page that says nothing, from an address that holds nothing.
+        let none = from_page(Some("<title>Just a moment...</title>"), url, Some("PDF"));
+        assert!(matches!(
+            none,
+            Err(Failure {
+                exit: Exit::NotFound,
+                ..
+            })
+        ));
+    }
 
     /// What `verify` prints, byte for byte, as text and as a table at 80
     /// columns: a match, a cited DOI that is another work's, and none.

@@ -456,16 +456,32 @@ The journal, volume and first page are checked too, from fields or from
 the text (\"N Engl J Med 2017;376:2545\"). A different volume or page makes
 a match plausible at best; it also tells an article from replies to it.
 
+An article page, as a browser shows it: --url is its address, --html its
+markup (the page saved as HTML, or its <head>; `-` reads stdin), and
+--title the title the browser gave it (a window's or a dragged link's).
+The claim is read from the page, offline, each field from the first that
+has it: Highwire citation_* tags, PRISM, Dublin Core, schema.org JSON-LD;
+then og:title or <title> without the site's name (\" | JAMA | JAMA
+Network\"); then --title, unless it's link text (\"Full Text\", \"PDF\") or
+too short; and the address's identifiers. The identifiers found are
+claimed. JSON gives `page_source`, what answered: highwire, prism,
+dublin_core, json_ld, title, title_hint or url. Exits 3 when the page
+doesn't say which work it is.
+
 Examples:
   aspero verify \"Vaswani et al. 2017. Attention is all you need. arXiv:1706.03762\"
   aspero verify --title \"Deep learning\" --author LeCun --year 2015 --id 10.1038/nature14539
   aspero verify --title \"Fibrinolysis for patients with intermediate-risk pulmonary embolism\" --journal \"N Engl J Med\" --volume 370 --page 1402
   aspero verify --format jsonl - < citations.jsonl
-  pbpaste | aspero verify --split -")]
+  pbpaste | aspero verify --split -
+  aspero verify --html page.html --url https://jamanetwork.com/journals/jama/fullarticle/2856706
+  aspero verify --url https://www.sciencedirect.com/science/article/pii/S2772940026000032 --title \"Air pollution and stroke - ScienceDirect\"")]
     #[command(display_order = 1)]
     Verify {
         #[command(flatten)]
         claim: ClaimArgs,
+        #[command(flatten)]
+        page: PageArgs,
     },
 
     /// Check every entry of a reference file or Word document.
@@ -864,6 +880,23 @@ pub struct ClaimArgs {
     pub split: bool,
 }
 
+/// `verify`'s article page: its address and markup (and `--title`).
+#[derive(Debug, Args)]
+pub struct PageArgs {
+    /// An article page's markup, as saved from a browser (or its
+    /// `<head>`): verify the work it shows; `-` reads stdin. With --url.
+    #[arg(long, value_name = "FILE", requires = "url")]
+    pub html: Option<String>,
+    /// An article page's address: verify the work it shows, from its
+    /// identifiers and --html's markup; --title is then the title the
+    /// browser gave the page.
+    #[arg(
+        long,
+        conflicts_with_all = ["text", "authors", "year", "journal", "volume", "page", "ids", "split"]
+    )]
+    pub url: Option<String>,
+}
+
 #[derive(Debug, Args)]
 pub struct SearchOptions {
     /// Provider to search (e.g. openalex, crossref).
@@ -922,6 +955,31 @@ mod tests {
         let cli = parse(&["lookup", "--format", "csl-json", "10.1038/nature14539"]).unwrap();
         assert_eq!(cli.global.format, Format::CslJson);
         assert!(Format::CslJson.is_export() && !Format::CslJson.is_human());
+    }
+
+    #[test]
+    fn a_page_is_its_address_markup_and_title() {
+        let cli = parse(&[
+            "verify",
+            "--html",
+            "-",
+            "--url",
+            "https://x.org/a",
+            "--title",
+            "T",
+        ])
+        .unwrap();
+        let Command::Verify { claim, page } = cli.command else {
+            panic!("not verify");
+        };
+        assert_eq!(page.html.as_deref(), Some("-"));
+        assert_eq!(page.url.as_deref(), Some("https://x.org/a"));
+        assert_eq!(claim.title.as_deref(), Some("T"));
+        // The markup needs its address; the address takes no other fields.
+        assert!(parse(&["verify", "--html", "page.html"]).is_err());
+        assert!(parse(&["verify", "--url", "https://x.org/a", "--author", "A"]).is_err());
+        assert!(parse(&["verify", "--url", "https://x.org/a", "some text"]).is_err());
+        assert!(parse(&["verify", "--url", "https://x.org/a"]).is_ok());
     }
 
     #[test]

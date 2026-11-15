@@ -67,6 +67,10 @@ pub struct Output {
 pub struct ToolError {
     pub kind: ToolErrorKind,
     pub message: String,
+    /// What the call spent before it failed, in USD (charged to the
+    /// session all the same): a document not identified was still
+    /// searched for.
+    pub cost_usd: f64,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -116,6 +120,7 @@ impl ToolError {
         ToolError {
             kind,
             message: message.into(),
+            cost_usd: 0.0,
         }
     }
 
@@ -158,7 +163,29 @@ impl From<EngineError> for ToolError {
     }
 }
 
-type Answer = Result<(Value, Vec<(ProviderId, Usage)>), ToolError>;
+/// A tool's JSON and usage, or why it failed and what it spent first.
+type Answer = Result<(Value, Vec<(ProviderId, Usage)>), Failed>;
+
+/// A tool that failed, and the usage of what it did before.
+struct Failed {
+    error: ToolError,
+    usage: Vec<(ProviderId, Usage)>,
+}
+
+impl From<ToolError> for Failed {
+    fn from(error: ToolError) -> Self {
+        Failed {
+            error,
+            usage: Vec::new(),
+        }
+    }
+}
+
+impl From<EngineError> for Failed {
+    fn from(e: EngineError) -> Self {
+        ToolError::from(e).into()
+    }
+}
 
 /// The engine tools over one engine. Share one between sessions.
 pub struct Tools {
@@ -187,7 +214,7 @@ impl Tools {
 
     /// Calls the tool `name` with `arguments` (a JSON object) for
     /// `session`: refused if it may spend and the session's budget is
-    /// spent; its usage is added to the session's.
+    /// spent; its usage is added to the session's, failed or not.
     pub async fn call(
         &self,
         session: &Session,
@@ -204,7 +231,7 @@ impl Tools {
             session.admit()?;
         }
         let full = arguments["full"].as_bool().unwrap_or(false);
-        let (mut structured, usage) = match name {
+        let answer = match name {
             "search" => self.search(parse(name, arguments)?).await,
             "search_supports" => self.supports(parse(name, arguments)?),
             "lookup" => self.lookup(parse(name, arguments)?).await,
@@ -216,7 +243,14 @@ impl Tools {
                     .await
             }
             _ => unreachable!("every spec has a tool"),
-        }?;
+        };
+        let (mut structured, usage) = match answer {
+            Ok(answer) => answer,
+            Err(Failed { mut error, usage }) => {
+                error.cost_usd = session.charge(&usage);
+                return Err(error);
+            }
+        };
         if !full {
             trim_authors(&mut structured);
         }
@@ -243,12 +277,12 @@ impl Tools {
             (Some(_), Some(_)) => {
                 return Err(ToolError::invalid(
                     "give `query` or `text`, not both: put keywords in the tree as {\"keywords\": \"…\"}",
-                ));
+                ).into());
             }
             (None, None) => {
-                return Err(ToolError::invalid(
-                    "give `query` (a query tree) or `text` (keywords)",
-                ));
+                return Err(
+                    ToolError::invalid("give `query` (a query tree) or `text` (keywords)").into(),
+                );
             }
         };
         page(&mut query, a.sort, a.limit, a.cursor)?;
@@ -268,7 +302,8 @@ impl Tools {
             return Err(ToolError::invalid(format!(
                 "`ids` takes 1 to {MAX_IDS} identifiers, not {}",
                 a.ids.len()
-            )));
+            ))
+            .into());
         }
         let mut extras = Extras::default();
         extras.full = a.full;
@@ -290,15 +325,14 @@ impl Tools {
                 return Err(ToolError::invalid(format!(
                     "`citations` takes 1 to {MAX_CITATIONS} citations, not {}",
                     cs.len()
-                )));
+                ))
+                .into());
             }
             (Some(_), Some(_)) => {
-                return Err(ToolError::invalid(
-                    "give `citation` or `citations`, not both",
-                ));
+                return Err(ToolError::invalid("give `citation` or `citations`, not both").into());
             }
             (None, None) => {
-                return Err(ToolError::invalid("give `citation` or `citations`"));
+                return Err(ToolError::invalid("give `citation` or `citations`").into());
             }
         };
         // As the CLI reads stdin lines: text, or a JSON object of fields.
@@ -312,7 +346,7 @@ impl Tools {
             })
             .collect();
         if one && let Err(reason) = &claims[0].claim {
-            return Err(ToolError::invalid(reason.clone()));
+            return Err(ToolError::invalid(reason.clone()).into());
         }
         let mut results: Vec<Option<Value>> = claims
             .iter()
@@ -334,33 +368,34 @@ impl Tools {
 
     async fn identify(&self, a: IdentifyArgs) -> Answer {
         if a.text.trim().is_empty() {
-            return Err(ToolError::invalid(
-                "`text` is empty: give the first page's text",
-            ));
+            return Err(ToolError::invalid("`text` is empty: give the first page's text").into());
         }
-        let found = self
+        let report = self
             .engine
             .identify(&a.text, a.title.as_deref(), a.title_hint.as_deref())
-            .await
-            .ok_or_else(|| {
-                ToolError::new(
+            .await;
+        let Some(found) = report.identified else {
+            return Err(Failed {
+                error: ToolError::new(
                     ToolErrorKind::NotFound,
                     "not identified: nothing on the page is sure enough (try `title_hint`, \
                      the largest type at the top of the page)",
-                )
-            })?;
+                ),
+                usage: report.usage,
+            });
+        };
         let v = &found.verification;
         let mut item = aspero_json::verification(json!({"input": found.input()}), v, a.full);
         item["identified"] = json!(true);
         item["decided_by"] = json!(found.decided_by.as_str());
-        Ok((item, v.report.usage.clone()))
+        Ok((item, report.usage))
     }
 
     /// `cites` and `cited_by`: a search by the relation alone, at the first
     /// source that can.
     async fn related(&self, relation: Relation, a: RelationArgs) -> Answer {
         if a.id.trim().is_empty() {
-            return Err(ToolError::invalid("`id` is empty"));
+            return Err(ToolError::invalid("`id` is empty").into());
         }
         let source = self
             .engine

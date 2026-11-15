@@ -690,7 +690,9 @@ A **`Session`** is one connection: its `Caller` (empty over stdio; over
 HTTP, the key) and a spend cap in USD (`--budget`, default $0.25). Tools that may spend are refused once the session has spent it,
 checked before each call; a call's cost is known only after it, so the
 last one can overshoot by its own cost. Spend is the engine's reported
-usage (OpenAlex's `cost`), as the CLI totals it; every result carries the
+usage (OpenAlex's `cost`), as the CLI totals it, charged whether or not
+the call succeeds (a document not identified was still searched for);
+every result carries the
 call's `usage` and the session's `spent_usd`, `budget_usd` and `left_usd`.
 `search_supports` is offline and never refused.
 

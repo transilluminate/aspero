@@ -87,7 +87,7 @@ pub use graph::{
     OddOne, OddReason, ReferencesPage, RelatedWork, RetractedReference, Section, Seed, SeedProblem,
     Stage,
 };
-pub use identify::{Decision, Identified, MAX_IDENTIFIERS};
+pub use identify::{Decision, Identified, IdentifyReport, MAX_IDENTIFIERS};
 #[cfg(feature = "openalex")]
 pub use keys::check_openalex_key;
 pub use keys::{KeyCheck, KeyStatus};

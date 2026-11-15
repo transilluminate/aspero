@@ -87,7 +87,11 @@ impl Handler {
                     .await
             }
         };
-        let cost = result.as_ref().map_or(0.0, |o| o.cost_usd);
+        // Spent all the same when the call failed after spending.
+        let cost = match &result {
+            Ok(output) => output.cost_usd,
+            Err(e) => e.cost_usd,
+        };
         if cost > 0.0 {
             self.shared.ledger_add(&k.id, cost);
         }

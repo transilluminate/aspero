@@ -780,6 +780,36 @@ async fn a_keys_daily_budget_outlasts_a_restart() {
     server.stop().await;
 }
 
+#[tokio::test(flavor = "multi_thread")]
+async fn a_failed_call_spends_from_the_keys_budget_too() {
+    let ledger = Arc::new(MemoryLedger::default());
+    let mut config = config(free_port());
+    config.keys = vec![key("full", FULL, &[Sources], 100.0)];
+    let server = start_with(config, None, ledger.clone()).await.unwrap();
+    let mut agent = Agent::new(server.port(), FULL);
+    agent.initialize().await;
+    // Not identified, after a paid search for the top of the page.
+    let page = "A study of nothing in particular\nAnon Ymous\n\nNothing to see here.";
+    let result = agent
+        .call(
+            "identify",
+            json!({"text": page, "title_hint": "A study of nothing in particular"}),
+        )
+        .await;
+    assert!(is_error(&result));
+    assert!(
+        text(&result).starts_with("Error (not_found): not identified"),
+        "{result}"
+    );
+    assert!(text(&result).contains("Session: $0.2500 spent"), "{result}");
+    let today = jiff::Timestamp::now()
+        .to_zoned(jiff::tz::TimeZone::UTC)
+        .date()
+        .to_string();
+    assert_eq!(ledger.spent("full", &today).unwrap(), SEARCH_COST);
+    server.stop().await;
+}
+
 const READ_TOOLS: [&str; 4] = [
     "history_search",
     "history_fail",

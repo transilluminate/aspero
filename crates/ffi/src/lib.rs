@@ -305,7 +305,8 @@ impl Aspero {
             async move {
                 let found = engine
                     .identify(&first_page, title.as_deref(), title_hint.as_deref())
-                    .await?;
+                    .await
+                    .identified?;
                 let claim = InputClaim {
                     input: found.input(),
                     key: None,

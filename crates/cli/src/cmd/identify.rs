@@ -34,6 +34,7 @@ pub async fn run(
     let Some(found) = engine
         .identify(&page, title.as_deref(), title_hint.as_deref())
         .await
+        .identified
     else {
         match out.format {
             Format::Text | Format::Table => {

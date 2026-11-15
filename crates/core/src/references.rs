@@ -317,6 +317,7 @@ impl<'a> List<'a> {
         let mut groups: Vec<Vec<Range<usize>>> = Vec::new();
         let mut last: Option<Marker> = None;
         for line in self.lines.iter().flatten() {
+            #[allow(clippy::match_same_arms)] // one rule an arm
             let starts = marker(self.line(line)).filter(|(m, _)| match (last, m) {
                 (None, _) => true,
                 (Some(Marker::Number(n)), Marker::Number(m)) => *m == n + 1,

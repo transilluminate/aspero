@@ -366,10 +366,12 @@ pub enum EngineError {
 impl EngineError {
     pub fn category(&self) -> ErrorCategory {
         match self {
-            EngineError::UnknownProvider(_) => ErrorCategory::Usage,
-            EngineError::Disabled(_) => ErrorCategory::Unsupported,
-            EngineError::NoCapableProvider(_) => ErrorCategory::Unsupported,
-            EngineError::NothingToSearch | EngineError::InvalidQuery(_) => ErrorCategory::Usage,
+            EngineError::UnknownProvider(_)
+            | EngineError::NothingToSearch
+            | EngineError::InvalidQuery(_) => ErrorCategory::Usage,
+            EngineError::Disabled(_) | EngineError::NoCapableProvider(_) => {
+                ErrorCategory::Unsupported
+            }
             EngineError::Unresolved { kind, .. } => match kind {
                 ErrorKind::NotFound => ErrorCategory::NotFound,
                 ErrorKind::BadRequest | ErrorKind::InvalidId => ErrorCategory::Usage,
@@ -387,10 +389,10 @@ impl EngineError {
 
     pub fn kind(&self) -> ErrorKind {
         match self {
-            EngineError::UnknownProvider(_) => ErrorKind::BadRequest,
-            EngineError::Disabled(_) => ErrorKind::Unsupported,
-            EngineError::NoCapableProvider(_) => ErrorKind::Unsupported,
-            EngineError::NothingToSearch | EngineError::InvalidQuery(_) => ErrorKind::BadRequest,
+            EngineError::UnknownProvider(_)
+            | EngineError::NothingToSearch
+            | EngineError::InvalidQuery(_) => ErrorKind::BadRequest,
+            EngineError::Disabled(_) | EngineError::NoCapableProvider(_) => ErrorKind::Unsupported,
             EngineError::Unresolved { kind, .. } => *kind,
             EngineError::Provider { error, .. } => error.kind(),
         }

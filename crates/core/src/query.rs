@@ -313,6 +313,7 @@ impl QueryNode {
                     t.value
                 ))
             }
+            #[allow(clippy::match_same_arms)] // each kind of node in turn
             QueryNode::Term(_) => Ok(()),
             QueryNode::Filter(FilterValue::Language(code)) => language(code)
                 .map(|_| ())

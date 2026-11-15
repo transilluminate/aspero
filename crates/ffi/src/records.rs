@@ -503,6 +503,7 @@ impl Lookup {
             .attempts
             .iter()
             .map(|a| {
+                #[allow(clippy::match_same_arms)] // the wildcard: see below
                 let (outcome, failure) = match &a.outcome {
                     Outcome::Found => (AttemptOutcome::Found, None),
                     Outcome::Failed(e) => (AttemptOutcome::Failed, Some(e)),
@@ -2049,6 +2050,9 @@ pub enum Coverage {
 }
 
 impl From<engine::Coverage> for Coverage {
+    // The wildcard is for variants the non-exhaustive enum adds later,
+    // not the named one it happens to map the same as.
+    #[allow(clippy::match_same_arms)]
     fn from(c: engine::Coverage) -> Self {
         match c {
             engine::Coverage::Known => Coverage::Known,
@@ -2147,6 +2151,9 @@ impl AnalysisKind {
 }
 
 impl From<engine::AnalysisKind> for AnalysisKind {
+    // The wildcard is for variants the non-exhaustive enum adds later,
+    // not the named one it happens to map the same as.
+    #[allow(clippy::match_same_arms)]
     fn from(k: engine::AnalysisKind) -> Self {
         match k {
             engine::AnalysisKind::RetractedReferences => AnalysisKind::RetractedReferences,
@@ -2176,6 +2183,9 @@ pub enum SeedProblem {
 }
 
 impl From<engine::SeedProblem> for SeedProblem {
+    // The wildcard is for variants the non-exhaustive enum adds later,
+    // not the named one it happens to map the same as.
+    #[allow(clippy::match_same_arms)]
     fn from(p: engine::SeedProblem) -> Self {
         match p {
             engine::SeedProblem::InvalidId => SeedProblem::InvalidId,
@@ -2239,6 +2249,9 @@ pub enum IncompleteKind {
 }
 
 impl From<engine::IncompleteKind> for IncompleteKind {
+    // The wildcard is for variants the non-exhaustive enum adds later,
+    // not the named one it happens to map the same as.
+    #[allow(clippy::match_same_arms)]
     fn from(k: engine::IncompleteKind) -> Self {
         match k {
             engine::IncompleteKind::Capped => IncompleteKind::Capped,
@@ -2264,6 +2277,9 @@ pub enum AnalysisStage {
 }
 
 impl From<engine::Stage> for AnalysisStage {
+    // The wildcard is for variants the non-exhaustive enum adds later,
+    // not the named one it happens to map the same as.
+    #[allow(clippy::match_same_arms)]
     fn from(s: engine::Stage) -> Self {
         match s {
             engine::Stage::Citing => AnalysisStage::Citing,
@@ -2333,6 +2349,9 @@ pub enum OddReason {
 }
 
 impl From<engine::OddReason> for OddReason {
+    // The wildcard is for variants the non-exhaustive enum adds later,
+    // not the named one it happens to map the same as.
+    #[allow(clippy::match_same_arms)]
     fn from(r: engine::OddReason) -> Self {
         match r {
             engine::OddReason::NoLinks => OddReason::NoLinks,

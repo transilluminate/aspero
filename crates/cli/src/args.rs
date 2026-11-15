@@ -435,8 +435,9 @@ exist with the same title and authors but a different year.
 Stops early when the claim's identifiers, or two providers, confirm a match;
 otherwise OpenAlex title searches run too ($0.001 each, at most two per claim).
 
-Batch input on stdin (`verify -`), one claim per line: a free-text
-reference, or a JSON object of what you know (more reliable than text):
+Batch input on stdin (`verify -`, or `verify` alone when piped, as `lookup`
+reads it), one claim per line: a free-text reference, or a JSON object of
+what you know (more reliable than text):
   {\"key\": \"pe.md:7\", \"title\": \"...\", \"authors\": [\"Meyer G\"], \"year\": 2014,
    \"journal\": \"N Engl J Med\", \"volume\": 370, \"page\": \"1402-11\", \"doi\": \"...\"}
   keys: text, title, authors, year, journal (or container), volume, page,
@@ -823,8 +824,8 @@ pub enum CacheAction {
 /// A citation claim: free text and/or fields.
 #[derive(Debug, Args)]
 pub struct ClaimArgs {
-    /// The citation as free text or an identifier; `-` reads one claim per
-    /// stdin line.
+    /// The citation as free text or an identifier; `-` (or none, with no
+    /// fields given, when piped) reads one claim per stdin line.
     pub text: Option<String>,
     /// Claimed title.
     #[arg(long)]

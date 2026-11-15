@@ -1,5 +1,21 @@
 # Changelog
 
+## Unreleased
+
+Added:
+
+- Publishers' article addresses, pasted or dragged from a browser, are
+  read as the work they show, by `scan` and so by `lookup`, `verify`,
+  `identify`, MCP and the app: Nature's `nature.com/articles/…` pages as
+  their DOI (`nature14539` is `10.1038/nature14539`), and ScienceDirect,
+  Cell and The Lancet pages by Elsevier's PII, a new kind of identifier
+  (`pii:S2772940026000032`). Crossref finds the DOI a PII belongs to (one
+  free call), and the work is then looked up as that DOI, so results are
+  the same as for the DOI. A PII Crossref doesn't know is not found.
+- Each mention `scan` finds says whether it was read from a web address
+  (`from_url` in JSON, only when it was; `fromUrl` in Swift), so the app
+  can say a work was found from its address.
+
 ## 0.22.1
 
 Changed (the CLI's tables and text; JSON and the other formats are as

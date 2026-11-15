@@ -624,7 +624,8 @@ fn specs(sources: &[String]) -> Vec<ToolSpec> {
             "lookup",
             "Look up works by identifier",
             "Look up works by identifier: DOIs, arXiv IDs, PMIDs, PMCIDs, NCBI Bookshelf \
-             IDs, ISBNs, OpenAlex IDs and their URLs. One result per identifier, in order, \
+             IDs, ISBNs, OpenAlex IDs, Elsevier PIIs and their URLs, publishers' article \
+             pages included (nature.com, ScienceDirect, Cell, The Lancet). One result per identifier, in order, \
              with its `status` (found, not_found, invalid, …). Lookups by identifier are free at \
              OpenAlex. `full` adds notices \
              (retractions, corrections), open access and the latest version of superseded \

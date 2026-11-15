@@ -19,6 +19,11 @@ const SCHEMELESS_HOSTS: &[&str] = &[
     "pmc.ncbi.nlm.nih.gov",
     "semanticscholar.org",
     "api.semanticscholar.org",
+    "nature.com",
+    "sciencedirect.com",
+    "linkinghub.elsevier.com",
+    "cell.com",
+    "thelancet.com",
 ];
 
 #[derive(Debug, Clone, PartialEq, Eq)]

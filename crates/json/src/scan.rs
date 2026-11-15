@@ -21,6 +21,11 @@ pub fn mention(file: &str, text: &str, m: &Mention) -> Value {
     if let Some(alternative) = m.alternative(text) {
         out["alternative"] = json!(alternative);
     }
+    // Read from a web address (a publisher's page, a doi.org link), so a
+    // front end can say it was found from the address.
+    if m.from_url {
+        out["from_url"] = json!(true);
+    }
     out
 }
 
@@ -70,6 +75,18 @@ mod tests {
                 "context": "PE trials: PEITHO (doi:10.1056/NEJMoa1302097).",
             })
         );
+    }
+
+    #[test]
+    fn mentions_read_from_addresses_say_so() {
+        let text = "See https://www.sciencedirect.com/science/article/pii/S2772940026000032";
+        let m = mention("-", text, &scan(text)[0]);
+        assert_eq!(m["id"], "pii:S2772940026000032");
+        assert_eq!(m["kind"], "pii");
+        assert_eq!(m["from_url"], true);
+        let text = "doi:10.1038/nature14539";
+        let m = mention("-", text, &scan(text)[0]);
+        assert!(m.get("from_url").is_none(), "{m}");
     }
 
     #[test]

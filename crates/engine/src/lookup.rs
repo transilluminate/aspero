@@ -1,7 +1,9 @@
 //! Lookups by identifier: routing across providers, the cache, and
 //! sharing calls in flight.
 
-use aspero_core::{Error, ErrorCategory, FieldSet, ProviderId, SourceRecord, Usage, WorkId};
+use aspero_core::{
+    Error, ErrorCategory, FieldSet, IdKind, ProviderId, SourceRecord, Usage, WorkId,
+};
 
 use crate::inflight::Answer;
 use crate::{Engine, Entry, Served, add_usage};
@@ -104,6 +106,60 @@ impl Engine {
     /// As [`lookup`](Self::lookup), without asking `skip` (a provider
     /// whose answer is already known).
     pub(crate) async fn lookup_skipping(
+        &self,
+        ids: &[WorkId],
+        fields: FieldSet,
+        skip: Option<&ProviderId>,
+    ) -> LookupReport {
+        let mut report = self.chain(ids, fields, skip).await;
+        self.follow_piis(&mut report, fields, skip).await;
+        report
+    }
+
+    /// A PII found (by Crossref, the one source that can) is looked up
+    /// again as the DOI its record gives, through the whole chain: the
+    /// answer is the record a lookup of that DOI gives (OpenAlex's,
+    /// usually), carrying the PII too, so verdicts and merging are a
+    /// DOI's. The DOI's attempts follow the PII's. Where the DOI isn't
+    /// found (all failing), the PII's record stands.
+    async fn follow_piis(
+        &self,
+        report: &mut LookupReport,
+        fields: FieldSet,
+        skip: Option<&ProviderId>,
+    ) {
+        let wanted: Vec<(usize, WorkId)> = report
+            .results
+            .iter()
+            .enumerate()
+            .filter(|(_, r)| r.id.kind() == IdKind::Pii)
+            .filter_map(|(i, r)| {
+                let ids = &r.record.as_ref()?.ids;
+                Some((i, ids.iter().find(|id| id.kind() == IdKind::Doi)?.clone()))
+            })
+            .collect();
+        if wanted.is_empty() {
+            return;
+        }
+        let dois: Vec<WorkId> = wanted.iter().map(|(_, doi)| doi.clone()).collect();
+        let by_doi = self.chain(&dois, fields, skip).await;
+        for (provider, usage) in by_doi.usage {
+            add_usage(&mut report.usage, &provider, usage);
+        }
+        for ((i, _), found) in wanted.into_iter().zip(by_doi.results) {
+            let result = &mut report.results[i];
+            result.attempts.extend(found.attempts);
+            if let Some(mut record) = found.record {
+                if !record.ids.contains(&result.id) {
+                    record.ids.push(result.id.clone());
+                }
+                result.record = Some(record);
+            }
+        }
+    }
+
+    /// Asks each provider in turn about the IDs still missing.
+    async fn chain(
         &self,
         ids: &[WorkId],
         fields: FieldSet,

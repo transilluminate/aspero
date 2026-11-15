@@ -169,14 +169,56 @@ scripts/       fixture recorders, one per provider
 ## Identity and data model
 
 - **Identifiers**: DOI, arXiv, PMID, PMCID, OpenAlex, S2 paperId, S2
-  CorpusId, ISBN, NCBI Bookshelf (NBK). Each parses bare, `kind:`-prefixed
-  and URL forms into one canonical value; display re-parses to itself
-  (property-tested). Bare digits are ambiguous and refused, except
-  checksum-valid ISBN-13s.
+  CorpusId, ISBN, NCBI Bookshelf (NBK), Elsevier PII. Each parses bare,
+  `kind:`-prefixed and URL forms into one canonical value; display
+  re-parses to itself (property-tested). Bare digits are ambiguous and
+  refused, except checksum-valid ISBN-13s.
+- **Publishers' article URLs** (#95), as pasted or dragged from a
+  browser, read as the identifier they show (query, fragment, trailing
+  `/` and `.pdf` aside):
+  - a DOI in the path (Wiley, NEJM, Frontiers, Springer and BMC's
+    `/article/10.…`), page suffixes (`/full`, `/pdf`, …) dropped;
+  - Nature's `nature.com/articles/<suffix>`: `10.1038/<suffix>`, for
+    every shape seen (`nature14539`, `s41586-020-2649-2`, `ncomms1234`,
+    `srep01234`, `nbt.3122`, `35057062`, `171737a0`, `d41586-…`), but
+    `10.1057` for the Palgrave journals hosted there (`s41599-…`;
+    `palcomms20162` is `palcomms.2016.2`). Older pages named by only part
+    of their DOI aren't read rather than read wrong (`/articles/6605004`
+    is `sj.bjc.6605004`, `/articles/ncb0200_57` is `35000001`);
+  - Elsevier's PII (`pii:`), from ScienceDirect's
+    `/science/article/pii/<PII>` (and `/abs/pii/`, `/am/pii/`),
+    `linkinghub.elsevier.com/retrieve/pii/`, Cell's `…/fulltext/S…`
+    (`/abstract/`, `/pdf/`) and the Lancet's `…/article/PIIS…/fulltext`.
+    Canonically compact, `S` and 16 characters (an X only where the
+    ISSN's or the PII's check character is), as Crossref holds it:
+    `S0140-6736(20)30183-5` is `S0140673620301835`. Journal PIIs only:
+    a book chapter's `B…` isn't read. Only Crossref looks
+    PIIs up (its `alternative-id` filter, one free list call for many:
+    the compact form, upper case, finds them; the punctuated form and
+    lower case find nothing, checked 2026-11-15 on ScienceDirect, Lancet
+    and Cell PIIs). The engine then looks the PII's DOI up through the
+    whole chain, so a PII's lookup is that DOI's (OpenAlex's record,
+    usually), the PII added to its identifiers, and verdicts and merging
+    are a DOI's; where the DOI isn't found again, Crossref's record
+    stands. A PII Crossref doesn't know is not found;
+  - arXiv's `/abs/`, `/pdf/` and `/html/`, a version and `.pdf` kept or
+    dropped as written.
+
+  Not read: JAMA Network's `/fullarticle/<number>` (Crossref holds the
+  number only in the record's resource URL, which can't be filtered on,
+  and no `alternative-id`: checked 2026-11-15; nothing else free maps
+  it); Oxford Academic's `/article/<vol>/<issue>/<page>/<id>` (only the
+  page's `citation_doi` says, and aspero doesn't fetch pages); OpenReview
+  (its ids aren't in Crossref, nor in any other source aspero asks).
 - **Scanning** (`id::scan`, `aspero scan`) finds every identifier
   mentioned in a document, with its position and text as written; which
   mentions matter is the caller's call. Shapes that prose imitates (bare
-  digits, `W1`, `1706.03762`) count only when labelled, prefixed or URLs.
+  digits, `W1`, `1706.03762`, a PII) count only when labelled, prefixed
+  or URLs. Each mention says whether it was written as a web address
+  (`from_url`: a link with its scheme, a host known without one such as
+  `doi.org/…` or `nature.com/…`, or a DOI in a host's path). Identifier
+  links (doi.org, PubMed, arXiv) count as much as publishers' pages: the
+  question is how it was written, not which kind it is.
   Claims and BibTeX URLs use the same scanner. It parses only pieces
   holding a byte from `/` to `:` (digits, `/`, `:`), found a chunk at a
   time, and reads the piece before as a label only then: ~1 GB/s on
@@ -674,6 +716,11 @@ fixture recorded with different parameters once hid a ranking bug.
 - **doi.org.** Content negotiation resolves any registered DOI through its
   agency (it found a Zenodo DOI minutes old); its 404 is authoritative.
   One DOI per request.
+- **Crossref and PIIs.** Elsevier deposits each work's PII as an
+  `alternative-id`, compact and upper case (`filter=alternative-id:
+  S2772940026000032`; repeated filters OR). Other publishers put other
+  numbers there (JAMA none), so only PII-shaped values are read, and only
+  when looking a PII up. One odd deposit holds `S0000000000000000`.
 - **Europe PMC.** PMIDs, PMCIDs and NBK IDs (`BOOK_ID:`; StatPearls
   chapters have PMIDs too) — the only provider for them — biomedical
   abstracts, "Retracted Publication" flags. Cursor paging keeps relevance.
@@ -880,7 +927,8 @@ so any executor can await them. Cancellation is explicit: UniFFI's Swift
 bindings (0.32) don't pass a `Task`'s cancellation to Rust, so calls take
 an optional `CallToken` the app cancels from `withTaskCancellationHandler`;
 the call's task is aborted and it throws `Cancelled`. Mentions carry
-`utf16` ranges for `NSString`. Hold one handle per app. With the `mcp`
+`utf16` ranges for `NSString`, and `fromUrl` when read from a web
+address. Hold one handle per app. With the `mcp`
 feature (on in the xcframework), `McpServer` serves agents over HTTP
 through the handle, and the app's own tools through `McpHost` (see
 Agents (MCP)). `just xcframework` builds `AsperoFFI.xcframework` (static, arm64,

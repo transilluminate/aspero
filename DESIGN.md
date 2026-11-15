@@ -342,8 +342,10 @@ from `cites:` pages); G3 OpenCitations as a free source of citing works.
 - **Identity.** Seeds, and works found, are one work when they share a
   DOI, PMID or arXiv ID (published records list their preprint's arXiv
   copy), else on the same title (similarity ≥ 0.9, a reply or erratum
-  never the work it answers), first author and years ±1. Merged ids are
-  kept; counts are over merged seeds ("cited by k of n").
+  never the work it answers), first author and years ±1; or one work
+  through another (a record carrying one's DOI and the other's arXiv
+  ID: every pair is compared). Merged ids are kept; counts are over
+  merged seeds ("cited by k of n").
 - **Retracted references:** the union of the seeds' references checked
   with `openalex:A|B|…,is_retracted:true`, 100 per request ($0.0001; the
   same as a lookup batch), plus, without calls, notices already cached:

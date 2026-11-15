@@ -7,6 +7,7 @@ use aspero_core::matching::{same_work, same_work_id};
 use aspero_core::{ErrorKind, FieldSet, IdKind, SourceRecord, WorkId};
 use futures::StreamExt;
 
+use super::spend::classes;
 use super::{Incomplete, IncompleteKind, MAX_FILTER, Seed, SeedProblem, Spend, openalex_id};
 use crate::{CallOptions, Engine, Entry, LookupResult, Outcome};
 
@@ -341,43 +342,44 @@ fn batches(ids: &[WorkId], pending: &[usize], entry: &Entry) -> Vec<Vec<usize>> 
         .collect()
 }
 
-/// Marks seeds that are one work (`same_as` the first of them) and groups
-/// the resolved ones, in order of their first seed.
+/// Marks seeds that are one work (the same OpenAlex work, or `same_work`;
+/// directly or through others) `same_as` the first of them, and groups the
+/// resolved ones, in order of their first seed.
 pub(super) fn merge_seeds(seeds: &mut [Seed]) -> Vec<Group> {
+    let resolved: Vec<usize> = (0..seeds.len())
+        .filter(|&i| seeds[i].record.is_some())
+        .collect();
+    let records: Vec<&SourceRecord> = resolved
+        .iter()
+        .filter_map(|&i| seeds[i].record.as_ref())
+        .collect();
+    let classes = classes(records.len(), |a, b| {
+        let (x, y) = (records[a], records[b]);
+        let same_id = openalex_id(x).is_some_and(|w| Some(w) == openalex_id(y));
+        same_id || same_work(x, y)
+    });
     let mut groups: Vec<Group> = Vec::new();
-    for i in 0..seeds.len() {
-        let Some(record) = &seeds[i].record else {
-            continue;
+    for class in classes {
+        let mut group = Group {
+            members: class.iter().map(|&k| resolved[k]).collect(),
+            works: BTreeSet::new(),
+            references: None,
         };
-        let same = groups.iter().position(|g| {
-            g.members.iter().any(|&m| {
-                let other = seeds[m]
-                    .record
-                    .as_ref()
-                    .expect("grouped seeds are resolved");
-                openalex_id(other) == openalex_id(record) || same_work(other, record)
-            })
-        });
-        let work = openalex_id(record).cloned();
-        let cited: Option<BTreeSet<WorkId>> = record
-            .references
-            .as_ref()
-            .map(|r| r.iter().cloned().collect());
-        match same {
-            Some(g) => {
-                let group = &mut groups[g];
-                seeds[i].same_as = Some(group.members[0]);
-                group.members.push(i);
-                group.works.extend(work);
-                if let Some(cited) = cited {
-                    group.references.get_or_insert_default().extend(cited);
-                }
+        for &k in &class {
+            let record = records[k];
+            group.works.extend(openalex_id(record).cloned());
+            if let Some(cited) = &record.references {
+                group
+                    .references
+                    .get_or_insert_default()
+                    .extend(cited.iter().cloned());
             }
-            None => groups.push(Group {
-                members: vec![i],
-                works: work.into_iter().collect(),
-                references: cited,
-            }),
+        }
+        groups.push(group);
+    }
+    for group in &groups {
+        for &m in &group.members[1..] {
+            seeds[m].same_as = Some(group.members[0]);
         }
     }
     groups

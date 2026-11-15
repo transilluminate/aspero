@@ -184,31 +184,74 @@ pub(super) struct Merged<T> {
 }
 
 /// Merges the works of `found` (id, record when looked up, value; best
-/// first) that are one work (`same_work`), in order of their first
-/// version, `join`ing their values. Works without a record merge with none.
+/// first) that are one work (`same_work`), directly or through others (a
+/// record carrying one's DOI and another's arXiv ID), in order of their
+/// first version, `join`ing their values. Works without a record merge
+/// with none.
 pub(super) fn merge_versions<T>(
     found: Vec<(WorkId, Option<SourceRecord>, T)>,
     mut join: impl FnMut(&mut T, T),
 ) -> Vec<Merged<T>> {
-    let mut merged: Vec<Merged<T>> = Vec::new();
-    for (id, record, value) in found {
-        let same = record.as_ref().and_then(|r| {
-            merged
-                .iter_mut()
-                .find(|m| m.record.as_ref().is_some_and(|other| same_work(other, r)))
-        });
-        match same {
-            Some(m) => {
-                m.ids.push(id);
-                join(&mut m.value, value);
+    let records: Vec<Option<&SourceRecord>> = found.iter().map(|(_, r, _)| r.as_ref()).collect();
+    let classes = classes(found.len(), |a, b| match (records[a], records[b]) {
+        (Some(x), Some(y)) => same_work(x, y),
+        _ => false,
+    });
+    let mut found: Vec<Option<(WorkId, Option<SourceRecord>, T)>> =
+        found.into_iter().map(Some).collect();
+    let mut take = |k: usize| found[k].take().expect("each work in one class");
+    classes
+        .into_iter()
+        .map(|class| {
+            let (id, record, mut value) = take(class[0]);
+            let mut ids = vec![id.clone()];
+            for &k in &class[1..] {
+                let (other, _, more) = take(k);
+                ids.push(other);
+                join(&mut value, more);
             }
-            None => merged.push(Merged {
-                ids: vec![id.clone()],
+            Merged {
                 id,
+                ids,
                 record,
                 value,
-            }),
+            }
+        })
+        .collect()
+}
+
+/// The classes of `0..n` that `same` joins, directly or through others
+/// (every pair asked: `n` is a few hundred at most), each in order, in
+/// order of their first.
+pub(super) fn classes(n: usize, same: impl Fn(usize, usize) -> bool) -> Vec<Vec<usize>> {
+    fn root(parent: &mut [usize], mut i: usize) -> usize {
+        while parent[i] != i {
+            parent[i] = parent[parent[i]];
+            i = parent[i];
+        }
+        i
+    }
+    let mut parent: Vec<usize> = (0..n).collect();
+    for a in 0..n {
+        for b in a + 1..n {
+            let (x, y) = (root(&mut parent, a), root(&mut parent, b));
+            if x != y && same(a, b) {
+                // The earlier root stays: a class's root is its first.
+                parent[x.max(y)] = x.min(y);
+            }
         }
     }
-    merged
+    let mut classes: Vec<Vec<usize>> = Vec::new();
+    let mut at: Vec<Option<usize>> = vec![None; n];
+    for i in 0..n {
+        let r = root(&mut parent, i);
+        match at[r] {
+            Some(c) => classes[c].push(i),
+            None => {
+                at[r] = Some(classes.len());
+                classes.push(vec![i]);
+            }
+        }
+    }
+    classes
 }

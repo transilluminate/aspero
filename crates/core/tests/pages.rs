@@ -29,17 +29,36 @@ fn jama() {
     let c = p.claim.unwrap();
     assert_eq!(
         c.title.as_deref(),
-        Some(
-            "Semaglutide and Kidney Outcomes in Adults With Type 2 Diabetes and Chronic \
-             Kidney Disease: A Randomized Clinical Trial"
-        )
+        Some("Treatment of Acute Ischemic Stroke: A Review")
     );
-    assert_eq!(c.authors, ["Rossing, Peter", "Tuttle, Katherine R."]);
+    assert_eq!(c.authors, ["Albers, Gregory W.", "Heit, Jeremy J."]);
     assert_eq!(c.container.as_deref(), Some("JAMA"));
     assert_eq!(c.year, Some(2026));
-    assert_eq!(c.volume.as_deref(), Some("335"));
-    assert_eq!(c.page.as_deref(), Some("221-232"));
+    // Online first: no volume or pages yet.
+    assert_eq!(c.volume, None);
+    assert_eq!(c.page, None);
     assert_eq!(c.ids.len(), 1);
+}
+
+#[test]
+fn jama_json_ld_alone() {
+    // Without the Highwire tags, the article's JSON-LD block says the
+    // same (the website's block is passed over).
+    let html: String = fixture("jama.html")
+        .lines()
+        .filter(|l| l.contains("ld+json"))
+        .collect();
+    let p = claim_from_page(
+        Some(&html),
+        "https://jamanetwork.com/journals/jama/fullarticle/2856706",
+        None,
+    );
+    assert_eq!(p.source, PageSource::JsonLd);
+    assert_eq!(ids(&p), ["doi:10.1001/jama.2026.19482"]);
+    let c = p.claim.unwrap();
+    assert_eq!(c.authors, ["Gregory W. Albers", "Jeremy J. Heit"]);
+    assert_eq!(c.container.as_deref(), Some("JAMA"));
+    assert_eq!(c.year, Some(2026));
 }
 
 #[test]

@@ -338,6 +338,14 @@ pub struct ProviderUsage {
     /// Left in the budget period.
     pub remaining: Option<f64>,
     pub resets_at: Option<SystemTime>,
+    /// The budget for the period (OpenAlex: the daily allowance), as the
+    /// provider says it.
+    #[uniffi(default = None)]
+    pub limit: Option<f64>,
+    /// A prepaid balance left beside the period's budget, where the
+    /// provider says one.
+    #[uniffi(default = None)]
+    pub prepaid_remaining: Option<f64>,
 }
 
 pub(crate) fn usage(usage: &[(aspero_core::ProviderId, aspero_core::Usage)]) -> Vec<ProviderUsage> {
@@ -348,6 +356,8 @@ pub(crate) fn usage(usage: &[(aspero_core::ProviderId, aspero_core::Usage)]) -> 
             cost: u.cost,
             remaining: u.remaining,
             resets_at: u.resets_at.map(time),
+            limit: u.limit,
+            prepaid_remaining: u.prepaid_remaining,
         })
         .collect()
 }
@@ -2654,6 +2664,19 @@ mod tests {
         for r in engine::Reason::ALL {
             assert_eq!(name(Reason::new(r, &candidates)), r.as_str());
         }
+    }
+
+    #[test]
+    fn usage_carries_the_budget_and_prepaid_balance() {
+        let mut u = aspero_core::Usage::default();
+        u.cost = Some(0.001);
+        u.limit = Some(1.0);
+        u.prepaid_remaining = Some(4.5);
+        let used = usage(&[(ProviderId::from_static("openalex"), u)]);
+        assert_eq!(used[0].provider, "openalex");
+        assert_eq!(used[0].limit, Some(1.0));
+        assert_eq!(used[0].prepaid_remaining, Some(4.5));
+        assert_eq!(used[0].remaining, None);
     }
 
     #[test]

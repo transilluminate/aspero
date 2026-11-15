@@ -26,6 +26,8 @@ struct Dependencies {
     dependencies: Vec<Dependency>,
 }
 
+// Like every command: main hands over what it parsed.
+#[allow(clippy::needless_pass_by_value)]
 pub fn run(out: Out) -> Exit {
     if out.full {
         match out.format {

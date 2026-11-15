@@ -110,7 +110,9 @@ impl Scripted {
     fn found(&self, node: &QueryNode, out: &mut Vec<SourceRecord>) {
         match node {
             QueryNode::All(nodes) | QueryNode::Any(nodes) => {
-                nodes.iter().for_each(|n| self.found(n, out));
+                for n in nodes {
+                    self.found(n, out);
+                }
             }
             QueryNode::Term(t) if t.field == TermField::Title => out.extend(self.titled(&t.value)),
             QueryNode::Relation(r) => {
@@ -156,13 +158,12 @@ impl Provider for Scripted {
             tokio::time::sleep(delay).await;
         }
         let mut records = Vec::new();
-        match &query.tree {
-            Some(tree) => self.found(tree, &mut records),
-            None => {
-                records.extend(self.titled(&query.text));
-                if let Some(title) = &query.title {
-                    records.extend(self.titled(title));
-                }
+        if let Some(tree) = &query.tree {
+            self.found(tree, &mut records);
+        } else {
+            records.extend(self.titled(&query.text));
+            if let Some(title) = &query.title {
+                records.extend(self.titled(title));
             }
         }
         let hits = records
@@ -248,7 +249,7 @@ pub fn engine(providers: Vec<Arc<Scripted>>) -> Engine {
         .into_iter()
         .enumerate()
         .fold(Engine::builder(), |b, (i, p)| {
-            b.provider(p, ResiliencePolicy::default(), i as i32)
+            b.provider(p, ResiliencePolicy::default(), i32::try_from(i).unwrap())
         })
         .build()
 }

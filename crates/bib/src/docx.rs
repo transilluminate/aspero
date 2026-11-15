@@ -109,7 +109,7 @@ impl Fields {
         let mut in_text = false;
         loop {
             match reader.read_event() {
-                Ok(Event::Start(e)) | Ok(Event::Empty(e)) => match e.name().as_ref() {
+                Ok(Event::Start(e) | Event::Empty(e)) => match e.name().as_ref() {
                     b"w:fldChar" => match attr(&e, b"w:fldCharType").as_deref() {
                         Some("begin") => open.push(String::new()),
                         Some("end") => {
@@ -139,7 +139,7 @@ impl Fields {
                 Ok(Event::Text(t)) => {
                     let Ok(s) = t.decode() else { continue };
                     let s = quick_xml::escape::unescape(&s)
-                        .map_or_else(|_| s.to_string(), |u| u.into_owned());
+                        .map_or_else(|_| s.to_string(), std::borrow::Cow::into_owned);
                     if in_instr {
                         if let Some(instr) = open.last_mut() {
                             instr.push_str(&s);
@@ -213,7 +213,11 @@ impl Fields {
             let mut entry = crate::csl::entry(&csl, self.entries.len() + 1);
             // Zotero's item key ends its URI: …/items/ABCD1234.
             if identity.contains("/items/") {
-                entry.key = identity.rsplit('/').next().unwrap_or_default().to_owned();
+                identity
+                    .rsplit('/')
+                    .next()
+                    .unwrap_or_default()
+                    .clone_into(&mut entry.key);
             }
             self.seen.push(identity);
             self.entries.push(entry);
@@ -276,7 +280,7 @@ mod tests {
     #[test]
     fn zotero_fields_become_claims_once_each() {
         let body = format!(
-            r#"<w:p><w:r><w:t>Deep nets work </w:t></w:r>{}<w:r><w:t>.</w:t></w:r></w:p><w:p>{}</w:p><w:p><w:r><w:t>References &amp; notes</w:t></w:r></w:p>"#,
+            r"<w:p><w:r><w:t>Deep nets work </w:t></w:r>{}<w:r><w:t>.</w:t></w:r></w:p><w:p>{}</w:p><w:p><w:r><w:t>References &amp; notes</w:t></w:r></w:p>",
             zotero(LECUN, "(LeCun et al., 2015)"),
             zotero(LECUN, "(LeCun et al., 2015)"),
         );
@@ -313,7 +317,7 @@ mod tests {
 
     #[test]
     fn documents_without_fields_give_their_text() {
-        let body = r#"<w:p><w:r><w:t>1. Smith J. A study. 2020.</w:t></w:r></w:p>"#;
+        let body = r"<w:p><w:r><w:t>1. Smith J. A study. 2020.</w:t></w:r></w:p>";
         let read = read_docx(&docx(body, None)).unwrap();
         assert!(read.entries.is_empty());
         assert_eq!(read.manager, None);

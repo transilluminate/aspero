@@ -231,7 +231,7 @@ impl Aspero {
             .disable(&config.disabled_sources)
             .map_err(|e| setup(e.to_string()))?;
         standard_config.cache_policy = cache_policy;
-        standard_config.mailto = mailto.clone();
+        standard_config.mailto.clone_from(&mailto);
         standard_config.pacing = cache.clone().map(|c| c as _);
         standard_config.cache = cache.clone().map(|c| c as _);
         let engine = standard(standard_config).map_err(|e| setup(e.to_string()))?;
@@ -485,6 +485,8 @@ impl Aspero {
     /// (an author id that's neither an ORCID nor an OpenAlex id, an unknown
     /// language code, a date that isn't one).
     #[uniffi::method(default(since = None))]
+    // Exported: UniFFI hands the arguments over by value.
+    #[allow(clippy::needless_pass_by_value)]
     pub fn search_supports(
         &self,
         source: Option<String>,
@@ -511,6 +513,8 @@ impl Aspero {
 
     /// The identifiers mentioned in `text`, in order, where and as written.
     /// Offline.
+    // Exported: UniFFI hands the arguments over by value.
+    #[allow(clippy::needless_pass_by_value)]
     pub fn scan(&self, text: String) -> Vec<Mention> {
         let mut utf16 = Utf16Offsets::new(&text);
         aspero_core::id::scan(&text)
@@ -522,6 +526,8 @@ impl Aspero {
     /// The references in a pasted list (numbered, bulleted, one per
     /// paragraph or line; wrapped lines rejoined), each ready to verify.
     /// Offline.
+    // Exported: UniFFI hands the arguments over by value.
+    #[allow(clippy::needless_pass_by_value)]
     pub fn split_references(&self, text: String) -> Vec<Reference> {
         let mut utf16 = Utf16Offsets::new(&text);
         aspero_core::split_references(&text)
@@ -532,6 +538,8 @@ impl Aspero {
 
     /// A BibTeX/BibLaTeX, RIS or CSL-JSON file's entries, each a claim to
     /// verify; the format is told from the contents. Offline.
+    // Exported: UniFFI hands the arguments over by value.
+    #[allow(clippy::needless_pass_by_value)]
     pub fn read_references(&self, text: String) -> Result<Bibliography, ReadError> {
         let (format, entries) = aspero_bib::read(&text)?;
         Ok(Bibliography {
@@ -544,12 +552,16 @@ impl Aspero {
     /// each work once as a claim to verify, and the document's text.
     /// Throws `ReadError.Unrecognised` for anything but a .docx file.
     /// Offline.
+    // Exported: UniFFI hands the arguments over by value.
+    #[allow(clippy::needless_pass_by_value)]
     pub fn read_docx(&self, data: Vec<u8>) -> Result<DocxReferences, ReadError> {
         Ok(aspero_bib::docx::read_docx(&data)?.into())
     }
 
     /// Works as BibTeX entries (keys kept distinct) or RIS records, one
     /// after another, or as a CSL-JSON array (keyed as BibTeX). Offline.
+    // Exported: UniFFI hands the arguments over by value.
+    #[allow(clippy::needless_pass_by_value)]
     pub fn export(&self, works: Vec<Work>, format: ExportFormat) -> String {
         if format == ExportFormat::CslJson {
             let core: Vec<_> = works.iter().map(Work::to_core).collect();
@@ -608,6 +620,8 @@ impl Aspero {
     /// the language of terms like "et al."; by default, the style's own.
     /// Offline.
     #[uniffi::method(default(locale = None))]
+    // Exported: UniFFI hands the arguments over by value.
+    #[allow(clippy::needless_pass_by_value)]
     pub fn cite(
         &self,
         works: Vec<Work>,

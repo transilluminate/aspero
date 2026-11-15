@@ -254,9 +254,10 @@ impl Engine {
                 provider,
                 error: Error::UnsupportedQuery(format!("{reason}, and no other source can")),
             }),
-            None => Err(EngineError::NoCapableProvider(match citation {
-                true => "citation search",
-                false => "search",
+            None => Err(EngineError::NoCapableProvider(if citation {
+                "citation search"
+            } else {
+                "search"
             })),
         }
     }
@@ -513,12 +514,13 @@ impl Engine {
 /// ([`Provider::since_unsupported`]).
 fn check_since(entry: &Entry, since: Option<Date>) -> Result<(), EngineError> {
     let caps = entry.provider.capabilities();
-    match since.is_some() && !caps.search_filters.contains(&Filter::Since) {
-        true => Err(EngineError::Provider {
+    if since.is_some() && !caps.search_filters.contains(&Filter::Since) {
+        Err(EngineError::Provider {
             provider: entry.provider.id(),
             error: Error::UnsupportedQuery(entry.provider.since_unsupported()),
-        }),
-        false => Ok(()),
+        })
+    } else {
+        Ok(())
     }
 }
 
@@ -526,7 +528,9 @@ fn check_since(entry: &Entry, since: Option<Date>) -> Result<(), EngineError> {
 fn relation_ids<'a>(tree: &'a mut QueryNode, out: &mut Vec<&'a mut String>) {
     match tree {
         QueryNode::All(nodes) | QueryNode::Any(nodes) | QueryNode::None(nodes) => {
-            nodes.iter_mut().for_each(|n| relation_ids(n, out));
+            for n in nodes {
+                relation_ids(n, out);
+            }
         }
         QueryNode::Relation(r) => out.push(&mut r.id),
         _ => {}
@@ -537,7 +541,7 @@ fn relation_ids<'a>(tree: &'a mut QueryNode, out: &mut Vec<&'a mut String>) {
 /// how far: a years filter that always applies (the tree itself, or one of
 /// its top-level all) with an upper year leaves the tree as it is; one
 /// with only a first year gains `year` as its last; otherwise the tree is
-/// ANDed with "up to `year`". Years under any or none don't count: they
+/// joined with AND to "up to `year`". Years under any or none don't count: they
 /// don't bound every hit.
 pub(crate) fn cap_years(tree: QueryNode, year: i16) -> QueryNode {
     let mut all = match tree {

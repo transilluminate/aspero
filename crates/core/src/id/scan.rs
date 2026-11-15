@@ -488,6 +488,8 @@ fn next_hit(bytes: &[u8], from: usize) -> Option<usize> {
         .map(|i| at + i)
 }
 
+// The `bytecount` crate would be a dependency for a count on short slices.
+#[allow(clippy::naive_bytecount)]
 fn newlines(bytes: &[u8]) -> usize {
     bytes.iter().filter(|&&b| b == b'\n').count()
 }
@@ -523,6 +525,7 @@ const CLASSES: [u8; 128] = {
     }
     let mut b = 0;
     while b < 128 {
+        #[allow(clippy::cast_possible_truncation)] // b < 128
         let c = b as u8;
         if c.is_ascii_digit() {
             classes[b] |= DIGIT;

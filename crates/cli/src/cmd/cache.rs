@@ -11,6 +11,8 @@ use crate::exit::Exit;
 
 /// `max_bytes`: the size limit `--cache-max-mb` sets, shown beside the
 /// size (stats doesn't evict: the next write does).
+// Like every command: main hands over what it parsed.
+#[allow(clippy::needless_pass_by_value)]
 pub fn run(
     path: PathBuf,
     action: CacheAction,

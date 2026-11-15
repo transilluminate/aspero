@@ -45,6 +45,8 @@ pub struct ClaimInput {
             description = "Your own reference for this claim, echoed back untouched."
         )
     )]
+    // Part of aspero_json's public API; the underscore marks it read only to be dropped.
+    #[allow(clippy::pub_underscore_fields)]
     pub _key: Option<serde::de::IgnoredAny>,
     pub doi: Option<String>,
     pub arxiv: Option<String>,
@@ -137,14 +139,8 @@ impl InputClaim {
     /// One stdin line: a JSON object or a plain reference. A JSON line's
     /// `key` is kept even when the rest of it is invalid.
     pub fn from_line(line: &str) -> Self {
-        let (key, claim) = match line.trim_start().starts_with('{') {
-            false => (
-                None,
-                Some(Claim::from_input(line))
-                    .filter(|c| !c.is_empty())
-                    .ok_or_else(|| EMPTY.to_owned()),
-            ),
-            true => match serde_json::from_str::<Value>(line) {
+        let (key, claim) = if line.trim_start().starts_with('{') {
+            match serde_json::from_str::<Value>(line) {
                 Err(e) => (None, Err(format!("invalid claim JSON: {e}"))),
                 Ok(value) => (
                     value.get("key").cloned(),
@@ -152,7 +148,14 @@ impl InputClaim {
                         .map_err(|e| format!("invalid claim: {e}"))
                         .and_then(ClaimInput::into_claim),
                 ),
-            },
+            }
+        } else {
+            (
+                None,
+                Some(Claim::from_input(line))
+                    .filter(|c| !c.is_empty())
+                    .ok_or_else(|| EMPTY.to_owned()),
+            )
         };
         InputClaim {
             input: line.to_owned(),

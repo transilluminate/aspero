@@ -1,5 +1,6 @@
 //! `aspero check`: verify every entry of a .bib file and report fixes.
 
+use std::fmt::Write as _;
 use std::io::IsTerminal;
 
 use aspero_bib::BibEntry;
@@ -157,7 +158,7 @@ fn entry_text(entry: &BibEntry, checked: &CheckedEntry, keys: &[&str]) -> String
     };
     let mut out = format!("{status:<8} {}  ({})\n", entry.key, verdict(checked));
     for finding in &checked.findings {
-        out.push_str(&format!("         - {}\n", finding.message(keys)));
+        let _ = writeln!(out, "         - {}", finding.message(keys));
     }
     out
 }
@@ -216,11 +217,10 @@ mod tests {
             &(serde_json::to_string_pretty(&json).unwrap() + "\n"),
         );
         let keys = keys(&entries);
-        let lines: String = entries
-            .iter()
-            .zip(&report.entries)
-            .map(|(e, c)| format!("{}\n", aspero_json::check::entry(e, c, &keys, true)))
-            .collect();
+        let mut lines = String::new();
+        for (e, c) in entries.iter().zip(&report.entries) {
+            let _ = writeln!(lines, "{}", aspero_json::check::entry(e, c, &keys, true));
+        }
         pinned("check/expected.jsonl", &lines);
         pinned("check/expected.txt", &text(path, &entries, &report));
     }

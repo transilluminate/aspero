@@ -234,6 +234,8 @@ impl ServerHandler for Handler {
         ))
     }
 
+    // rmcp's ServerHandler method, async by the trait.
+    #[allow(clippy::unused_async_trait_impl)]
     async fn initialize(
         &self,
         request: InitializeRequestParams,
@@ -255,6 +257,8 @@ impl ServerHandler for Handler {
 
     /// The tools the request's key may call, by its scopes and the host's
     /// tools now.
+    // rmcp's ServerHandler method, async by the trait.
+    #[allow(clippy::unused_async_trait_impl)]
     async fn list_tools(
         &self,
         _: Option<PaginatedRequestParams>,
@@ -409,8 +413,7 @@ pub(crate) fn engine_summary(name: &str, arguments: &Map<String, Value>) -> Stri
         arguments
             .get("id")
             .and_then(Value::as_str)
-            .map(quoted)
-            .unwrap_or_else(|| "a work".into())
+            .map_or_else(|| "a work".into(), quoted)
     };
     match name {
         "search" => {
@@ -465,7 +468,10 @@ mod tests {
     use serde_json::json;
 
     fn args(v: Value) -> Map<String, Value> {
-        v.as_object().unwrap().clone()
+        let Value::Object(map) = v else {
+            panic!("arguments are an object")
+        };
+        map
     }
 
     #[test]

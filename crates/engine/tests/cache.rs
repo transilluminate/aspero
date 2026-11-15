@@ -66,9 +66,10 @@ impl Counting {
     }
 
     fn known(&self) -> SourceRecord {
-        let title = match self.corrected.load(Ordering::SeqCst) {
-            true => "Known (corrected)",
-            false => "Known",
+        let title = if self.corrected.load(Ordering::SeqCst) {
+            "Known (corrected)"
+        } else {
+            "Known"
         };
         self.record("10.1000/known", title)
     }

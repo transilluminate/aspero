@@ -94,7 +94,7 @@ pub async fn run(engine: &Engine, ids: Vec<String>, out: Out) -> Result<Exit, Fa
 fn looked(lookup: &InputLookup) -> Option<&Looked> {
     match lookup {
         InputLookup::Looked(l) => Some(l),
-        _ => None,
+        InputLookup::Invalid(_) => None,
     }
 }
 
@@ -142,44 +142,41 @@ fn row(item: &Value, result: Option<&LookupResult>) -> Vec<comfy_table::Cell> {
         .or(item["input"].as_str())
         .unwrap_or("?");
     let status = item["status"].as_str().unwrap_or("?").replace('_', " ");
-    match result.and_then(|r| r.record.as_ref()) {
-        Some(record) => {
-            let w = &record.work;
-            let via = match item["served"].as_str() {
-                Some(served) => format!("{} ({served})", record.source),
-                None => record.source.to_string(),
-            };
-            let (status_text, level) = match (w.retraction(), w.newer_version()) {
-                (Some(r), _) => (format!("found\n{}", describe_update(r)), Level::Error),
-                (None, Some(newer)) => (format!("found\nsuperseded by {newer}"), Level::Warning),
-                (None, None) => (status, Level::Good),
-            };
-            vec![
-                Cell::new(label),
-                output::status_cell(&status_text, level),
-                Cell::new(output::year(w)),
-                Cell::new(output::first_author(w)),
-                Cell::new(w.title.as_deref().unwrap_or("")),
-                Cell::new(output::free_copy(w)),
-                Cell::new(via),
-            ]
-        }
-        None => {
-            let level = match item["status"].as_str() {
-                Some("not_found") | Some("invalid") => Level::Error,
-                _ => Level::Warning,
-            };
-            let why = item["error"].as_str().unwrap_or("");
-            vec![
-                Cell::new(label),
-                output::status_cell(&status, level),
-                Cell::new(""),
-                Cell::new(""),
-                Cell::new(why),
-                Cell::new(""),
-                Cell::new(""),
-            ]
-        }
+    if let Some(record) = result.and_then(|r| r.record.as_ref()) {
+        let w = &record.work;
+        let via = match item["served"].as_str() {
+            Some(served) => format!("{} ({served})", record.source),
+            None => record.source.to_string(),
+        };
+        let (status_text, level) = match (w.retraction(), w.newer_version()) {
+            (Some(r), _) => (format!("found\n{}", describe_update(r)), Level::Error),
+            (None, Some(newer)) => (format!("found\nsuperseded by {newer}"), Level::Warning),
+            (None, None) => (status, Level::Good),
+        };
+        vec![
+            Cell::new(label),
+            output::status_cell(&status_text, level),
+            Cell::new(output::year(w)),
+            Cell::new(output::first_author(w)),
+            Cell::new(w.title.as_deref().unwrap_or("")),
+            Cell::new(output::free_copy(w)),
+            Cell::new(via),
+        ]
+    } else {
+        let level = match item["status"].as_str() {
+            Some("not_found" | "invalid") => Level::Error,
+            _ => Level::Warning,
+        };
+        let why = item["error"].as_str().unwrap_or("");
+        vec![
+            Cell::new(label),
+            output::status_cell(&status, level),
+            Cell::new(""),
+            Cell::new(""),
+            Cell::new(why),
+            Cell::new(""),
+            Cell::new(""),
+        ]
     }
 }
 
@@ -210,12 +207,13 @@ pub fn text(item: &Value, looked: Option<&Looked>) -> String {
             .iter()
             .map(|d| format!("{} {} (vs {})", d.field, d.value, d.registry_value))
             .collect();
-        let conflicts = match conflicts.is_empty() {
-            true => String::new(),
-            false => format!(
+        let conflicts = if conflicts.is_empty() {
+            String::new()
+        } else {
+            format!(
                 "\n  ⚠ the DOI's registry disagrees: {}",
                 conflicts.join("; ")
-            ),
+            )
         };
         return format!(
             "{label}  found via {}{served}\n{}{latest}{conflicts}\n",
@@ -223,25 +221,24 @@ pub fn text(item: &Value, looked: Option<&Looked>) -> String {
             output::work_text(record, "  ")
         );
     }
-    let why = item["error"]
-        .as_str()
-        .map(str::to_owned)
-        .unwrap_or_else(|| {
-            item["attempts"]
-                .as_array()
-                .into_iter()
-                .flatten()
-                .map(|a| {
-                    let detail = a["error"]
-                        .as_str()
-                        .or(a["outcome"].as_str())
-                        .unwrap_or("?")
-                        .replace('_', " ");
-                    format!("{}: {detail}", a["provider"].as_str().unwrap_or("?"))
-                })
-                .collect::<Vec<_>>()
-                .join("; ")
-        });
+    let why = if let Some(error) = item["error"].as_str() {
+        error.to_owned()
+    } else {
+        item["attempts"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .map(|a| {
+                let detail = a["error"]
+                    .as_str()
+                    .or(a["outcome"].as_str())
+                    .unwrap_or("?")
+                    .replace('_', " ");
+                format!("{}: {detail}", a["provider"].as_str().unwrap_or("?"))
+            })
+            .collect::<Vec<_>>()
+            .join("; ")
+    };
     let status = item["status"].as_str().unwrap_or("?").replace('_', " ");
     format!("{label}  {status} ({why})\n")
 }

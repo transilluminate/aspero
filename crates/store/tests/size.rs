@@ -42,7 +42,7 @@ fn fill(cache: &SqliteCache, from: usize, to: usize, kb: usize) {
     for i in from..to {
         let (key, record) = sized(i, kb);
         cache
-            .put_lookups(&OA, &[(&key, Some(&record))], at(i as i64))
+            .put_lookups(&OA, &[(&key, Some(&record))], at(i64::try_from(i).unwrap()))
             .unwrap();
     }
 }

@@ -236,6 +236,8 @@ struct AuthorList {
 
 #[derive(Debug, Default, Deserialize)]
 #[serde(default, rename_all = "camelCase")]
+// The wire's names: `authorId` is Europe PMC's.
+#[allow(clippy::struct_field_names)]
 struct Author {
     full_name: Option<String>,
     first_name: Option<String>,
@@ -388,7 +390,7 @@ fn to_record(value: &serde_json::Value, at: Timestamp) -> serde_json::Result<Sou
         .title
         .or_else(|| book.comprising_title.clone())
         .map(plain_text);
-    work.publisher = book.publisher.clone();
+    work.publisher.clone_from(&book.publisher);
     work.volume = r.journal_info.volume;
     work.issue = r.journal_info.issue;
     work.page = r.page_info;

@@ -3,6 +3,7 @@ name = "aspero-mcp"
 description = "aspero as a Model Context Protocol server: search, look up, verify and identify scholarly works from an agent"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 homepage.workspace = true

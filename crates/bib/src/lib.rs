@@ -146,7 +146,7 @@ fn line_at(src: &str, at: usize) -> usize {
 fn entry(e: &biblatex::Entry) -> BibEntry {
     let field = |name: &str| {
         e.get(name)
-            .map(|chunks| chunks.format_verbatim())
+            .map(ChunksExt::format_verbatim)
             .map(|s| s.split_whitespace().collect::<Vec<_>>().join(" "))
             .filter(|s| !s.is_empty())
     };
@@ -179,7 +179,7 @@ fn entry(e: &biblatex::Entry) -> BibEntry {
     match (field("eprint"), eprint_type.as_deref()) {
         (Some(eprint), None) => ids.arxiv("eprint", &eprint, false),
         (Some(eprint), Some(t)) if t.eq_ignore_ascii_case("arxiv") => {
-            ids.arxiv("eprint", &eprint, true)
+            ids.arxiv("eprint", &eprint, true);
         }
         (Some(eprint), Some(t)) if t.eq_ignore_ascii_case("pubmed") => ids.pmid("eprint", &eprint),
         _ => {}

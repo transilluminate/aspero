@@ -26,8 +26,8 @@
 //! pacing slots) once the database passes it; see [`ACCESS`].
 
 use std::path::Path;
-use std::sync::Mutex;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Mutex, PoisonError};
 use std::time::Duration;
 
 use aspero_core::{Page, ProviderId, SearchQuery, SourceRecord, WorkId};
@@ -203,8 +203,8 @@ impl Edges {
 /// cached "not found".
 pub type CachedLookup = Entry<Option<SourceRecord>>;
 
-/// One ID's stored rows: its record (JSON, stored_at) and its miss
-/// (stored_at).
+/// One ID's stored rows: its record (JSON, `stored_at`) and its miss
+/// (`stored_at`).
 type LookupRow = (Option<(String, i64)>, Option<i64>);
 
 /// A row read, for tracking use: its rowid, and when it was last used.
@@ -369,7 +369,7 @@ impl SqliteCache {
     fn conn(&self) -> std::sync::MutexGuard<'_, Connection> {
         // A panic while holding the lock leaves SQLite consistent (writes
         // are transactional), so poisoning is ignorable.
-        self.conn.lock().unwrap_or_else(|e| e.into_inner())
+        self.conn.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
     /// Limits the cache to `max` bytes (as [`Stats::bytes`] counts them),
@@ -399,6 +399,8 @@ impl SqliteCache {
         if size(&conn)?.0 <= max {
             return Ok(());
         }
+        // A u64 times 0.9: non-negative and in range.
+        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
         let target = (max as f64 * EVICT_TO) as u64;
         // Each round deletes the oldest entries whose rows add up to the
         // excess, as estimated; pages only partly freed may need another.
@@ -498,7 +500,8 @@ impl SqliteCache {
         let count = |table: &str| -> Result<u64> {
             let n: i64 =
                 conn.query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |r| r.get(0))?;
-            Ok(n as u64)
+            // A count: never negative.
+            Ok(n.unsigned_abs())
         };
         Ok(Stats {
             records: count("record")?,
@@ -593,7 +596,7 @@ fn size(conn: &Connection) -> Result<(u64, u64)> {
         pragma("freelist_count")?,
         pragma("page_size")?,
     );
-    let bytes = |n: i64| n.max(0) as u64 * page.max(0) as u64;
+    let bytes = |n: i64| n.max(0).unsigned_abs() * page.max(0).unsigned_abs();
     Ok((bytes(pages), bytes(pages - free)))
 }
 
@@ -646,7 +649,7 @@ fn evict(conn: &mut Connection, excess: u64) -> Result<usize> {
                 &format!("DELETE FROM {table} WHERE rowid = ?1"),
                 params![rowid],
             )?;
-            freed += bytes.max(0) as u64;
+            freed += bytes.max(0).unsigned_abs();
             removed += 1;
         }
     }
@@ -700,14 +703,17 @@ impl Pacing for SqliteCache {
                 |r| r.get(0),
             )
             .optional()?;
-        let ahead = MAX_AHEAD.as_millis() as i64;
+        let ahead = i64::try_from(MAX_AHEAD.as_millis()).unwrap_or(i64::MAX);
         let slot = next
             .filter(|n| *n - now_ms <= ahead)
             .map_or(now_ms, |n| n.max(now_ms));
         tx.execute(
             "INSERT INTO pacing (provider, next_slot) VALUES (?1, ?2)
              ON CONFLICT (provider) DO UPDATE SET next_slot = excluded.next_slot",
-            params![provider, slot + interval.as_millis() as i64],
+            params![
+                provider,
+                slot.saturating_add(i64::try_from(interval.as_millis()).unwrap_or(i64::MAX))
+            ],
         )?;
         tx.commit()?;
         Ok(Timestamp::from_millisecond(slot).unwrap_or(now))

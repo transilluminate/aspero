@@ -258,6 +258,8 @@ impl QueryNode {
     /// in a group of the same kind flattened into it, an all or any of
     /// one node replaced by that node, and a none of one none by an any of
     /// what that held. `None` when nothing is left to search by.
+    // The trimmed values borrow the fields they replace, so `clone_into` can't.
+    #[allow(clippy::assigning_clones)]
     pub fn normalised(self) -> Option<QueryNode> {
         match self {
             QueryNode::All(nodes) => group(Group::All, nodes),
@@ -311,6 +313,7 @@ impl QueryNode {
                     t.value
                 ))
             }
+            #[allow(clippy::match_same_arms)] // each kind of node in turn
             QueryNode::Term(_) => Ok(()),
             QueryNode::Filter(FilterValue::Language(code)) => language(code)
                 .map(|_| ())
@@ -339,7 +342,9 @@ impl QueryNode {
     fn collect_leaves<'a>(&'a self, out: &mut Vec<&'a QueryNode>) {
         match self {
             QueryNode::All(nodes) | QueryNode::Any(nodes) | QueryNode::None(nodes) => {
-                nodes.iter().for_each(|n| n.collect_leaves(out));
+                for n in nodes {
+                    n.collect_leaves(out);
+                }
             }
             leaf => out.push(leaf),
         }
@@ -736,15 +741,17 @@ fn check_node(
             nodes
         }
         QueryNode::Term(t) => {
-            return match caps.search_filters.contains(&t.field.filter()) {
-                true => Ok(()),
-                false => Err(format!("{source} can't search by {}", t.field.name())),
+            return if caps.search_filters.contains(&t.field.filter()) {
+                Ok(())
+            } else {
+                Err(format!("{source} can't search by {}", t.field.name()))
             };
         }
         QueryNode::Filter(f) => {
-            return match caps.search_filters.contains(&f.filter()) {
-                true => Ok(()),
-                false => Err(match f {
+            return if caps.search_filters.contains(&f.filter()) {
+                Ok(())
+            } else {
+                Err(match f {
                     FilterValue::Years(_) => format!("{source} can't filter by year"),
                     FilterValue::WorkType(_) => format!("{source} can't filter by work type"),
                     FilterValue::OpenAccess(_) => format!("{source} can't filter by open access"),
@@ -755,16 +762,17 @@ fn check_node(
                     FilterValue::HasAbstract => {
                         format!("{source} can't filter by whether a work has an abstract")
                     }
-                }),
+                })
             };
         }
         QueryNode::Relation(r) => {
-            return match caps.relations.contains(&r.relation) {
-                true => Ok(()),
-                false => Err(match r.relation {
+            return if caps.relations.contains(&r.relation) {
+                Ok(())
+            } else {
+                Err(match r.relation {
                     Relation::Cites => format!("{source} can't find the works citing a work"),
                     Relation::CitedBy => format!("{source} can't find the works a work cites"),
-                }),
+                })
             };
         }
     };
@@ -818,9 +826,10 @@ fn render(
 /// escaped ([`lucene_words`]).
 pub fn lucene_term(prefix: Option<&str>, value: &str, phrase: bool) -> String {
     let field = prefix.map(|p| format!("{p}:")).unwrap_or_default();
-    match phrase {
-        true => format!("{field}\"{}\"", escape_lucene(value)),
-        false => format!("{field}({})", lucene_words(value)),
+    if phrase {
+        format!("{field}\"{}\"", escape_lucene(value))
+    } else {
+        format!("{field}({})", lucene_words(value))
     }
 }
 
@@ -846,14 +855,17 @@ pub fn lucene_words(text: &str) -> String {
         .join(" ")
 }
 
-/// A request's clauses ANDed: a rendered tree (bare at its top, `a OR b`)
+/// A request's clauses joined with AND: a rendered tree (bare at its top, `a OR b`)
 /// first, bracketed when anything joins it, so all of it is bounded:
 /// `(a OR b) AND (raw)`. The other clauses stand alone already (`(words)`,
 /// `FIELD:[…]`, `FIELD:"…"`).
 pub fn lucene_and(tree: Option<String>, clauses: Vec<String>) -> String {
-    let tree = tree.map(|t| match clauses.is_empty() {
-        true => t,
-        false => format!("({t})"),
+    let tree = tree.map(|t| {
+        if clauses.is_empty() {
+            t
+        } else {
+            format!("({t})")
+        }
     });
     tree.into_iter()
         .chain(clauses)

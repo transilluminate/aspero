@@ -3,6 +3,7 @@ name = "aspero-ffi"
 description = "aspero for apps: Swift (and Kotlin, Python) bindings via UniFFI"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 homepage.workspace = true
@@ -11,9 +12,33 @@ authors.workspace = true
 publish = false
 
 # Not the workspace lints: UniFFI's generated glue is `unsafe` by nature
-# (C ABI); this crate's own code has none.
+# (C ABI); this crate's own code has none. The clippy table is the
+# workspace's, copied (a crate inherits all its lints or none): keep the
+# two in step.
 [lints.clippy]
 all = { level = "warn", priority = -1 }
+pedantic = { level = "warn", priority = -1 }
+# Pedantic lints that are off, and why:
+# `#[must_use]` on every getter and builder is noise; the types where
+# ignoring the result is a bug carry it by hand.
+must_use_candidate = "allow"
+return_self_not_must_use = "allow"
+# Error and panic cases are in the prose where they matter, not in a
+# boilerplate section on every fallible function.
+missing_errors_doc = "allow"
+missing_panics_doc = "allow"
+# The long functions are match tables or linear pipelines; splitting them
+# hides the flow.
+too_many_lines = "allow"
+# Pairs like `doi`/`dois` and `left`/`right` are the clearest names.
+similar_names = "allow"
+# Names that repeat their module (`id::IdError`) read better where used.
+module_name_repetitions = "allow"
+# Option and flag structs (CLI arguments, query settings) are bool-heavy
+# by nature.
+struct_excessive_bools = "allow"
+# Score and price arithmetic on counts, which never approach 2^52.
+cast_precision_loss = "allow"
 
 [lib]
 crate-type = ["lib", "staticlib", "cdylib"]

@@ -86,7 +86,7 @@ impl Work {
         Work {
             source: record.source.to_string(),
             ids: record.ids.iter().map(ToString::to_string).collect(),
-            canonical: aspero_core::canonical(&record.ids).map(|id| id.to_string()),
+            canonical: aspero_core::canonical(&record.ids).map(ToString::to_string),
             title: w.title.clone(),
             authors: w
                 .authors
@@ -503,6 +503,7 @@ impl Lookup {
             .attempts
             .iter()
             .map(|a| {
+                #[allow(clippy::match_same_arms)] // the wildcard: see below
                 let (outcome, failure) = match &a.outcome {
                     Outcome::Found => (AttemptOutcome::Found, None),
                     Outcome::Failed(e) => (AttemptOutcome::Failed, Some(e)),
@@ -941,9 +942,10 @@ impl Verification {
             notes: v.notes.iter().map(Notice::from).collect(),
             read: Some(Claim::read(&v.read, key(claim))),
             best: v.best.map(|i| Candidate::from(&v.report.candidates[i])),
-            candidates: match full {
-                true => v.report.candidates.iter().map(Candidate::from).collect(),
-                false => Vec::new(),
+            candidates: if full {
+                v.report.candidates.iter().map(Candidate::from).collect()
+            } else {
+                Vec::new()
             },
             failures: v.report.failures().iter().map(Failure::from).collect(),
         }
@@ -1236,7 +1238,7 @@ pub struct SearchRequest {
     /// or skip such works.
     #[uniffi(default = None)]
     pub cursor: Option<String>,
-    /// An author's name. Fields are ANDed with `text`, which may then be
+    /// An author's name. Fields are joined with AND to `text`, which may then be
     /// empty; a source that can't search one fails (`unsupported`), as
     /// `searchCapabilities` tells.
     #[uniffi(default = None)]
@@ -1816,7 +1818,7 @@ impl Work {
     /// The work and its identifiers as found, for writing out.
     pub(crate) fn to_core(&self) -> (aspero_core::Work, Vec<aspero_core::WorkId>) {
         let mut w = aspero_core::Work::default();
-        w.title = self.title.clone();
+        w.title.clone_from(&self.title);
         // The full JSON keeps family and given names apart.
         let json: Option<serde_json::Value> = serde_json::from_str(&self.json).ok();
         w.authors = json
@@ -1828,8 +1830,8 @@ impl Work {
                         Some(family) => {
                             let mut p = aspero_core::Person::default();
                             p.family = Some(family.clone());
-                            p.given = a.given.clone();
-                            p.orcid = a.orcid.clone();
+                            p.given.clone_from(&a.given);
+                            p.orcid.clone_from(&a.orcid);
                             p
                         }
                         None => aspero_core::Person::literal(&a.name),
@@ -1845,12 +1847,12 @@ impl Work {
             .work_type
             .as_deref()
             .map(aspero_core::WorkType::from_csl);
-        w.container_title = self.container.clone();
-        w.volume = self.volume.clone();
-        w.issue = self.issue.clone();
-        w.page = self.page.clone();
-        w.publisher = self.publisher.clone();
-        w.url = self.url.clone();
+        w.container_title.clone_from(&self.container);
+        w.volume.clone_from(&self.volume);
+        w.issue.clone_from(&self.issue);
+        w.page.clone_from(&self.page);
+        w.publisher.clone_from(&self.publisher);
+        w.url.clone_from(&self.url);
         let ids = self.ids.iter().filter_map(|id| id.parse().ok()).collect();
         (w, ids)
     }
@@ -2048,6 +2050,9 @@ pub enum Coverage {
 }
 
 impl From<engine::Coverage> for Coverage {
+    // The wildcard is for variants the non-exhaustive enum adds later,
+    // not the named one it happens to map the same as.
+    #[allow(clippy::match_same_arms)]
     fn from(c: engine::Coverage) -> Self {
         match c {
             engine::Coverage::Known => Coverage::Known,
@@ -2146,6 +2151,9 @@ impl AnalysisKind {
 }
 
 impl From<engine::AnalysisKind> for AnalysisKind {
+    // The wildcard is for variants the non-exhaustive enum adds later,
+    // not the named one it happens to map the same as.
+    #[allow(clippy::match_same_arms)]
     fn from(k: engine::AnalysisKind) -> Self {
         match k {
             engine::AnalysisKind::RetractedReferences => AnalysisKind::RetractedReferences,
@@ -2175,6 +2183,9 @@ pub enum SeedProblem {
 }
 
 impl From<engine::SeedProblem> for SeedProblem {
+    // The wildcard is for variants the non-exhaustive enum adds later,
+    // not the named one it happens to map the same as.
+    #[allow(clippy::match_same_arms)]
     fn from(p: engine::SeedProblem) -> Self {
         match p {
             engine::SeedProblem::InvalidId => SeedProblem::InvalidId,
@@ -2238,6 +2249,9 @@ pub enum IncompleteKind {
 }
 
 impl From<engine::IncompleteKind> for IncompleteKind {
+    // The wildcard is for variants the non-exhaustive enum adds later,
+    // not the named one it happens to map the same as.
+    #[allow(clippy::match_same_arms)]
     fn from(k: engine::IncompleteKind) -> Self {
         match k {
             engine::IncompleteKind::Capped => IncompleteKind::Capped,
@@ -2263,6 +2277,9 @@ pub enum AnalysisStage {
 }
 
 impl From<engine::Stage> for AnalysisStage {
+    // The wildcard is for variants the non-exhaustive enum adds later,
+    // not the named one it happens to map the same as.
+    #[allow(clippy::match_same_arms)]
     fn from(s: engine::Stage) -> Self {
         match s {
             engine::Stage::Citing => AnalysisStage::Citing,
@@ -2332,6 +2349,9 @@ pub enum OddReason {
 }
 
 impl From<engine::OddReason> for OddReason {
+    // The wildcard is for variants the non-exhaustive enum adds later,
+    // not the named one it happens to map the same as.
+    #[allow(clippy::match_same_arms)]
     fn from(r: engine::OddReason) -> Self {
         match r {
             engine::OddReason::NoLinks => OddReason::NoLinks,

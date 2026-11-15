@@ -1,6 +1,8 @@
 //! Who may connect: bearer keys, by the SHA-256 of their tokens, and the
 //! Host and Origin checks that keep browsers out.
 
+use std::fmt::Write as _;
+
 use http::HeaderMap;
 use http::header::{AUTHORIZATION, HOST};
 use sha2::{Digest, Sha256};
@@ -39,8 +41,10 @@ impl Credential {
 pub fn sha256_hex(token: &str) -> String {
     Sha256::digest(token.as_bytes())
         .iter()
-        .map(|b| format!("{b:02x}"))
-        .collect()
+        .fold(String::with_capacity(64), |mut hex, b| {
+            let _ = write!(hex, "{b:02x}");
+            hex
+        })
 }
 
 fn decode_hex(s: &str) -> Option<[u8; 32]> {
@@ -51,7 +55,7 @@ fn decode_hex(s: &str) -> Option<[u8; 32]> {
     let mut out = [0u8; 32];
     for (i, pair) in bytes.chunks(2).enumerate() {
         let digit = |c: u8| (c as char).to_digit(16);
-        out[i] = (digit(pair[0])? * 16 + digit(pair[1])?) as u8;
+        out[i] = u8::try_from(digit(pair[0])? * 16 + digit(pair[1])?).ok()?;
     }
     Some(out)
 }

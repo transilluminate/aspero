@@ -173,15 +173,12 @@ impl Engine {
             .into_iter()
             .enumerate()
         {
-            answers[i] = match cached.answer() {
-                Some((outcome, record)) => {
-                    from_cache += 1;
-                    Some((attempt(outcome, Served::Cache), record))
-                }
-                None => {
-                    pending.push(i);
-                    None
-                }
+            answers[i] = if let Some((outcome, record)) = cached.answer() {
+                from_cache += 1;
+                Some((attempt(outcome, Served::Cache), record))
+            } else {
+                pending.push(i);
+                None
             };
         }
 
@@ -204,9 +201,10 @@ impl Engine {
             leads.publish(&answers);
             let batch: Vec<WorkId> = chunk.iter().map(|&i| ids[i].clone()).collect();
             let ask = || entry.provider.lookup(&batch, fields);
-            let answer = match batch.len() > free {
-                true => self.call_paid(entry, ask).await,
-                false => self.call(entry, ask).await,
+            let answer = if batch.len() > free {
+                self.call_paid(entry, ask).await
+            } else {
+                self.call(entry, ask).await
             };
 
             let error = match answer {

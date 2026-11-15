@@ -2,7 +2,7 @@
 //! of items, or a single item. Read with the lenient [`CslItem`] used for
 //! doi.org's responses.
 
-use aspero_core::csl::{CslItem, OneOrMany};
+use aspero_core::csl::{CslItem, OneOrMany, Scalar};
 use aspero_core::{Claim, Person};
 
 use crate::{BibEntry, Format, Ids, ReadError};
@@ -15,9 +15,10 @@ pub fn parse_csl_json(src: &str) -> Result<Vec<BibEntry>, ReadError> {
         message: e.to_string(),
     };
     let src = src.trim_start_matches('\u{FEFF}');
-    let items: Vec<CslItem> = match src.trim_start().starts_with('{') {
-        true => vec![serde_json::from_str(src).map_err(invalid)?],
-        false => serde_json::from_str(src).map_err(invalid)?,
+    let items: Vec<CslItem> = if src.trim_start().starts_with('{') {
+        vec![serde_json::from_str(src).map_err(invalid)?]
+    } else {
+        serde_json::from_str(src).map_err(invalid)?
     };
     Ok(items
         .iter()
@@ -63,7 +64,7 @@ pub(crate) fn entry(item: &CslItem, position: usize) -> BibEntry {
         key: item
             .id
             .as_ref()
-            .map_or_else(|| position.to_string(), |id| id.text()),
+            .map_or_else(|| position.to_string(), Scalar::text),
         entry_type: item.item_type.clone().unwrap_or_default().to_lowercase(),
         claim,
         notes: ids.notes,

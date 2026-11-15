@@ -19,24 +19,23 @@ pub(super) fn family_name(p: &Person) -> Option<String> {
 /// "Ashish Vaswani" → "vaswani", "A. Vaswani" → "vaswani", "Daum RS" →
 /// "daum", "A. van der Berg" → "van der berg".
 pub(super) fn claimed_family(name: &str) -> Option<String> {
-    let family = match name.split_once(',') {
-        Some((before, _)) => normalise(before),
-        None => {
-            // Vancouver initials after the name ("Daum RS") go first.
-            let mut tokens: Vec<&str> = name.split_whitespace().collect();
-            while tokens.len() > 1 && tokens.last().is_some_and(|t| is_initials(t)) {
-                tokens.pop();
-            }
-            let name = tokens.join(" ");
-            let literal = Person {
-                literal: Some(name.clone()),
-                ..Person::default()
-            };
-            match literal.parts() {
-                Some((family, _)) => normalise(&family),
-                // The last word that isn't an initial.
-                None => words(&name).into_iter().rfind(|w| w.chars().count() > 1)?,
-            }
+    let family = if let Some((before, _)) = name.split_once(',') {
+        normalise(before)
+    } else {
+        // Vancouver initials after the name ("Daum RS") go first.
+        let mut tokens: Vec<&str> = name.split_whitespace().collect();
+        while tokens.len() > 1 && tokens.last().is_some_and(|t| is_initials(t)) {
+            tokens.pop();
+        }
+        let name = tokens.join(" ");
+        let literal = Person {
+            literal: Some(name.clone()),
+            ..Person::default()
+        };
+        match literal.parts() {
+            Some((family, _)) => normalise(&family),
+            // The last word that isn't an initial.
+            None => words(&name).into_iter().rfind(|w| w.chars().count() > 1)?,
         }
     };
     (!family.is_empty()).then_some(family)
@@ -98,11 +97,13 @@ pub(super) fn names_given(text: &str) -> bool {
                 .chars()
                 .all(|c| c.is_alphabetic() || matches!(c, '-' | '\''))
             && (1..=3).contains(&initials.chars().count())
-            && initials.chars().all(|c| c.is_uppercase())
+            && initials.chars().all(char::is_uppercase)
     })
 }
 
 #[cfg(test)]
+// Exact constants: scores and spends rounded or summed from binary-exact values.
+#[allow(clippy::float_cmp)]
 mod tests {
     use super::*;
 

@@ -8,6 +8,8 @@ use crate::args::Format;
 use crate::exit::Exit;
 use crate::output;
 
+// Like every command: main hands over what it parsed.
+#[allow(clippy::needless_pass_by_value)]
 pub fn run(credits: bool, out: Out) -> Exit {
     if credits {
         match out.format {

@@ -1,6 +1,8 @@
 //! Rendering works, results and usage as terminal text and tables. JSON
 //! shapes are the contract in `aspero-json`, re-exported here.
 
+use std::fmt::Write as _;
+
 use aspero_core::matching::{PLAUSIBLE, VERIFIED};
 use aspero_core::{
     Agreement, Hit, IdKind, ProviderId, SourceRecord, UpdateKind, Usage, Work, WorkId,
@@ -121,7 +123,7 @@ pub fn work_text(record: &SourceRecord, indent: &str) -> String {
         .authors
         .iter()
         .take(TABLE_AUTHORS)
-        .filter_map(|a| a.display_name())
+        .filter_map(aspero_core::Person::display_name)
         .collect();
     if w.authors.len() > TABLE_AUTHORS {
         names.push("et al.".into());
@@ -151,9 +153,10 @@ pub fn work_text(record: &SourceRecord, indent: &str) -> String {
             .flatten()
             .collect();
         let link = oa.pdf_url.as_deref().or(oa.url.as_deref()).unwrap_or("");
-        let terms = match terms.is_empty() {
-            true => String::new(),
-            false => format!(" ({})", terms.join(", ")),
+        let terms = if terms.is_empty() {
+            String::new()
+        } else {
+            format!(" ({})", terms.join(", "))
         };
         lines.push(format!("{indent}Free copy{terms}: {link}"));
     }
@@ -227,7 +230,7 @@ fn agreement_word(g: Agreement) -> &'static str {
         Agreement::Match => "match",
         Agreement::Partial => "partial",
         Agreement::Mismatch => "MISMATCH",
-        _ => "unknown",
+        Agreement::Unknown => "unknown",
     }
 }
 
@@ -333,7 +336,7 @@ pub fn candidate_row(rank: usize, c: &Candidate) -> Vec<comfy_table::Cell> {
         Agreement::Match => "✓",
         Agreement::Partial => "~",
         Agreement::Mismatch => "✗",
-        _ => "?",
+        Agreement::Unknown => "?",
     };
     let mut checks = format!(
         "title {} authors {} year {}",
@@ -342,7 +345,7 @@ pub fn candidate_row(rank: usize, c: &Candidate) -> Vec<comfy_table::Cell> {
         mark(a.year.agreement)
     );
     if a.ids != Agreement::Unknown {
-        checks.push_str(&format!(" id {}", mark(a.ids)));
+        let _ = write!(checks, " id {}", mark(a.ids));
     }
     let level = match a.confidence {
         c if c >= VERIFIED => Level::Good,

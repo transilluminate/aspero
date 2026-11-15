@@ -38,9 +38,10 @@ impl Recorder {
 impl HttpClient for Recorder {
     async fn send(&self, request: HttpRequest) -> Result<HttpResponse, Error> {
         let source = r#"{"results": [{"id": "https://openalex.org/S1", "display_name": "S"}]}"#;
-        let body = match request.url.contains("/sources?") {
-            true => source,
-            false => r#"{"message": {"items": []}}"#,
+        let body = if request.url.contains("/sources?") {
+            source
+        } else {
+            r#"{"message": {"items": []}}"#
         };
         self.urls.lock().unwrap().push(request.url);
         Ok(response(200, &[], body))
@@ -54,27 +55,36 @@ fn engine() -> (Engine, Arc<Recorder>) {
     let client = || -> Arc<dyn HttpClient> { http.clone() };
     let providers: [(Arc<dyn Provider>, i32); 5] = [
         (
-            Arc::new(aspero_openalex::OpenAlex::new(Default::default(), client())),
+            Arc::new(aspero_openalex::OpenAlex::new(
+                aspero_openalex::OpenAlexConfig::default(),
+                client(),
+            )),
             10,
         ),
         (
-            Arc::new(aspero_crossref::Crossref::new(Default::default(), client())),
+            Arc::new(aspero_crossref::Crossref::new(
+                aspero_crossref::CrossrefConfig::default(),
+                client(),
+            )),
             20,
         ),
         (
-            Arc::new(aspero_datacite::Datacite::new(Default::default(), client())),
+            Arc::new(aspero_datacite::Datacite::new(
+                aspero_datacite::DataciteConfig::default(),
+                client(),
+            )),
             25,
         ),
         (
             Arc::new(aspero_europepmc::EuropePmc::new(
-                Default::default(),
+                aspero_europepmc::EuropePmcConfig::default(),
                 client(),
             )),
             35,
         ),
         (
             Arc::new(aspero_openlibrary::OpenLibrary::new(
-                Default::default(),
+                aspero_openlibrary::OpenLibraryConfig::default(),
                 client(),
             )),
             40,
@@ -163,9 +173,12 @@ fn term() -> impl Strategy<Value = QueryNode> {
         1 => author_ids.prop_map(|v| (TermField::AuthorId, v)),
         1 => ids.prop_map(|v| (TermField::Identifier, v)),
     ];
-    (field_value, any::<bool>()).prop_map(|((field, value), phrase)| match phrase {
-        true => QueryNode::phrase(field, value),
-        false => QueryNode::term(field, value),
+    (field_value, any::<bool>()).prop_map(|((field, value), phrase)| {
+        if phrase {
+            QueryNode::phrase(field, value)
+        } else {
+            QueryNode::term(field, value)
+        }
     })
 }
 
@@ -218,7 +231,9 @@ fn tree() -> impl Strategy<Value = QueryNode> {
 fn text_terms<'a>(node: &'a mut QueryNode, out: &mut Vec<&'a mut Term>) {
     match node {
         QueryNode::All(nodes) | QueryNode::Any(nodes) | QueryNode::None(nodes) => {
-            nodes.iter_mut().for_each(|n| text_terms(n, out));
+            for n in nodes {
+                text_terms(n, out);
+            }
         }
         QueryNode::Term(t) if !matches!(t.field, TermField::AuthorId | TermField::Identifier) => {
             out.push(t);

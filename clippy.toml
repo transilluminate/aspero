@@ -1,0 +1,16 @@
+# Proper nouns that clippy's `doc_markdown` would otherwise want in
+# backticks; ".." keeps clippy's own list.
+doc-valid-idents = [
+    "OpenAlex",
+    "DataCite",
+    "PubMed",
+    "UniFFI",
+    "PDFKit",
+    "StatPearls",
+    "LeCun",
+    "AlphaFold",
+    "CorpusId",
+    "JaLC",
+    "SplitMix64",
+    "..",
+]

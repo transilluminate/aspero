@@ -174,6 +174,8 @@ mod tests {
     use crate::id::IdError;
 
     #[test]
+    // Identifiers, compared with the strings beside them: no digit groups.
+    #[allow(clippy::unreadable_literal)]
     fn parses_and_displays() {
         assert_eq!(
             "PMID: 0031452104".parse::<Pmid>().unwrap().to_string(),

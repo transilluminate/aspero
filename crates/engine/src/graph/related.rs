@@ -119,6 +119,7 @@ fn most_shared(groups: &[Group]) -> Vec<WorkId> {
 }
 
 /// A page of citing works, as asked for.
+#[allow(clippy::cast_possible_truncation)] // `PAGE` is 200
 fn citing_query(filter: &str, cursor: Option<Cursor>) -> SearchQuery {
     let mut query = SearchQuery::new("");
     query.page.limit = PAGE as u32;
@@ -221,7 +222,8 @@ impl Stops {
             (Stage::Lookup, self.lookup, self.lookups),
         ];
         let at = |kind, (stage, _, (done, total)): (Stage, Stop, (u64, u64))| {
-            let mut i = Incomplete::new(kind, done as usize, total as usize).at(stage);
+            let size = |n: u64| usize::try_from(n).unwrap_or(usize::MAX);
+            let mut i = Incomplete::new(kind, size(done), size(total)).at(stage);
             if kind == IncompleteKind::ProviderFailed {
                 i = i.from(provider.clone());
             }
@@ -481,6 +483,8 @@ impl Engine {
             if !of_set.is_empty() {
                 for r in refs.iter().filter(|r| !group_of.contains_key(r)) {
                     let t = tallies.entry(r).or_default();
+                    // An index into the citing works: pages of 200, a few per work.
+                    #[allow(clippy::cast_possible_truncation)]
                     t.citing.push(i as u32);
                     t.groups.extend(&of_set);
                 }
@@ -643,7 +647,7 @@ impl Engine {
             let query = citing_query(filter, cursor.take());
             match self.cached_search(provider, &query) {
                 Some((page, fresh)) if fresh || self.options.offline => {
-                    cursor = page.next.clone();
+                    cursor.clone_from(&page.next);
                     pages.push(page);
                     if cursor.is_none() {
                         break;
@@ -677,14 +681,15 @@ impl Engine {
             .zip(works.iter().zip(targets))
             .map(|(row, ((_, count), target))| {
                 let row = row.filter(|r| fresh(r, self.cache_policy.cited_by))?;
-                let enough = match *target >= *count {
-                    true => row.value.complete,
-                    false => row.value.ids.len() as u64 >= *target,
+                let enough = if *target >= *count {
+                    row.value.complete
+                } else {
+                    row.value.ids.len() as u64 >= *target
                 };
                 (*target > 0 && enough).then(|| {
                     let mut ids = row.value.ids;
                     if !row.value.complete {
-                        ids.truncate(*target as usize);
+                        ids.truncate(usize::try_from(*target).unwrap_or(usize::MAX));
                     }
                     (ids, row.value.complete)
                 })

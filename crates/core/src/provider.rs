@@ -338,7 +338,7 @@ pub struct SearchQuery {
     /// given.
     pub text: String,
     pub mode: SearchMode,
-    /// An author's name, ANDed with the rest.
+    /// An author's name, joined with AND to the rest.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub author: Option<String>,
     /// Words of the title.
@@ -439,6 +439,8 @@ impl SearchQuery {
 }
 
 // Keeps queries without a sort keyed as before in caches.
+// By reference: serde's `skip_serializing_if` passes one.
+#[allow(clippy::trivially_copy_pass_by_ref)]
 fn is_relevance(sort: &Sort) -> bool {
     *sort == Sort::Relevance
 }

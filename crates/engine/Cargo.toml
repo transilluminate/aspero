@@ -3,6 +3,7 @@ name = "aspero-engine"
 description = "Routing, caching and resilience engine for aspero"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 homepage.workspace = true

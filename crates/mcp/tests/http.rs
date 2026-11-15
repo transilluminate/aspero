@@ -1,6 +1,9 @@
 //! The Streamable HTTP server end to end, on loopback: a scripted engine,
 //! a fake host, and JSON-RPC over HTTP as an agent sends it.
 
+// Exact constants: scores and spends rounded or summed from binary-exact values.
+#![allow(clippy::float_cmp)]
+
 mod common;
 
 use std::sync::{Arc, Mutex};

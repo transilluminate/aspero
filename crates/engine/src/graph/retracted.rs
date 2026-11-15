@@ -37,7 +37,7 @@ impl Engine {
                 spend.requests += paid;
                 continue;
             }
-            if !spend.allows(paid as usize) {
+            if !spend.allows(usize::try_from(paid).unwrap_or(usize::MAX)) {
                 budget = true;
                 break;
             }
@@ -143,6 +143,7 @@ fn notice_source(update: &Update, fallback: &str) -> String {
 }
 
 /// The search finding which of `ids` OpenAlex flags as retracted.
+#[allow(clippy::cast_possible_truncation)] // `MAX_FILTER` is 100
 fn retracted_query(ids: &[&WorkId]) -> SearchQuery {
     let mut query = SearchQuery::new("");
     query.page.limit = MAX_FILTER as u32;

@@ -36,7 +36,7 @@ const NAME: &str = "OpenAlex";
 pub(crate) struct Plan {
     /// `search=`, keywords as a boolean query.
     pub search: Option<String>,
-    /// `filter=` clauses, ANDed.
+    /// `filter=` clauses, joined with AND.
     pub filters: Vec<String>,
     /// Journals to find sources for, each then a `primary_location.source.id`
     /// filter.
@@ -83,7 +83,7 @@ pub(crate) fn translate(tree: &QueryNode, caps: &Capabilities) -> Result<Plan, S
     Ok(plan)
 }
 
-/// The clauses, ANDed, that say `node` (or, `negated`, that it doesn't
+/// The clauses, joined with AND, that say `node` (or, `negated`, that it doesn't
 /// match).
 fn conjunction(node: &QueryNode, negated: bool) -> Result<Vec<Clause>, String> {
     // One text field: one boolean query, however the tree nests. A none is
@@ -141,9 +141,10 @@ fn text_clause(field: TermField, node: &QueryNode, negated: bool) -> Result<Clau
         (field, negated) => {
             let key = text_key(field).expect("a text field");
             let bang = if negated { "!" } else { "" };
-            match negated && grouped {
-                true => Clause::Filter(format!("{key}:{bang}({expr})")),
-                false => Clause::Filter(format!("{key}:{bang}{expr}")),
+            if negated && grouped {
+                Clause::Filter(format!("{key}:{bang}({expr})"))
+            } else {
+                Clause::Filter(format!("{key}:{bang}{expr}"))
             }
         }
     })
@@ -173,13 +174,12 @@ fn text_value(value: &str, phrase: bool, grouped: bool) -> String {
 }
 
 /// An any of leaves that are all values of one filter: `type:a|b`, or
-/// journals, whose sources are then ORed.
+/// journals, whose sources are then joined with OR.
 fn any_of_values(node: &QueryNode, nodes: &[QueryNode]) -> Result<Clause, String> {
     let refuse = || match identifier_kinds(nodes) {
-        Some(kinds) => format!(
-            "{NAME} can't combine {} with any, only identifiers of one kind",
-            kinds
-        ),
+        Some(kinds) => {
+            format!("{NAME} can't combine {kinds} with any, only identifiers of one kind")
+        }
         None => format!("{NAME} can't combine {} with any", node.leaf_names()),
     };
     let journals: Option<Vec<(String, bool)>> = nodes
@@ -211,7 +211,7 @@ fn any_of_values(node: &QueryNode, nodes: &[QueryNode]) -> Result<Clause, String
     Ok(Clause::Filter(format!("{key}:{}", values.join("|"))))
 }
 
-/// A leaf's filter key and value, if values of its filter can be ORed.
+/// A leaf's filter key and value, if values of its filter can be joined with OR.
 fn orable(node: &QueryNode) -> Option<Result<(&'static str, String), String>> {
     Some(match node {
         QueryNode::Filter(FilterValue::WorkType(t)) => work_type(t).map(|v| ("type", v.to_owned())),

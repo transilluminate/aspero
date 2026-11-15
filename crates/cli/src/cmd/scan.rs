@@ -12,6 +12,8 @@ use crate::args::Format;
 use crate::exit::Exit;
 use crate::output;
 
+// Like every command: main hands over what it parsed.
+#[allow(clippy::needless_pass_by_value)]
 pub fn run(files: Vec<PathBuf>, out: Out) -> Result<Exit, Failure> {
     let mut mentions = Vec::new();
     for (name, text) in documents(files)? {

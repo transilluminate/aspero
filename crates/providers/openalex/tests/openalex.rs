@@ -45,12 +45,10 @@ fn query(http: &ReplayClient, n: usize) -> Vec<(String, String)> {
     url.query_pairs().into_owned().collect()
 }
 
-fn after(secs: f64) -> Option<jiff::Timestamp> {
-    Some(
-        FIXTURE_TIME
-            .checked_add(Duration::from_secs_f64(secs))
-            .unwrap(),
-    )
+fn after(secs: f64) -> jiff::Timestamp {
+    FIXTURE_TIME
+        .checked_add(Duration::from_secs_f64(secs))
+        .unwrap()
 }
 
 #[test]
@@ -102,7 +100,7 @@ fn single_doi_lookup_uses_free_endpoint_and_maps_the_work() {
     let usage = resp.usage.unwrap();
     assert_eq!(usage.cost, Some(0.0));
     assert_eq!(usage.remaining, Some(remaining));
-    assert_eq!(usage.resets_at, after(reset));
+    assert_eq!(usage.resets_at, Some(after(reset)));
     // The daily allowance and prepaid balance come with every response.
     assert_eq!(usage.limit, Some(1.0));
     assert_eq!(usage.prepaid_remaining, Some(0.0));
@@ -124,7 +122,7 @@ fn limit_and_prepaid_headers_are_read_when_given() {
     assert_eq!(usage.limit, Some(0.1));
     assert_eq!(usage.remaining, Some(0.025));
     assert_eq!(usage.prepaid_remaining, Some(4.5));
-    assert_eq!(usage.resets_at, after(60.0));
+    assert_eq!(usage.resets_at, Some(after(60.0)));
 
     // Responses without them leave them unknown.
     let (oa, _) = provider([response(200, &[("x-ratelimit-cost-usd", "0.001")], body)]);
@@ -532,7 +530,7 @@ fn spent_budget_is_quota_exhausted_with_reset_time() {
     let Error::QuotaExhausted { resets_at } = err else {
         panic!("expected QuotaExhausted, got {err:?}");
     };
-    assert_eq!(resets_at, after(3600.0));
+    assert_eq!(resets_at, Some(after(3600.0)));
 }
 
 #[test]
@@ -592,7 +590,7 @@ fn without_a_key_paging_on_is_unsupported_not_a_rejected_key() {
             assert!(
                 m.starts_with("OpenAlex needs an API key for this: Paging past"),
                 "{m}"
-            )
+            );
         }
         other => panic!("{other:?}"),
     }

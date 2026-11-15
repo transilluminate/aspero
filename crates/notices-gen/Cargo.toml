@@ -3,6 +3,7 @@ name = "notices-gen"
 description = "Generates the third-party notices that aspero's FFI library and CLI ship (`just notices`)"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 homepage.workspace = true

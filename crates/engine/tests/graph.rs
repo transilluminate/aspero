@@ -1,6 +1,9 @@
 //! Citation links: references pages and analyses of a set, against a
 //! scripted OpenAlex that charges as the real one does.
 
+// Exact constants: scores and spends rounded or summed from binary-exact values.
+#![allow(clippy::float_cmp)]
+
 use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
 
@@ -292,7 +295,7 @@ fn engine(alex: Arc<Alex>, cache: Option<Arc<SqliteCache>>) -> Engine {
 }
 
 fn inputs(ids: &[&str]) -> Vec<String> {
-    ids.iter().map(|s| s.to_string()).collect()
+    ids.iter().map(ToString::to_string).collect()
 }
 
 /// A set: a preprint (W1) and its published version (W2: the same title,

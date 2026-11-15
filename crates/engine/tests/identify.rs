@@ -3,6 +3,7 @@
 
 mod common;
 
+use std::fmt::Write as _;
 use std::sync::Arc;
 
 use aspero_engine::{Decision, Verdict};
@@ -18,9 +19,10 @@ fn page() -> String {
          Deep learning allows computational models that are composed of multiple\n",
     );
     for i in 0..12 {
-        page.push_str(&format!(
-            "processing layers to learn representations of data {i}.\n"
-        ));
+        let _ = writeln!(
+            page,
+            "processing layers to learn representations of data {i}."
+        );
     }
     page.push_str("as shown before (doi:10.1145/3448250).\n");
     page.push_str("Nature 521, 436-444 (2015). doi:10.1038/nature14539\n");
@@ -127,11 +129,11 @@ async fn nothing_sure_enough_is_none() {
 async fn on_a_title_tie_the_header_identifier_wins() {
     let mut page = String::from("https://doi.org/10.1101/2015.01.01.000001\nDeep learning\n");
     for i in 0..6 {
-        page.push_str(&format!("representations of data {i}.\n"));
+        let _ = writeln!(page, "representations of data {i}.");
     }
     page.push_str("as published (doi:10.1038/nature14539).\n");
     for i in 0..6 {
-        page.push_str(&format!("more layers {i}.\n"));
+        let _ = writeln!(page, "more layers {i}.");
     }
     let works = vec![
         work(

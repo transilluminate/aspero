@@ -2,6 +2,8 @@
 //! for free (OpenAlex's `/rate-limit` with a key; without one, a lookup of
 //! one work, which is free too and says the budget in its headers).
 
+use std::fmt::Write as _;
+
 use aspero_core::{FieldSet, WorkId};
 use aspero_engine::{Budget, CallOptions, Engine};
 use serde_json::{Map, Value, json};
@@ -88,10 +90,10 @@ fn line(b: &Budget, no_key: bool) -> String {
     };
     if let Some(t) = b.resets_at {
         let at = t.to_zoned(jiff::tz::TimeZone::UTC);
-        text.push_str(&format!(", resets {} UTC", at.strftime("%H:%M")));
+        let _ = write!(text, ", resets {} UTC", at.strftime("%H:%M"));
     }
     if let Some(prepaid) = b.prepaid_remaining.filter(|p| *p > 0.0) {
-        text.push_str(&format!("; ${prepaid:.2} prepaid left"));
+        let _ = write!(text, "; ${prepaid:.2} prepaid left");
     }
     text
 }

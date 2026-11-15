@@ -231,9 +231,9 @@ fn query(text: String, o: &SearchOptions) -> Result<SearchQuery, Failure> {
     q.years = o.year.as_deref().map(parse_years).transpose()?;
     q.work_type = o.work_type.as_deref().map(WorkType::from_csl);
     q.open_access = o.oa.then_some(true);
-    q.author = o.author.clone();
-    q.title = o.title.clone();
-    q.container = o.container.clone();
+    q.author.clone_from(&o.author);
+    q.title.clone_from(&o.title);
+    q.container.clone_from(&o.container);
     q.tree = o.tree.as_deref().map(parse_tree).transpose()?;
     q.sort = sort(o.sort);
     q.since = o
@@ -273,12 +273,11 @@ fn parse_years(s: &str) -> Result<YearRange, Failure> {
             .map(Some)
             .map_err(|_| Failure::usage(format!("invalid year {t:?} in --year {s:?}")))
     };
-    let (from, to) = match s.split_once("..") {
-        Some((from, to)) => (year(from)?, year(to)?),
-        None => {
-            let y = year(s)?;
-            (y, y)
-        }
+    let (from, to) = if let Some((from, to)) = s.split_once("..") {
+        (year(from)?, year(to)?)
+    } else {
+        let y = year(s)?;
+        (y, y)
     };
     if from.is_none() && to.is_none() {
         return Err(Failure::usage(format!("--year {s:?} names no year")));
@@ -308,7 +307,7 @@ mod tests {
             t.header()
                 .unwrap()
                 .cell_iter()
-                .map(|c| c.content())
+                .map(comfy_table::Cell::content)
                 .collect()
         };
         assert_eq!(
@@ -353,7 +352,7 @@ mod tests {
             next_command("Bishop's book", &options, "openalex", "c", true)
                 .split(" --")
                 .next(),
-            Some(r#"aspero search 'Bishop'\''s book'"#)
+            Some(r"aspero search 'Bishop'\''s book'")
         );
         let by_fields = SearchOptions {
             year: None,

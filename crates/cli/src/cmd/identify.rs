@@ -38,7 +38,7 @@ pub async fn run(
     else {
         match out.format {
             Format::Text | Format::Table => {
-                println!("NOT IDENTIFIED\n  nothing on the page is sure enough")
+                println!("NOT IDENTIFIED\n  nothing on the page is sure enough");
             }
             _ => print(&json!({"identified": false})),
         }

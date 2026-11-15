@@ -42,6 +42,8 @@ pub struct Keys(Vec<String>);
 
 impl Keys {
     /// A key for `work` not given before.
+    // Ends: only finitely many keys are taken, and the suffixes go on.
+    #[allow(clippy::maybe_infinite_iter)]
     pub fn key(&mut self, work: &Work) -> String {
         let base = cite_key(work);
         let key = std::iter::once(base.clone())

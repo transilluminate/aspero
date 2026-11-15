@@ -94,9 +94,10 @@ pub fn parse_query(value: &Value) -> Result<QueryNode, String> {
     };
     if let Some(field) = field(key) {
         let text = string(key, value)?;
-        return Ok(match phrase {
-            true => QueryNode::phrase(field, text),
-            false => QueryNode::term(field, text),
+        return Ok(if phrase {
+            QueryNode::phrase(field, text)
+        } else {
+            QueryNode::term(field, text)
         });
     }
     let flag = |filter: FilterValue| match value {

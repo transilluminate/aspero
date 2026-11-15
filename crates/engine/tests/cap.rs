@@ -2,6 +2,9 @@
 //! (as the provider reports it) reaches it, free ones go on, checks fall
 //! back to other sources, and it lifts when the budget resets.
 
+// Exact constants: scores and spends rounded or summed from binary-exact values.
+#![allow(clippy::float_cmp)]
+
 mod common;
 
 use std::sync::atomic::{AtomicI64, Ordering};
@@ -124,7 +127,7 @@ fn engine_with(openalex: Arc<Metered>, others: Vec<Arc<Scripted>>, cap: f64) -> 
         .daily_cap(ProviderId::from_static("openalex"), cap)
         .clock(|| Timestamp::from_second(NOON).unwrap());
     for (i, p) in others.into_iter().enumerate() {
-        builder = builder.provider(p, policy.clone(), 20 + i as i32);
+        builder = builder.provider(p, policy.clone(), 20 + i32::try_from(i).unwrap());
     }
     builder.build()
 }

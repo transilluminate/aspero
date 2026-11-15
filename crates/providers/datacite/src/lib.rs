@@ -383,9 +383,10 @@ fn express(tree: &QueryNode, caps: &Capabilities) -> std::result::Result<String,
             FilterValue::Language(code) => {
                 let (b, t) = aspero_core::query::language(code)
                     .ok_or_else(|| format!("{code:?} is not an ISO 639-1 language code"))?;
-                match b == t {
-                    true => format!("language:({code} OR {b})"),
-                    false => format!("language:({code} OR {b} OR {t})"),
+                if b == t {
+                    format!("language:({code} OR {b})")
+                } else {
+                    format!("language:({code} OR {b} OR {t})")
                 }
             }
             FilterValue::HasAbstract => "descriptions.descriptionType:Abstract".to_owned(),

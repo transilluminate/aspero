@@ -333,7 +333,7 @@ const PARTICLES: [&str; 14] = [
 ];
 
 /// Words that make a name an organisation's.
-const BODIES: [&str; 46] = [
+const BODIES: [&str; 55] = [
     "university",
     "institute",
     "institution",
@@ -380,6 +380,15 @@ const BODIES: [&str; 46] = [
     "secretariat",
     "trialists",
     "collaborators",
+    "collaborative",
+    "force",
+    "bank",
+    "service",
+    "services",
+    "authority",
+    "unit",
+    "health",
+    "research",
 ];
 
 /// A personal name written whole ("Yann LeCun", "Vincent van Gogh"), as
@@ -643,6 +652,16 @@ mod tests {
             "Sepsis Taskforce",
             "CRASH Trialists",
             "Covid Collaborators",
+            "Public Health England",
+            "Cancer Research UK",
+            "World Bank",
+            "Health Canada",
+            "Sepsis Task Force",
+            "CovidSurg Collaborative",
+            "Blood Transfusion Service",
+            "Indian Health Services",
+            "Patient Safety Authority",
+            "Clinical Trials Unit",
         ] {
             assert_eq!(Person::literal(body).parts(), None, "{body}");
             assert_eq!(short(Person::literal(body)), body);

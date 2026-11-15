@@ -65,7 +65,8 @@ use auth::Credential;
 use handler::{Authed, Handler};
 use host::Listed;
 
-use crate::server::engine_tool;
+use crate::server::engine_tools;
+use crate::session::Reservations;
 use crate::{DEFAULT_BUDGET_USD, Scope, Tools};
 
 /// The port unless the app picks another.
@@ -77,10 +78,22 @@ pub const HOST_TIMEOUT: Duration = Duration::from_secs(30);
 /// How long a session may take to take a notification before it's given
 /// up on.
 const NOTIFY_TIMEOUT: Duration = Duration::from_secs(10);
+/// Activity waiting for the app to take it; more is dropped (it's
+/// informational) while the app is this far behind.
+pub const ACTIVITY_QUEUE: usize = 256;
+/// Paid calls a key may have in flight at once, across its sessions;
+/// more wait. Calls hold their estimated cost while in flight, so the
+/// daily budget is passed by one call's cost at most; this bounds what
+/// calls costing more than estimated can add.
+pub const PAID_IN_FLIGHT: usize = 4;
 /// The path the protocol is served at.
 pub const PATH: &str = "/mcp";
 
 const SESSION_ID: &str = "mcp-session-id";
+
+/// Sessions a key may have open at once; more are refused (429) until one
+/// ends (closed, or idle for five minutes).
+pub const MAX_SESSIONS_PER_KEY: usize = 16;
 
 /// A bearer key the app minted. aspero sees only its token's hash.
 #[derive(Debug, Clone, PartialEq)]
@@ -228,9 +241,14 @@ pub(crate) struct Shared {
     host: Option<Arc<dyn Host>>,
     catalog: RwLock<Arc<Vec<Listed>>>,
     ledger: Arc<dyn Ledger>,
+    /// Each key's paid calls in flight, by key id.
+    paid: Mutex<HashMap<String, Arc<Reservations>>>,
+    /// Spend the ledger couldn't record, by key id and day: counted
+    /// against the key's budget, and written with its next spend or check.
+    unrecorded: Mutex<HashMap<(String, String), f64>>,
     session_budget_usd: f64,
     host_timeout: Duration,
-    activity: Mutex<Option<std::sync::mpsc::Sender<Activity>>>,
+    activity: Mutex<Option<std::sync::mpsc::SyncSender<Activity>>>,
     /// Each initialized session's line back to its client, for telling it
     /// the tools changed.
     listeners: Mutex<Vec<Listener>>,
@@ -251,10 +269,50 @@ impl Shared {
             .clone()
     }
 
+    /// The paid calls in flight of the key `key_id`.
+    fn paid(&self, key_id: &str) -> Arc<Reservations> {
+        let mut paid = self.paid.lock().unwrap_or_else(|e| e.into_inner());
+        paid.entry(key_id.to_owned())
+            .or_insert_with(|| Arc::new(Reservations::new(PAID_IN_FLIGHT)))
+            .clone()
+    }
+
+    /// Adds to what the key `key_id` spent today, in the ledger or, if it
+    /// can't write, here until it can.
     fn ledger_add(&self, key_id: &str, usd: f64) {
-        if let Err(e) = self.ledger.add(key_id, &today(), usd) {
-            tracing::warn!(target: "aspero::mcp", key = key_id, error = %e, "could not record a key's spend");
-        }
+        let mut unrecorded = self.unrecorded.lock().unwrap_or_else(|e| e.into_inner());
+        *unrecorded.entry((key_id.to_owned(), today())).or_default() += usd;
+        self.record(&mut unrecorded, key_id);
+    }
+
+    /// What the key `key_id` has spent today: the ledger's figure, and what
+    /// it couldn't record yet (tried again first).
+    fn key_spent(&self, key_id: &str) -> Result<f64, String> {
+        let day = today();
+        let mut unrecorded = self.unrecorded.lock().unwrap_or_else(|e| e.into_inner());
+        self.record(&mut unrecorded, key_id);
+        let owed = unrecorded
+            .get(&(key_id.to_owned(), day.clone()))
+            .copied()
+            .unwrap_or(0.0);
+        Ok(self.ledger.spent(key_id, &day)? + owed)
+    }
+
+    /// Writes the key `key_id`'s unrecorded spend to the ledger, keeping
+    /// what it still can't.
+    fn record(&self, unrecorded: &mut HashMap<(String, String), f64>, key_id: &str) {
+        unrecorded.retain(|(key, day), usd| {
+            if key != key_id {
+                return true;
+            }
+            match self.ledger.add(key, day, *usd) {
+                Ok(()) => false,
+                Err(e) => {
+                    tracing::warn!(target: "aspero::mcp", key = key_id, error = %e, "could not record a key's spend; kept to try again");
+                    true
+                }
+            }
+        });
     }
 
     /// Keeps a session's client, to tell it when its tools change.
@@ -266,6 +324,13 @@ impl Shared {
             digest: key.digest,
             peer,
         });
+    }
+
+    /// Initialized sessions whose clients are still connected.
+    fn listening(&self) -> usize {
+        let mut listeners = self.listeners.lock().unwrap_or_else(|e| e.into_inner());
+        listeners.retain(|l| !l.peer.is_transport_closed());
+        listeners.len()
     }
 
     /// Sends `notifications/tools/list_changed`, on `runtime`, to the open
@@ -289,10 +354,13 @@ impl Shared {
         }
     }
 
-    /// Hands `activity` to the host's thread.
+    /// Hands `activity` to the host's thread, or drops it if the host is
+    /// [`ACTIVITY_QUEUE`] behind.
     fn report(&self, activity: Activity) {
-        if let Some(tx) = &*self.activity.lock().unwrap_or_else(|e| e.into_inner()) {
-            let _ = tx.send(activity);
+        if let Some(tx) = &*self.activity.lock().unwrap_or_else(|e| e.into_inner())
+            && let Err(std::sync::mpsc::TrySendError::Full(a)) = tx.try_send(activity)
+        {
+            tracing::debug!(target: "aspero::mcp", tool = %a.tool, "the app is behind on activity; dropped");
         }
     }
 }
@@ -318,9 +386,47 @@ struct State {
     manager: Arc<LocalSessionManager>,
     owners: Mutex<HashMap<String, Owner>>,
     usage: Mutex<Usage>,
+    /// Cancelled once the server is stopping: no request is served after.
+    stopping: CancellationToken,
+    /// Sessions each key (by id) is opening: not yet in `owners`.
+    opening: Mutex<HashMap<String, usize>>,
+}
+
+/// A place held for a session a key is opening, until its owner is on
+/// record.
+struct Opening<'a> {
+    state: &'a State,
+    key_id: String,
+}
+
+impl Drop for Opening<'_> {
+    fn drop(&mut self) {
+        let mut opening = self.state.opening.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(n) = opening.get_mut(&self.key_id) {
+            *n -= 1;
+            if *n == 0 {
+                opening.remove(&self.key_id);
+            }
+        }
+    }
 }
 
 type Body = BoxBody<Bytes, Infallible>;
+
+/// 429, saying why: the key has as many sessions open as it may.
+fn too_many_sessions() -> Response<Body> {
+    let message = format!(
+        "this key has {MAX_SESSIONS_PER_KEY} MCP sessions open, the most it may: end one \
+         (DELETE {PATH} with its Mcp-Session-Id) or let one go idle for five minutes first"
+    );
+    let mut response = Response::new(Full::new(Bytes::from(message)).boxed());
+    *response.status_mut() = StatusCode::TOO_MANY_REQUESTS;
+    response.headers_mut().insert(
+        http::header::CONTENT_TYPE,
+        http::HeaderValue::from_static("text/plain; charset=utf-8"),
+    );
+    response
+}
 
 fn plain(status: StatusCode) -> Response<Body> {
     let mut response = Response::new(Full::new(Bytes::new()).boxed());
@@ -337,6 +443,9 @@ impl State {
     }
 
     async fn handle(&self, mut request: Request<Incoming>) -> Response<Body> {
+        if self.stopping.is_cancelled() {
+            return plain(StatusCode::SERVICE_UNAVAILABLE);
+        }
         if request.uri().path() != PATH {
             return plain(StatusCode::NOT_FOUND);
         }
@@ -366,6 +475,16 @@ impl State {
                 return plain(StatusCode::NOT_FOUND);
             }
         }
+        // A request outside a session may open one: the key's place for it.
+        let _opening = match &session {
+            None if request.method() == Method::POST => {
+                match self.place(&credential.key.id).await {
+                    Some(opening) => Some(opening),
+                    None => return too_many_sessions(),
+                }
+            }
+            _ => None,
+        };
         self.used(&credential);
         let delete = request.method() == Method::DELETE;
         request.extensions_mut().insert(Authed(credential.clone()));
@@ -373,28 +492,71 @@ impl State {
         let opened = response
             .headers()
             .get(SESSION_ID)
-            .and_then(|v| v.to_str().ok());
-        let mut owners = self.owners.lock().unwrap_or_else(|e| e.into_inner());
+            .and_then(|v| v.to_str().ok())
+            .map(String::from);
         match (&session, opened) {
-            (None, Some(id)) => {
-                owners.insert(
-                    id.to_owned(),
-                    Owner {
-                        key_id: credential.key.id.clone(),
-                        digest: credential.digest,
-                    },
-                );
-                // Forget sessions that ended on their own (idle).
-                if let Ok(live) = self.manager.sessions.try_read() {
-                    owners.retain(|id, _| live.contains_key(id.as_str()));
-                }
-            }
+            (None, Some(id)) => self.opened(&id, &credential).await,
             (Some(id), _) if delete && response.status().is_success() => {
-                owners.remove(id);
+                self.owners
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .remove(id);
             }
             _ => {}
         }
         response.map(|b| b.boxed())
+    }
+
+    /// Records that `credential`'s key opened the session `id`, and ends it
+    /// if the key went (or was re-hashed) meanwhile: [`HttpServer::set_keys`]
+    /// ends the sessions on record, which this one wasn't yet.
+    async fn opened(&self, id: &str, credential: &Credential) {
+        {
+            let mut owners = self.owners.lock().unwrap_or_else(|e| e.into_inner());
+            owners.insert(
+                id.to_owned(),
+                Owner {
+                    key_id: credential.key.id.clone(),
+                    digest: credential.digest,
+                },
+            );
+            // Forget sessions that ended on their own (idle).
+            if let Ok(live) = self.manager.sessions.try_read() {
+                owners.retain(|id, _| live.contains_key(id.as_str()));
+            }
+        }
+        // After the owner's on record: `set_keys` swaps the keys before it
+        // reads the owners, so one of the two sees the other.
+        let current = self
+            .credentials()
+            .iter()
+            .any(|c| c.key.id == credential.key.id && c.digest == credential.digest);
+        if !current {
+            // Its owner stays on record until it's gone, as `set_keys` leaves
+            // them.
+            let _ = self.manager.close_session(&id.into()).await;
+        }
+    }
+
+    /// Holds a place for a session the key `key_id` may open, unless it
+    /// has [`MAX_SESSIONS_PER_KEY`] open or opening.
+    async fn place(&self, key_id: &str) -> Option<Opening<'_>> {
+        let live = self.manager.sessions.read().await;
+        let mut owners = self.owners.lock().unwrap_or_else(|e| e.into_inner());
+        // Sessions that ended on their own (idle) don't count.
+        owners.retain(|id, _| live.contains_key(id.as_str()));
+        drop(live);
+        let open = owners.values().filter(|o| o.key_id == key_id).count();
+        let mut opening = self.opening.lock().unwrap_or_else(|e| e.into_inner());
+        let n = opening.entry(key_id.to_owned()).or_default();
+        if open + *n >= MAX_SESSIONS_PER_KEY {
+            return None;
+        }
+        *n += 1;
+        Some(Opening {
+            state: self,
+            key_id: key_id.to_owned(),
+        })
     }
 
     fn used(&self, credential: &Credential) {
@@ -412,7 +574,8 @@ pub struct HttpServer {
     state: Arc<State>,
     cancel: CancellationToken,
     running: AtomicBool,
-    task: Mutex<Option<JoinHandle<()>>>,
+    /// The accept loop, until it has finished.
+    task: tokio::sync::Mutex<Option<JoinHandle<()>>>,
     /// The runtime serving it, for work begun outside it (`set_keys`).
     runtime: tokio::runtime::Handle,
 }
@@ -457,7 +620,7 @@ impl HttpServer {
             .port();
 
         let activity = host.clone().map(|host| {
-            let (tx, rx) = std::sync::mpsc::channel::<Activity>();
+            let (tx, rx) = std::sync::mpsc::sync_channel::<Activity>(ACTIVITY_QUEUE);
             let spawned = std::thread::Builder::new()
                 .name("aspero-mcp-activity".into())
                 .spawn(move || {
@@ -471,13 +634,15 @@ impl HttpServer {
             tx
         });
         let shared = Arc::new(Shared {
-            engine_listed: tools.specs().iter().map(engine_tool).collect(),
+            engine_listed: engine_tools(&tools),
             engine_names,
             tools,
             engine_tools: config.engine_tools,
             host,
             catalog: RwLock::new(Arc::new(catalog)),
             ledger,
+            paid: Mutex::default(),
+            unrecorded: Mutex::default(),
             session_budget_usd: budget,
             host_timeout: config.host_timeout,
             activity: Mutex::new(activity),
@@ -504,6 +669,8 @@ impl HttpServer {
             manager,
             owners: Mutex::default(),
             usage: Mutex::default(),
+            stopping: cancel.clone(),
+            opening: Mutex::default(),
         });
         let task = tokio::spawn(accept(listener, state.clone(), cancel.clone()));
         tracing::info!(target: "aspero::mcp", port, "MCP server listening on 127.0.0.1");
@@ -511,7 +678,7 @@ impl HttpServer {
             state,
             cancel,
             running: AtomicBool::new(true),
-            task: Mutex::new(Some(task)),
+            task: tokio::sync::Mutex::new(Some(task)),
             runtime: tokio::runtime::Handle::current(),
         })
     }
@@ -533,22 +700,7 @@ impl HttpServer {
                 }
             })
             .collect();
-        // Their owners stay on record (until the sessions are gone), so no
-        // other key, nor the same id with a new hash, takes them over
-        // before they close.
-        let ended: Vec<String> = self
-            .state
-            .owners
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .iter()
-            .filter(|(_, o)| {
-                !credentials
-                    .iter()
-                    .any(|c| c.key.id == o.key_id && c.digest == o.digest)
-            })
-            .map(|(id, _)| id.clone())
-            .collect();
+        let credentials = Arc::new(credentials);
         // Kept keys whose scopes changed: their sessions' lists did.
         let rescoped: Vec<(String, [u8; 32])> = {
             let mut current = self
@@ -567,9 +719,27 @@ impl HttpServer {
                 })
                 .map(|c| (c.key.id.clone(), c.digest))
                 .collect();
-            *current = Arc::new(credentials);
+            *current = credentials.clone();
             rescoped
         };
+        // Read after the swap: a session opening meanwhile is on record
+        // here, or its opening sees the new keys and ends it. Their owners
+        // stay on record (until the sessions are gone), so no other key,
+        // nor the same id with a new hash, takes them over before they
+        // close.
+        let ended: Vec<String> = self
+            .state
+            .owners
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .iter()
+            .filter(|(_, o)| {
+                !credentials
+                    .iter()
+                    .any(|c| c.key.id == o.key_id && c.digest == o.digest)
+            })
+            .map(|(id, _)| id.clone())
+            .collect();
         if !rescoped.is_empty() {
             self.state
                 .shared
@@ -609,9 +779,12 @@ impl HttpServer {
     pub fn status(&self) -> Status {
         let state = &self.state;
         let usage = state.usage.lock().unwrap_or_else(|e| e.into_inner());
+        // Without waiting: while a session opens or closes, the sessions
+        // whose clients are connected. (The owners on record can include
+        // sessions ended idle.)
         let sessions = match state.manager.sessions.try_read() {
             Ok(live) => live.len(),
-            Err(_) => state.owners.lock().unwrap_or_else(|e| e.into_inner()).len(),
+            Err(_) => state.shared.listening(),
         };
         Status {
             running: self.running.load(Ordering::Relaxed),
@@ -630,22 +803,26 @@ impl HttpServer {
         }
     }
 
-    /// Ends every session, stops listening and waits (a couple of seconds
-    /// at most) for requests in flight; the port is free when it returns.
-    /// Stopping again does nothing.
+    /// Stops listening and taking requests, ends every session and waits (a
+    /// couple of seconds at most) for requests in flight; the port is free
+    /// when it returns. Stopping again finishes a stop cut short (its
+    /// future dropped), and otherwise does nothing.
     pub async fn stop(&self) {
-        if !self.running.swap(false, Ordering::Relaxed) {
-            return;
-        }
+        // First, and at once: whatever happens to this future, nothing new
+        // is served from here on.
+        self.cancel.cancel();
         let manager = &self.state.manager;
         let ids: Vec<_> = manager.sessions.read().await.keys().cloned().collect();
         for id in ids {
             let _ = manager.close_session(&id).await;
         }
-        self.cancel.cancel();
-        let task = self.task.lock().unwrap_or_else(|e| e.into_inner()).take();
-        if let Some(task) = task {
-            let _ = task.await;
+        {
+            // Kept until it's done, for a stop called again to wait on.
+            let mut task = self.task.lock().await;
+            if let Some(running) = task.as_mut() {
+                let _ = running.await;
+                *task = None;
+            }
         }
         // Ends the activity thread once it has said what's queued.
         self.state
@@ -654,7 +831,9 @@ impl HttpServer {
             .lock()
             .unwrap_or_else(|e| e.into_inner())
             .take();
-        tracing::info!(target: "aspero::mcp", port = self.state.port, "MCP server stopped");
+        if self.running.swap(false, Ordering::Relaxed) {
+            tracing::info!(target: "aspero::mcp", port = self.state.port, "MCP server stopped");
+        }
     }
 }
 
@@ -701,4 +880,95 @@ async fn accept(listener: TcpListener, state: Arc<State>, cancel: CancellationTo
     }
     drop(listener);
     let _ = tokio::time::timeout(Duration::from_secs(2), graceful.shutdown()).await;
+}
+
+#[cfg(test)]
+mod tests {
+    use rmcp::transport::streamable_http_server::SessionManager;
+
+    use super::*;
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_stop_cut_short_finishes_when_called_again() {
+        let tools = Arc::new(Tools::new(aspero_engine::Engine::builder().build()));
+        let config = HttpConfig {
+            port: 0,
+            ..HttpConfig::default()
+        };
+        let ledger = Arc::new(MemoryLedger::default());
+        let server = HttpServer::start(tools, config, None, ledger)
+            .await
+            .unwrap();
+        let port = server.port();
+        let manager = server.state.manager.clone();
+        let _session = manager.create_session().await.unwrap();
+        {
+            // The sessions busy elsewhere: closing one waits, and the stop
+            // is dropped there, as an app's cancelled task would be.
+            let _busy = manager.sessions.read().await;
+            assert!(futures::FutureExt::now_or_never(server.stop()).is_none());
+        }
+        server.stop().await;
+        assert!(!server.status().running);
+        std::net::TcpListener::bind(("127.0.0.1", port)).expect("the port is free");
+        // And again: nothing left to do.
+        server.stop().await;
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn status_counts_no_ended_sessions_while_sessions_change() {
+        let tools = Arc::new(Tools::new(aspero_engine::Engine::builder().build()));
+        let config = HttpConfig {
+            port: 0,
+            ..HttpConfig::default()
+        };
+        let ledger = Arc::new(MemoryLedger::default());
+        let server = HttpServer::start(tools, config, None, ledger)
+            .await
+            .unwrap();
+        // A session that ended idle, its owner still on record.
+        server.state.owners.lock().unwrap().insert(
+            "gone".into(),
+            Owner {
+                key_id: "k".into(),
+                digest: [0; 32],
+            },
+        );
+        {
+            // A session opening or closing meanwhile.
+            let _busy = server.state.manager.sessions.write().await;
+            assert_eq!(server.status().sessions, 0);
+        }
+        server.stop().await;
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_session_opening_as_its_key_goes_ends() {
+        let tools = Arc::new(Tools::new(aspero_engine::Engine::builder().build()));
+        let key = Key {
+            id: "k".into(),
+            name: "agent".into(),
+            scopes: vec![Scope::Sources],
+            sha256: sha256_hex("token"),
+            daily_budget_usd: 1.0,
+        };
+        let config = HttpConfig {
+            port: 0,
+            keys: vec![key],
+            ..HttpConfig::default()
+        };
+        let ledger = Arc::new(MemoryLedger::default());
+        let server = HttpServer::start(tools, config, None, ledger)
+            .await
+            .unwrap();
+        let state = &server.state;
+        let credential = state.credentials()[0].clone();
+        // Mid-initialize: open, its owner not yet on record, as the key
+        // goes.
+        let (id, _transport) = state.manager.create_session().await.unwrap();
+        server.set_keys(Vec::new());
+        state.opened(&id, &credential).await;
+        assert!(!state.manager.sessions.read().await.contains_key(&id));
+        server.stop().await;
+    }
 }

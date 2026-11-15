@@ -13,9 +13,9 @@
 
 use aspero_core::id::{Mention, scan};
 use aspero_core::matching::{self, Agreement};
-use aspero_core::{Claim, FieldSet, SourceRecord, WorkId};
+use aspero_core::{Claim, FieldSet, ProviderId, SourceRecord, Usage, WorkId};
 
-use crate::{Engine, Verdict, Verification};
+use crate::{Engine, SEARCH_LIMIT, Verdict, Verification, add_usage};
 
 /// Identifiers looked up per page.
 pub const MAX_IDENTIFIERS: usize = 6;
@@ -68,6 +68,16 @@ pub struct Identified {
     pub verification: Verification,
 }
 
+/// What [`Engine::identify`] found, and what finding it cost.
+#[derive(Debug, Clone)]
+#[non_exhaustive]
+pub struct IdentifyReport {
+    /// `None` when nothing is sure enough.
+    pub identified: Option<Identified>,
+    /// Every call's, identified or not: the lookups and the verification.
+    pub usage: Vec<(ProviderId, Usage)>,
+}
+
 impl Identified {
     /// What was verified, on one line: the identifier, or the start of the
     /// page.
@@ -89,13 +99,14 @@ impl Engine {
     /// The work a document is, from its first page's text and, optionally,
     /// its title: `title_hint` (the largest type at the top of the page)
     /// and `title` (the file's metadata, ignored when junk such as
-    /// "Microsoft Word - draft3.docx"). `None` when nothing is sure enough.
+    /// "Microsoft Word - draft3.docx"). Nothing is identified when nothing
+    /// is sure enough; what was spent is reported either way.
     pub async fn identify(
         &self,
         first_page: &str,
         title: Option<&str>,
         title_hint: Option<&str>,
-    ) -> Option<Identified> {
+    ) -> IdentifyReport {
         // Metadata titles of a word or two are more often placeholders than
         // titles; the largest type on the page is the title, however short.
         let titles: Vec<&str> = [(title_hint, 1), (title, 3)]
@@ -145,12 +156,15 @@ impl Engine {
         if let Some((id, decided_by)) = by_title.or_else(on_page).or_else(only) {
             let mut claim = Claim::default();
             claim.ids = vec![id.clone()];
-            let verification = self.verify(&claim, 5).await;
-            return Some(Identified {
-                decided_by,
-                claim,
-                verification,
-            });
+            let verification = self.verify(&claim, SEARCH_LIMIT).await;
+            return IdentifyReport {
+                usage: spent(found.usage, &verification),
+                identified: Some(Identified {
+                    decided_by,
+                    claim,
+                    verification,
+                }),
+            };
         }
 
         // No identifier confirmed: the top of the page as a citation, with
@@ -167,15 +181,28 @@ impl Engine {
         }
         let mut claim = Claim::default();
         claim.text = Some(top);
-        let verification = self.verify(&claim, 5).await;
-        matches!(verification.verdict, Verdict::Verified | Verdict::Plausible).then_some(
-            Identified {
-                decided_by: Decision::TitleSearch,
-                claim,
-                verification,
-            },
-        )
+        let verification = self.verify(&claim, SEARCH_LIMIT).await;
+        IdentifyReport {
+            usage: spent(found.usage, &verification),
+            identified: matches!(verification.verdict, Verdict::Verified | Verdict::Plausible)
+                .then_some(Identified {
+                    decided_by: Decision::TitleSearch,
+                    claim,
+                    verification,
+                }),
+        }
     }
+}
+
+/// The lookups' usage and the verification's, together.
+fn spent(
+    mut usage: Vec<(ProviderId, Usage)>,
+    verification: &Verification,
+) -> Vec<(ProviderId, Usage)> {
+    for (provider, u) in &verification.report.usage {
+        add_usage(&mut usage, provider, *u);
+    }
+    usage
 }
 
 /// Title similarity that counts as the same title.

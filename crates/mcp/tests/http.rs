@@ -8,8 +8,8 @@ use std::time::Duration;
 
 use aspero_mcp::Scope::{ReadHistory, Sources, WriteHistory};
 use aspero_mcp::http::{
-    Activity, Host, HostError, HostOutput, HostTool, HttpConfig, HttpServer, Key, Ledger,
-    MemoryLedger, StartError, sha256_hex,
+    ACTIVITY_QUEUE, Activity, Host, HostError, HostOutput, HostTool, HttpConfig, HttpServer, Key,
+    Ledger, MemoryLedger, StartError, sha256_hex,
 };
 use aspero_mcp::{Caller, Scope, Tools};
 use async_trait::async_trait;
@@ -503,7 +503,8 @@ async fn required_fields_are_checked_and_a_slow_host_times_out() {
     assert!(is_error(&result));
     assert_eq!(
         text(&result),
-        "Error (timeout): the app didn't answer history_slow within 0.3 s"
+        "Error (timeout): the app didn't answer history_slow within 0.3 s, so whether it \
+         did anything is unknown (it may yet): check before calling it again"
     );
     assert!(started.elapsed() < Duration::from_secs(5));
     server.stop().await;
@@ -711,6 +712,154 @@ async fn a_port_in_use_fails_and_stop_frees_it() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn a_stop_cut_short_finishes_when_called_again() {
+    use futures::FutureExt;
+    let host = FakeHost::new();
+    let server = start(&host).await;
+    let port = server.port();
+    let mut agent = Agent::new(port, FULL);
+    agent.initialize().await;
+    // Dropped at its first wait (closing the session), as an app's task
+    // can be: no new session opens meanwhile.
+    assert!(server.stop().now_or_never().is_none());
+    let mut late = Agent::new(port, FULL);
+    late.http = reqwest::Client::builder()
+        .no_proxy()
+        .timeout(Duration::from_secs(5))
+        .build()
+        .unwrap();
+    let init = json!({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {
+        "protocolVersion": "2025-06-18",
+        "capabilities": {},
+        "clientInfo": {"name": "late", "version": "1.0"},
+    }});
+    let opened = late
+        .http
+        .post(&late.url)
+        .bearer_auth(FULL)
+        .header("accept", "application/json, text/event-stream")
+        .header("content-type", "application/json")
+        .body(init.to_string())
+        .send()
+        .await
+        .is_ok_and(|r| r.status().is_success());
+    assert!(!opened, "a session opened while stopping");
+    // Stopping again finishes the job.
+    server.stop().await;
+    assert!(!server.status().running);
+    std::net::TcpListener::bind(("127.0.0.1", port)).expect("the port is free");
+    server.stop().await;
+}
+
+/// An app whose activity callback is stuck until let go.
+#[derive(Default)]
+struct StuckHost {
+    open: Mutex<bool>,
+    opened: std::sync::Condvar,
+    heard: std::sync::atomic::AtomicUsize,
+}
+
+#[async_trait]
+impl Host for StuckHost {
+    fn tools(&self) -> Vec<HostTool> {
+        vec![tool("history_search", ReadHistory, &[])]
+    }
+
+    async fn call(&self, _: String, _: String, _: Caller) -> Result<HostOutput, HostError> {
+        Ok(HostOutput {
+            structured: "{}".into(),
+            summary: "nothing".into(),
+        })
+    }
+
+    fn activity(&self, _: Activity) {
+        let mut open = self.open.lock().unwrap();
+        while !*open {
+            open = self.opened.wait(open).unwrap();
+        }
+        self.heard
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn activity_the_app_is_slow_to_take_is_dropped_past_a_queue() {
+    let host = Arc::new(StuckHost::default());
+    let server = HttpServer::start(
+        Arc::new(tools(vec![source()])),
+        config(free_port()),
+        Some(host.clone() as Arc<dyn Host>),
+        Arc::new(MemoryLedger::default()),
+    )
+    .await
+    .unwrap();
+    let mut agent = Agent::new(server.port(), FULL);
+    agent.initialize().await;
+    let calls = ACTIVITY_QUEUE + 50;
+    for _ in 0..calls {
+        assert!(!is_error(&agent.call("history_search", json!({})).await));
+    }
+    *host.open.lock().unwrap() = true;
+    host.opened.notify_all();
+    server.stop().await;
+    // Once the app has heard all it's going to: the queue, and the one it
+    // was stuck on.
+    let heard = || host.heard.load(std::sync::atomic::Ordering::Relaxed);
+    let mut before = usize::MAX;
+    while heard() != before {
+        before = heard();
+        tokio::time::sleep(Duration::from_millis(200)).await;
+    }
+    let heard = heard();
+    assert!(heard <= ACTIVITY_QUEUE + 1, "{heard} of {calls}");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_key_has_sixteen_sessions_open_at_most() {
+    let host = FakeHost::new();
+    let server = start(&host).await;
+    let port = server.port();
+    let mut open = Vec::new();
+    for _ in 0..16 {
+        let mut agent = Agent::new(port, FULL);
+        agent.initialize().await;
+        open.push(agent);
+    }
+    let more = Agent::new(port, FULL);
+    let init = json!({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {
+        "protocolVersion": "2025-06-18",
+        "capabilities": {},
+        "clientInfo": {"name": "more", "version": "1.0"},
+    }});
+    let refused = more.post(&init).await;
+    assert_eq!(refused.status().as_u16(), 429);
+    assert!(
+        refused
+            .text()
+            .await
+            .unwrap()
+            .starts_with("this key has 16 MCP sessions open, the most it may"),
+    );
+    // Another key's are its own.
+    Agent::new(port, READER).initialize().await;
+    // One ended, another opens.
+    let ended = open.pop().unwrap();
+    let deleted = ended
+        .http
+        .delete(&ended.url)
+        .bearer_auth(FULL)
+        .header("mcp-session-id", ended.session.as_deref().unwrap())
+        .header("mcp-protocol-version", "2025-06-18")
+        .send()
+        .await
+        .unwrap();
+    assert!(deleted.status().is_success(), "{deleted:?}");
+    Agent::new(port, FULL).initialize().await;
+    assert_eq!(server.status().sessions, 17);
+    server.stop().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn a_session_spends_its_budget_and_no_more() {
     let host = FakeHost::new();
     let mut config = config(free_port());
@@ -777,6 +926,140 @@ async fn a_keys_daily_budget_outlasts_a_restart() {
     // Free tools still work.
     let supports = json!({"query": {"title": "x"}});
     assert!(!is_error(&agent.call("search_supports", supports).await));
+    server.stop().await;
+}
+
+/// UTC today, as the ledger keeps it.
+fn today() -> String {
+    jiff::Timestamp::now()
+        .to_zoned(jiff::tz::TimeZone::UTC)
+        .date()
+        .to_string()
+}
+
+/// `n` searches at once, each in a session of its own for the key `FULL`
+/// (its daily budget `daily_usd`), on a source whose searches take a
+/// while: how many succeeded, and what the key spent.
+async fn searches_at_once(n: usize, daily_usd: f64) -> (usize, f64) {
+    let slow = common::Scripted::new("openalex", vec![common::deep_learning()])
+        .slow(Duration::from_millis(100));
+    let tools = Arc::new(tools(vec![Arc::new(slow)]));
+    let ledger = Arc::new(MemoryLedger::default());
+    let mut config = config(free_port());
+    config.keys = vec![key("full", FULL, &[Sources], daily_usd)];
+    let server = HttpServer::start(tools, config, None, ledger.clone())
+        .await
+        .unwrap();
+    let mut agents = Vec::new();
+    for _ in 0..n {
+        let mut agent = Agent::new(server.port(), FULL);
+        agent.initialize().await;
+        agents.push(agent);
+    }
+    let calls = agents
+        .iter_mut()
+        .map(|a| a.call("search", json!({"text": "Deep learning"})));
+    let results = futures::future::join_all(calls).await;
+    for r in results.iter().filter(|r| is_error(r)) {
+        assert!(
+            text(r).starts_with("Error (budget_spent): this key's daily budget is spent"),
+            "{r}"
+        );
+    }
+    server.stop().await;
+    let done = results.iter().filter(|r| !is_error(r)).count();
+    (done, ledger.spent("full", &today()).unwrap())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn calls_at_once_pass_a_keys_budget_by_one_call_at_most() {
+    // A budget under one search's estimate: one runs, alone.
+    assert_eq!(searches_at_once(10, 0.0005).await, (1, SEARCH_COST));
+    // Searches costing far more than estimated (the test source's): at
+    // most four paid calls run at once, so the key passes its budget by
+    // four calls' cost at most.
+    let (done, spent) = searches_at_once(12, 4.0 * SEARCH_COST).await;
+    assert!(done >= 4, "{done}");
+    assert!(spent <= 8.0 * SEARCH_COST, "{spent}");
+}
+
+/// A ledger that can't write while `failing`.
+#[derive(Default)]
+struct FlakyLedger {
+    kept: MemoryLedger,
+    failing: std::sync::atomic::AtomicBool,
+}
+
+impl Ledger for FlakyLedger {
+    fn spent(&self, key_id: &str, day: &str) -> Result<f64, String> {
+        self.kept.spent(key_id, day)
+    }
+
+    fn add(&self, key_id: &str, day: &str, usd: f64) -> Result<(), String> {
+        if self.failing.load(std::sync::atomic::Ordering::Relaxed) {
+            return Err("database is locked".into());
+        }
+        self.kept.add(key_id, day, usd)
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn spend_the_ledger_cant_record_still_counts_and_is_written_later() {
+    let ledger = Arc::new(FlakyLedger::default());
+    ledger
+        .failing
+        .store(true, std::sync::atomic::Ordering::Relaxed);
+    let mut config = config(free_port());
+    config.keys = vec![key("full", FULL, &[Sources], SEARCH_COST)];
+    let server = start_with(config, None, ledger.clone()).await.unwrap();
+    let mut agent = Agent::new(server.port(), FULL);
+    agent.initialize().await;
+    let search = json!({"text": "Deep learning"});
+    assert!(!is_error(&agent.call("search", search.clone()).await));
+    assert_eq!(ledger.spent("full", &today()).unwrap(), 0.0);
+    // Not on record, but spent: the budget is.
+    let result = agent.call("search", search.clone()).await;
+    assert!(is_error(&result), "{result}");
+    assert!(
+        text(&result).starts_with("Error (budget_spent): this key's daily budget is spent"),
+        "{result}"
+    );
+    // Written once the ledger can.
+    ledger
+        .failing
+        .store(false, std::sync::atomic::Ordering::Relaxed);
+    assert!(is_error(&agent.call("search", search).await));
+    assert_eq!(ledger.spent("full", &today()).unwrap(), SEARCH_COST);
+    server.stop().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_failed_call_spends_from_the_keys_budget_too() {
+    let ledger = Arc::new(MemoryLedger::default());
+    let mut config = config(free_port());
+    config.keys = vec![key("full", FULL, &[Sources], 100.0)];
+    let server = start_with(config, None, ledger.clone()).await.unwrap();
+    let mut agent = Agent::new(server.port(), FULL);
+    agent.initialize().await;
+    // Not identified, after a paid search for the top of the page.
+    let page = "A study of nothing in particular\nAnon Ymous\n\nNothing to see here.";
+    let result = agent
+        .call(
+            "identify",
+            json!({"text": page, "title_hint": "A study of nothing in particular"}),
+        )
+        .await;
+    assert!(is_error(&result));
+    assert!(
+        text(&result).starts_with("Error (not_found): not identified"),
+        "{result}"
+    );
+    assert!(text(&result).contains("Session: $0.2500 spent"), "{result}");
+    let today = jiff::Timestamp::now()
+        .to_zoned(jiff::tz::TimeZone::UTC)
+        .date()
+        .to_string();
+    assert_eq!(ledger.spent("full", &today).unwrap(), SEARCH_COST);
     server.stop().await;
 }
 

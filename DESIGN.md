@@ -705,8 +705,16 @@ fixture recorded with different parameters once hid a ranking bug.
 A **`Session`** is one connection: its `Caller` (empty over stdio; over
 HTTP, the key) and a spend cap in USD (`--budget`, default $0.25). Tools that may spend are refused once the session has spent it,
 checked before each call; a call's cost is known only after it, so the
-last one can overshoot by its own cost. Spend is the engine's reported
-usage (OpenAlex's `cost`), as the CLI totals it; every result carries the
+last one can overshoot by its own cost. Calls at once can't overshoot
+more: each holds an estimate of its cost while in flight (at OpenAlex's
+prices: a search $0.001, one more per journal term; a citation two
+searches and its lookups' list calls), and a call whose estimate doesn't
+fit in what's left beside those held waits for the calls in flight,
+running once it fits or alone. A call costing more than its estimate
+(prices changed) overshoots by the difference. Spend is the engine's reported
+usage (OpenAlex's `cost`), as the CLI totals it, charged whether or not
+the call succeeds (a document not identified was still searched for);
+every result carries the
 call's `usage` and the session's `spent_usd`, `budget_usd` and `left_usd`.
 `search_supports` is offline and never refused.
 
@@ -741,9 +749,15 @@ CLI builds without it and serves stdio only) and, over it, the FFI's
   `start` throws. Sessions are the protocol's (`initialize`, then
   `Mcp-Session-Id`), each with its own handler and budget; only the
   revisions with `initialize` are offered, and a call outside a session
-  is refused, so budgets can't be dodged by going sessionless. Stopping
-  closes every session, cancels their streams, closes the listener, and
-  waits up to two seconds for requests in flight.
+  is refused, so budgets can't be dodged by going sessionless. A key has
+  at most 16 sessions open (closed, or ended idle after rmcp's five
+  minutes); another `initialize` is refused, 429 with a line saying so.
+  Stopping
+  first, at once, refuses further requests (503), cancels the sessions'
+  streams and closes the listener; then closes every session and waits up
+  to two seconds for requests in flight. A stop cut short (the app's task
+  cancelled) finishes when called again; `status` says running until
+  then.
 - **Auth, on every request, in order.** The path; `Host` must be
   `127.0.0.1:<port>` or `localhost:<port>` and any `Origin` is refused
   (both 403, before auth); `Authorization: Bearer <token>`: the token's
@@ -773,30 +787,36 @@ CLI builds without it and serves stdio only) and, over it, the FFI's
   runtime (`Peer::notify_tool_list_changed`, given up after 10 s, errors
   ignored), so neither call waits on a client. `rmcp` puts it on the
   session's GET stream, or keeps it (up to 16 messages, the newest) until
-  the client opens one. Over stdio the list never changes, but is still listed from
-  `Tools` at each request.
+  the client opens one. The engine tools' listing is built once, over
+  either transport, since `Tools` never changes; over stdio the list
+  never changes at all.
 - **Host tools.** Names must differ from the engine tools' (even with
   `engineTools` off) and each other's, or `start` / `hostToolsChanged`
   throws `toolNameClash`; schemas must be JSON objects. A call's
   arguments must hold the input schema's `required` fields (checked
   here; the rest of the schema is the app's to check), then the app has
   30 s; a `HostToolError` or a timeout is a tool error (`isError`) with
-  its message, and `structured` must be a JSON object: the result's
+  its message (a timeout's says the outcome is unknown: the app may still
+  finish, so a retry could write twice), and `structured` must be a JSON object: the result's
   `structuredContent`, with `summary` as its text. Host tools cost $0.
 - **Budgets.** Per session, as over stdio. Per key per UTC day: engine
   spend only, refused (a tool error; free tools still work) once a paid
   call would start at or past `dailyBudgetUsd`, overshooting as sessions
-  do. Kept in the cache file (`mcp_spend (key_id, day, usd)`, beside the
+  do, estimates held across all the key's sessions. At most four paid
+  calls per key run at once (more wait), which bounds what calls costing
+  more than estimated can add. Kept in the cache file (`mcp_spend (key_id, day, usd)`, beside the
   versioned schema like the pacing slots: rebuilds, `clear` and eviction
   keep it; days over a month old are pruned), so restarts don't reset it;
   in memory without a cache. A spend that can't be read refuses the
-  key's paid calls.
+  key's paid calls; one that can't be written is kept in memory, counted,
+  and written with the key's next spend or check.
 - **Activity.** After every tool call (engine or app, success, error or
   refusal), the app's `activity` gets the key's name, the tool, a few
   words ("searched ‘lactate clearance’", "looked up 3 works", "verified 2
   citations", "identified a document"; an app tool's summary's first
   line; "error: …"), whether it failed, and its cost, on a thread of its
-  own, in order, never holding up a request.
+  own, in order, never holding up a request. Up to 256 wait for the app;
+  while it's that far behind, more are dropped (they're informational).
 
 **Threat model.** The server is for agents on the same machine, acting
 for the user. Loopback only: nothing off the machine can connect. Every

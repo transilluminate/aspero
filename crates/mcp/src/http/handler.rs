@@ -2,8 +2,7 @@
 //! by the key's scopes, under the session's and the key's budgets.
 
 use std::borrow::Cow;
-use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, OnceLock};
 
 use rmcp::model::{
     CallToolRequestParams, CallToolResponse, CallToolResult, ContentBlock, InitializeRequestParams,
@@ -13,12 +12,12 @@ use rmcp::service::RequestContext;
 use rmcp::{ErrorData, RoleServer, ServerHandler};
 use serde_json::{Map, Value};
 
+use super::Shared;
 use super::auth::Credential;
 use super::host::{Activity, HostError};
-use super::{Shared, today};
-use crate::server::{INSTRUCTIONS, engine_result, server_info};
+use crate::server::{INSTRUCTIONS, engine_result, error_text, server_info};
 use crate::session::usd;
-use crate::{Caller, Scope, Session, ToolError, ToolErrorKind};
+use crate::{Caller, Scope, Session, ToolError, ToolErrorKind, tools};
 
 const HOST_INSTRUCTIONS: &str = "Tools provided by the app that embeds aspero.";
 
@@ -29,20 +28,17 @@ pub(crate) struct Authed(pub Arc<Credential>);
 
 pub(crate) struct Handler {
     shared: Arc<Shared>,
-    session: Session,
-    /// Whether the client has initialized: budgets attach to sessions, so
-    /// sessionless requests (the 2026-07-28 protocol's) call no tools.
-    initialized: AtomicBool,
+    /// Opened by `initialize`, for its key and client: budgets attach to
+    /// sessions, so sessionless requests (the 2026-07-28 protocol's) call
+    /// no tools.
+    session: OnceLock<Session>,
 }
 
 impl Handler {
     pub fn new(shared: Arc<Shared>) -> Self {
-        let session = Session::new(Caller::default(), shared.session_budget_usd)
-            .with_raise_hint("ask the user to raise the session budget in the app's settings");
         Handler {
             shared,
-            session,
-            initialized: AtomicBool::new(false),
+            session: OnceLock::new(),
         }
     }
 
@@ -65,51 +61,62 @@ impl Handler {
 
     async fn engine_call(
         &self,
+        session: &Session,
         key: &Credential,
         name: &str,
         arguments: Map<String, Value>,
     ) -> (Result<CallToolResult, ErrorData>, Activity) {
         let k = &key.key;
+        let said = engine_summary(name, &arguments);
+        let arguments = Value::Object(arguments);
         let spends = self.shared.tools.spec(name).is_some_and(|s| s.spends);
-        let refused = if !k.scopes.contains(&Scope::Sources) {
-            Some(lacks(name, Scope::Sources))
+        // The key's sessions' paid calls in flight hold their estimates, as
+        // a session's do.
+        let paid = self.shared.paid(&k.id);
+        let held = if !k.scopes.contains(&Scope::Sources) {
+            Err(lacks(name, Scope::Sources))
         } else if spends {
-            self.over_daily_budget(key).err()
+            let estimate = tools::estimate(name, &arguments);
+            paid.hold(estimate, || self.daily_left(key)).await.map(Some)
         } else {
-            None
+            Ok(None)
         };
-        let result = match refused {
-            Some(e) => Err(e),
-            None => {
-                self.shared
-                    .tools
-                    .call(&self.session, name, Value::Object(arguments.clone()))
-                    .await
+        let (result, cost) = match held {
+            Err(e) => (Err(e), 0.0),
+            Ok(held) => {
+                let result = self.shared.tools.call(session, name, arguments).await;
+                // Spent all the same when the call failed after spending.
+                let cost = match &result {
+                    Ok(output) => output.cost_usd,
+                    Err(e) => e.cost_usd,
+                };
+                if cost > 0.0 {
+                    self.shared.ledger_add(&k.id, cost);
+                }
+                // Let go once the spend is on record.
+                drop(held);
+                (result, cost)
             }
         };
-        let cost = result.as_ref().map_or(0.0, |o| o.cost_usd);
-        if cost > 0.0 {
-            self.shared.ledger_add(&k.id, cost);
-        }
         let activity = Activity {
             key_name: k.name.clone(),
             tool: name.into(),
             summary: match &result {
-                Ok(_) => engine_summary(name, &arguments),
+                Ok(_) => said,
                 Err(e) => error_summary(&e.message),
             },
             is_error: result.is_err(),
             cost_usd: cost,
         };
-        (engine_result(&self.session, name, result), activity)
+        (engine_result(session, name, result), activity)
     }
 
-    /// Refuses a paid call once the key has spent its daily budget (or its
-    /// spend can't be read).
-    fn over_daily_budget(&self, key: &Credential) -> Result<(), ToolError> {
+    /// What's left of the key's daily budget; refuses a paid call once it's
+    /// spent (or its spend can't be read).
+    fn daily_left(&self, key: &Credential) -> Result<f64, ToolError> {
         let k = &key.key;
-        match self.shared.ledger.spent(&k.id, &today()) {
-            Ok(spent) if spent < k.daily_budget_usd => Ok(()),
+        match self.shared.key_spent(&k.id) {
+            Ok(spent) if spent < k.daily_budget_usd => Ok(k.daily_budget_usd - spent),
             Ok(spent) => Err(ToolError::new(
                 ToolErrorKind::BudgetSpent,
                 format!(
@@ -144,13 +151,9 @@ impl Handler {
             is_error,
             cost_usd: 0.0,
         };
-        let fail = |kind: &str, message: String| {
-            let summary = error_summary(&message);
-            (tool_error(kind, &message), activity(summary, true))
-        };
+        let fail = |e: ToolError| (tool_error(&e), activity(error_summary(&e.message), true));
         if !k.scopes.contains(&scope) {
-            let e = lacks(name, scope);
-            return fail("forbidden", e.message);
+            return fail(lacks(name, scope));
         }
         let missing: Vec<&str> = required
             .iter()
@@ -158,8 +161,8 @@ impl Handler {
             .map(String::as_str)
             .collect();
         if !missing.is_empty() {
-            return fail(
-                "invalid_arguments",
+            return fail(ToolError::new(
+                ToolErrorKind::InvalidArguments,
                 format!(
                     "invalid arguments for {name}: missing {}",
                     missing
@@ -168,24 +171,30 @@ impl Handler {
                         .collect::<Vec<_>>()
                         .join(", ")
                 ),
-            );
+            ));
         }
         let Some(host) = &self.shared.host else {
-            return fail("failed", format!("{name} has no host to call"));
+            return fail(ToolError::new(
+                ToolErrorKind::Failed,
+                format!("{name} has no host to call"),
+            ));
         };
         let caller = caller(k, context);
         let json = Value::Object(arguments).to_string();
         let timeout = self.shared.host_timeout;
         let answer = tokio::time::timeout(timeout, host.call(name.into(), json, caller)).await;
         match answer {
-            Err(_) => fail(
-                "timeout",
+            // Given up on here, but the app may finish (a write committed):
+            // a retry could do it twice.
+            Err(_) => fail(ToolError::new(
+                ToolErrorKind::Timeout,
                 format!(
-                    "the app didn't answer {name} within {} s",
+                    "the app didn't answer {name} within {} s, so whether it did anything \
+                     is unknown (it may yet): check before calling it again",
                     timeout.as_secs_f64()
                 ),
-            ),
-            Ok(Err(e)) => fail(e.kind(), host_message(&e)),
+            )),
+            Ok(Err(e)) => fail(ToolError::new(host_kind(&e), host_message(&e))),
             Ok(Ok(output)) => match serde_json::from_str::<Value>(&output.structured) {
                 Ok(structured @ Value::Object(_)) => {
                     let first = output
@@ -200,10 +209,10 @@ impl Handler {
                     result.structured_content = Some(structured);
                     (result, activity(first, false))
                 }
-                _ => fail(
-                    "failed",
+                _ => fail(ToolError::new(
+                    ToolErrorKind::Failed,
                     format!("the app's {name} answered with something other than a JSON object"),
-                ),
+                )),
             },
         }
     }
@@ -230,13 +239,17 @@ impl ServerHandler for Handler {
         request: InitializeRequestParams,
         context: RequestContext<RoleServer>,
     ) -> Result<InitializeResult, ErrorData> {
-        self.initialized.store(true, Ordering::Relaxed);
         context.peer.set_peer_info(request.clone());
         let result = self.negotiate_initialize(&request)?;
+        let key = authed(&context)?;
+        // The key and client as they opened it; a call reads its key's
+        // scopes as they are then.
+        let session = Session::new(caller(&key.key, &context), self.shared.session_budget_usd)
+            .with_raise_hint("ask the user to raise the session budget in the app's settings");
+        // Initialized again, the session stays as it was.
+        let _ = self.session.set(session);
         // Told when the key's scopes or the host's tools change.
-        if let Ok(key) = authed(&context) {
-            self.shared.listen(&key, context.peer.clone());
-        }
+        self.shared.listen(&key, context.peer.clone());
         Ok(result)
     }
 
@@ -270,30 +283,33 @@ impl ServerHandler for Handler {
         context: RequestContext<RoleServer>,
     ) -> Result<CallToolResponse, ErrorData> {
         let key = authed(&context)?;
-        if !self.initialized.load(Ordering::Relaxed) {
-            return Ok(tool_error(
-                "no_session",
+        let Some(session) = self.session.get() else {
+            return Ok(tool_error(&ToolError::new(
+                ToolErrorKind::NoSession,
                 "start a session (initialize) first: budgets are per session",
-            )
+            ))
             .into());
-        }
+        };
         let name = request.name.to_string();
         let arguments = request.arguments.unwrap_or_default();
         let engine = self.shared.engine_tools && self.shared.tools.spec(&name).is_some();
         let (result, activity) = if engine {
-            let (result, activity) = self.engine_call(&key, &name, arguments).await;
+            let (result, activity) = self.engine_call(session, &key, &name, arguments).await;
             (result, Some(activity))
         } else {
-            let host = self
-                .shared
-                .catalog()
-                .iter()
-                .find(|l| l.tool.name == name)
-                .map(|l| (l.scope, l.required.clone()));
-            match host {
-                Some((scope, required)) => {
+            // The host's tools as they are now, kept for the call.
+            let catalog = self.shared.catalog();
+            match catalog.iter().find(|l| l.tool.name == name) {
+                Some(listed) => {
                     let (result, activity) = self
-                        .host_call(&key, &context, &name, scope, &required, arguments)
+                        .host_call(
+                            &key,
+                            &context,
+                            &name,
+                            listed.scope,
+                            &listed.required,
+                            arguments,
+                        )
                         .await;
                     (Ok(result), Some(activity))
                 }
@@ -345,10 +361,18 @@ fn lacks(tool: &str, scope: Scope) -> ToolError {
     )
 }
 
-fn tool_error(kind: &str, message: &str) -> CallToolResult {
-    CallToolResult::error(vec![ContentBlock::text(format!(
-        "Error ({kind}): {message}"
-    ))])
+fn tool_error(e: &ToolError) -> CallToolResult {
+    CallToolResult::error(vec![ContentBlock::text(error_text(e))])
+}
+
+/// A host error's kind, as the agent reads it.
+fn host_kind(e: &HostError) -> ToolErrorKind {
+    match e {
+        HostError::InvalidArguments(_) => ToolErrorKind::InvalidArguments,
+        HostError::NotFound(_) => ToolErrorKind::NotFound,
+        HostError::Refused(_) => ToolErrorKind::Refused,
+        HostError::Failed(_) => ToolErrorKind::Failed,
+    }
 }
 
 /// A host error's message, or its kind when the app gave none.

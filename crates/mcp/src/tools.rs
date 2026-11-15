@@ -67,6 +67,10 @@ pub struct Output {
 pub struct ToolError {
     pub kind: ToolErrorKind,
     pub message: String,
+    /// What the call spent before it failed, in USD (charged to the
+    /// session all the same): a document not identified was still
+    /// searched for.
+    pub cost_usd: f64,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -92,6 +96,15 @@ pub enum ToolErrorKind {
     Unavailable,
     /// A provider answered unexpectedly.
     Protocol,
+    /// A call outside a session (HTTP): budgets are per session.
+    NoSession,
+    /// The app took too long with one of its tools (HTTP): whether it
+    /// did anything is unknown.
+    Timeout,
+    /// The app refused one of its tools' calls (HTTP).
+    Refused,
+    /// One of the app's tools failed (HTTP).
+    Failed,
 }
 
 impl ToolErrorKind {
@@ -107,6 +120,10 @@ impl ToolErrorKind {
             ToolErrorKind::Auth => "auth",
             ToolErrorKind::Unavailable => "unavailable",
             ToolErrorKind::Protocol => "protocol",
+            ToolErrorKind::NoSession => "no_session",
+            ToolErrorKind::Timeout => "timeout",
+            ToolErrorKind::Refused => "refused",
+            ToolErrorKind::Failed => "failed",
         }
     }
 }
@@ -116,6 +133,7 @@ impl ToolError {
         ToolError {
             kind,
             message: message.into(),
+            cost_usd: 0.0,
         }
     }
 
@@ -158,7 +176,29 @@ impl From<EngineError> for ToolError {
     }
 }
 
-type Answer = Result<(Value, Vec<(ProviderId, Usage)>), ToolError>;
+/// A tool's JSON and usage, or why it failed and what it spent first.
+type Answer = Result<(Value, Vec<(ProviderId, Usage)>), Failed>;
+
+/// A tool that failed, and the usage of what it did before.
+struct Failed {
+    error: ToolError,
+    usage: Vec<(ProviderId, Usage)>,
+}
+
+impl From<ToolError> for Failed {
+    fn from(error: ToolError) -> Self {
+        Failed {
+            error,
+            usage: Vec::new(),
+        }
+    }
+}
+
+impl From<EngineError> for Failed {
+    fn from(e: EngineError) -> Self {
+        ToolError::from(e).into()
+    }
+}
 
 /// The engine tools over one engine. Share one between sessions.
 pub struct Tools {
@@ -187,7 +227,7 @@ impl Tools {
 
     /// Calls the tool `name` with `arguments` (a JSON object) for
     /// `session`: refused if it may spend and the session's budget is
-    /// spent; its usage is added to the session's.
+    /// spent; its usage is added to the session's, failed or not.
     pub async fn call(
         &self,
         session: &Session,
@@ -200,11 +240,14 @@ impl Tools {
                 format!("no tool named {name:?}"),
             )
         })?;
-        if spec.spends {
-            session.admit()?;
-        }
+        // Held until the call's charged, at the end of this.
+        let _held = if spec.spends {
+            Some(session.admit(estimate(name, &arguments)).await?)
+        } else {
+            None
+        };
         let full = arguments["full"].as_bool().unwrap_or(false);
-        let (mut structured, usage) = match name {
+        let answer = match name {
             "search" => self.search(parse(name, arguments)?).await,
             "search_supports" => self.supports(parse(name, arguments)?),
             "lookup" => self.lookup(parse(name, arguments)?).await,
@@ -216,7 +259,14 @@ impl Tools {
                     .await
             }
             _ => unreachable!("every spec has a tool"),
-        }?;
+        };
+        let (mut structured, usage) = match answer {
+            Ok(answer) => answer,
+            Err(Failed { mut error, usage }) => {
+                error.cost_usd = session.charge(&usage);
+                return Err(error);
+            }
+        };
         if !full {
             trim_authors(&mut structured);
         }
@@ -243,12 +293,12 @@ impl Tools {
             (Some(_), Some(_)) => {
                 return Err(ToolError::invalid(
                     "give `query` or `text`, not both: put keywords in the tree as {\"keywords\": \"…\"}",
-                ));
+                ).into());
             }
             (None, None) => {
-                return Err(ToolError::invalid(
-                    "give `query` (a query tree) or `text` (keywords)",
-                ));
+                return Err(
+                    ToolError::invalid("give `query` (a query tree) or `text` (keywords)").into(),
+                );
             }
         };
         page(&mut query, a.sort, a.limit, a.cursor)?;
@@ -268,7 +318,8 @@ impl Tools {
             return Err(ToolError::invalid(format!(
                 "`ids` takes 1 to {MAX_IDS} identifiers, not {}",
                 a.ids.len()
-            )));
+            ))
+            .into());
         }
         let mut extras = Extras::default();
         extras.full = a.full;
@@ -290,15 +341,14 @@ impl Tools {
                 return Err(ToolError::invalid(format!(
                     "`citations` takes 1 to {MAX_CITATIONS} citations, not {}",
                     cs.len()
-                )));
+                ))
+                .into());
             }
             (Some(_), Some(_)) => {
-                return Err(ToolError::invalid(
-                    "give `citation` or `citations`, not both",
-                ));
+                return Err(ToolError::invalid("give `citation` or `citations`, not both").into());
             }
             (None, None) => {
-                return Err(ToolError::invalid("give `citation` or `citations`"));
+                return Err(ToolError::invalid("give `citation` or `citations`").into());
             }
         };
         // As the CLI reads stdin lines: text, or a JSON object of fields.
@@ -312,7 +362,7 @@ impl Tools {
             })
             .collect();
         if one && let Err(reason) = &claims[0].claim {
-            return Err(ToolError::invalid(reason.clone()));
+            return Err(ToolError::invalid(reason.clone()).into());
         }
         let mut results: Vec<Option<Value>> = claims
             .iter()
@@ -334,33 +384,34 @@ impl Tools {
 
     async fn identify(&self, a: IdentifyArgs) -> Answer {
         if a.text.trim().is_empty() {
-            return Err(ToolError::invalid(
-                "`text` is empty: give the first page's text",
-            ));
+            return Err(ToolError::invalid("`text` is empty: give the first page's text").into());
         }
-        let found = self
+        let report = self
             .engine
             .identify(&a.text, a.title.as_deref(), a.title_hint.as_deref())
-            .await
-            .ok_or_else(|| {
-                ToolError::new(
+            .await;
+        let Some(found) = report.identified else {
+            return Err(Failed {
+                error: ToolError::new(
                     ToolErrorKind::NotFound,
                     "not identified: nothing on the page is sure enough (try `title_hint`, \
                      the largest type at the top of the page)",
-                )
-            })?;
+                ),
+                usage: report.usage,
+            });
+        };
         let v = &found.verification;
         let mut item = aspero_json::verification(json!({"input": found.input()}), v, a.full);
         item["identified"] = json!(true);
         item["decided_by"] = json!(found.decided_by.as_str());
-        Ok((item, v.report.usage.clone()))
+        Ok((item, report.usage))
     }
 
     /// `cites` and `cited_by`: a search by the relation alone, at the first
     /// source that can.
     async fn related(&self, relation: Relation, a: RelationArgs) -> Answer {
         if a.id.trim().is_empty() {
-            return Err(ToolError::invalid("`id` is empty"));
+            return Err(ToolError::invalid("`id` is empty").into());
         }
         let source = self
             .engine
@@ -427,6 +478,47 @@ impl Tools {
             .map(|u| vec![(report.provider.clone(), u)])
             .unwrap_or_default();
         Ok((answer, usage))
+    }
+}
+
+/// OpenAlex's prices, in USD: a search, and a list (filter) call such as a
+/// batch lookup. The other sources are free.
+const SEARCH_USD: f64 = 0.001;
+const LIST_USD: f64 = 0.0001;
+/// A lookup at most: a list call per kind of identifier (DOI, PMID,
+/// arXiv, …) and, with `full`, as many again for notices and versions.
+const LOOKUP_USD: f64 = 16.0 * LIST_USD;
+/// A citation's verification at most: two title searches, and its
+/// identifiers' lookups.
+const CLAIM_USD: f64 = 2.0 * SEARCH_USD + LOOKUP_USD;
+
+/// What a call to the tool `name` with `arguments` may cost, in USD, at
+/// OpenAlex's prices: held while it runs, so calls at once can't together
+/// pass a budget by more than one call's cost. A call that costs more
+/// (prices changed) passes it by the difference.
+pub(crate) fn estimate(name: &str, arguments: &Value) -> f64 {
+    match name {
+        // One more search per journal term, to find the journals.
+        "search" => (1 + journals(&arguments["query"])) as f64 * SEARCH_USD,
+        "lookup" => LOOKUP_USD,
+        "verify" => {
+            let n = arguments["citations"].as_array().map_or(1, Vec::len);
+            n.max(1) as f64 * CLAIM_USD
+        }
+        "identify" => LOOKUP_USD + CLAIM_USD,
+        "citing_works" | "references" => SEARCH_USD,
+        _ => 0.0,
+    }
+}
+
+/// How many journal terms a query tree has.
+fn journals(node: &Value) -> usize {
+    match node {
+        Value::Object(map) => {
+            usize::from(map.contains_key("journal")) + map.values().map(journals).sum::<usize>()
+        }
+        Value::Array(items) => items.iter().map(journals).sum(),
+        _ => 0,
     }
 }
 

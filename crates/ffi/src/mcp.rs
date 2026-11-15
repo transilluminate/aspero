@@ -367,12 +367,39 @@ impl McpServer {
     }
 
     /// Ends the sessions and stops listening; the port is free when it
-    /// returns. Stopping again does nothing.
+    /// returns. Stopping again finishes a stop cut short (its task
+    /// cancelled), and otherwise does nothing.
     pub async fn stop(&self) {
         let inner = self.inner.clone();
         let _ = self
             .aspero
             .run(async move { inner.stop().await }, None)
             .await;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// UniFFI's defaults must be literals: they say what aspero-mcp's
+    /// constants do.
+    #[test]
+    fn the_defaults_are_aspero_mcps() {
+        let source = include_str!("mcp.rs");
+        for (default, field) in [
+            (
+                format!("{:?}", http::DEFAULT_DAILY_BUDGET_USD),
+                "daily_budget_usd: f64",
+            ),
+            (
+                format!("{:?}", aspero_mcp::DEFAULT_BUDGET_USD),
+                "session_budget_usd: f64",
+            ),
+            (http::DEFAULT_PORT.to_string(), "port: u16"),
+        ] {
+            let attribute = format!("#[uniffi(default = {default})]\n    pub {field},");
+            assert!(source.contains(&attribute), "{attribute}");
+        }
     }
 }

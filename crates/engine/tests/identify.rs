@@ -49,6 +49,7 @@ async fn the_title_given_picks_the_documents_own_identifier() {
             Some("Deep learning"),
         )
         .await
+        .identified
         .expect("identified");
     assert_eq!(found.decided_by, Decision::IdentifierAndTitle);
     let v = &found.verification;
@@ -67,6 +68,7 @@ async fn without_a_title_the_page_confirms_its_own_identifier() {
     let found = engine
         .identify(&page(), Some("untitled"), None)
         .await
+        .identified
         .expect("identified");
     assert_eq!(found.decided_by, Decision::IdentifierAndPage);
     let v = &found.verification;
@@ -91,6 +93,7 @@ async fn with_no_identifier_confirmed_the_title_is_searched() {
     let found = engine
         .identify(page, None, Some("Deep learning"))
         .await
+        .identified
         .expect("identified");
     assert_eq!(found.decided_by, Decision::TitleSearch);
     let v = &found.verification;
@@ -103,15 +106,21 @@ async fn with_no_identifier_confirmed_the_title_is_searched() {
 
 #[tokio::test]
 async fn nothing_sure_enough_is_none() {
-    let crossref = Arc::new(Scripted::new("crossref").matcher(vec![]).with(works()));
+    let crossref = Arc::new(
+        Scripted::new("crossref")
+            .matcher(vec![])
+            .with(works())
+            .costing(0.25),
+    );
     let engine = engine(vec![crossref]);
     let page = "Some unrelated notes\nSee doi:10.1145/3448250 for background.\n";
-    assert!(
-        engine
-            .identify(page, Some("Notes on things to do"), None)
-            .await
-            .is_none()
-    );
+    let report = engine
+        .identify(page, Some("Notes on things to do"), None)
+        .await;
+    assert!(report.identified.is_none());
+    // What it spent finding nothing is still reported.
+    let spent: f64 = report.usage.iter().filter_map(|(_, u)| u.cost).sum();
+    assert!(spent >= 0.25, "{:?}", report.usage);
 }
 
 #[tokio::test]
@@ -145,6 +154,7 @@ async fn on_a_title_tie_the_header_identifier_wins() {
     let found = engine
         .identify(&page, None, Some("Deep learning"))
         .await
+        .identified
         .expect("identified");
     assert_eq!(found.decided_by, Decision::IdentifierAndTitle);
     let v = &found.verification;

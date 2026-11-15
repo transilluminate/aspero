@@ -32,6 +32,8 @@ pub struct Scripted {
     /// Each OpenAlex work id's references.
     references: HashMap<String, Vec<SourceRecord>>,
     pub searches: Mutex<Vec<SearchQuery>>,
+    /// How long each search takes.
+    delay: Option<std::time::Duration>,
 }
 
 impl Scripted {
@@ -59,7 +61,14 @@ impl Scripted {
             citing: HashMap::new(),
             references: HashMap::new(),
             searches: Mutex::default(),
+            delay: None,
         }
+    }
+
+    /// Takes `delay` over each search, so calls overlap.
+    pub fn slow(mut self, delay: std::time::Duration) -> Self {
+        self.delay = Some(delay);
+        self
     }
 
     /// Finds works by citations, as OpenAlex does.
@@ -143,6 +152,9 @@ impl Provider for Scripted {
 
     async fn search(&self, query: &SearchQuery) -> Result<Response<Page>> {
         self.searches.lock().unwrap().push(query.clone());
+        if let Some(delay) = self.delay {
+            tokio::time::sleep(delay).await;
+        }
         let mut records = Vec::new();
         match &query.tree {
             Some(tree) => self.found(tree, &mut records),

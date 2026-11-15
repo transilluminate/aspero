@@ -375,6 +375,28 @@ async fn identify_names_the_work_a_page_is() {
 }
 
 #[tokio::test]
+async fn a_failed_identify_still_charges_what_it_spent() {
+    let source = source();
+    let tools = tools(vec![source.clone()]);
+    let session = session(1.0);
+    // No identifier: the top of the page is verified as a citation, by a
+    // paid title search that finds nothing.
+    let page = "A study of nothing in particular\nAnon Ymous\n\nNothing to see here.";
+    let e = err(
+        &tools,
+        &session,
+        "identify",
+        json!({"text": page, "title_hint": "A study of nothing in particular"}),
+    )
+    .await;
+    assert_eq!(e.kind, ToolErrorKind::NotFound);
+    assert!(!source.sent().is_empty(), "searched");
+    let spent = source.sent().len() as f64 * SEARCH_COST;
+    assert_eq!(e.cost_usd, spent);
+    assert_eq!(session.spent_usd(), spent);
+}
+
+#[tokio::test]
 async fn cites_and_cited_by_search_by_the_works_openalex_id() {
     let source = source();
     let tools = tools(vec![source.clone()]);
@@ -472,6 +494,26 @@ async fn a_spent_session_is_refused_but_free_tools_still_answer() {
     assert_eq!(session.spent_usd(), 0.5);
     let free = ok(&tools, &session, "search_supports", search).await;
     assert_eq!(free.structured["supported"], true);
+}
+
+#[tokio::test]
+async fn calls_at_once_pass_a_sessions_budget_by_one_call_at_most() {
+    // Searches that overlap, against a budget smaller than one's estimate:
+    // the first runs alone, and the rest find the budget spent.
+    let slow = Scripted::new("openalex", vec![deep_learning()])
+        .slow(std::time::Duration::from_millis(100));
+    let tools = tools(vec![std::sync::Arc::new(slow)]);
+    let session = session(0.0005);
+    let search = json!({"text": "Deep learning"});
+    let calls = (0..10).map(|_| tools.call(&session, "search", search.clone()));
+    let results = futures::future::join_all(calls).await;
+    let done = results.iter().filter(|r| r.is_ok()).count();
+    assert_eq!(done, 1, "{results:?}");
+    assert!(results.iter().all(|r| match r {
+        Ok(_) => true,
+        Err(e) => e.kind == ToolErrorKind::BudgetSpent,
+    }));
+    assert_eq!(session.spent_usd(), SEARCH_COST);
 }
 
 #[tokio::test]

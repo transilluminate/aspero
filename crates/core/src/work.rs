@@ -580,6 +580,35 @@ impl WorkType {
         }
     }
 
+    /// The type in words, for people: "journal article", "book chapter",
+    /// "preprint". Other CSL types as named, without their hyphens.
+    pub fn label(&self) -> String {
+        let named = match self {
+            WorkType::JournalArticle => "journal article",
+            WorkType::ConferencePaper => "conference paper",
+            WorkType::Preprint => "preprint",
+            WorkType::Book => "book",
+            WorkType::Chapter => "book chapter",
+            WorkType::Thesis => "thesis",
+            WorkType::Report => "report",
+            WorkType::Dataset => "dataset",
+            WorkType::Software => "software",
+            WorkType::Review => "review",
+            WorkType::Other(s) => match s.as_str() {
+                "article-magazine" => "magazine article",
+                "article-newspaper" => "newspaper article",
+                "entry-dictionary" => "dictionary entry",
+                "entry-encyclopedia" => "encyclopedia entry",
+                "post-weblog" => "blog post",
+                "webpage" => "web page",
+                "retraction" => "retraction notice",
+                "erratum" => "correction notice",
+                other => return other.replace(['-', '_'], " "),
+            },
+        };
+        named.to_owned()
+    }
+
     /// Inverse of [`WorkType::as_csl`]; never fails.
     pub fn from_csl(s: &str) -> Self {
         match s {
@@ -734,6 +763,16 @@ mod tests {
         );
         let other = WorkType::from_csl("musical-score");
         assert_eq!(other.as_csl(), "musical-score");
+    }
+
+    #[test]
+    fn work_types_read_as_words() {
+        let label = |csl| WorkType::from_csl(csl).label();
+        assert_eq!(label("article-journal"), "journal article");
+        assert_eq!(label("chapter"), "book chapter");
+        assert_eq!(label("article"), "preprint");
+        assert_eq!(label("entry-encyclopedia"), "encyclopedia entry");
+        assert_eq!(label("musical-score"), "musical score");
     }
 
     #[test]

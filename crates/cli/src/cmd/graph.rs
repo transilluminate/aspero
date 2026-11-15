@@ -77,7 +77,7 @@ fn references_text(page: &ReferencesPage) -> String {
             Some(record) => one_line(record),
             None => "(not found)".into(),
         };
-        let _ = writeln!(out, "  {}  {line}", r.id);
+        let _ = writeln!(out, "  {line} · {}", r.id);
     }
     out
 }
@@ -350,11 +350,8 @@ fn analysis_text(a: &Analysis, doc: &Value, related: bool) -> String {
                     .map(|f| format!(", same work as {}", n(f)))
                     .unwrap_or_default();
                 let record = a.seeds.get(i).and_then(|s| s.record.as_ref());
-                format!(
-                    "{}  {refs}{same}  {}",
-                    seed["id"].as_str().unwrap_or("?"),
-                    record.map(one_line).unwrap_or_default()
-                )
+                let work = record.map(one_line).unwrap_or_default();
+                format!("{work} · {refs}{same}")
             }
             Some("skipped") => "skipped: no identifier".into(),
             _ => format!(
@@ -363,7 +360,7 @@ fn analysis_text(a: &Analysis, doc: &Value, related: bool) -> String {
                 seed["error"].as_str().unwrap_or("")
             ),
         };
-        let _ = writeln!(out, "  {} {}  {detail}", n(i), label(i));
+        let _ = writeln!(out, "  {} {detail} · {}", n(i), label(i));
     }
 
     if let Some(found) = &a.retracted_references {
@@ -374,16 +371,16 @@ fn analysis_text(a: &Analysis, doc: &Value, related: bool) -> String {
         for r in &found.items {
             let _ = writeln!(
                 out,
-                "  {} {} cites {}  {} (retracted, says {})",
+                "  {} {} cites {} (retracted, says {}) · {}",
                 n(r.seed),
                 label(r.seed),
+                one_line(&r.cites),
+                r.source,
                 r.cites
                     .ids
                     .first()
                     .map(ToString::to_string)
-                    .unwrap_or_default(),
-                one_line(&r.cites),
-                r.source
+                    .unwrap_or_default()
             );
         }
         for i in &found.incomplete {
@@ -424,14 +421,14 @@ fn analysis_text(a: &Analysis, doc: &Value, related: bool) -> String {
             let work = m
                 .record
                 .as_ref()
-                .map(|r| format!("{}  ", one_line(r)))
+                .map(|r| format!("{} · ", one_line(r)))
                 .unwrap_or_default();
             let _ = writeln!(
                 out,
-                "  {}  {}  {work}cited by {}",
+                "  {}  {work}cited by {} · {}",
                 m.count(),
-                m.id,
-                all(&m.cited_by)
+                all(&m.cited_by),
+                m.id
             );
         }
         for i in &found.incomplete {
@@ -451,7 +448,7 @@ fn analysis_text(a: &Analysis, doc: &Value, related: bool) -> String {
             let work = r
                 .record
                 .as_ref()
-                .map(|r| format!("{}  ", one_line(r)))
+                .map(|r| format!("{} · ", one_line(r)))
                 .unwrap_or_default();
             let cited = r
                 .record
@@ -461,12 +458,12 @@ fn analysis_text(a: &Analysis, doc: &Value, related: bool) -> String {
                 .unwrap_or_default();
             let _ = writeln!(
                 out,
-                "  {:.2}  {}  {work}co-cited {}, shares {}; with {}{cited}",
+                "  {:.2}  {work}co-cited {}, shares {}; with {}{cited} · {}",
                 r.score,
-                r.id,
                 thousands(r.co_cited_with as u64),
                 thousands(r.shared_references as u64),
-                all(&r.seeds)
+                all(&r.seeds),
+                r.id
             );
         }
         for i in &found.incomplete {

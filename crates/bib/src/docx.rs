@@ -280,7 +280,7 @@ mod tests {
     #[test]
     fn zotero_fields_become_claims_once_each() {
         let body = format!(
-            r#"<w:p><w:r><w:t>Deep nets work </w:t></w:r>{}<w:r><w:t>.</w:t></w:r></w:p><w:p>{}</w:p><w:p><w:r><w:t>References &amp; notes</w:t></w:r></w:p>"#,
+            r"<w:p><w:r><w:t>Deep nets work </w:t></w:r>{}<w:r><w:t>.</w:t></w:r></w:p><w:p>{}</w:p><w:p><w:r><w:t>References &amp; notes</w:t></w:r></w:p>",
             zotero(LECUN, "(LeCun et al., 2015)"),
             zotero(LECUN, "(LeCun et al., 2015)"),
         );
@@ -317,7 +317,7 @@ mod tests {
 
     #[test]
     fn documents_without_fields_give_their_text() {
-        let body = r#"<w:p><w:r><w:t>1. Smith J. A study. 2020.</w:t></w:r></w:p>"#;
+        let body = r"<w:p><w:r><w:t>1. Smith J. A study. 2020.</w:t></w:r></w:p>";
         let read = read_docx(&docx(body, None)).unwrap();
         assert!(read.entries.is_empty());
         assert_eq!(read.manager, None);

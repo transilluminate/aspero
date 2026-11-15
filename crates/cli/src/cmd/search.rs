@@ -353,7 +353,7 @@ mod tests {
             next_command("Bishop's book", &options, "openalex", "c", true)
                 .split(" --")
                 .next(),
-            Some(r#"aspero search 'Bishop'\''s book'"#)
+            Some(r"aspero search 'Bishop'\''s book'")
         );
         let by_fields = SearchOptions {
             year: None,

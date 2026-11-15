@@ -1,0 +1,150 @@
+//! Retracted references: which seed cites which retracted work.
+
+use std::collections::{BTreeMap, BTreeSet};
+
+use aspero_core::{IdKind, ProviderId, SearchQuery, SourceRecord, Update, WorkId};
+
+use super::{
+    Incomplete, IncompleteKind, MAX_FILTER, OPENALEX, RetractedReference, Section, Seed, Spend,
+    openalex_id,
+};
+use crate::{Engine, Served};
+
+impl Engine {
+    /// Which seed cites which retracted work: the seeds' references checked
+    /// at OpenAlex 100 at a time, and against notices already cached.
+    pub(super) async fn retracted_references(
+        &self,
+        seeds: &[Seed],
+        spend: &mut Spend,
+    ) -> Section<RetractedReference> {
+        let cited: BTreeSet<&WorkId> = seeds
+            .iter()
+            .filter_map(Seed::references)
+            .flatten()
+            .collect();
+        let cited: Vec<&WorkId> = cited.into_iter().collect();
+        let provider = ProviderId::from_static(OPENALEX);
+        let mut retracted: BTreeMap<WorkId, (SourceRecord, String)> = BTreeMap::new();
+        let (mut done, mut failed) = (0, false);
+        let mut incomplete = None;
+        for chunk in cited.chunks(MAX_FILTER) {
+            let query = retracted_query(chunk);
+            let paid = match self.cached_search(&provider, &query) {
+                Some((_, true)) => 0,
+                _ => 1,
+            };
+            if spend.estimating {
+                spend.requests += paid;
+                continue;
+            }
+            if !spend.allows(paid as usize) {
+                incomplete = Some(Incomplete::new(IncompleteKind::Budget, done, cited.len()));
+                break;
+            }
+            match self.search(Some(OPENALEX), &query).await {
+                Ok(report) => {
+                    let usage = report.usage.map(|u| (provider.clone(), u));
+                    let live = usize::from(report.served == Served::Live);
+                    spend.add(usage.into_iter().collect(), live);
+                    for hit in report.page.hits {
+                        if let Some(id) = openalex_id(&hit.record).cloned() {
+                            retracted.insert(id, (hit.record, OPENALEX.into()));
+                        }
+                    }
+                    done += chunk.len();
+                }
+                Err(e) => {
+                    tracing::warn!(target: "aspero::graph", error = %e, "retraction check failed");
+                    failed = true;
+                }
+            }
+        }
+        if failed && incomplete.is_none() {
+            incomplete = Some(
+                Incomplete::new(IncompleteKind::ProviderFailed, done, cited.len())
+                    .from(provider.clone()),
+            );
+        }
+        if spend.estimating {
+            return Section::new(Vec::new(), None);
+        }
+
+        // Notices aspero already has: cached records' own flags, and the
+        // registry's (Crossref) notices for their DOIs. No calls.
+        let unflagged: Vec<WorkId> = cited
+            .iter()
+            .filter(|id| !retracted.contains_key(id))
+            .map(|id| (*id).clone())
+            .collect();
+        let registry = self.registry().map(|e| e.provider.id());
+        for (id, record) in unflagged
+            .iter()
+            .zip(self.stale_lookups(&provider, &unflagged))
+        {
+            let Some(record) = record else { continue };
+            let notice = match record.work.retraction() {
+                Some(u) => Some(notice_source(u, OPENALEX)),
+                None => registry.as_ref().and_then(|registry| {
+                    let dois: Vec<WorkId> = record
+                        .ids
+                        .iter()
+                        .filter(|i| i.kind() == IdKind::Doi)
+                        .cloned()
+                        .collect();
+                    self.stale_lookups(registry, &dois)
+                        .into_iter()
+                        .flatten()
+                        .find_map(|r| {
+                            r.work
+                                .retraction()
+                                .map(|u| notice_source(u, registry.as_str()))
+                        })
+                }),
+            };
+            if let Some(source) = notice {
+                retracted.insert(id.clone(), (record, source));
+            }
+        }
+
+        let mut items = Vec::new();
+        for (i, seed) in seeds.iter().enumerate() {
+            let mut seen = BTreeSet::new();
+            for id in seed.references().into_iter().flatten() {
+                if let Some((record, source)) = retracted.get(id)
+                    && seen.insert(id)
+                {
+                    items.push(RetractedReference {
+                        seed: i,
+                        cites: record.clone(),
+                        source: source.clone(),
+                    });
+                }
+            }
+        }
+        Section::new(items, incomplete)
+    }
+}
+
+/// Who reported a retraction: the notice's source, or `fallback`.
+fn notice_source(update: &Update, fallback: &str) -> String {
+    update.source.clone().unwrap_or_else(|| fallback.to_owned())
+}
+
+/// The search finding which of `ids` OpenAlex flags as retracted.
+fn retracted_query(ids: &[&WorkId]) -> SearchQuery {
+    let values: Vec<String> = ids
+        .iter()
+        .map(|id| match id {
+            WorkId::OpenAlex(w) => w.to_string(),
+            other => other.to_string(),
+        })
+        .collect();
+    let mut query = SearchQuery::new("");
+    query.page.limit = MAX_FILTER as u32;
+    query.extra.insert(
+        "filter".into(),
+        format!("openalex:{},is_retracted:true", values.join("|")),
+    );
+    query
+}

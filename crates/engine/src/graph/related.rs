@@ -8,8 +8,9 @@
 //!   filter, as many as one page holds by their `cited_by_count`, so they
 //!   cost a page between them; others are read alone, at most
 //!   [`PAGES_PER_WORK`] pages each (their 1,000 most cited citing works: a
-//!   sample of a classic's). The set reads at most [`CITING_PAGES`] pages,
-//!   taken off the works read most first. Pages are cached per work of the
+//!   sample of a classic's). The set reads at most
+//!   [`CITING_PAGES`](plan::CITING_PAGES) pages, taken off the works read
+//!   most first. Pages are cached per work of the
 //!   set (`edges`, `cited_by`, a day), each citing work's references with
 //!   them (`references`, 30 days).
 //! - **Co-citation:** the citing works read that cite a work and at least
@@ -19,8 +20,8 @@
 //!   handbook's chapters) don't make everything they list related: see
 //!   [`citing_weight`].
 //! - **Coupling:** how many of the set's references (all its works'
-//!   references together) a work cites too, counted from [`MIN_SHARED`].
-//!   Counted for every work whose references are known: the citing works
+//!   references together) a work cites too, counted from
+//!   [`MIN_SHARED`](score::MIN_SHARED). Counted for every work whose references are known: the citing works
 //!   read, the works found citing the set's most shared references, and the
 //!   works looked up. Those found citing the shared references are a fixed
 //!   sample: one filter of the references at least two works of the set
@@ -29,7 +30,7 @@
 //! - **Score:** co-citation strength (the weights summed) and the coupling
 //!   count, each as a share of the highest among the works found, weighted
 //!   0.8 and 0.2 (all of it to one when no work has the other): see
-//!   [`CO_CITATION`].
+//!   [`CO_CITATION`](score::CO_CITATION).
 //! - The best are looked up in whole batches (one request for up to 100),
 //!   so works that are one of the set (sharing any identifier with any
 //!   seed, or one work with a seed) and retracted works drop, and versions
@@ -43,35 +44,21 @@ use aspero_core::{Cursor, FieldSet, Page, ProviderId, SearchQuery, SourceRecord,
 use aspero_store::{Direction, Edges};
 use futures::StreamExt;
 
+use super::seeds::Group;
+use super::spend::{Spend, TheSet, failed_lookups};
 use super::{
-    Group, Incomplete, IncompleteKind, MAX_FILTER, MIN_CITING, Section, Seed, Spend, Stage, TheSet,
-    openalex_id,
+    Incomplete, IncompleteKind, MAX_FILTER, MIN_CITING, Section, Seed, Stage, openalex_id,
 };
 use crate::{Engine, Entry};
 
-/// Works per page of citing works: OpenAlex's most.
-const PAGE: u64 = 200;
+mod plan;
+mod score;
 
-/// Pages of one work's citing works at most: its 1,000 most cited.
-const PAGES_PER_WORK: usize = 5;
-
-/// Pages of citing works for the whole set at most. A set of 25 works cited
-/// 300 times each reads 50 ($0.005), all of them.
-const CITING_PAGES: usize = 75;
+use plan::{Cites, Counted, PAGE, PAGES_PER_WORK, bins, cites, plan, target};
+use score::{Tally, citing_weight, highest, score};
 
 /// Pages of the works citing the set's most shared references at most.
 const COUPLING_PAGES: usize = 5;
-
-/// References in common for a work to count as coupled: one is chance.
-const MIN_SHARED: usize = 2;
-
-/// The weights of co-citation and coupling in a score. Co-citation leads:
-/// what the citing literature reads together. Coupling counts favour long
-/// reference lists, so weighted evenly (tried on two sets, 2026-11) they
-/// ranked broad reviews, theses and off-topic works (AI in food science)
-/// above the field's core works; they still rank works no one cites yet.
-const CO_CITATION: f64 = 0.8;
-const COUPLING: f64 = 0.2;
 
 /// Pages read at once (different filters; one filter's pages run in turn).
 const READ_AT_ONCE: usize = 4;
@@ -104,121 +91,12 @@ pub struct RelatedWork {
     pub seeds: Vec<usize>,
 }
 
-/// A work of the set and how many works cite it (its `cited_by_count`).
-type Counted = (WorkId, u64);
-
 /// Citing works, each with its references.
 type Citing = Vec<(WorkId, Vec<WorkId>)>;
 
 /// A work of the set's citing works from the cache: those whose references
 /// are cached too, how many were read, and whether that's all of them.
 type CachedCiting = (Citing, usize, bool);
-
-/// A `cites:` filter of works of the set, and the pages of it to read.
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct Cites {
-    works: Vec<WorkId>,
-    pages: usize,
-}
-
-impl Cites {
-    fn filter(&self) -> String {
-        cites(&self.works)
-    }
-}
-
-fn cites(works: &[WorkId]) -> String {
-    let values: Vec<String> = works
-        .iter()
-        .map(|w| match w {
-            WorkId::OpenAlex(id) => id.to_string(),
-            other => other.to_string(),
-        })
-        .collect();
-    format!("cites:{}", values.join("|"))
-}
-
-/// Works cited at most a page's worth of times (each with its count),
-/// packed into filters that one page holds (most cited first, ties by id;
-/// each into the first filter it fits).
-fn bins(works: &[(WorkId, u64)]) -> Vec<Vec<WorkId>> {
-    let mut small: Vec<&(WorkId, u64)> = works.iter().collect();
-    small.sort_by(|(a, x), (b, y)| y.cmp(x).then(a.cmp(b)));
-    let mut bins: Vec<(Vec<WorkId>, u64)> = Vec::new();
-    for (work, count) in small {
-        let fits = bins
-            .iter_mut()
-            .find(|(ws, sum)| sum + count <= PAGE && ws.len() < MAX_FILTER);
-        match fits {
-            Some((ws, sum)) => {
-                ws.push(work.clone());
-                *sum += count;
-            }
-            None => bins.push((vec![work.clone()], *count)),
-        }
-    }
-    bins.into_iter().map(|(ws, _)| ws).collect()
-}
-
-/// The filters reading the citing works of `works` (each with its
-/// `cited_by_count`; uncited works need none): shared filters of a page
-/// first, then works alone, least cited first, at most [`PAGES_PER_WORK`]
-/// pages each. Over [`CITING_PAGES`] in all, pages come off the works read
-/// most (the most cited of them first), down to none.
-fn plan(works: &[(WorkId, u64)], per_work: usize) -> Vec<Cites> {
-    let (small, large): (Vec<Counted>, Vec<Counted>) = works
-        .iter()
-        .filter(|(_, count)| *count > 0)
-        .cloned()
-        .partition(|(_, count)| *count <= PAGE);
-    let mut shared: Vec<Cites> = bins(&small)
-        .into_iter()
-        .map(|works| Cites { works, pages: 1 })
-        .collect();
-    let mut alone: Vec<(u64, Cites)> = large
-        .into_iter()
-        .map(|(work, count)| {
-            let pages = (count.div_ceil(PAGE) as usize).min(per_work);
-            (
-                count,
-                Cites {
-                    works: vec![work],
-                    pages,
-                },
-            )
-        })
-        .collect();
-    alone.sort_by(|(x, a), (y, b)| x.cmp(y).then(a.works.cmp(&b.works)));
-    let mut total = shared.len() + alone.iter().map(|(_, c)| c.pages).sum::<usize>();
-    while total > CITING_PAGES {
-        // The last of the most pages: the most cited of them.
-        match alone
-            .iter_mut()
-            .filter(|(_, c)| c.pages > 0)
-            .max_by_key(|(_, c)| c.pages)
-        {
-            Some((_, c)) => c.pages -= 1,
-            None => {
-                shared.pop();
-            }
-        }
-        total -= 1;
-    }
-    shared
-        .into_iter()
-        .chain(alone.into_iter().map(|(_, c)| c))
-        .collect()
-}
-
-/// The citing works of `work` (cited `count` times) a plan reads: all of
-/// them, or a sample of its pages' worth.
-fn target(plan: &[Cites], work: &WorkId, count: u64) -> u64 {
-    let pages = plan
-        .iter()
-        .find(|c| c.works.contains(work))
-        .map_or(0, |c| c.pages);
-    count.min(pages as u64 * PAGE)
-}
 
 /// The references at least two works of the set cite, most shared first
 /// (ties by id), as many as one filter takes.
@@ -291,90 +169,6 @@ impl Read {
         }
         page.next
     }
-}
-
-/// Counts for one work around the set.
-#[derive(Debug, Clone, Default)]
-struct Tally {
-    /// The citing works (indexes) that cite it and a work of the set.
-    citing: Vec<u32>,
-    /// The set's references it cites too, when at least [`MIN_SHARED`].
-    shared: BTreeSet<WorkId>,
-    /// The works of the set (groups) linking it.
-    groups: BTreeSet<usize>,
-}
-
-impl Tally {
-    /// Counts `refs` (a work's references) as coupling, with `cited` the
-    /// works of the set citing each of the set's references. It links the
-    /// works of the set it shares at least [`MIN_SHARED`] references with.
-    fn couple(&mut self, refs: &[WorkId], cited: &BTreeMap<&WorkId, BTreeSet<usize>>) -> bool {
-        let shared: Vec<&WorkId> = refs.iter().filter(|r| cited.contains_key(r)).collect();
-        if shared.len() < MIN_SHARED {
-            return false;
-        }
-        let mut with: BTreeMap<usize, usize> = BTreeMap::new();
-        for r in shared {
-            self.shared.insert(r.clone());
-            for &g in &cited[r] {
-                *with.entry(g).or_default() += 1;
-            }
-        }
-        self.groups.extend(
-            with.into_iter()
-                .filter(|(_, n)| *n >= MIN_SHARED)
-                .map(|(g, _)| g),
-        );
-        true
-    }
-
-    fn join(&mut self, other: Tally) {
-        self.citing.extend(other.citing);
-        self.citing.sort_unstable();
-        self.citing.dedup();
-        self.shared.extend(other.shared);
-        self.groups.extend(other.groups);
-    }
-}
-
-/// Co-citation strength ([`co_citation`]) and the coupling count, each as
-/// a share of the highest, weighted [`CO_CITATION`] and [`COUPLING`] (all
-/// of it to one when no work has the other), to four places.
-fn score(t: &Tally, weights: &[f64], (most_cited, most_shared): (f64, usize)) -> f64 {
-    let co_cited = co_citation(t, weights);
-    let shared = t.shared.len() as f64;
-    let score = match (most_cited > 0.0, most_shared > 0) {
-        (true, true) => {
-            CO_CITATION * co_cited / most_cited + COUPLING * shared / most_shared as f64
-        }
-        (true, false) => co_cited / most_cited,
-        (false, true) => shared / most_shared as f64,
-        (false, false) => 0.0,
-    };
-    (score * 10_000.0).round() / 10_000.0
-}
-
-/// What a citing work's co-citation is worth: 1/√(its references). A work
-/// listing hundreds co-cites everything it lists: a handbook's chapters
-/// (the Oxford Handbook of Clinical Specialties, 2020: 26 chapter records,
-/// each with the whole book's ~970 references) made CRASH-2, an airway
-/// guideline and parvovirus B19 "related" to ED analgesia trials. Tried on
-/// two sets (2026-11): 1/n favoured citing works listing a few references
-/// (partial data), and 1/ln(e + n) left the chapters' picks in the top 20;
-/// 1/√n dropped them and kept a set of sepsis trials' top 20 as it was.
-fn citing_weight(references: usize) -> f64 {
-    1.0 / (references.max(1) as f64).sqrt()
-}
-
-/// A work's co-citation strength: its citing works' weights, summed.
-fn co_citation(t: &Tally, weights: &[f64]) -> f64 {
-    t.citing.iter().map(|&i| weights[i as usize]).sum()
-}
-
-fn highest<'a>(tallies: impl Iterator<Item = &'a Tally>, weights: &[f64]) -> (f64, usize) {
-    tallies.fold((0.0, 0), |(c, s), t| {
-        (c.max(co_citation(t, weights)), s.max(t.shared.len()))
-    })
 }
 
 /// Why each stage stopped short, if it did.
@@ -691,7 +485,7 @@ impl Engine {
                     .lookup_at(entry, &ids, FieldSet::DEFAULT, &mut usage)
                     .await;
                 spend.add(usage, paid);
-                let failed = super::failed_lookups(&answers, "related works' lookup failed");
+                let failed = failed_lookups(&answers, "related works' lookup failed");
                 stops.lookup.failed = failed > 0;
                 stops.lookups = ((fetch - failed) as u64, fetch as u64);
                 records = answers.into_iter().map(|(_, r)| r).collect();
@@ -914,77 +708,5 @@ impl Engine {
         let links: Vec<(&WorkId, &[WorkId])> =
             links.iter().map(|(w, r)| (w, r.as_slice())).collect();
         self.remember_references(&links);
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn w(n: u64) -> WorkId {
-        format!("W{n}").parse().unwrap()
-    }
-
-    #[test]
-    fn works_cited_little_share_a_page_and_classics_are_capped() {
-        let works = [
-            (w(1), 120),
-            (w(2), 80),
-            (w(3), 90),
-            (w(4), 0),
-            (w(5), 300),
-            (w(6), 90_000),
-            (w(7), 30),
-        ];
-        let plan = plan(&works, PAGES_PER_WORK);
-        let shape: Vec<(Vec<WorkId>, usize)> =
-            plan.iter().map(|c| (c.works.clone(), c.pages)).collect();
-        assert_eq!(
-            shape,
-            [
-                // 120 + 80 fill a page; 90 + 30 the next.
-                (vec![w(1), w(2)], 1),
-                (vec![w(3), w(7)], 1),
-                (vec![w(5)], 2),
-                (vec![w(6)], PAGES_PER_WORK),
-            ]
-        );
-        assert_eq!(target(&plan, &w(6), 90_000), 1_000);
-        assert_eq!(target(&plan, &w(5), 300), 300);
-        assert_eq!(target(&plan, &w(4), 0), 0);
-    }
-
-    #[test]
-    fn citing_works_listing_hundreds_count_for_less() {
-        // Three papers of 30 references co-cite A; five chapters of a
-        // handbook, each listing its 900, co-cite B.
-        let weights: Vec<f64> = [30, 30, 30, 900, 900, 900, 900, 900]
-            .map(citing_weight)
-            .to_vec();
-        let a = Tally {
-            citing: vec![0, 1, 2],
-            ..Tally::default()
-        };
-        let b = Tally {
-            citing: vec![3, 4, 5, 6, 7],
-            ..Tally::default()
-        };
-        let most = highest([&a, &b].into_iter(), &weights);
-        assert_eq!(score(&a, &weights, most), 1.0);
-        // 5/√900 of 3/√30: about a third.
-        assert_eq!(score(&b, &weights, most), 0.3043);
-        assert_eq!(citing_weight(0), 1.0, "no references: no division by zero");
-    }
-
-    #[test]
-    fn the_set_reads_at_most_its_cap_taken_off_the_most_read() {
-        // 30 works cited 1,000 times: 150 pages wanted, 75 read.
-        let works: Vec<(WorkId, u64)> = (1..=30).map(|n| (w(n), 1_000)).collect();
-        let plan = plan(&works, PAGES_PER_WORK);
-        let pages: Vec<usize> = plan.iter().map(|c| c.pages).collect();
-        assert_eq!(pages.iter().sum::<usize>(), CITING_PAGES);
-        // Taken evenly, the last (ties by id) first.
-        assert_eq!(pages[..15], [3; 15]);
-        assert_eq!(pages[15..], [2; 15]);
     }
 }

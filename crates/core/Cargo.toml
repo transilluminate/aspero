@@ -3,6 +3,7 @@ name = "aspero-core"
 description = "Core types, identifiers and Provider trait for aspero (no I/O)"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 homepage.workspace = true

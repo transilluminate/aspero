@@ -30,7 +30,7 @@ use authors::{author_overlap, family_name, same_family};
 pub use derivative::{
     WorkKind, claim_mentions_derivative, derivative_kind, derivative_work_kind, is_derivative,
 };
-use text::{Normalised, content_words};
+use text::{Normalised, content_words, words};
 pub use text::{normalise, search_terms, shared_title, title_similarity, unmarked};
 
 /// Field weights in the confidence (before penalties).
@@ -436,17 +436,20 @@ pub fn assess(claim: &Claim, record: &SourceRecord) -> Assessment {
         && cited_place.page.is_some();
     let container = match (&claim.container, &work.container_title, &text) {
         (Some(claimed), Some(actual), _) => FieldCheck::exact(same_journal(claimed, actual)),
-        (None, Some(actual), Some(text)) => {
-            let cited = cited_journal.as_deref();
-            if journal_in(&text.words, actual) || cited.is_some_and(|c| same_journal(c, actual)) {
+        // The journal read where the reference gives it decides, not words
+        // elsewhere in it (an author's initials "SR" for Scientific Reports).
+        (None, Some(actual), Some(text)) => match cited_journal.as_deref() {
+            Some(cited) if same_journal(cited, actual) || journal_in(&words(cited), actual) => {
                 FieldCheck::exact(true)
-            } else if article && cited.is_some_and(|c| other_journal(c, actual)) {
-                // Another journal, clearly named where the journal goes.
-                FieldCheck::exact(false)
-            } else {
-                FieldCheck::UNKNOWN
             }
-        }
+            // Another journal, clearly named where the journal goes.
+            Some(cited) if article && other_journal(cited, actual) => FieldCheck::exact(false),
+            Some(_) => FieldCheck::UNKNOWN,
+            None => match journal_in(&text.words, actual) {
+                true => FieldCheck::exact(true),
+                false => FieldCheck::UNKNOWN,
+            },
+        },
         _ => FieldCheck::UNKNOWN,
     };
     let container = match preprint_of_cited && container.agreement != Agreement::Match {

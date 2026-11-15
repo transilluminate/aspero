@@ -100,7 +100,10 @@ fn loosely_abbreviates(short: &str, full: &str) -> bool {
 }
 
 /// Whether `journal`, in full or abbreviated, appears in `words` (a
-/// normalised reference, split into words).
+/// normalised reference, split into words). Not as a reference's other
+/// words may: a one-word journal is named in full or by a prefix ("Circ"),
+/// not any word with its letters ("mice" for "Medicine"), and a name's
+/// initials ("SR", "N") are not a journal's.
 pub(crate) fn journal_in(words: &[String], journal: &str) -> bool {
     let full = significant(journal);
     if full.is_empty() {
@@ -111,9 +114,13 @@ pub(crate) fn journal_in(words: &[String], journal: &str) -> bool {
         .map(String::as_str)
         .filter(|w| !JOURNAL_STOPWORDS.contains(w))
         .collect();
-    text.windows(full.len())
-        .any(|run| run.iter().zip(&full).all(|(s, f)| abbreviates_word(s, f)))
-        || (full.len() > 1 && text.iter().any(|w| is_initials(w, &full)))
+    if let [one] = &full[..] {
+        return text.iter().any(|w| w.len() >= 3 && one.starts_with(w));
+    }
+    text.windows(full.len()).any(|run| {
+        run.iter().any(|w| w.len() > 1)
+            && run.iter().zip(&full).all(|(s, f)| abbreviates_word(s, f))
+    }) || text.iter().any(|w| w.len() > 2 && is_initials(w, &full))
 }
 
 /// Whether `word` (normalised) is one of a journal's significant words
@@ -525,6 +532,17 @@ mod tests {
         assert!(journal_in(&text, "New England Journal of Medicine"));
         assert!(!journal_in(&text, "The Lancet"));
         assert!(journal_in(&words("Lancet 2010;376:23"), "The Lancet"));
+        assert!(journal_in(&words("Circ 2010;121:23"), "Circulation"));
+        assert!(journal_in(&words("Smith J. NEJM 2010"), "N Engl J Med"));
+        // Names, initials and title words are not the journal.
+        for (text, journal) in [
+            ("Ragusa A, Rossi SR. Title. 2021", "Scientific Reports"),
+            ("Doe J. Sepsis in mice. 2020", "Medicine"),
+            ("Smith N. Title. 2020", "Nature"),
+            ("Smith J. A. Title. 2020", "Journal of Anaesthesia"),
+        ] {
+            assert!(!journal_in(&words(text), journal), "{text}: {journal}");
+        }
     }
 
     #[test]

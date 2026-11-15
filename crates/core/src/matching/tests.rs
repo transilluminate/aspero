@@ -839,6 +839,45 @@ fn journals_abbreviated_with_words_left_out_are_no_mismatch() {
 }
 
 #[test]
+fn a_journal_read_from_the_reference_outweighs_words_elsewhere_in_it() {
+    // "SR" among the authors' initials is not Scientific Reports, nor
+    // "mice" in the title Medicine, when the reference names another.
+    for (text, title, author, year, at) in [
+        (
+            "Ragusa A, Rossi SR. Microplastics in human placenta. Nature. 2021;11:1234.",
+            "Microplastics in human placenta",
+            "Antonio Ragusa",
+            2021,
+            ("Scientific Reports", "11", "1234"),
+        ),
+        (
+            "Doe J. Sepsis in mice. Lancet. 2020;99:e1-e9.",
+            "Sepsis in mice",
+            "Jane Doe",
+            2020,
+            ("Medicine", "99", "e1"),
+        ),
+    ] {
+        let mut r = placed(&[], title, &[author], year, at);
+        r.work.work_type = Some(crate::work::WorkType::JournalArticle);
+        let a = assess(&Claim::from_text(text), &r);
+        assert_eq!(a.container.agreement, Agreement::Mismatch, "{text}");
+        assert!(a.confidence < VERIFIED, "{text}: {a:?}");
+    }
+    // With no journal read, nor do they count as the journal.
+    let mut r = placed(
+        &[],
+        "Sepsis in mice",
+        &["Jane Doe"],
+        2020,
+        ("Medicine", "99", "e1"),
+    );
+    r.work.work_type = Some(crate::work::WorkType::JournalArticle);
+    let a = assess(&Claim::from_text("Doe J. Sepsis in mice. 2020."), &r);
+    assert_eq!(a.container.agreement, Agreement::Unknown, "{a:?}");
+}
+
+#[test]
 fn journals_named_otherwise_or_not_at_all_are_no_mismatch() {
     let mut nejm = peitho();
     nejm.work.work_type = Some(crate::work::WorkType::JournalArticle);

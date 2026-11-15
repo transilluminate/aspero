@@ -77,12 +77,7 @@ impl Engine {
             spend.add(report.usage, 0);
             for ((i, id), result) in elsewhere.into_iter().zip(report.results) {
                 let input = &inputs[i];
-                let found = result.record.as_ref().and_then(|r| {
-                    r.ids
-                        .iter()
-                        .find(|x| x.kind() == IdKind::OpenAlex)
-                        .or_else(|| r.ids.iter().find(|x| accepts.contains(&x.kind())))
-                });
+                let found = result.record.as_ref().and_then(|r| ask_by(r, accepts, &id));
                 match (found, seed_failure(&result)) {
                     (Some(other), _) => asks.push((i, other.clone())),
                     (None, Some((problem, message))) => {
@@ -128,18 +123,7 @@ impl Engine {
                 let Some(record) = &result.record else {
                     continue;
                 };
-                let asked = &asks[k].1;
-                let other = record
-                    .ids
-                    .iter()
-                    .find(|x| x.kind() == IdKind::OpenAlex)
-                    .or_else(|| {
-                        record
-                            .ids
-                            .iter()
-                            .find(|x| accepts.contains(&x.kind()) && !same_work_id(x, asked))
-                    });
-                if let Some(other) = other {
+                if let Some(other) = ask_by(record, accepts, &asks[k].1) {
                     again.push((k, other.clone()));
                 }
             }
@@ -268,6 +252,18 @@ impl Engine {
         }
         answers
     }
+}
+
+/// The identifier to ask OpenAlex about `record` by: its OpenAlex id, else
+/// one OpenAlex looks up (`accepts`) other than `asked`.
+fn ask_by<'a>(record: &'a SourceRecord, accepts: &[IdKind], asked: &WorkId) -> Option<&'a WorkId> {
+    let ids = &record.ids;
+    ids.iter()
+        .find(|x| x.kind() == IdKind::OpenAlex)
+        .or_else(|| {
+            ids.iter()
+                .find(|x| accepts.contains(&x.kind()) && !same_work_id(x, asked))
+        })
 }
 
 /// A lookup's failure as a seed's problem; `None` when it found a record.

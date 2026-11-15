@@ -334,6 +334,8 @@ struct State {
     manager: Arc<LocalSessionManager>,
     owners: Mutex<HashMap<String, Owner>>,
     usage: Mutex<Usage>,
+    /// Cancelled once the server is stopping: no request is served after.
+    stopping: CancellationToken,
 }
 
 type Body = BoxBody<Bytes, Infallible>;
@@ -353,6 +355,9 @@ impl State {
     }
 
     async fn handle(&self, mut request: Request<Incoming>) -> Response<Body> {
+        if self.stopping.is_cancelled() {
+            return plain(StatusCode::SERVICE_UNAVAILABLE);
+        }
         if request.uri().path() != PATH {
             return plain(StatusCode::NOT_FOUND);
         }
@@ -428,7 +433,8 @@ pub struct HttpServer {
     state: Arc<State>,
     cancel: CancellationToken,
     running: AtomicBool,
-    task: Mutex<Option<JoinHandle<()>>>,
+    /// The accept loop, until it has finished.
+    task: tokio::sync::Mutex<Option<JoinHandle<()>>>,
     /// The runtime serving it, for work begun outside it (`set_keys`).
     runtime: tokio::runtime::Handle,
 }
@@ -521,6 +527,7 @@ impl HttpServer {
             manager,
             owners: Mutex::default(),
             usage: Mutex::default(),
+            stopping: cancel.clone(),
         });
         let task = tokio::spawn(accept(listener, state.clone(), cancel.clone()));
         tracing::info!(target: "aspero::mcp", port, "MCP server listening on 127.0.0.1");
@@ -528,7 +535,7 @@ impl HttpServer {
             state,
             cancel,
             running: AtomicBool::new(true),
-            task: Mutex::new(Some(task)),
+            task: tokio::sync::Mutex::new(Some(task)),
             runtime: tokio::runtime::Handle::current(),
         })
     }
@@ -647,22 +654,26 @@ impl HttpServer {
         }
     }
 
-    /// Ends every session, stops listening and waits (a couple of seconds
-    /// at most) for requests in flight; the port is free when it returns.
-    /// Stopping again does nothing.
+    /// Stops listening and taking requests, ends every session and waits (a
+    /// couple of seconds at most) for requests in flight; the port is free
+    /// when it returns. Stopping again finishes a stop cut short (its
+    /// future dropped), and otherwise does nothing.
     pub async fn stop(&self) {
-        if !self.running.swap(false, Ordering::Relaxed) {
-            return;
-        }
+        // First, and at once: whatever happens to this future, nothing new
+        // is served from here on.
+        self.cancel.cancel();
         let manager = &self.state.manager;
         let ids: Vec<_> = manager.sessions.read().await.keys().cloned().collect();
         for id in ids {
             let _ = manager.close_session(&id).await;
         }
-        self.cancel.cancel();
-        let task = self.task.lock().unwrap_or_else(|e| e.into_inner()).take();
-        if let Some(task) = task {
-            let _ = task.await;
+        {
+            // Kept until it's done, for a stop called again to wait on.
+            let mut task = self.task.lock().await;
+            if let Some(running) = task.as_mut() {
+                let _ = running.await;
+                *task = None;
+            }
         }
         // Ends the activity thread once it has said what's queued.
         self.state
@@ -671,7 +682,9 @@ impl HttpServer {
             .lock()
             .unwrap_or_else(|e| e.into_inner())
             .take();
-        tracing::info!(target: "aspero::mcp", port = self.state.port, "MCP server stopped");
+        if self.running.swap(false, Ordering::Relaxed) {
+            tracing::info!(target: "aspero::mcp", port = self.state.port, "MCP server stopped");
+        }
     }
 }
 
@@ -718,4 +731,38 @@ async fn accept(listener: TcpListener, state: Arc<State>, cancel: CancellationTo
     }
     drop(listener);
     let _ = tokio::time::timeout(Duration::from_secs(2), graceful.shutdown()).await;
+}
+
+#[cfg(test)]
+mod tests {
+    use rmcp::transport::streamable_http_server::SessionManager;
+
+    use super::*;
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_stop_cut_short_finishes_when_called_again() {
+        let tools = Arc::new(Tools::new(aspero_engine::Engine::builder().build()));
+        let config = HttpConfig {
+            port: 0,
+            ..HttpConfig::default()
+        };
+        let ledger = Arc::new(MemoryLedger::default());
+        let server = HttpServer::start(tools, config, None, ledger)
+            .await
+            .unwrap();
+        let port = server.port();
+        let manager = server.state.manager.clone();
+        let _session = manager.create_session().await.unwrap();
+        {
+            // The sessions busy elsewhere: closing one waits, and the stop
+            // is dropped there, as an app's cancelled task would be.
+            let _busy = manager.sessions.read().await;
+            assert!(futures::FutureExt::now_or_never(server.stop()).is_none());
+        }
+        server.stop().await;
+        assert!(!server.status().running);
+        std::net::TcpListener::bind(("127.0.0.1", port)).expect("the port is free");
+        // And again: nothing left to do.
+        server.stop().await;
+    }
 }

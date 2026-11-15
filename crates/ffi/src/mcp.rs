@@ -367,7 +367,8 @@ impl McpServer {
     }
 
     /// Ends the sessions and stops listening; the port is free when it
-    /// returns. Stopping again does nothing.
+    /// returns. Stopping again finishes a stop cut short (its task
+    /// cancelled), and otherwise does nothing.
     pub async fn stop(&self) {
         let inner = self.inner.clone();
         let _ = self

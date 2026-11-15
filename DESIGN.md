@@ -734,8 +734,11 @@ CLI builds without it and serves stdio only) and, over it, the FFI's
   `Mcp-Session-Id`), each with its own handler and budget; only the
   revisions with `initialize` are offered, and a call outside a session
   is refused, so budgets can't be dodged by going sessionless. Stopping
-  closes every session, cancels their streams, closes the listener, and
-  waits up to two seconds for requests in flight.
+  first, at once, refuses further requests (503), cancels the sessions'
+  streams and closes the listener; then closes every session and waits up
+  to two seconds for requests in flight. A stop cut short (the app's task
+  cancelled) finishes when called again; `status` says running until
+  then.
 - **Auth, on every request, in order.** The path; `Host` must be
   `127.0.0.1:<port>` or `localhost:<port>` and any `Origin` is refused
   (both 403, before auth); `Authorization: Bearer <token>`: the token's

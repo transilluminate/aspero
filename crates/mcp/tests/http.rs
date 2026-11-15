@@ -711,6 +711,46 @@ async fn a_port_in_use_fails_and_stop_frees_it() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn a_stop_cut_short_finishes_when_called_again() {
+    use futures::FutureExt;
+    let host = FakeHost::new();
+    let server = start(&host).await;
+    let port = server.port();
+    let mut agent = Agent::new(port, FULL);
+    agent.initialize().await;
+    // Dropped at its first wait (closing the session), as an app's task
+    // can be: no new session opens meanwhile.
+    assert!(server.stop().now_or_never().is_none());
+    let mut late = Agent::new(port, FULL);
+    late.http = reqwest::Client::builder()
+        .no_proxy()
+        .timeout(Duration::from_secs(5))
+        .build()
+        .unwrap();
+    let init = json!({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {
+        "protocolVersion": "2025-06-18",
+        "capabilities": {},
+        "clientInfo": {"name": "late", "version": "1.0"},
+    }});
+    let opened = late
+        .http
+        .post(&late.url)
+        .bearer_auth(FULL)
+        .header("accept", "application/json, text/event-stream")
+        .header("content-type", "application/json")
+        .body(init.to_string())
+        .send()
+        .await
+        .is_ok_and(|r| r.status().is_success());
+    assert!(!opened, "a session opened while stopping");
+    // Stopping again finishes the job.
+    server.stop().await;
+    assert!(!server.status().running);
+    std::net::TcpListener::bind(("127.0.0.1", port)).expect("the port is free");
+    server.stop().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn a_session_spends_its_budget_and_no_more() {
     let host = FakeHost::new();
     let mut config = config(free_port());

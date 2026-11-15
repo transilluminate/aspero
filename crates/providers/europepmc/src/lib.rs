@@ -15,7 +15,9 @@ use std::time::Duration;
 
 use aspero_core::csl::{null_default, plain_text, strip_markup};
 use aspero_core::http::{escape_lucene, status_error};
-use aspero_core::query::{check_supported, lucene_term, lucene_years, render_lucene};
+use aspero_core::query::{
+    check_supported, lucene_and, lucene_quoted, lucene_term, lucene_years, render_lucene,
+};
 use aspero_core::{
     BooleanSupport, Capabilities, Cursor, Doi, Error, FieldSet, Filter, FilterValue, Hit,
     HttpClient, HttpRequest, HttpResponse, IdKind, Lookup, Nbk, OpenAccess, Page, PartialDate,
@@ -423,7 +425,7 @@ fn clause(id: &WorkId) -> Result<String> {
         WorkId::Pmid(p) => format!("(EXT_ID:{p} AND SRC:MED)"),
         WorkId::Pmcid(p) => format!("PMCID:{p}"),
         WorkId::Nbk(n) => format!("BOOK_ID:{n}"),
-        WorkId::Doi(d) => format!("DOI:\"{}\"", d.as_str().replace('"', "\\\"")),
+        WorkId::Doi(d) => format!("DOI:{}", lucene_quoted(d.as_str())),
         _ => {
             return Err(Error::Unsupported(
                 "Europe PMC lookup of this identifier kind",
@@ -473,10 +475,13 @@ impl Provider for EuropePmc {
         if query.mode != SearchMode::Keywords {
             return Err(Error::Unsupported("Europe PMC has no citation matcher"));
         }
+        let tree = query
+            .tree
+            .as_ref()
+            .map(|t| express(t, &self.capabilities))
+            .transpose()
+            .map_err(Error::UnsupportedQuery)?;
         let mut clauses = Vec::new();
-        if let Some(tree) = &query.tree {
-            clauses.push(express(tree, &self.capabilities).map_err(Error::UnsupportedQuery)?);
-        }
         if !query.text.trim().is_empty() {
             clauses.push(format!("({})", escape_lucene(query.text.trim())));
         }
@@ -491,14 +496,7 @@ impl Provider for EuropePmc {
                 }
             }
         }
-        if let Some(years) = query.years {
-            let end = |y: Option<i16>| y.map_or("*".to_owned(), |y| y.to_string());
-            clauses.push(format!(
-                "PUB_YEAR:[{} TO {}]",
-                end(years.from),
-                end(years.to)
-            ));
-        }
+        clauses.extend(query.years.map(|y| lucene_years("PUB_YEAR", y)));
         if let Some(oa) = query.open_access {
             clauses.push(format!("OPEN_ACCESS:{}", if oa { "y" } else { "n" }));
         }
@@ -517,15 +515,10 @@ impl Provider for EuropePmc {
         // 2026-11-13).
         if let Some(since) = query.since {
             clauses.push(format!("FIRST_IDATE:[{since} TO *]"));
-            // A tree's top-level any is bare `a OR b`: bracketed, the
-            // date bounds all of it.
-            if query.tree.is_some() {
-                clauses[0] = format!("({})", clauses[0]);
-            }
         }
         let cursor = query.page.cursor.as_ref().map_or("*", |c| c.0.as_str());
         let mut params = vec![
-            ("query", clauses.join(" AND ")),
+            ("query", lucene_and(tree, clauses)),
             ("resultType", "core".to_owned()),
             ("format", "json".to_owned()),
             ("pageSize", query.page.limit.clamp(1, MAX_PAGE).to_string()),

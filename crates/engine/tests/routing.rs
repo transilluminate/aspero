@@ -435,6 +435,46 @@ async fn search_providers_come_in_the_order_search_picks_from() {
     assert_eq!(report.provider.as_str(), names[0]);
 }
 
+/// The built-in sources' names and lookup priorities, where search order
+/// differs: Europe PMC before DataCite.
+#[tokio::test(start_paused = true)]
+async fn unnamed_searches_pick_in_search_order_not_lookup_priority() {
+    let flat = |id| {
+        let mut mock = tree_mock(id, &[]);
+        mock.caps.search_any = BooleanSupport::No;
+        Arc::new(mock)
+    };
+    let (openalex, crossref) = (flat("openalex"), flat("crossref"));
+    let mut datacite = tree_mock("datacite", &[]);
+    datacite.caps.search_filters.push(Filter::Since);
+    let datacite = Arc::new(datacite);
+    let mut europepmc = tree_mock("europepmc", &[]);
+    europepmc.caps.search_filters.push(Filter::Since);
+    let europepmc = Arc::new(europepmc);
+    let engine = engine(vec![
+        (openalex, 10),
+        (crossref, 20),
+        (datacite.clone(), 25),
+        (europepmc.clone(), 35),
+    ]);
+    let order: Vec<String> = engine
+        .search_providers()
+        .map(|p| p.id().to_string())
+        .collect();
+    assert_eq!(order, ["openalex", "crossref", "europepmc", "datacite"]);
+
+    let tree = QueryNode::Any(vec![title("sepsis"), title("lactate")]);
+    assert_eq!(engine.search_supports(None, &tree), None);
+    let report = engine.search(None, &with_tree(tree)).await.unwrap();
+    assert_eq!(report.provider.as_str(), "europepmc");
+
+    let mut q = SearchQuery::new("sepsis");
+    q.since = Some(jiff::civil::date(2026, 11, 1));
+    let report = engine.search(None, &q).await.unwrap();
+    assert_eq!(report.provider.as_str(), "europepmc");
+    assert!(datacite.searches.lock().unwrap().is_empty());
+}
+
 #[tokio::test(start_paused = true)]
 async fn search_errors_name_the_provider() {
     let mock = Arc::new(
@@ -768,6 +808,28 @@ async fn identifiers_are_checked_before_a_source_sees_them() {
     match engine.search(None, &with_tree(bad)).await {
         Err(EngineError::InvalidQuery(r)) => assert_eq!(r, why),
         other => panic!("{other:?}"),
+    }
+    assert!(mock.searches.lock().unwrap().is_empty());
+}
+
+#[tokio::test(start_paused = true)]
+async fn work_types_are_names_never_filter_syntax() {
+    let mut mock = tree_mock("types", &[]);
+    mock.caps.search_filters.push(Filter::WorkType);
+    let mock = Arc::new(mock);
+    let engine = engine_of(mock.clone());
+    let injected = aspero_core::WorkType::from_csl("book,is_oa:true");
+    let why = r#""book,is_oa:true" is not a work type: types are names of letters, digits and hyphens, like "book-chapter""#;
+    let tree = QueryNode::None(vec![QueryNode::filter(FilterValue::WorkType(
+        injected.clone(),
+    ))]);
+    assert_eq!(engine.search_supports(None, &tree).as_deref(), Some(why));
+    // Without a tree, the request's own type alike.
+    let mut q = SearchQuery::new("sepsis");
+    q.work_type = Some(injected);
+    match engine.search(None, &q).await {
+        Err(EngineError::InvalidQuery(r)) => assert_eq!(r, why),
+        other => panic!("{:?}", other.map(|_| ())),
     }
     assert!(mock.searches.lock().unwrap().is_empty());
 }

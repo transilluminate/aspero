@@ -380,7 +380,9 @@ struct Tree {
 /// A query tree in Crossref's terms: all of words in its query fields
 /// (`query`, `query.title`, `query.author`, `query.container-title`),
 /// and of filters (years, one work type, one ORCID, `has-abstract`).
-/// Its queries rank a bag of words, so there are no phrases, and filters
+/// Its queries rank a bag of words, so there are no phrases, terms of one
+/// field are its words together (as one term of them all would be), and
+/// a journal goes alone among terms: beside others it only ranks. Filters
 /// of one name OR (two ORCIDs would mean either). Crossref has no filter
 /// for retracted works themselves (`update-type:retraction` finds the
 /// notices), nor for language.
@@ -495,6 +497,20 @@ fn express(tree: &QueryNode, caps: &Capabilities) -> std::result::Result<Tree, S
             }
             other => return Err(format!("{NAME} can't search by {}", other.leaf_name())),
         }
+    }
+    // The queries are scored together, so a journal's few words beside
+    // others only nudge the order: works from any journal come first.
+    // Alone, or beside filters, the journal's are the words ranked by.
+    if out.params.len() > 1
+        && out
+            .params
+            .iter()
+            .any(|(p, _)| *p == "query.container-title")
+    {
+        return Err(format!(
+            "{NAME} can't keep to a journal beside other terms: it ranks works by the \
+             journal's name, without requiring it"
+        ));
     }
     if let Some(years) = years {
         out.filters

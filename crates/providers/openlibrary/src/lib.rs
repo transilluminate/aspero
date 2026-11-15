@@ -19,7 +19,7 @@ use std::time::Duration;
 
 use aspero_core::csl::null_default;
 use aspero_core::http::{escape_lucene, status_error};
-use aspero_core::query::{check_supported, lucene_term, lucene_years, render_lucene};
+use aspero_core::query::{check_supported, lucene_and, lucene_term, lucene_years, render_lucene};
 use aspero_core::{
     BooleanSupport, Capabilities, Cursor, Error, FieldSet, Filter, FilterValue, Hit, HttpClient,
     HttpRequest, HttpResponse, IdKind, Isbn, Lookup, Page, PartialDate, Person, Provider,
@@ -368,21 +368,17 @@ impl Provider for OpenLibrary {
                 "unknown Open Library parameter {key:?}"
             )));
         }
+        let tree = query
+            .tree
+            .as_ref()
+            .map(|t| express(t, &self.capabilities))
+            .transpose()
+            .map_err(Error::UnsupportedQuery)?;
         let mut clauses = Vec::new();
-        if let Some(tree) = &query.tree {
-            clauses.push(express(tree, &self.capabilities).map_err(Error::UnsupportedQuery)?);
-        }
         if !query.text.trim().is_empty() {
             clauses.push(format!("({})", escape_lucene(query.text.trim())));
         }
-        if let Some(years) = query.years {
-            let end = |y: Option<i16>| y.map_or("*".to_owned(), |y| y.to_string());
-            clauses.push(format!(
-                "first_publish_year:[{} TO {}]",
-                end(years.from),
-                end(years.to)
-            ));
-        }
+        clauses.extend(query.years.map(|y| lucene_years("first_publish_year", y)));
         let page_number: u32 = match &query.page.cursor {
             None => 1,
             Some(c) => c
@@ -391,7 +387,7 @@ impl Provider for OpenLibrary {
                 .map_err(|_| Error::BadRequest(format!("invalid Open Library cursor {:?}", c.0)))?,
         };
         let limit = query.page.limit.clamp(1, MAX_PAGE);
-        let mut params = vec![("q", clauses.join(" AND "))];
+        let mut params = vec![("q", lucene_and(tree, clauses))];
         if let Some(author) = query.field(Filter::Author) {
             params.push(("author", author.to_owned()));
         }

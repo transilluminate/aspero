@@ -391,3 +391,36 @@ fn since_is_the_registration_date_anded_with_text_or_a_tree() {
         )
     );
 }
+
+#[test]
+fn a_doi_is_quoted_whatever_it_holds() {
+    // A DOI's suffix may hold `\` and `"`: escaped, the quotes still close.
+    let (dc, http) = provider([empty_page(), empty_page()]);
+    let tree = QueryNode::term(TermField::Identifier, r#"10.1000/a"b\"#);
+    block_on(dc.search(&tree_query(tree))).unwrap();
+    assert_eq!(query(&http, 0)[0], pair("query", r#"doi:"10.1000/a\"b\\""#));
+    block_on(dc.lookup(&[id("10.1000/x\\"), id("10.1000/y")], FieldSet::DEFAULT)).unwrap();
+    assert_eq!(
+        query(&http, 1)[0],
+        pair("query", r#"doi:("10.1000/x\\" OR "10.1000/y")"#)
+    );
+}
+
+#[test]
+fn an_expert_query_bounds_all_of_a_tree() {
+    let (dc, http) = provider([empty_page()]);
+    let mut q = tree_query(QueryNode::Any(vec![
+        QueryNode::term(TermField::Title, "a"),
+        QueryNode::term(TermField::Title, "b"),
+    ]));
+    q.extra
+        .insert("query".into(), "types.resourceTypeGeneral:Dataset".into());
+    block_on(dc.search(&q)).unwrap();
+    assert_eq!(
+        query(&http, 0)[0],
+        pair(
+            "query",
+            "(titles.title:(a) OR titles.title:(b)) AND (types.resourceTypeGeneral:Dataset)"
+        )
+    );
+}

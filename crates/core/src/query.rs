@@ -255,9 +255,9 @@ impl QueryNode {
     }
 
     /// The tree with blank leaves and empty groups dropped, groups nested
-    /// in a group of the same kind flattened into it, and an all or any of
-    /// one node replaced by that node. `None` when nothing is left to
-    /// search by.
+    /// in a group of the same kind flattened into it, an all or any of
+    /// one node replaced by that node, and a none of one none by an any of
+    /// what that held. `None` when nothing is left to search by.
     pub fn normalised(self) -> Option<QueryNode> {
         match self {
             QueryNode::All(nodes) => group(Group::All, nodes),
@@ -281,8 +281,8 @@ impl QueryNode {
     }
 
     /// Checks every leaf's value: author ids, identifiers, language codes,
-    /// year ranges and relations' identifiers. The reason, in English, for the first
-    /// that's invalid.
+    /// work types ([`check_work_type`]), year ranges and relations'
+    /// identifiers. The reason, in English, for the first that's invalid.
     pub fn validate(&self) -> Result<(), String> {
         match self {
             QueryNode::All(nodes) | QueryNode::Any(nodes) | QueryNode::None(nodes) => {
@@ -297,10 +297,25 @@ impl QueryNode {
                 })
             }
             QueryNode::Term(t) if t.field == TermField::Identifier => t.work_id().map(|_| ()),
+            // Punctuation alone is no words: sources find nothing, or fail,
+            // and dropping the term would widen the search.
+            QueryNode::Term(t) if !t.value.chars().any(char::is_alphanumeric) => {
+                let have = if t.field == TermField::Keywords {
+                    "have"
+                } else {
+                    "has"
+                };
+                Err(format!(
+                    "the {} {:?} {have} no letters or digits to search for",
+                    t.field.name(),
+                    t.value
+                ))
+            }
             QueryNode::Term(_) => Ok(()),
             QueryNode::Filter(FilterValue::Language(code)) => language(code)
                 .map(|_| ())
                 .ok_or_else(|| format!("{code:?} is not an ISO 639-1 language code, like \"en\"")),
+            QueryNode::Filter(FilterValue::WorkType(t)) => check_work_type(t),
             QueryNode::Filter(FilterValue::Years(YearRange {
                 from: Some(from),
                 to: Some(to),
@@ -394,12 +409,36 @@ fn group(kind: Group, nodes: Vec<QueryNode>) -> Option<QueryNode> {
             (_, node) => flat.push(node),
         }
     }
+    // None of a none is any of what it held.
+    if kind == Group::None
+        && let [QueryNode::None(inner)] = flat.as_mut_slice()
+    {
+        return group(Group::Any, std::mem::take(inner));
+    }
     match (kind, flat.len()) {
         (_, 0) => None,
         (Group::All | Group::Any, 1) => flat.pop(),
         (Group::All, _) => Some(QueryNode::All(flat)),
         (Group::Any, _) => Some(QueryNode::Any(flat)),
         (Group::None, _) => Some(QueryNode::None(flat)),
+    }
+}
+
+/// Checks a work type that isn't one aspero knows ([`WorkType::Other`]) is
+/// a name sources can filter by: letters, digits and hyphens. Sources put
+/// the name in their filters as it is, where `,`, `|` or `:` would be
+/// syntax (OpenAlex's `type:!book,is_oa:true` is two filters).
+pub fn check_work_type(t: &WorkType) -> Result<(), String> {
+    match t {
+        WorkType::Other(name)
+            if name.is_empty() || !name.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-') =>
+        {
+            Err(format!(
+                "{name:?} is not a work type: types are names of letters, digits and \
+                 hyphens, like \"book-chapter\""
+            ))
+        }
+        _ => Ok(()),
     }
 }
 
@@ -785,11 +824,19 @@ pub fn lucene_term(prefix: Option<&str>, value: &str, phrase: bool) -> String {
     }
 }
 
+/// A value as one quoted Lucene term, `"…"`, its `\` and `"` escaped: a
+/// DOI, whose suffix may hold either.
+pub fn lucene_quoted(value: &str) -> String {
+    format!("\"{}\"", value.replace('\\', "\\\\").replace('"', "\\\""))
+}
+
 /// User text as words, never syntax: special characters escaped, and the
 /// operators `AND`, `OR` and `NOT` (as words) quoted, so they are searched
-/// for rather than obeyed.
+/// for rather than obeyed. `<`, `>` and `=` are dropped: Elasticsearch
+/// reads `<` and `>` as ranges and can't escape them (in a phrase they
+/// are only text).
 pub fn lucene_words(text: &str) -> String {
-    escape_lucene(text)
+    escape_lucene(&text.replace(['<', '>', '='], " "))
         .split_whitespace()
         .map(|word| match word {
             "AND" | "OR" | "NOT" => format!("\"{}\"", word.to_lowercase()),
@@ -797,6 +844,21 @@ pub fn lucene_words(text: &str) -> String {
         })
         .collect::<Vec<_>>()
         .join(" ")
+}
+
+/// A request's clauses ANDed: a rendered tree (bare at its top, `a OR b`)
+/// first, bracketed when anything joins it, so all of it is bounded:
+/// `(a OR b) AND (raw)`. The other clauses stand alone already (`(words)`,
+/// `FIELD:[…]`, `FIELD:"…"`).
+pub fn lucene_and(tree: Option<String>, clauses: Vec<String>) -> String {
+    let tree = tree.map(|t| match clauses.is_empty() {
+        true => t,
+        false => format!("({t})"),
+    });
+    tree.into_iter()
+        .chain(clauses)
+        .collect::<Vec<_>>()
+        .join(" AND ")
 }
 
 /// A year range in Lucene syntax: `FIELD:[2017 TO *]`.
@@ -845,6 +907,23 @@ mod tests {
             QueryNode::All(vec![QueryNode::None(vec![])]).normalised(),
             None
         );
+        // None of none is any: a range of years, not one left out twice.
+        let years = QueryNode::filter(FilterValue::Years(YearRange {
+            from: Some(2020),
+            to: None,
+        }));
+        assert_eq!(
+            QueryNode::None(vec![QueryNode::None(vec![years.clone()])]).normalised(),
+            Some(years)
+        );
+        assert_eq!(
+            QueryNode::None(vec![QueryNode::None(vec![
+                title("a"),
+                QueryNode::Any(vec![title("b"), title("c")]),
+            ])])
+            .normalised(),
+            Some(QueryNode::Any(vec![title("a"), title("b"), title("c")]))
+        );
         assert_eq!(title("  ").normalised(), None);
         assert_eq!(
             title("  x ").normalised(),
@@ -889,6 +968,38 @@ mod tests {
             bad_id.validate().unwrap_err(),
             "\"Yann LeCun\" is neither an ORCID nor an OpenAlex author id (A…)"
         );
+        // A type is one name: never filter syntax for the source to obey.
+        let types = |t: &str| QueryNode::filter(FilterValue::WorkType(WorkType::from_csl(t)));
+        assert_eq!(
+            QueryNode::None(vec![types("book,is_oa:true")])
+                .validate()
+                .unwrap_err(),
+            r#""book,is_oa:true" is not a work type: types are names of letters, digits and hyphens, like "book-chapter""#
+        );
+        for bad in ["book|dataset", "", "peer review", "a:b", "\"x\""] {
+            assert!(types(bad).validate().is_err(), "{bad:?}");
+        }
+        for good in ["book", "peer-review", "posted-content", "Reference-Entry"] {
+            assert_eq!(types(good).validate(), Ok(()), "{good}");
+        }
+        // Words are letters or digits: punctuation alone finds nothing (or
+        // fails), and leaving it out would widen the search.
+        assert_eq!(
+            QueryNode::All(vec![
+                title("x"),
+                QueryNode::term(TermField::Keywords, "***")
+            ])
+            .validate()
+            .unwrap_err(),
+            r#"the keywords "***" have no letters or digits to search for"#
+        );
+        assert_eq!(
+            title("?!").validate().unwrap_err(),
+            r#"the title "?!" has no letters or digits to search for"#
+        );
+        for good in ["C++", "β-lactam", "3", "細胞"] {
+            assert_eq!(title(good).validate(), Ok(()), "{good}");
+        }
         let lang = QueryNode::filter(FilterValue::Language("eng".into()));
         assert!(lang.validate().unwrap_err().contains("ISO 639-1"));
         assert!(
@@ -1028,6 +1139,18 @@ mod tests {
         );
         let top = QueryNode::None(vec![title("a")]);
         assert_eq!(render_lucene(&top, &mut leaf).unwrap(), "(NOT TITLE:(a))");
+        // `<` and `>` can't be escaped (Elasticsearch takes them for
+        // ranges): words lose them, and `=`; phrases keep them.
+        assert_eq!(lucene_words("a<b >=c d="), "a b c d");
+        assert_eq!(lucene_term(None, "a<b", true), r#""a<b""#);
+        // A tree joined by more is bracketed, alone it isn't.
+        let any = || Some("a OR b".to_owned());
+        assert_eq!(
+            lucene_and(any(), vec!["(raw)".into()]),
+            "(a OR b) AND (raw)"
+        );
+        assert_eq!(lucene_and(any(), vec![]), "a OR b");
+        assert_eq!(lucene_and(None, vec!["x".into(), "y".into()]), "x AND y");
         let bad = QueryNode::All(vec![
             title("a"),
             QueryNode::filter(FilterValue::HasAbstract),

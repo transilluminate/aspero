@@ -36,20 +36,28 @@ impl Engine {
     /// Providers that search by keywords, in the order [`search`](Self::search)
     /// picks from: without a `source`, the first.
     pub fn search_providers(&self) -> impl Iterator<Item = &Arc<dyn Provider>> {
-        let mut searching: Vec<&Arc<dyn Provider>> = self
-            .providers()
-            .filter(|p| p.capabilities().search)
+        self.searching().into_iter().map(|e| &e.provider)
+    }
+
+    /// The searching providers' entries, in the order searches prefer
+    /// them: what [`search_providers`](Self::search_providers) lists and
+    /// [`first_that_can`](Self::first_that_can) picks from.
+    fn searching(&self) -> Vec<&Entry> {
+        let mut searching: Vec<&Entry> = self
+            .entries
+            .iter()
+            .filter(|e| e.provider.capabilities().search)
             .collect();
         // For searching, the broad indexes first, then Europe PMC (for
         // medicine and life sciences) ahead of DataCite (mostly datasets
         // and repositories); other providers keep their order, after.
-        searching.sort_by_key(|p| {
+        searching.sort_by_key(|e| {
             SEARCH_ORDER
                 .iter()
-                .position(|name| *name == p.id().as_str())
+                .position(|name| *name == e.provider.id().as_str())
                 .unwrap_or(SEARCH_ORDER.len())
         });
-        searching.into_iter()
+        searching
     }
 
     /// Whether `source` can search by `tree` or, without one, any source
@@ -106,6 +114,10 @@ impl Engine {
         let citation = query.mode == SearchMode::Citation;
         let fields = [Filter::Author, Filter::Title, Filter::Container];
         let has_field = fields.iter().any(|f| query.field(*f).is_some());
+        // As in a tree: a type is a name, never the source's filter syntax.
+        if let Some(t) = &query.work_type {
+            aspero_core::query::check_work_type(t).map_err(EngineError::InvalidQuery)?;
+        }
         if query.tree.is_some() {
             if !query.text.trim().is_empty() || has_field || query.place.is_some() {
                 return Err(EngineError::InvalidQuery(
@@ -215,10 +227,10 @@ impl Engine {
         can: impl Fn(&Entry) -> Result<T, EngineError>,
     ) -> Result<(&Entry, T), EngineError> {
         let mut first: Option<(ProviderId, String)> = None;
-        let searching = self.entries.iter().filter(|e| {
-            let caps = e.provider.capabilities();
-            caps.search && (!citation || caps.citation_search)
-        });
+        let searching = self
+            .searching()
+            .into_iter()
+            .filter(|e| !citation || e.provider.capabilities().citation_search);
         for entry in searching {
             match can(entry) {
                 Ok(t) => return Ok((entry, t)),
@@ -353,17 +365,27 @@ impl Engine {
             return Ok(None);
         };
         tree.validate().map_err(EngineError::InvalidQuery)?;
+        let express = |tree: &QueryNode| {
+            entry
+                .provider
+                .express(tree)
+                .map_err(|reason| EngineError::Provider {
+                    provider: provider.clone(),
+                    error: Error::UnsupportedQuery(reason),
+                })
+        };
+        // The tree as asked decides, as `search_supports` (which knows no
+        // sort) says: the cap's years beside it mustn't make a none alone
+        // searchable where it isn't.
+        express(&tree)?;
         let tree = match newest_cap {
-            Some(year) => cap_years(tree, year),
+            Some(year) => {
+                let capped = cap_years(tree, year);
+                express(&capped)?;
+                capped
+            }
             None => tree,
         };
-        entry
-            .provider
-            .express(&tree)
-            .map_err(|reason| EngineError::Provider {
-                provider,
-                error: Error::UnsupportedQuery(reason),
-            })?;
         Ok(Some(tree))
     }
 

@@ -22,7 +22,9 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use aspero_core::http::{escape_lucene, path_segment, status_error};
-use aspero_core::query::{check_supported, lucene_term, lucene_years, render_lucene};
+use aspero_core::query::{
+    check_supported, lucene_and, lucene_quoted, lucene_term, lucene_years, render_lucene,
+};
 use aspero_core::{
     AuthorId, BooleanSupport, Capabilities, Cursor, Doi, Error, Field, FieldSet, Filter,
     FilterValue, Hit, HttpClient, HttpRequest, HttpResponse, IdKind, Lookup, Page, Provider,
@@ -220,10 +222,7 @@ impl Provider for Datacite {
         }
         let mut found = Vec::new();
         for chunk in dois.chunks(MAX_BATCH) {
-            let terms: Vec<String> = chunk
-                .iter()
-                .map(|d| format!("\"{}\"", d.as_str().replace('"', "\\\"")))
-                .collect();
+            let terms: Vec<String> = chunk.iter().map(|d| lucene_quoted(d.as_str())).collect();
             let params = [
                 ("query", format!("doi:({})", terms.join(" OR "))),
                 ("page[size]", chunk.len().to_string()),
@@ -253,21 +252,17 @@ impl Provider for Datacite {
         if query.mode != SearchMode::Keywords {
             return Err(Error::Unsupported("DataCite has no citation matcher"));
         }
+        let tree = query
+            .tree
+            .as_ref()
+            .map(|t| express(t, &self.capabilities))
+            .transpose()
+            .map_err(Error::UnsupportedQuery)?;
         let mut clauses = Vec::new();
-        if let Some(tree) = &query.tree {
-            clauses.push(express(tree, &self.capabilities).map_err(Error::UnsupportedQuery)?);
-        }
         if !query.text.trim().is_empty() {
             clauses.push(format!("({})", escape_lucene(query.text.trim())));
         }
-        if let Some(years) = query.years {
-            let end = |y: Option<i16>| y.map_or("*".to_owned(), |y| y.to_string());
-            clauses.push(format!(
-                "publicationYear:[{} TO {}]",
-                end(years.from),
-                end(years.to)
-            ));
-        }
+        clauses.extend(query.years.map(|y| lucene_years("publicationYear", y)));
         if let Some(author) = query.field(Filter::Author) {
             clauses.push(format!("creators.name:({})", escape_lucene(author)));
         }
@@ -278,11 +273,6 @@ impl Provider for Datacite {
         // 2026-11-13).
         if let Some(since) = query.since {
             clauses.push(format!("created:[{since} TO *]"));
-            // A tree's top-level any is bare `a OR b`: bracketed, the
-            // date bounds all of it.
-            if query.tree.is_some() {
-                clauses[0] = format!("({})", clauses[0]);
-            }
         }
         let sort = match query.sort {
             Sort::Relevance => "relevance",
@@ -303,8 +293,9 @@ impl Provider for Datacite {
                 }
             }
         }
-        if !clauses.is_empty() {
-            params.insert(0, ("query", clauses.join(" AND ")));
+        let q = lucene_and(tree, clauses);
+        if !q.is_empty() {
+            params.insert(0, ("query", q));
         }
         if let Some(t) = &query.work_type {
             let id = wire::resource_type_id(t).ok_or_else(|| {
@@ -365,7 +356,7 @@ fn express(tree: &QueryNode, caps: &Capabilities) -> std::result::Result<String,
                         WorkId::Arxiv(arxiv) => arxiv.doi(),
                         _ => return Err(format!("{NAME} finds works by DOI or arXiv id only")),
                     };
-                    return Ok(format!("doi:\"{}\"", doi.as_str().replace('"', "\\\"")));
+                    return Ok(format!("doi:{}", lucene_quoted(doi.as_str())));
                 }
                 TermField::AuthorId => {
                     return match AuthorId::parse(&t.value) {

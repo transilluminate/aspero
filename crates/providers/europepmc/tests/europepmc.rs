@@ -451,3 +451,28 @@ fn since_is_the_first_index_date_anded_with_text_or_a_tree() {
         pair("query", "TITLE:(sepsis) OR ABSTRACT:(septic shock)")
     );
 }
+
+#[test]
+fn a_doi_is_quoted_whatever_it_holds() {
+    // A DOI's suffix may hold `\` and `"`: escaped, the quotes still close.
+    let (epmc, http) = provider([empty_page(), empty_page()]);
+    block_on(epmc.search(&tree_query(id_term(r#"10.1000/a"b\"#)))).unwrap();
+    assert_eq!(query(&http, 0)[0], pair("query", r#"DOI:"10.1000/a\"b\\""#));
+    block_on(epmc.lookup(&[id(r"10.1000/x\")], aspero_core::FieldSet::DEFAULT)).unwrap();
+    assert_eq!(query(&http, 1)[0], pair("query", r#"DOI:"10.1000/x\\""#));
+}
+
+#[test]
+fn an_expert_query_bounds_all_of_a_tree() {
+    let (epmc, http) = provider([empty_page()]);
+    let mut q = tree_query(QueryNode::Any(vec![
+        QueryNode::term(TermField::Title, "a"),
+        QueryNode::term(TermField::Title, "b"),
+    ]));
+    q.extra.insert("query".into(), "SRC:MED".into());
+    block_on(epmc.search(&q)).unwrap();
+    assert_eq!(
+        query(&http, 0)[0],
+        pair("query", "(TITLE:(a) OR TITLE:(b)) AND (SRC:MED)")
+    );
+}

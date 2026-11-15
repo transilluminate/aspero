@@ -131,8 +131,11 @@ scripts/       fixture recorders, one per provider
   of terms (keywords, title, author, container, abstract, author id,
   identifier), filters and relations, instead of the keywords and fields. The engine
   normalises a tree (blank leaves and empty groups dropped, same-kind
-  groups flattened, an all or any of one node unwrapped), checks its
-  values (author ids, language codes, year ranges, identifiers), folds the
+  groups flattened, an all or any of one node unwrapped, a none of one
+  none read as any of what it held), checks its
+  values (author ids, language codes, year ranges, identifiers, and work
+  types beyond aspero's own: letters, digits and hyphens, as the request's
+  type is too, never a source's filter syntax), folds the
   request's own filters in as more of all of it, and asks the provider's
   `express`, which translates it or says why not: one decision behind
   both `search` and the offline `search_supports`. Nothing in a tree is
@@ -143,7 +146,10 @@ scripts/       fixture recorders, one per provider
   asking again by DOI or PMID when the record found (Europe PMC's, for a
   PMCID) has none. Newest first, a tree stops at this year unless a years
   filter that bounds every hit (the tree itself or one of its top-level
-  all) has an upper year; years under any or none don't count.
+  all) has an upper year; years under any or none don't count. The cap
+  never changes what a source can search: the tree as asked decides, as
+  `search_supports` (which takes no sort) says, so Open Library's none
+  alone stays refused newest first too.
 - **Identifier terms** (#65) name works in a tree, beside anything else:
   the value is any `WorkId` (else a bad query), and each source takes
   the kinds its syntax can find, refusing others with the reason, so
@@ -623,13 +629,23 @@ fixture recorded with different parameters once hid a ranking bug.
   can't be filtered by journal name, so a container search first finds
   the sources so named (another $0.001) and ORs the best 100 IDs. An
   any of journals finds each one's sources and ORs them all, each journal
-  given an equal share of the 100 values a filter takes.
+  given an equal share of the 100 values a filter takes (a loose name's
+  best matches are what it means). A journal left out that names a full
+  page of sources (more may follow, and would leak through) fails
+  (`UnsupportedQuery`, asking for the exact name as a phrase) rather than
+  being cut short; only the search can tell, not `search_supports`. The
+  lookups aren't cached: each page asks again.
 - **Crossref.** `mailto` puts requests in the polite pool (10 req/s single,
   3 req/s lists, 3 concurrent). **Cursor paging drops relevance order**
   unless `sort=score&order=desc` is sent. Lookalike re-deposits exist (2025
   copies of "Attention Is All You Need" with the real authors). Field
   queries: `query.author`, `query.title` (titles only, unlike
-  `query.bibliographic`), `query.container-title`. It doesn't
+  `query.bibliographic`), `query.container-title`. They rank rather
+  than require, scored together: in a tree, terms of one field join its
+  parameter (as one term of all their words would), and a journal term
+  goes alone among terms (filters beside it are fine), since beside
+  keywords or a title works from any journal outrank it; such a tree is
+  refused, saying so. It doesn't
   index DataCite DOIs (arXiv). Its "CSL" uses Crossref type names. Top
   matches can be derivative records ("Faculty Opinions recommendation of
   X"). `updated-by` carries Retraction Watch notices.

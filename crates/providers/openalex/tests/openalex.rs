@@ -919,6 +919,52 @@ fn journals_in_trees_are_sources_kept_or_left_out() {
     assert_eq!(resp.usage.unwrap().cost, Some(0.003));
 }
 
+/// A `/sources` answer naming `n` sources, `S1`….
+fn sources(n: usize) -> HttpResponse {
+    let results: Vec<String> = (1..=n)
+        .map(|i| {
+            format!(r#"{{"id": "https://openalex.org/S{i}", "display_name": "Medicine {i}"}}"#)
+        })
+        .collect();
+    let body = format!(
+        r#"{{"meta": {{"count": {n}}}, "results": [{}]}}"#,
+        results.join(",")
+    );
+    response(200, &[("x-ratelimit-cost-usd", "0.001")], &body)
+}
+
+#[test]
+fn a_journal_left_out_whose_sources_dont_fit_a_filter_is_refused() {
+    let empty = r#"{"meta": {"count": 0}, "results": []}"#;
+    let unsupported = |r: Result<_, Error>| match r {
+        Err(Error::UnsupportedQuery(reason)) => reason,
+        other => panic!("{:?}", other.map(|_: aspero_core::Response<Page>| ())),
+    };
+    // Left out: a full page of sources may be followed by more, which
+    // would leak through.
+    let (oa, http) = provider([sources(100)]);
+    let none = QueryNode::None(vec![QueryNode::term(TermField::Container, "medicine")]);
+    assert_eq!(
+        unsupported(block_on(oa.search(&tree_query(none)))),
+        "OpenAlex can't leave out the journal \"medicine\": more sources are so named than \
+         one filter takes; name it exactly, as a phrase"
+    );
+    assert_eq!(http.requests().len(), 1);
+    // One journal keeps its best 100, as ever.
+    let (oa, http) = provider([
+        sources(100),
+        response(200, &[("x-ratelimit-cost-usd", "0.001")], empty),
+    ]);
+    let one = QueryNode::term(TermField::Container, "medicine");
+    block_on(oa.search(&tree_query(one))).unwrap();
+    let filter = query(&http, 1)
+        .into_iter()
+        .find(|(k, _)| k == "filter")
+        .unwrap()
+        .1;
+    assert_eq!(filter.split('|').count(), 100);
+}
+
 #[test]
 fn records_carry_the_works_they_cite() {
     let (oa, _) = provider([recorded("work_by_doi")]);

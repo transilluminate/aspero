@@ -156,7 +156,7 @@ fn text_clause(field: TermField, node: &QueryNode, negated: bool) -> Result<Clau
 /// operator.
 fn text_value(value: &str, phrase: bool, grouped: bool) -> String {
     let words: Vec<String> = value
-        .split(|c: char| c.is_whitespace() || "\"(),|!:*?~\\[]{}^".contains(c))
+        .split(|c: char| c.is_whitespace() || "\"(),|!:*?~\\[]{}^<>=".contains(c))
         .map(|w| w.trim_start_matches(['-', '+']))
         .filter(|w| !w.is_empty())
         .map(|w| match w {
@@ -218,7 +218,7 @@ fn orable(node: &QueryNode) -> Option<Result<(&'static str, String), String>> {
         QueryNode::Filter(FilterValue::Language(code)) => Ok(("language", code.clone())),
         QueryNode::Term(t) if t.field == TermField::AuthorId => Ok(author_id(&t.value)),
         QueryNode::Term(t) if t.field == TermField::Identifier => identifier(t),
-        QueryNode::Relation(r) => Ok((relation_key(r.relation), work_id(&r.id))),
+        QueryNode::Relation(r) => relation_key(r.relation).map(|k| (k, work_id(&r.id))),
         _ => return None,
     })
 }
@@ -315,15 +315,17 @@ fn leaf_clauses(leaf: &QueryNode, negated: bool) -> Result<Vec<Clause>, String> 
             }
             _ => Err(format!("{NAME} can't filter by {}", leaf.leaf_name())),
         },
-        QueryNode::Relation(r) => filter(relation_key(r.relation), &work_id(&r.id)),
+        QueryNode::Relation(r) => filter(relation_key(r.relation)?, &work_id(&r.id)),
         group => Err(format!("{NAME} can't say {}", group.leaf_name())),
     }
 }
 
-fn relation_key(relation: Relation) -> &'static str {
+/// A relation's filter key: `cites` or `cited_by`.
+fn relation_key(relation: Relation) -> Result<&'static str, String> {
     match relation {
-        Relation::Cites => "cites",
-        _ => "cited_by",
+        Relation::Cites => Ok("cites"),
+        Relation::CitedBy => Ok("cited_by"),
+        other => Err(format!("{NAME} has no {} filter", other.as_str())),
     }
 }
 
@@ -485,6 +487,13 @@ mod tests {
         assert_eq!(plan(tree).unwrap().filters, ["title.search:!(a AND (b c))"]);
         let tree = QueryNode::None(vec![term(TermField::Abstract, "x, y|z")]);
         assert_eq!(plan(tree).unwrap().filters, ["abstract.search:!x y z"]);
+        let tree = QueryNode::All(vec![
+            term(TermField::Title, "a<b"),
+            term(TermField::Keywords, "x >= y"),
+        ]);
+        let p = plan(tree).unwrap();
+        assert_eq!(p.filters, ["title.search:a b"]);
+        assert_eq!(p.search.as_deref(), Some("x y"));
     }
 
     #[test]

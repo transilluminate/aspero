@@ -440,12 +440,21 @@ impl Provider for OpenAlex {
             let mut sources = Vec::new();
             for (name, phrase) in container.names {
                 let exact = phrase.then(|| name.replace('"', ""));
-                let name = match &exact {
+                let asked = match &exact {
                     Some(exact) => format!("\"{exact}\""),
-                    None => name,
+                    None => name.clone(),
                 };
-                let (found, u) = self.sources_named(&name, exact.as_deref()).await?;
+                let (found, u) = self.sources_named(&asked, exact.as_deref()).await?;
                 usage = Some(usage.map_or(u, |s: Usage| s.then(u)));
+                // Kept to, a name's best matches are what it means. Left
+                // out, a full page may be followed by more that would leak
+                // through.
+                if container.negated && found.len() >= MAX_PAGE as usize {
+                    return Err(Error::UnsupportedQuery(format!(
+                        "OpenAlex can't leave out the journal {name:?}: more sources are so \
+                         named than one filter takes; name it exactly, as a phrase"
+                    )));
+                }
                 for source in found.into_iter().take(share) {
                     if !sources.contains(&source) {
                         sources.push(source);

@@ -71,7 +71,7 @@ pub struct StandardConfig {
     /// Stops OpenAlex's paid calls once the day's use (as OpenAlex reports
     /// it, shared by everything using the key) reaches this many USD,
     /// until the budget resets; see [`EngineBuilder::daily_cap`].
-    pub openalex_daily_cap: Option<f64>,
+    pub openalex_daily_cap_usd: Option<f64>,
     #[cfg(feature = "openalex")]
     pub openalex: Option<OpenAlexConfig>,
     #[cfg(feature = "crossref")]
@@ -246,7 +246,7 @@ pub fn standard(config: StandardConfig) -> Result<Engine, Error> {
         let policy = OpenAlex::default_policy();
         let provider = OpenAlex::new(oa, client("openalex", &policy)?);
         builder = builder.provider(Arc::new(provider), policy, 10);
-        if let Some(cap) = config.openalex_daily_cap {
+        if let Some(cap) = config.openalex_daily_cap_usd {
             builder = builder.daily_cap(aspero_openalex::ID, cap);
         }
     }

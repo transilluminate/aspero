@@ -1002,7 +1002,7 @@ fn settings_default_as_before() {
     assert_eq!(config.cache_found_days, 7);
     assert_eq!(config.cache_not_found_days, 1);
     assert_eq!(config.cache_max_mb, None);
-    assert_eq!(config.openalex_daily_cap, None);
+    assert_eq!(config.openalex_daily_cap_usd, None);
     assert!(config.disabled_sources.is_empty());
 }
 
@@ -1125,14 +1125,14 @@ fn checks_work_with_one_source_left() {
 fn a_daily_cap_must_be_an_amount() {
     for cap in [-0.5, f64::NAN, f64::INFINITY] {
         let made = Aspero::new(Config {
-            openalex_daily_cap: Some(cap),
+            openalex_daily_cap_usd: Some(cap),
             ..Config::default()
         });
         assert!(matches!(made, Err(AsperoError::Setup(_))), "{cap}");
     }
     for cap in [0.0, 0.5] {
         let config = Config {
-            openalex_daily_cap: Some(cap),
+            openalex_daily_cap_usd: Some(cap),
             ..Config::default()
         };
         assert!(Aspero::new(config).is_ok());
@@ -1165,7 +1165,7 @@ fn live_key_checks() {
         let checked = block_on(handle.check_openalex_key(key, None)).unwrap();
         eprintln!("{checked:?}");
         assert_eq!(checked.status, KeyStatus::Valid);
-        assert!(checked.budget.is_some_and(|b| b.remaining.is_some()));
+        assert!(checked.budget.is_some_and(|b| b.remaining_usd.is_some()));
     }
 }
 

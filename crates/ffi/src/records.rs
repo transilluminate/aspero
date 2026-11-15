@@ -242,7 +242,7 @@ pub enum ErrorKind {
     Decode,
     InvalidId,
     Other,
-    /// The app's daily cap on the provider's spend (`Config.openalexDailyCap`)
+    /// The app's daily cap on the provider's spend (`Config.openalexDailyCapUsd`)
     /// is reached until the budget resets: see `Failure.budgetCap`. Last, so
     /// the cases before keep their places.
     BudgetCapped,
@@ -287,7 +287,7 @@ pub struct Failure {
 /// A daily cap reached: paid calls to the provider stop until `resetsAt`.
 #[derive(Debug, Clone, PartialEq, uniffi::Record)]
 pub struct BudgetCap {
-    /// The cap (US dollars), as `Config.openalexDailyCap` set it.
+    /// The cap (US dollars), as `Config.openalexDailyCapUsd` set it.
     pub cap: f64,
     /// Used today, as the provider reports it: by everything using the key.
     pub used: f64,
@@ -339,19 +339,19 @@ impl BudgetCap {
 #[derive(Debug, Clone, uniffi::Record)]
 pub struct ProviderUsage {
     pub provider: String,
-    /// Spent by the call (OpenAlex: US dollars).
-    pub cost: Option<f64>,
-    /// Left in the budget period.
-    pub remaining: Option<f64>,
+    /// Spent by the call, in US dollars.
+    pub cost_usd: Option<f64>,
+    /// Left in the budget period, in US dollars.
+    pub remaining_usd: Option<f64>,
     pub resets_at: Option<SystemTime>,
-    /// The budget for the period (OpenAlex: the daily allowance), as the
-    /// provider says it.
+    /// The budget for the period (OpenAlex: the daily allowance), in US
+    /// dollars, as the provider says it.
     #[uniffi(default = None)]
-    pub limit: Option<f64>,
-    /// A prepaid balance left beside the period's budget, where the
-    /// provider says one.
+    pub limit_usd: Option<f64>,
+    /// A prepaid balance left beside the period's budget, in US dollars,
+    /// where the provider says one.
     #[uniffi(default = None)]
-    pub prepaid_remaining: Option<f64>,
+    pub prepaid_remaining_usd: Option<f64>,
 }
 
 pub(crate) fn usage(usage: &[(aspero_core::ProviderId, aspero_core::Usage)]) -> Vec<ProviderUsage> {
@@ -359,11 +359,11 @@ pub(crate) fn usage(usage: &[(aspero_core::ProviderId, aspero_core::Usage)]) -> 
         .iter()
         .map(|(p, u)| ProviderUsage {
             provider: p.to_string(),
-            cost: u.cost,
-            remaining: u.remaining,
+            cost_usd: u.cost,
+            remaining_usd: u.remaining,
             resets_at: u.resets_at.map(time),
-            limit: u.limit,
-            prepaid_remaining: u.prepaid_remaining,
+            limit_usd: u.limit,
+            prepaid_remaining_usd: u.prepaid_remaining,
         })
         .collect()
 }
@@ -1138,30 +1138,31 @@ pub struct Unavailable {
 #[derive(Debug, Clone, uniffi::Record)]
 pub struct Budget {
     pub provider: String,
-    /// OpenAlex: US dollars.
-    pub remaining: Option<f64>,
+    /// Left today, in US dollars.
+    pub remaining_usd: Option<f64>,
     pub resets_at: Option<SystemTime>,
     /// When the provider said so.
     pub seen_at: SystemTime,
-    /// The daily allowance, as the provider says it (OpenAlex: $1 with a
-    /// key, $0.10 without). Used today is `limit - remaining`.
+    /// The daily allowance in US dollars, as the provider says it
+    /// (OpenAlex: $1 with a key, $0.10 without). Spent today is
+    /// `limitUsd - remainingUsd`.
     #[uniffi(default = None)]
-    pub limit: Option<f64>,
-    /// A prepaid balance beside the daily allowance, where the provider
-    /// says one.
+    pub limit_usd: Option<f64>,
+    /// A prepaid balance beside the daily allowance, in US dollars, where
+    /// the provider says one.
     #[uniffi(default = None)]
-    pub prepaid_remaining: Option<f64>,
+    pub prepaid_remaining_usd: Option<f64>,
 }
 
 impl Budget {
     pub(crate) fn new(provider: &aspero_core::ProviderId, b: &engine::Budget) -> Self {
         Budget {
             provider: provider.to_string(),
-            remaining: b.remaining,
+            remaining_usd: b.remaining,
             resets_at: b.resets_at.map(time),
             seen_at: time(b.seen_at),
-            limit: b.limit,
-            prepaid_remaining: b.prepaid_remaining,
+            limit_usd: b.limit,
+            prepaid_remaining_usd: b.prepaid_remaining,
         }
     }
 }
@@ -2707,9 +2708,9 @@ mod tests {
         u.prepaid_remaining = Some(4.5);
         let used = usage(&[(ProviderId::from_static("openalex"), u)]);
         assert_eq!(used[0].provider, "openalex");
-        assert_eq!(used[0].limit, Some(1.0));
-        assert_eq!(used[0].prepaid_remaining, Some(4.5));
-        assert_eq!(used[0].remaining, None);
+        assert_eq!(used[0].limit_usd, Some(1.0));
+        assert_eq!(used[0].prepaid_remaining_usd, Some(4.5));
+        assert_eq!(used[0].remaining_usd, None);
     }
 
     #[test]

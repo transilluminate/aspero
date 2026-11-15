@@ -570,7 +570,8 @@ claim doesn't hold up the rest, and a batch never queues so many requests
 that a caller sharing the engine waits behind it.
 
 A **daily cap** (`EngineBuilder::daily_cap`, `StandardConfig`/FFI
-`openalex_daily_cap`, CLI `--openalex-cap` / `ASPERO_OPENALEX_CAP`, USD)
+`openalex_daily_cap_usd`, CLI `--openalex-cap-usd` /
+`ASPERO_OPENALEX_CAP_USD`)
 stops a provider's paid calls short of its own budget (#72). The day's
 use is the provider's figure, `limit − remaining` from the last response
 or refresh, so it counts everything using the key; once it reaches the
@@ -609,7 +610,8 @@ fixture recorded with different parameters once hid a ranking bug.
   `x-ratelimit-cost-usd`, `-limit-usd` (the daily allowance),
   `-remaining-usd`, `-prepaid-remaining-usd` and `-reset` (seconds to
   midnight UTC); `Usage` and the engine's `Budget` keep them (`limit`,
-  `prepaid_remaining`). `GET /rate-limit` says the same as JSON
+  `prepaid_remaining`), which JSON and the FFI name in USD (`cost_usd`,
+  `remaining_usd`, `limit_usd`, `prepaid_remaining_usd`). `GET /rate-limit` says the same as JSON
   (`daily_budget_usd`, `daily_remaining_usd`, `prepaid_remaining_usd`,
   `resets_at`) for free (`daily_used_usd` unchanged across calls, no cost
   header; checked 2026-11-14), but only to a key (401 "Authentication
@@ -725,7 +727,7 @@ searches and its lookups' list calls), and a call whose estimate doesn't
 fit in what's left beside those held waits for the calls in flight,
 running once it fits or alone. A call costing more than its estimate
 (prices changed) overshoots by the difference. Spend is the engine's reported
-usage (OpenAlex's `cost`), as the CLI totals it, charged whether or not
+usage (OpenAlex's `cost_usd`), as the CLI totals it, charged whether or not
 the call succeeds (a document not identified was still searched for);
 every result carries the
 call's `usage` and the session's `spent_usd`, `budget_usd` and `left_usd`.
@@ -953,7 +955,7 @@ its container; different schema versions would rebuild each other's).
 ## Open questions
 
 - Whether to cap OpenAlex spend per CLI command, as MCP sessions are
-  (`--openalex-cap` caps the day, not a command).
+  (`--openalex-cap-usd` caps the day, not a command).
 - The MCP budgets' defaults ($0.25 a session, $1 a key a day) once agents
   have used them for a while.
 - Whether a lookup should ever hedge (ask two providers at once) for

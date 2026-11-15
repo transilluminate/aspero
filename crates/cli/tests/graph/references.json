@@ -44,7 +44,7 @@
   "total": 3,
   "usage": {
     "openalex": {
-      "cost": 0.1875
+      "cost_usd": 0.1875
     }
   },
   "work": {

@@ -308,7 +308,7 @@ mod tests {
             },
             "complete": false,
             "incomplete": [],
-            "usage": {"openalex": {"cost": 0.0002}},
+            "usage": {"openalex": {"cost_usd": 0.0002}},
         });
         assert_eq!(
             analysis_lines(&doc),
@@ -326,7 +326,7 @@ mod tests {
                     },
                     "complete": false,
                     "incomplete": [],
-                    "usage": {"openalex": {"cost": 0.0002}},
+                    "usage": {"openalex": {"cost_usd": 0.0002}},
                 }),
             ]
         );

@@ -89,15 +89,16 @@ fn verification() -> Value {
     )
 }
 
-/// What each provider's calls cost: `{provider: {cost, remaining, resets_at}}`.
+/// What each provider's calls cost: `{provider: {cost_usd, remaining_usd,
+/// resets_at}}`.
 fn usage() -> Value {
     json!({
         "type": "object",
         "description": "this call's usage per provider: cost and what's left of its budget, in USD",
         "additionalProperties": object(
             &json!({
-                "cost": {"type": "number"},
-                "remaining": {"type": "number"},
+                "cost_usd": {"type": "number"},
+                "remaining_usd": {"type": "number"},
                 "resets_at": {"type": "string"},
             }),
             &[],

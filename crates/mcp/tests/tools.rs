@@ -96,7 +96,7 @@ async fn search_takes_a_query_tree_as_the_cli_does() {
     assert_eq!(v["hits"][0]["work"]["canonical"], "doi:10.1038/nature14539");
     // Lean: no abstract, no fetch time.
     assert!(v["hits"][0]["work"].get("abstract").is_none());
-    assert_eq!(v["usage"], json!({"openalex": {"cost": SEARCH_COST}}));
+    assert_eq!(v["usage"], json!({"openalex": {"cost_usd": SEARCH_COST}}));
     assert_eq!(
         v["session"],
         json!({"spent_usd": 0.25, "budget_usd": 1.0, "left_usd": 0.75})

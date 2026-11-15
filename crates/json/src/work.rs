@@ -74,19 +74,19 @@ pub fn usage(usage: &[(ProviderId, Usage)]) -> Value {
 pub fn usage_one(u: &Usage) -> Value {
     let mut out = Map::new();
     if let Some(c) = u.cost {
-        out.insert("cost".into(), json!(c));
+        out.insert("cost_usd".into(), json!(c));
     }
     if let Some(r) = u.remaining {
-        out.insert("remaining".into(), json!(r));
+        out.insert("remaining_usd".into(), json!(r));
     }
     if let Some(t) = u.resets_at {
         out.insert("resets_at".into(), json!(t.to_string()));
     }
     if let Some(l) = u.limit {
-        out.insert("limit".into(), json!(l));
+        out.insert("limit_usd".into(), json!(l));
     }
     if let Some(p) = u.prepaid_remaining {
-        out.insert("prepaid_remaining".into(), json!(p));
+        out.insert("prepaid_remaining_usd".into(), json!(p));
     }
     Value::Object(out)
 }

@@ -404,7 +404,7 @@
   },
   "usage": {
     "openalex": {
-      "cost": 3.25
+      "cost_usd": 3.25
     }
   }
 }

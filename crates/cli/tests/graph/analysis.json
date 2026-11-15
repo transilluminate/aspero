@@ -307,7 +307,7 @@
   ],
   "usage": {
     "openalex": {
-      "cost": 2.6875
+      "cost_usd": 2.6875
     }
   },
   "with_references": 3

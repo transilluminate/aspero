@@ -56,7 +56,7 @@ pub struct Config {
     /// With a key, a free budget refresh decides the first paid call of
     /// the day. `None`: no cap but OpenAlex's own.
     #[uniffi(default = None)]
-    pub openalex_daily_cap: Option<f64>,
+    pub openalex_daily_cap_usd: Option<f64>,
     /// Sources never to ask, for lookups, checks or searches, by the names
     /// `SearchResults.provider` gives: `openalex`, `crossref`, `datacite`,
     /// `doi`, `europepmc`, `openlibrary`. `searchCapabilities` leaves them
@@ -87,7 +87,7 @@ impl Default for Config {
             mailto: None,
             openalex_key: None,
             cache_dir: None,
-            openalex_daily_cap: None,
+            openalex_daily_cap_usd: None,
             disabled_sources: Vec::new(),
             cache_found_days: 7,
             cache_not_found_days: 1,
@@ -219,14 +219,14 @@ impl Aspero {
         let mailto = config.mailto.filter(|m| !m.trim().is_empty());
         let key = config.openalex_key.filter(|k| !k.trim().is_empty());
         let mut standard_config = StandardConfig::all(key.map(SecretString::from));
-        if let Some(cap) = config.openalex_daily_cap
+        if let Some(cap) = config.openalex_daily_cap_usd
             && !(cap.is_finite() && cap >= 0.0)
         {
             return Err(setup(format!(
                 "the OpenAlex daily cap must be zero or more US dollars, not {cap}"
             )));
         }
-        standard_config.openalex_daily_cap = config.openalex_daily_cap;
+        standard_config.openalex_daily_cap_usd = config.openalex_daily_cap_usd;
         standard_config
             .disable(&config.disabled_sources)
             .map_err(|e| setup(e.to_string()))?;

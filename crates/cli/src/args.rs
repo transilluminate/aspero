@@ -24,7 +24,7 @@ Environment:
   OPENALEX_API_KEY  OpenAlex key ($1/day free budget; $0.10/day without)
   ASPERO_MAILTO     contact address for polite API pools (Crossref)
   ASPERO_CACHE_DIR  where to keep the answer cache (default: platform cache dir)
-  ASPERO_OPENALEX_CAP  --openalex-cap
+  ASPERO_OPENALEX_CAP_USD  --openalex-cap-usd
   ASPERO_DISABLED_SOURCES  --without
   ASPERO_CACHE_FOUND_DAYS, ASPERO_CACHE_NOT_FOUND_DAYS, ASPERO_CACHE_MAX_MB
                     --cache-found-days, --cache-not-found-days, --cache-max-mb
@@ -155,12 +155,13 @@ pub struct Global {
         long,
         global = true,
         value_name = "USD",
-        env = "ASPERO_OPENALEX_CAP",
+        env = "ASPERO_OPENALEX_CAP_USD",
+        alias = "openalex-cap",
         value_parser = cap,
         help_heading = "Sources and budget",
         hide_short_help = true
     )]
-    pub openalex_cap: Option<f64>,
+    pub openalex_cap_usd: Option<f64>,
 
     /// Sources never to ask, for lookups, checks or searches: openalex,
     /// crossref, datacite, doi, europepmc, openlibrary (comma-separated or
@@ -684,9 +685,9 @@ With OPENALEX_API_KEY set, asks OpenAlex's /rate-limit, which costs nothing:
 Without a key, /rate-limit doesn't answer, so one work is looked up alone,
 past the cache (free), and its response's headers say the budget:
   openalex: $0.0153 of $0.10 used today (no key), resets 00:00 UTC
-JSON: {\"budgets\": [{\"provider\", \"limit\", \"used\", \"remaining\",
-\"prepaid_remaining\", \"resets_at\", \"seen_at\"}]}, and \"key\": false without
-one.
+JSON: {\"budgets\": [{\"provider\", \"limit_usd\", \"spent_usd\",
+\"remaining_usd\", \"prepaid_remaining_usd\", \"resets_at\", \"seen_at\"}]}, and
+\"key\": false without one.
 
 Examples:
   aspero budget
@@ -739,7 +740,7 @@ Examples:
     Licences,
 }
 
-/// `--openalex-cap`: zero or more dollars.
+/// `--openalex-cap-usd`: zero or more dollars.
 fn cap(s: &str) -> Result<f64, String> {
     match s.trim().parse::<f64>() {
         Ok(usd) if usd.is_finite() && usd >= 0.0 => Ok(usd),
@@ -902,12 +903,15 @@ mod tests {
 
     #[test]
     fn the_openalex_cap_is_an_amount() {
-        let cli = parse(&["--openalex-cap", "0.5", "search", "x"]).unwrap();
-        assert_eq!(cli.global.openalex_cap, Some(0.5));
-        let after = parse(&["search", "x", "--openalex-cap", "0"]).unwrap();
-        assert_eq!(after.global.openalex_cap, Some(0.0));
+        let cli = parse(&["--openalex-cap-usd", "0.5", "search", "x"]).unwrap();
+        assert_eq!(cli.global.openalex_cap_usd, Some(0.5));
+        let after = parse(&["search", "x", "--openalex-cap-usd", "0"]).unwrap();
+        assert_eq!(after.global.openalex_cap_usd, Some(0.0));
+        // The old name still works.
+        let old = parse(&["--openalex-cap", "0.25", "search", "x"]).unwrap();
+        assert_eq!(old.global.openalex_cap_usd, Some(0.25));
         for bad in ["-1", "half", "inf"] {
-            let error = parse(&["--openalex-cap", bad, "search", "x"]).expect_err(bad);
+            let error = parse(&["--openalex-cap-usd", bad, "search", "x"]).expect_err(bad);
             assert_eq!(error.exit_code(), 2);
         }
     }

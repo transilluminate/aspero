@@ -388,7 +388,7 @@ fn to_record(value: &serde_json::Value, at: Timestamp) -> serde_json::Result<Sou
         .title
         .or_else(|| book.comprising_title.clone())
         .map(plain_text);
-    work.publisher = book.publisher.clone();
+    work.publisher.clone_from(&book.publisher);
     work.volume = r.journal_info.volume;
     work.issue = r.journal_info.issue;
     work.page = r.page_info;

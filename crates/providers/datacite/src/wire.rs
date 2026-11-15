@@ -181,9 +181,9 @@ impl Attributes {
             .map(PartialDate::from_year);
         work.work_type = work_type(&self.types);
         work.container_title = self.container.title.clone().map(plain_text);
-        work.volume = self.container.volume.clone();
-        work.issue = self.container.issue.clone();
-        work.page = self.container.first_page.clone();
+        work.volume.clone_from(&self.container.volume);
+        work.issue.clone_from(&self.container.issue);
+        work.page.clone_from(&self.container.first_page);
         // Since schema 4.4, publisher may be an object with a name.
         work.publisher = match &self.publisher {
             Some(serde_json::Value::String(s)) => Some(s.clone()),
@@ -199,7 +199,7 @@ impl Attributes {
             .and_then(|d| d.description.as_deref())
             .map(|d| tidy_abstract(&strip_markup(d)))
             .filter(|d| !d.is_empty());
-        work.url = self.url.clone();
+        work.url.clone_from(&self.url);
         // DataCite counts only citations it tracks (between DOIs it
         // registers), so its 0 means "none seen here", not "never cited".
         work.cited_by_count = self.citation_count.filter(|&n| n > 0);
@@ -213,7 +213,7 @@ impl Creator {
         match (&self.family_name, &self.name) {
             (Some(family), _) => {
                 person.family = Some(family.clone());
-                person.given = self.given_name.clone();
+                person.given.clone_from(&self.given_name);
             }
             (None, Some(name)) => person.literal = Some(name.clone()),
             (None, None) => return None,

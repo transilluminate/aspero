@@ -1816,7 +1816,7 @@ impl Work {
     /// The work and its identifiers as found, for writing out.
     pub(crate) fn to_core(&self) -> (aspero_core::Work, Vec<aspero_core::WorkId>) {
         let mut w = aspero_core::Work::default();
-        w.title = self.title.clone();
+        w.title.clone_from(&self.title);
         // The full JSON keeps family and given names apart.
         let json: Option<serde_json::Value> = serde_json::from_str(&self.json).ok();
         w.authors = json
@@ -1828,8 +1828,8 @@ impl Work {
                         Some(family) => {
                             let mut p = aspero_core::Person::default();
                             p.family = Some(family.clone());
-                            p.given = a.given.clone();
-                            p.orcid = a.orcid.clone();
+                            p.given.clone_from(&a.given);
+                            p.orcid.clone_from(&a.orcid);
                             p
                         }
                         None => aspero_core::Person::literal(&a.name),
@@ -1845,12 +1845,12 @@ impl Work {
             .work_type
             .as_deref()
             .map(aspero_core::WorkType::from_csl);
-        w.container_title = self.container.clone();
-        w.volume = self.volume.clone();
-        w.issue = self.issue.clone();
-        w.page = self.page.clone();
-        w.publisher = self.publisher.clone();
-        w.url = self.url.clone();
+        w.container_title.clone_from(&self.container);
+        w.volume.clone_from(&self.volume);
+        w.issue.clone_from(&self.issue);
+        w.page.clone_from(&self.page);
+        w.publisher.clone_from(&self.publisher);
+        w.url.clone_from(&self.url);
         let ids = self.ids.iter().filter_map(|id| id.parse().ok()).collect();
         (w, ids)
     }

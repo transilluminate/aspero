@@ -231,9 +231,9 @@ fn query(text: String, o: &SearchOptions) -> Result<SearchQuery, Failure> {
     q.years = o.year.as_deref().map(parse_years).transpose()?;
     q.work_type = o.work_type.as_deref().map(WorkType::from_csl);
     q.open_access = o.oa.then_some(true);
-    q.author = o.author.clone();
-    q.title = o.title.clone();
-    q.container = o.container.clone();
+    q.author.clone_from(&o.author);
+    q.title.clone_from(&o.title);
+    q.container.clone_from(&o.container);
     q.tree = o.tree.as_deref().map(parse_tree).transpose()?;
     q.sort = sort(o.sort);
     q.since = o

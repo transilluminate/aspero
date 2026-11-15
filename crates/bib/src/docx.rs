@@ -213,7 +213,11 @@ impl Fields {
             let mut entry = crate::csl::entry(&csl, self.entries.len() + 1);
             // Zotero's item key ends its URI: …/items/ABCD1234.
             if identity.contains("/items/") {
-                entry.key = identity.rsplit('/').next().unwrap_or_default().to_owned();
+                identity
+                    .rsplit('/')
+                    .next()
+                    .unwrap_or_default()
+                    .clone_into(&mut entry.key);
             }
             self.seen.push(identity);
             self.entries.push(entry);

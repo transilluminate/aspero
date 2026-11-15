@@ -258,6 +258,8 @@ impl QueryNode {
     /// in a group of the same kind flattened into it, an all or any of
     /// one node replaced by that node, and a none of one none by an any of
     /// what that held. `None` when nothing is left to search by.
+    // The trimmed values borrow the fields they replace, so `clone_into` can't.
+    #[allow(clippy::assigning_clones)]
     pub fn normalised(self) -> Option<QueryNode> {
         match self {
             QueryNode::All(nodes) => group(Group::All, nodes),

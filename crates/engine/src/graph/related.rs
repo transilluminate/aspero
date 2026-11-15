@@ -643,7 +643,7 @@ impl Engine {
             let query = citing_query(filter, cursor.take());
             match self.cached_search(provider, &query) {
                 Some((page, fresh)) if fresh || self.options.offline => {
-                    cursor = page.next.clone();
+                    cursor.clone_from(&page.next);
                     pages.push(page);
                     if cursor.is_none() {
                         break;

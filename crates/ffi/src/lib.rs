@@ -231,7 +231,7 @@ impl Aspero {
             .disable(&config.disabled_sources)
             .map_err(|e| setup(e.to_string()))?;
         standard_config.cache_policy = cache_policy;
-        standard_config.mailto = mailto.clone();
+        standard_config.mailto.clone_from(&mailto);
         standard_config.pacing = cache.clone().map(|c| c as _);
         standard_config.cache = cache.clone().map(|c| c as _);
         let engine = standard(standard_config).map_err(|e| setup(e.to_string()))?;

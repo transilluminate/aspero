@@ -477,8 +477,8 @@ impl Candidate {
     /// gave.
     pub fn merged_record(&self) -> SourceRecord {
         let mut record = self.record.clone();
-        record.ids = self.ids.clone();
-        record.work.updates = self.updates.clone();
+        record.ids.clone_from(&self.ids);
+        record.work.updates.clone_from(&self.updates);
         record
     }
 }

@@ -250,8 +250,8 @@ impl WireWork {
             .map(|t| work_type(t, source.and_then(|s| s.source_type.as_deref())));
         work.container_title = source.and_then(|s| s.display_name.clone()).map(plain_text);
         work.publisher = source.and_then(|s| s.host_organization_name.clone());
-        work.volume = self.biblio.volume.clone();
-        work.issue = self.biblio.issue.clone();
+        work.volume.clone_from(&self.biblio.volume);
+        work.issue.clone_from(&self.biblio.issue);
         work.page = match (&self.biblio.first_page, &self.biblio.last_page) {
             (Some(first), Some(last)) if first != last => Some(format!("{first}-{last}")),
             (Some(first), _) => Some(first.clone()),
@@ -270,7 +270,7 @@ impl WireWork {
             let best = self.best_oa_location.as_ref().filter(|_| oa.is_oa);
             let mut out = OpenAccess::default();
             out.is_oa = oa.is_oa;
-            out.status = oa.oa_status.clone();
+            out.status.clone_from(&oa.oa_status);
             out.pdf_url = best.and_then(|l| l.pdf_url.clone());
             out.url = best
                 .and_then(|l| l.landing_page_url.clone())

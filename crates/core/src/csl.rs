@@ -123,7 +123,7 @@ impl CrossrefUpdate {
             .and_then(|d| d.parse::<Doi>().ok())
             .map(WorkId::Doi);
         update.date = self.updated.as_ref().and_then(CslDate::to_partial);
-        update.source = self.source.clone();
+        update.source.clone_from(&self.source);
         Some(update)
     }
 
@@ -132,7 +132,7 @@ impl CrossrefUpdate {
         let work = WorkId::Doi(self.doi.as_deref()?.parse::<Doi>().ok()?);
         let mut update = UpdateTo::new(kind, work);
         update.date = self.updated.as_ref().and_then(CslDate::to_partial);
-        update.source = self.source.clone();
+        update.source.clone_from(&self.source);
         Some(update)
     }
 }
@@ -224,7 +224,7 @@ impl CslName {
         match (&self.family, self.literal.as_ref().or(self.name.as_ref())) {
             (Some(family), _) => {
                 person.family = Some(family.clone());
-                person.given = self.given.clone();
+                person.given.clone_from(&self.given);
             }
             (None, Some(literal)) => person.literal = Some(literal.clone()),
             (None, None) => person.literal = Some(self.given.clone()?),

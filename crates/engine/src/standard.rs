@@ -255,7 +255,7 @@ pub fn standard(config: StandardConfig) -> Result<Engine, Error> {
     if let Some(mut cr) = config.crossref {
         use aspero_crossref::Crossref;
         if cr.mailto.is_none() {
-            cr.mailto = config.mailto.clone();
+            cr.mailto.clone_from(&config.mailto);
         }
         let mut policy = Crossref::default_policy();
         // Crossref answers a second concurrent request from its public

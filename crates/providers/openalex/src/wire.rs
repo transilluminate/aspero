@@ -205,11 +205,29 @@ impl WireWork {
         (!cited.is_empty()).then_some(cited)
     }
 
-    fn work(&self) -> Work {
-        let source = self
+    /// Where the work appeared: its primary location's source, unless
+    /// that is a repository holding a copy of an article ("PubMed Central",
+    /// "arXiv (Cornell University)"), which appeared in the journal another
+    /// location names, if any.
+    fn source(&self) -> Option<&WireSource> {
+        let primary = self
             .primary_location
             .as_ref()
             .and_then(|l| l.source.as_ref());
+        let is = |s: &WireSource, kind: &str| s.source_type.as_deref() == Some(kind);
+        match primary {
+            Some(s) if is(s, "repository") && self.work_type.as_deref().is_some_and(is_article) => {
+                self.locations
+                    .iter()
+                    .filter_map(|l| l.source.as_ref())
+                    .find(|s| is(s, "journal"))
+            }
+            _ => primary,
+        }
+    }
+
+    fn work(&self) -> Work {
+        let source = self.source();
         let mut work = Work::default();
         work.title = self
             .title
@@ -323,11 +341,13 @@ fn is_et_al(name: &str) -> bool {
 /// OpenAlex types to CSL. Conference papers have their own type
 /// (`conference-paper`, seen 2026-11), but older records may still be an
 /// `article` in a conference source. OpenAlex's `review` means a review
-/// *article*, unlike CSL's `review` (a review of another work).
+/// *article*, unlike CSL's `review` (a review of another work). An
+/// `article` in a book series or an ebook is a chapter of a book.
 fn work_type(openalex: &str, source_type: Option<&str>) -> WorkType {
     match (openalex, source_type) {
         ("conference-paper", _) | ("article", Some("conference")) => WorkType::ConferencePaper,
-        ("article" | "review" | "letter" | "editorial", _) => WorkType::JournalArticle,
+        ("article", Some("book series" | "ebook platform")) => WorkType::Chapter,
+        (t, _) if is_article(t) => WorkType::JournalArticle,
         ("preprint", _) => WorkType::Preprint,
         ("book", _) => WorkType::Book,
         ("book-chapter", _) => WorkType::Chapter,
@@ -336,6 +356,11 @@ fn work_type(openalex: &str, source_type: Option<&str>) -> WorkType {
         ("dataset", _) => WorkType::Dataset,
         (other, _) => WorkType::from_csl(other),
     }
+}
+
+/// OpenAlex types of journal articles.
+fn is_article(openalex: &str) -> bool {
+    matches!(openalex, "article" | "review" | "letter" | "editorial")
 }
 
 /// OpenAlex ships abstracts as `{word: [positions]}`; put the words back in order.
@@ -404,6 +429,34 @@ mod tests {
         assert!(authorship(Some(" "), None).is_none());
     }
 
+    /// An article whose primary location is a repository holding a copy.
+    fn in_repository(locations: &[(&str, &str)]) -> Work {
+        let location = |(kind, name): &(&str, &str)| serde_json::json!({ "source": { "display_name": name, "type": kind } });
+        let wire: WireWork = serde_json::from_value(serde_json::json!({
+            "type": "article",
+            "primary_location": location(&locations[0]),
+            "locations": locations.iter().map(location).collect::<Vec<_>>(),
+        }))
+        .unwrap();
+        wire.work()
+    }
+
+    #[test]
+    fn a_repository_holding_a_copy_is_not_the_journal() {
+        let w = in_repository(&[
+            ("repository", "PubMed Central"),
+            ("journal", "New England Journal of Medicine"),
+        ]);
+        assert_eq!(w.work_type, Some(WorkType::JournalArticle));
+        assert_eq!(
+            w.container_title.as_deref(),
+            Some("New England Journal of Medicine")
+        );
+        let w = in_repository(&[("repository", "arXiv (Cornell University)")]);
+        assert_eq!(w.work_type, Some(WorkType::JournalArticle));
+        assert_eq!(w.container_title, None);
+    }
+
     #[test]
     fn rebuilds_inverted_abstracts() {
         let index = BTreeMap::from([
@@ -431,6 +484,10 @@ mod tests {
             WorkType::JournalArticle
         );
         assert_eq!(work_type("review", None), WorkType::JournalArticle);
+        // An article in a book series or an ebook is a chapter of a book.
+        for source in ["book series", "ebook platform"] {
+            assert_eq!(work_type("article", Some(source)), WorkType::Chapter);
+        }
         assert_eq!(
             work_type("paratext", None),
             WorkType::Other("paratext".into())

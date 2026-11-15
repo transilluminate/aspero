@@ -303,8 +303,10 @@ fn field_key(field: TermField) -> &'static str {
         TermField::Author => "author",
         TermField::Container => "container",
         TermField::Abstract => "abstract",
+        TermField::AuthorId => "author_id",
         TermField::Identifier => "id",
-        _ => "author_id",
+        // A field this crate doesn't know yet: never another's key.
+        _ => "unknown",
     }
 }
 

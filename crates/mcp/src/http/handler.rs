@@ -2,8 +2,7 @@
 //! by the key's scopes, under the session's and the key's budgets.
 
 use std::borrow::Cow;
-use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, OnceLock};
 
 use rmcp::model::{
     CallToolRequestParams, CallToolResponse, CallToolResult, ContentBlock, InitializeRequestParams,
@@ -29,20 +28,17 @@ pub(crate) struct Authed(pub Arc<Credential>);
 
 pub(crate) struct Handler {
     shared: Arc<Shared>,
-    session: Session,
-    /// Whether the client has initialized: budgets attach to sessions, so
-    /// sessionless requests (the 2026-07-28 protocol's) call no tools.
-    initialized: AtomicBool,
+    /// Opened by `initialize`, for its key and client: budgets attach to
+    /// sessions, so sessionless requests (the 2026-07-28 protocol's) call
+    /// no tools.
+    session: OnceLock<Session>,
 }
 
 impl Handler {
     pub fn new(shared: Arc<Shared>) -> Self {
-        let session = Session::new(Caller::default(), shared.session_budget_usd)
-            .with_raise_hint("ask the user to raise the session budget in the app's settings");
         Handler {
             shared,
-            session,
-            initialized: AtomicBool::new(false),
+            session: OnceLock::new(),
         }
     }
 
@@ -65,6 +61,7 @@ impl Handler {
 
     async fn engine_call(
         &self,
+        session: &Session,
         key: &Credential,
         name: &str,
         arguments: Map<String, Value>,
@@ -87,7 +84,7 @@ impl Handler {
         let (result, cost) = match held {
             Err(e) => (Err(e), 0.0),
             Ok(held) => {
-                let result = self.shared.tools.call(&self.session, name, arguments).await;
+                let result = self.shared.tools.call(session, name, arguments).await;
                 // Spent all the same when the call failed after spending.
                 let cost = match &result {
                     Ok(output) => output.cost_usd,
@@ -111,7 +108,7 @@ impl Handler {
             is_error: result.is_err(),
             cost_usd: cost,
         };
-        (engine_result(&self.session, name, result), activity)
+        (engine_result(session, name, result), activity)
     }
 
     /// What's left of the key's daily budget; refuses a paid call once it's
@@ -242,13 +239,17 @@ impl ServerHandler for Handler {
         request: InitializeRequestParams,
         context: RequestContext<RoleServer>,
     ) -> Result<InitializeResult, ErrorData> {
-        self.initialized.store(true, Ordering::Relaxed);
         context.peer.set_peer_info(request.clone());
         let result = self.negotiate_initialize(&request)?;
+        let key = authed(&context)?;
+        // The key and client as they opened it; a call reads its key's
+        // scopes as they are then.
+        let session = Session::new(caller(&key.key, &context), self.shared.session_budget_usd)
+            .with_raise_hint("ask the user to raise the session budget in the app's settings");
+        // Initialized again, the session stays as it was.
+        let _ = self.session.set(session);
         // Told when the key's scopes or the host's tools change.
-        if let Ok(key) = authed(&context) {
-            self.shared.listen(&key, context.peer.clone());
-        }
+        self.shared.listen(&key, context.peer.clone());
         Ok(result)
     }
 
@@ -282,18 +283,18 @@ impl ServerHandler for Handler {
         context: RequestContext<RoleServer>,
     ) -> Result<CallToolResponse, ErrorData> {
         let key = authed(&context)?;
-        if !self.initialized.load(Ordering::Relaxed) {
+        let Some(session) = self.session.get() else {
             return Ok(tool_error(&ToolError::new(
                 ToolErrorKind::NoSession,
                 "start a session (initialize) first: budgets are per session",
             ))
             .into());
-        }
+        };
         let name = request.name.to_string();
         let arguments = request.arguments.unwrap_or_default();
         let engine = self.shared.engine_tools && self.shared.tools.spec(&name).is_some();
         let (result, activity) = if engine {
-            let (result, activity) = self.engine_call(&key, &name, arguments).await;
+            let (result, activity) = self.engine_call(session, &key, &name, arguments).await;
             (result, Some(activity))
         } else {
             // The host's tools as they are now, kept for the call.

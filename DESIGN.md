@@ -629,9 +629,9 @@ fixture recorded with different parameters once hid a ranking bug.
   can't be filtered by journal name, so a container search first finds
   the sources so named (another $0.001) and ORs the best 100 IDs. An
   any of journals finds each one's sources and ORs them all, each journal
-  given an equal share of the 100 values a filter takes. One naming more
-  sources than its share, or a journal left out that names a full page
-  of them (more may follow, and would leak through), fails
+  given an equal share of the 100 values a filter takes (a loose name's
+  best matches are what it means). A journal left out that names a full
+  page of sources (more may follow, and would leak through) fails
   (`UnsupportedQuery`, asking for the exact name as a phrase) rather than
   being cut short; only the search can tell, not `search_supports`. The
   lookups aren't cached: each page asks again.

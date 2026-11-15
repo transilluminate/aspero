@@ -934,7 +934,7 @@ fn sources(n: usize) -> HttpResponse {
 }
 
 #[test]
-fn journals_whose_sources_dont_fit_a_filter_are_refused_not_cut_short() {
+fn a_journal_left_out_whose_sources_dont_fit_a_filter_is_refused() {
     let empty = r#"{"meta": {"count": 0}, "results": []}"#;
     let unsupported = |r: Result<_, Error>| match r {
         Err(Error::UnsupportedQuery(reason)) => reason,
@@ -950,19 +950,6 @@ fn journals_whose_sources_dont_fit_a_filter_are_refused_not_cut_short() {
          one filter takes; name it exactly, as a phrase"
     );
     assert_eq!(http.requests().len(), 1);
-    // Any of several: each gets a share of the 100, and one needing
-    // more would be cut short.
-    let (oa, http) = provider([sources(60)]);
-    let any = QueryNode::Any(vec![
-        QueryNode::term(TermField::Container, "medicine"),
-        QueryNode::term(TermField::Container, "surgery"),
-    ]);
-    assert_eq!(
-        unsupported(block_on(oa.search(&tree_query(any)))),
-        "OpenAlex can't search any of these journals: \"medicine\" names more sources than \
-         its share of the 100 one filter takes; name each exactly, as a phrase"
-    );
-    assert_eq!(http.requests().len(), 1, "refused at the first");
     // One journal keeps its best 100, as ever.
     let (oa, http) = provider([
         sources(100),

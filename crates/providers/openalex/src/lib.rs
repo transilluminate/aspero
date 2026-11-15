@@ -436,7 +436,6 @@ impl Provider for OpenAlex {
         for container in containers {
             // OpenAlex takes at most 100 values in a filter: each journal
             // gets an equal share of its best-matching sources.
-            let several = container.names.len() > 1;
             let share = (MAX_FILTER_VALUES / container.names.len().max(1)).max(1);
             let mut sources = Vec::new();
             for (name, phrase) in container.names {
@@ -447,20 +446,13 @@ impl Provider for OpenAlex {
                 };
                 let (found, u) = self.sources_named(&asked, exact.as_deref()).await?;
                 usage = Some(usage.map_or(u, |s: Usage| s.then(u)));
-                // One journal keeps its best 100 sources. Left out, a full
-                // page may be followed by more that would leak through;
-                // beside others, one cut to its share would lose some.
+                // Kept to, a name's best matches are what it means. Left
+                // out, a full page may be followed by more that would leak
+                // through.
                 if container.negated && found.len() >= MAX_PAGE as usize {
                     return Err(Error::UnsupportedQuery(format!(
                         "OpenAlex can't leave out the journal {name:?}: more sources are so \
                          named than one filter takes; name it exactly, as a phrase"
-                    )));
-                }
-                if several && found.len() > share {
-                    return Err(Error::UnsupportedQuery(format!(
-                        "OpenAlex can't search any of these journals: {name:?} names more \
-                         sources than its share of the {MAX_FILTER_VALUES} one filter takes; \
-                         name each exactly, as a phrase"
                     )));
                 }
                 for source in found.into_iter().take(share) {

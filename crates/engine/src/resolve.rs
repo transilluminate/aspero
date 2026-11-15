@@ -103,21 +103,27 @@ impl Candidate {
 /// the broadest index.
 const COUNTS: &str = "openalex";
 
+/// Whether a record's cited-by count is [`COUNTS`]'s.
+fn from_counts(record: &SourceRecord) -> bool {
+    record.source.as_str() == COUNTS
+}
+
 /// Merges another record of the same work (found in `sightings`) into a
 /// candidate: its identifiers, notices and sightings, every year reported,
 /// and the record itself if it matches the claim better. Whichever record
 /// wins, the work shows the same values whichever source answered first
-/// ([`merged_values`]).
+/// ([`merged_values`]). `counts` says whether the candidate's and the
+/// record's cited-by counts are OpenAlex's; returns whether the
+/// candidate's then is.
 fn absorb(
     claim: &Claim,
     c: &mut Candidate,
+    counts: (bool, bool),
     ids: &[WorkId],
     updates: &[Update],
     sightings: Vec<Sighting>,
     mut record: SourceRecord,
-) {
-    let counted = |sightings: &[Sighting]| sightings.iter().any(|s| s.provider.as_str() == COUNTS);
-    let counts = (counted(&c.sightings), counted(&sightings));
+) -> bool {
     c.sightings.extend(sightings);
     for id in ids.iter().chain(&record.ids) {
         if !c.ids.iter().any(|known| same_work_id(known, id)) {
@@ -129,7 +135,7 @@ fn absorb(
     // Pool the years every source reports (online-first vs print,
     // editions), then keep the better-matching record.
     let pooled: Vec<i16> = years(&c.record).chain(years(&record)).collect();
-    merged_values(&mut c.record, &mut record, counts);
+    let counts = merged_values(&mut c.record, &mut record, counts);
     add_years(&mut c.record, &pooled);
     add_years(&mut record, &pooled);
     c.assessment = matching::assess(claim, &c.record);
@@ -137,12 +143,15 @@ fn absorb(
     if assessment.confidence > c.assessment.confidence {
         c.record = record;
         c.assessment = assessment;
+        return counts.1;
     }
+    counts.0
 }
 
 /// Values sources give differently for one work, made the same on both
 /// records so the work doesn't change with the source that won the merge
-/// (#81). `counts` says whether each side's cited-by count is OpenAlex's.
+/// (#81). `counts` says whether each side's cited-by count is OpenAlex's;
+/// returns whether each side's then is.
 ///
 /// - Open access: the more informative, whatever the version (a free
 ///   preprint is a free copy): free with a PDF, then free with a page,
@@ -154,7 +163,7 @@ fn absorb(
 ///     2020-12-01 over Crossref's 2021-01), and of dates that overlap
 ///     (2021 and 2021-01-05) the more precise. The other date's year stays
 ///     in `other_years`, where verification's year matching finds it.
-fn merged_values(a: &mut SourceRecord, b: &mut SourceRecord, counts: (bool, bool)) {
+fn merged_values(a: &mut SourceRecord, b: &mut SourceRecord, counts: (bool, bool)) -> (bool, bool) {
     let oa = best_open_access(&a.work.open_access, &b.work.open_access).clone();
     a.work.open_access.clone_from(&oa);
     b.work.open_access = oa;
@@ -163,11 +172,11 @@ fn merged_values(a: &mut SourceRecord, b: &mut SourceRecord, counts: (bool, bool
         matches!(x.kind(), IdKind::Doi | IdKind::Pmid) && b.ids.iter().any(|y| same_work_id(x, y))
     });
     if !shared {
-        return;
+        return counts;
     }
-    let count = match (a.work.cited_by_count, b.work.cited_by_count, counts) {
-        (Some(n), _, (true, _)) | (_, Some(n), (_, true)) => Some(n),
-        (x, y, _) => x.max(y),
+    let (count, counted) = match (a.work.cited_by_count, b.work.cited_by_count, counts) {
+        (Some(n), _, (true, _)) | (_, Some(n), (_, true)) => (Some(n), true),
+        (x, y, _) => (x.max(y), false),
     };
     a.work.cited_by_count = count;
     b.work.cited_by_count = count;
@@ -177,6 +186,7 @@ fn merged_values(a: &mut SourceRecord, b: &mut SourceRecord, counts: (bool, bool
     };
     a.work.issued = issued;
     b.work.issued = issued;
+    (counted, counted)
 }
 
 /// The more informative of two open-access records; on a tie, the first.
@@ -376,6 +386,7 @@ impl Engine {
         let mut acc = Accumulator {
             claim,
             report: ResolveReport::default(),
+            counted: Vec::new(),
         };
         let done = |acc: &Accumulator| stop_when_verified && acc.verified();
         let query = |text: &str, citation: bool| {
@@ -545,6 +556,8 @@ impl ClaimExt for Claim {
 struct Accumulator<'a> {
     claim: &'a Claim,
     report: ResolveReport,
+    /// Whether each candidate's cited-by count is OpenAlex's.
+    counted: Vec<bool>,
 }
 
 impl Accumulator<'_> {
@@ -558,10 +571,20 @@ impl Accumulator<'_> {
         };
         let mut at = match candidates.iter().position(|c| shares(c, &record.ids)) {
             Some(i) => {
-                absorb(claim, &mut candidates[i], &[], &[], vec![sighting], record);
+                let counts = (self.counted[i], from_counts(&record));
+                self.counted[i] = absorb(
+                    claim,
+                    &mut candidates[i],
+                    counts,
+                    &[],
+                    &[],
+                    vec![sighting],
+                    record,
+                );
                 i
             }
             None => {
+                self.counted.push(from_counts(&record));
                 let mut updates = Vec::new();
                 merge_updates(&mut updates, &record.work.updates);
                 candidates.push(Candidate {
@@ -580,11 +603,13 @@ impl Accumulator<'_> {
             (0..candidates.len()).find(|&j| j != at && shares(&candidates[j], &candidates[at].ids))
         {
             let (keep, gone) = (at.min(j), at.max(j));
+            let counts = (self.counted[keep], self.counted.remove(gone));
             let gone = candidates.remove(gone);
             let c = &mut candidates[keep];
-            absorb(
+            self.counted[keep] = absorb(
                 claim,
                 c,
+                counts,
                 &gone.ids,
                 &gone.updates,
                 gone.sightings,
@@ -858,6 +883,7 @@ mod tests {
                 let mut acc = Accumulator {
                     claim,
                     report: ResolveReport::default(),
+                    counted: Vec::new(),
                 };
                 let all = records();
                 for i in order {
@@ -881,6 +907,58 @@ mod tests {
                 assert!(w.other_years.contains(&2021), "{order:?}");
                 assert_eq!(c.sightings.len(), 3);
             }
+        }
+    }
+
+    /// An OpenAlex preprint merged in by its arXiv ID doesn't make the
+    /// article's count OpenAlex's: either order shows the article's.
+    #[test]
+    fn a_preprints_source_does_not_decide_its_articles_count() {
+        let claim = Claim::from_text("Ragusa A. Plasticenta. Environ Int. 2021;146:106274.");
+        let records = [
+            plasticenta(
+                "crossref",
+                &[DOI, "arxiv:2001.00001"],
+                "2021",
+                Some(10),
+                None,
+            ),
+            plasticenta(
+                "openalex",
+                &["doi:10.1101/2020.07.15.198325", "arxiv:2001.00001"],
+                "2019-07-15",
+                Some(9),
+                None,
+            ),
+            plasticenta(
+                "europepmc",
+                &[DOI, "pmid:33395930"],
+                "2021",
+                Some(3400),
+                None,
+            ),
+        ];
+        for order in [[0, 1, 2], [0, 2, 1]] {
+            let mut acc = Accumulator {
+                claim: &claim,
+                report: ResolveReport::default(),
+                counted: Vec::new(),
+            };
+            for i in order {
+                let record = records[i].clone();
+                let sighting = Sighting {
+                    provider: record.source.clone(),
+                    via: Via::TitleSearch,
+                    rank: 1,
+                    score: None,
+                };
+                acc.add(record, sighting);
+            }
+            let [c] = &acc.report.candidates[..] else {
+                panic!("one work: {order:?}");
+            };
+            assert_eq!(c.record.source.as_str(), "crossref", "{order:?}");
+            assert_eq!(c.record.work.cited_by_count, Some(3400), "{order:?}");
         }
     }
 

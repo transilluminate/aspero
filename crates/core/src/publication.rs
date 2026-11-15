@@ -431,7 +431,7 @@ fn is_year(w: &str) -> bool {
     w.len() == 4 && w.parse().is_ok_and(|y| PLAUSIBLE_YEARS.contains(&y))
 }
 
-fn is_month(w: &str) -> bool {
+pub(crate) fn is_month(w: &str) -> bool {
     const MONTHS: &[&str] = &[
         "jan",
         "feb",

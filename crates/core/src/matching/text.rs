@@ -182,30 +182,6 @@ impl Normalised {
             "pp",
             "suppl",
             "eds",
-            "jan",
-            "feb",
-            "mar",
-            "apr",
-            "may",
-            "jun",
-            "jul",
-            "aug",
-            "sep",
-            "sept",
-            "oct",
-            "nov",
-            "dec",
-            "january",
-            "february",
-            "march",
-            "april",
-            "june",
-            "july",
-            "august",
-            "september",
-            "october",
-            "november",
-            "december",
             "pmid",
             "pmcid",
             "arxiv",
@@ -219,6 +195,7 @@ impl Normalised {
                 || STOPWORDS.contains(&w.as_str())
                 || LINK_WORDS.contains(&w.as_str())
                 || FURNITURE.contains(&w.as_str())
+                || crate::publication::is_month(w)
                 || author_words.contains(&w.as_str())
                 || journal
                     .as_ref()

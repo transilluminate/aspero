@@ -413,11 +413,7 @@ pub fn assess(claim: &Claim, record: &SourceRecord) -> Assessment {
         .into_iter()
         .chain(work.other_years.iter().copied())
         .collect();
-    let claimed_years: Vec<i16> = match (claim.year, &text) {
-        (Some(y), _) => vec![y],
-        (None, Some(text)) => text.years(),
-        _ => Vec::new(),
-    };
+    let claimed_years = claim.cited_years();
     let year = match actual_years.is_empty() || claimed_years.is_empty() {
         false => {
             // Nearest pairing: any edition's year may be the one cited.
@@ -475,13 +471,8 @@ pub fn assess(claim: &Claim, record: &SourceRecord) -> Assessment {
     };
     // A journal article cited in a journal clearly not its own, or a
     // preprint cited as a journal's article.
-    let wrong_journal = container.agreement == Agreement::Mismatch
-        && (preprint_of_cited
-            || article
-                && cited_journal
-                    .as_deref()
-                    .zip(work.container_title.as_deref())
-                    .is_some_and(|(c, a)| other_journal(c, a)));
+    let wrong_journal =
+        container.agreement == Agreement::Mismatch && (preprint_of_cited || article);
     let located = cited_place;
     let same = |claimed: Option<&str>, actual: Option<&str>| match (claimed, actual) {
         (Some(c), Some(a)) if !c.is_empty() && !a.is_empty() => {

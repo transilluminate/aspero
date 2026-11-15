@@ -468,7 +468,10 @@ mod tests {
     use serde_json::json;
 
     fn args(v: Value) -> Map<String, Value> {
-        v.as_object().unwrap().clone()
+        let Value::Object(map) = v else {
+            panic!("arguments are an object")
+        };
+        map
     }
 
     #[test]

@@ -98,13 +98,13 @@ pub(crate) fn crossref_type(t: &WorkType) -> Option<&str> {
 mod tests {
     use super::*;
 
-    fn work(v: serde_json::Value) -> Work {
-        to_record(&v, Timestamp::UNIX_EPOCH).unwrap().work
+    fn work(v: &serde_json::Value) -> Work {
+        to_record(v, Timestamp::UNIX_EPOCH).unwrap().work
     }
 
     #[test]
     fn reads_as_csl_plus_print_and_online_years() {
-        let w = work(serde_json::json!({
+        let w = work(&serde_json::json!({
             "DOI": "10.1000/x",
             "type": "reference-entry",
             "author": [{"name": "ATLAS Collaboration"}],

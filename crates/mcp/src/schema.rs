@@ -8,7 +8,7 @@
 
 use serde_json::{Map, Value, json};
 
-fn object(properties: Value, required: &[&str]) -> Value {
+fn object(properties: &Value, required: &[&str]) -> Value {
     json!({
         "type": "object",
         "properties": properties,
@@ -23,7 +23,7 @@ fn nullable(kind: &str) -> Value {
 /// A work: lean by default, every known field with `full`.
 fn work() -> Value {
     object(
-        json!({
+        &json!({
             "source": {"type": "string", "description": "the provider whose record this is"},
             "ids": {"type": "array", "items": {"type": "string"}, "description": "every identifier, prefixed: doi:…, arxiv:…, pmid:…"},
             "canonical": {
@@ -33,7 +33,7 @@ fn work() -> Value {
             "title": {"type": "string"},
             "authors": {
                 "type": "array",
-                "items": object(json!({"name": {"type": "string"}, "orcid": {"type": "string"}}), &["name"]),
+                "items": object(&json!({"name": {"type": "string"}, "orcid": {"type": "string"}}), &["name"]),
             },
             "authors_more": {"type": "integer", "description": "authors left out of a lean record's list (`full` lists them all)"},
             "issued": {"type": "string", "description": "the publication date: 2015, 2015-05 or 2015-05-27"},
@@ -56,7 +56,7 @@ fn work() -> Value {
 /// A scored candidate for a citation.
 fn candidate() -> Value {
     object(
-        json!({
+        &json!({
             "confidence": {"type": "number", "description": "0 to 1"},
             "checks": {"type": "object", "description": "per field: match, partial, mismatch or unknown"},
             "found_by": {"type": "array", "items": {"type": "object"}},
@@ -69,7 +69,7 @@ fn candidate() -> Value {
 /// One verification, after the claim's echo.
 fn verification() -> Value {
     object(
-        json!({
+        &json!({
             "input": {"type": "string", "description": "the citation as given"},
             "key": {"description": "your key for the citation, echoed"},
             "claim": {"type": "object", "description": "the citation as understood"},
@@ -95,7 +95,7 @@ fn usage() -> Value {
         "type": "object",
         "description": "this call's usage per provider: cost and what's left of its budget, in USD",
         "additionalProperties": object(
-            json!({
+            &json!({
                 "cost": {"type": "number"},
                 "remaining": {"type": "number"},
                 "resets_at": {"type": "string"},
@@ -107,7 +107,7 @@ fn usage() -> Value {
 
 fn session() -> Value {
     let mut session = object(
-        json!({
+        &json!({
             "spent_usd": {"type": "number"},
             "budget_usd": {"type": "number"},
             "left_usd": {"type": "number"},
@@ -124,7 +124,7 @@ fn output(mut properties: Value, required: &[&str]) -> Map<String, Value> {
     properties["session"] = session();
     let mut required = required.to_vec();
     required.extend(["usage", "session"]);
-    match object(properties, &required) {
+    match object(&properties, &required) {
         Value::Object(map) => map,
         _ => unreachable!("an object"),
     }
@@ -144,7 +144,7 @@ pub fn search() -> Map<String, Value> {
             "hits": {
                 "type": "array",
                 "items": object(
-                    json!({
+                    &json!({
                         "rank": {"type": "integer"},
                         "score": {"type": "number", "description": "the source's own, when it gives one; compare only within one search"},
                         "work": work(),
@@ -169,7 +169,7 @@ pub fn supports() -> Map<String, Value> {
 
 pub fn lookup() -> Map<String, Value> {
     let item = object(
-        json!({
+        &json!({
             "input": {"type": "string"},
             "id": {"type": "string", "description": "the identifier, canonical"},
             "status": {

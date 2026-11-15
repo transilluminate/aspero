@@ -281,8 +281,8 @@ impl QueryNode {
     }
 
     /// Checks every leaf's value: author ids, identifiers, language codes,
-    /// year ranges and relations' identifiers. The reason, in English, for the first
-    /// that's invalid.
+    /// work types ([`check_work_type`]), year ranges and relations'
+    /// identifiers. The reason, in English, for the first that's invalid.
     pub fn validate(&self) -> Result<(), String> {
         match self {
             QueryNode::All(nodes) | QueryNode::Any(nodes) | QueryNode::None(nodes) => {
@@ -301,6 +301,7 @@ impl QueryNode {
             QueryNode::Filter(FilterValue::Language(code)) => language(code)
                 .map(|_| ())
                 .ok_or_else(|| format!("{code:?} is not an ISO 639-1 language code, like \"en\"")),
+            QueryNode::Filter(FilterValue::WorkType(t)) => check_work_type(t),
             QueryNode::Filter(FilterValue::Years(YearRange {
                 from: Some(from),
                 to: Some(to),
@@ -400,6 +401,24 @@ fn group(kind: Group, nodes: Vec<QueryNode>) -> Option<QueryNode> {
         (Group::All, _) => Some(QueryNode::All(flat)),
         (Group::Any, _) => Some(QueryNode::Any(flat)),
         (Group::None, _) => Some(QueryNode::None(flat)),
+    }
+}
+
+/// Checks a work type that isn't one aspero knows ([`WorkType::Other`]) is
+/// a name sources can filter by: letters, digits and hyphens. Sources put
+/// the name in their filters as it is, where `,`, `|` or `:` would be
+/// syntax (OpenAlex's `type:!book,is_oa:true` is two filters).
+pub fn check_work_type(t: &WorkType) -> Result<(), String> {
+    match t {
+        WorkType::Other(name)
+            if name.is_empty() || !name.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-') =>
+        {
+            Err(format!(
+                "{name:?} is not a work type: types are names of letters, digits and \
+                 hyphens, like \"book-chapter\""
+            ))
+        }
+        _ => Ok(()),
     }
 }
 
@@ -889,6 +908,20 @@ mod tests {
             bad_id.validate().unwrap_err(),
             "\"Yann LeCun\" is neither an ORCID nor an OpenAlex author id (A…)"
         );
+        // A type is one name: never filter syntax for the source to obey.
+        let types = |t: &str| QueryNode::filter(FilterValue::WorkType(WorkType::from_csl(t)));
+        assert_eq!(
+            QueryNode::None(vec![types("book,is_oa:true")])
+                .validate()
+                .unwrap_err(),
+            r#""book,is_oa:true" is not a work type: types are names of letters, digits and hyphens, like "book-chapter""#
+        );
+        for bad in ["book|dataset", "", "peer review", "a:b", "\"x\""] {
+            assert!(types(bad).validate().is_err(), "{bad:?}");
+        }
+        for good in ["book", "peer-review", "posted-content", "Reference-Entry"] {
+            assert_eq!(types(good).validate(), Ok(()), "{good}");
+        }
         let lang = QueryNode::filter(FilterValue::Language("eng".into()));
         assert!(lang.validate().unwrap_err().contains("ISO 639-1"));
         assert!(

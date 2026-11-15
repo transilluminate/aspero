@@ -132,7 +132,9 @@ scripts/       fixture recorders, one per provider
   identifier), filters and relations, instead of the keywords and fields. The engine
   normalises a tree (blank leaves and empty groups dropped, same-kind
   groups flattened, an all or any of one node unwrapped), checks its
-  values (author ids, language codes, year ranges, identifiers), folds the
+  values (author ids, language codes, year ranges, identifiers, and work
+  types beyond aspero's own: letters, digits and hyphens, as the request's
+  type is too, never a source's filter syntax), folds the
   request's own filters in as more of all of it, and asks the provider's
   `express`, which translates it or says why not: one decision behind
   both `search` and the offline `search_supports`. Nothing in a tree is

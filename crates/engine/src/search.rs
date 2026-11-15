@@ -114,6 +114,10 @@ impl Engine {
         let citation = query.mode == SearchMode::Citation;
         let fields = [Filter::Author, Filter::Title, Filter::Container];
         let has_field = fields.iter().any(|f| query.field(*f).is_some());
+        // As in a tree: a type is a name, never the source's filter syntax.
+        if let Some(t) = &query.work_type {
+            aspero_core::query::check_work_type(t).map_err(EngineError::InvalidQuery)?;
+        }
         if query.tree.is_some() {
             if !query.text.trim().is_empty() || has_field || query.place.is_some() {
                 return Err(EngineError::InvalidQuery(

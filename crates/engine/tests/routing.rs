@@ -813,6 +813,28 @@ async fn identifiers_are_checked_before_a_source_sees_them() {
 }
 
 #[tokio::test(start_paused = true)]
+async fn work_types_are_names_never_filter_syntax() {
+    let mut mock = tree_mock("types", &[]);
+    mock.caps.search_filters.push(Filter::WorkType);
+    let mock = Arc::new(mock);
+    let engine = engine_of(mock.clone());
+    let injected = aspero_core::WorkType::from_csl("book,is_oa:true");
+    let why = r#""book,is_oa:true" is not a work type: types are names of letters, digits and hyphens, like "book-chapter""#;
+    let tree = QueryNode::None(vec![QueryNode::filter(FilterValue::WorkType(
+        injected.clone(),
+    ))]);
+    assert_eq!(engine.search_supports(None, &tree).as_deref(), Some(why));
+    // Without a tree, the request's own type alike.
+    let mut q = SearchQuery::new("sepsis");
+    q.work_type = Some(injected);
+    match engine.search(None, &q).await {
+        Err(EngineError::InvalidQuery(r)) => assert_eq!(r, why),
+        other => panic!("{:?}", other.map(|_| ())),
+    }
+    assert!(mock.searches.lock().unwrap().is_empty());
+}
+
+#[tokio::test(start_paused = true)]
 async fn newest_trees_stop_at_this_year_unless_their_years_say_otherwise() {
     let mock = Arc::new(tree_mock("dated", &[]));
     let engine = Engine::builder()

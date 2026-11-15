@@ -271,6 +271,12 @@ pub trait Pacing: Send + Sync {
     fn claim_slot(&self, provider: &str, interval: Duration, now: Timestamp) -> Result<Timestamp>;
 }
 
+/// `mb` megabytes (1,000,000 bytes, as size limits are given) in bytes,
+/// saturating.
+pub fn megabytes(mb: u64) -> u64 {
+    mb.saturating_mul(1_000_000)
+}
+
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct Stats {

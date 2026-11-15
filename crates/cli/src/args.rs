@@ -218,16 +218,12 @@ pub struct Global {
 impl Global {
     /// How long cached answers are trusted.
     pub fn cache_policy(&self) -> aspero_engine::CachePolicy {
-        let days = |n: u32| std::time::Duration::from_secs(u64::from(n) * 86_400);
-        let mut policy = aspero_engine::CachePolicy::default();
-        policy.records = days(self.cache_found_days);
-        policy.misses = days(self.cache_not_found_days);
-        policy
+        aspero_engine::CachePolicy::from_days(self.cache_found_days, self.cache_not_found_days)
     }
 
     /// The cache's size limit in bytes.
     pub fn cache_max_bytes(&self) -> Option<u64> {
-        self.cache_max_mb.map(|mb| mb.saturating_mul(1_000_000))
+        self.cache_max_mb.map(aspero_engine::megabytes)
     }
 }
 

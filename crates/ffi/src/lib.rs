@@ -99,11 +99,7 @@ impl Default for Config {
 impl Config {
     /// How long cached answers are trusted, from the days given.
     fn cache_policy(&self) -> CachePolicy {
-        let days = |n: u32| std::time::Duration::from_secs(u64::from(n) * 86_400);
-        let mut policy = CachePolicy::default();
-        policy.records = days(self.cache_found_days);
-        policy.misses = days(self.cache_not_found_days);
-        policy
+        CachePolicy::from_days(self.cache_found_days, self.cache_not_found_days)
     }
 }
 
@@ -207,7 +203,7 @@ impl Aspero {
         let cache_policy = config.cache_policy();
         let max_bytes = match config.cache_max_mb {
             Some(0) => return Err(setup("the cache's size limit must be at least 1 MB".into())),
-            mb => mb.map(|mb| mb.saturating_mul(1_000_000)),
+            mb => mb.map(aspero_engine::megabytes),
         };
         let cache = match &config.cache_dir {
             Some(dir) => {

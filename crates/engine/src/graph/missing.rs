@@ -98,9 +98,10 @@ pub(super) fn odd_one_out(groups: &[Group]) -> Section<OddOne> {
                 .iter()
                 .enumerate()
                 .any(|(h, other)| h != g && other.may_cite(group));
-        let reason = match unknown {
-            false => OddReason::NoLinks,
-            true => OddReason::NoReferenceData,
+        let reason = if unknown {
+            OddReason::NoReferenceData
+        } else {
+            OddReason::NoLinks
         };
         items.extend(group.members.iter().map(|&seed| OddOne { seed, reason }));
     }

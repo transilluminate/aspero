@@ -225,9 +225,12 @@ fn near_miss(c: &Candidate) -> bool {
 fn differences(claim: &Claim, c: &Candidate, known_only: bool) -> Vec<Difference> {
     let a = &c.assessment;
     let w = &c.record.work;
-    let off = |check: &matching::FieldCheck| match known_only {
-        true => matches!(check.agreement, Agreement::Mismatch | Agreement::Partial),
-        false => check.agreement != Agreement::Match,
+    let off = |check: &matching::FieldCheck| {
+        if known_only {
+            matches!(check.agreement, Agreement::Mismatch | Agreement::Partial)
+        } else {
+            check.agreement != Agreement::Match
+        }
     };
     let read = claim.as_read();
     let diff = |field, actual: Option<String>, cited: Option<String>| Difference {
@@ -407,13 +410,14 @@ fn weigh(claim: &Claim, report: &ResolveReport) -> (Verdict, Reason, Option<usiz
                 .into_iter()
                 .filter(|d| d.field != CitedField::Kind)
                 .collect();
-            match differs.is_empty() {
-                true => (Verdict::Verified, Reason::IdExists, Some(i)),
-                false => (
+            if differs.is_empty() {
+                (Verdict::Verified, Reason::IdExists, Some(i))
+            } else {
+                (
                     Verdict::Plausible,
                     Reason::IdPartlyMatches { differs },
                     Some(i),
-                ),
+                )
             }
         }
         Some((i, c)) if c.assessment.confidence >= VERIFIED => {

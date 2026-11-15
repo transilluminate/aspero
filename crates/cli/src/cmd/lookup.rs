@@ -210,12 +210,13 @@ pub fn text(item: &Value, looked: Option<&Looked>) -> String {
             .iter()
             .map(|d| format!("{} {} (vs {})", d.field, d.value, d.registry_value))
             .collect();
-        let conflicts = match conflicts.is_empty() {
-            true => String::new(),
-            false => format!(
+        let conflicts = if conflicts.is_empty() {
+            String::new()
+        } else {
+            format!(
                 "\n  ⚠ the DOI's registry disagrees: {}",
                 conflicts.join("; ")
-            ),
+            )
         };
         return format!(
             "{label}  found via {}{served}\n{}{latest}{conflicts}\n",

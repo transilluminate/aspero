@@ -254,9 +254,10 @@ impl Engine {
                 provider,
                 error: Error::UnsupportedQuery(format!("{reason}, and no other source can")),
             }),
-            None => Err(EngineError::NoCapableProvider(match citation {
-                true => "citation search",
-                false => "search",
+            None => Err(EngineError::NoCapableProvider(if citation {
+                "citation search"
+            } else {
+                "search"
             })),
         }
     }
@@ -513,12 +514,13 @@ impl Engine {
 /// ([`Provider::since_unsupported`]).
 fn check_since(entry: &Entry, since: Option<Date>) -> Result<(), EngineError> {
     let caps = entry.provider.capabilities();
-    match since.is_some() && !caps.search_filters.contains(&Filter::Since) {
-        true => Err(EngineError::Provider {
+    if since.is_some() && !caps.search_filters.contains(&Filter::Since) {
+        Err(EngineError::Provider {
             provider: entry.provider.id(),
             error: Error::UnsupportedQuery(entry.provider.since_unsupported()),
-        }),
-        false => Ok(()),
+        })
+    } else {
+        Ok(())
     }
 }
 

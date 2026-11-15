@@ -450,9 +450,10 @@ fn classify(body: &str) -> Vec<&'static str> {
         "permission to use, copy, modify, and distribute this software for any purpose with or without fee is hereby granted",
     ] {
         for (at, _) in t.match_indices(isc) {
-            let id = match t[at + isc.len()..].starts_with(", provided that the above copyright") {
-                true => "ISC",
-                false => "0BSD",
+            let id = if t[at + isc.len()..].starts_with(", provided that the above copyright") {
+                "ISC"
+            } else {
+                "0BSD"
             };
             if !ids.contains(&id) {
                 ids.push(id);

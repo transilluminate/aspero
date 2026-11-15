@@ -38,9 +38,10 @@ impl Recorder {
 impl HttpClient for Recorder {
     async fn send(&self, request: HttpRequest) -> Result<HttpResponse, Error> {
         let source = r#"{"results": [{"id": "https://openalex.org/S1", "display_name": "S"}]}"#;
-        let body = match request.url.contains("/sources?") {
-            true => source,
-            false => r#"{"message": {"items": []}}"#,
+        let body = if request.url.contains("/sources?") {
+            source
+        } else {
+            r#"{"message": {"items": []}}"#
         };
         self.urls.lock().unwrap().push(request.url);
         Ok(response(200, &[], body))
@@ -163,9 +164,12 @@ fn term() -> impl Strategy<Value = QueryNode> {
         1 => author_ids.prop_map(|v| (TermField::AuthorId, v)),
         1 => ids.prop_map(|v| (TermField::Identifier, v)),
     ];
-    (field_value, any::<bool>()).prop_map(|((field, value), phrase)| match phrase {
-        true => QueryNode::phrase(field, value),
-        false => QueryNode::term(field, value),
+    (field_value, any::<bool>()).prop_map(|((field, value), phrase)| {
+        if phrase {
+            QueryNode::phrase(field, value)
+        } else {
+            QueryNode::term(field, value)
+        }
     })
 }
 

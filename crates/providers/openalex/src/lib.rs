@@ -156,9 +156,10 @@ impl OpenAlex {
             exact.is_some_and(|e| shown.trim().eq_ignore_ascii_case(e.trim()))
         };
         let exactly: Vec<&serde_json::Value> = list.results.iter().filter(|v| named(v)).collect();
-        let chosen = match exactly.is_empty() {
-            true => list.results.iter().collect(),
-            false => exactly,
+        let chosen = if exactly.is_empty() {
+            list.results.iter().collect()
+        } else {
+            exactly
         };
         let ids = chosen
             .into_iter()

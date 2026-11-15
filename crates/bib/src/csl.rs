@@ -15,9 +15,10 @@ pub fn parse_csl_json(src: &str) -> Result<Vec<BibEntry>, ReadError> {
         message: e.to_string(),
     };
     let src = src.trim_start_matches('\u{FEFF}');
-    let items: Vec<CslItem> = match src.trim_start().starts_with('{') {
-        true => vec![serde_json::from_str(src).map_err(invalid)?],
-        false => serde_json::from_str(src).map_err(invalid)?,
+    let items: Vec<CslItem> = if src.trim_start().starts_with('{') {
+        vec![serde_json::from_str(src).map_err(invalid)?]
+    } else {
+        serde_json::from_str(src).map_err(invalid)?
     };
     Ok(items
         .iter()

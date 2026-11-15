@@ -48,11 +48,12 @@ async fn main() -> ExitCode {
         cli.command,
         Command::Lookup { .. } | Command::Search { .. } | Command::Verify { .. }
     );
-    let result = match format.is_export() && !exports {
-        true => Err(Failure::usage(
+    let result = if format.is_export() && !exports {
+        Err(Failure::usage(
             "--format bibtex, ris, csl-json and cite are for lookup, search and verify",
-        )),
-        false => run(cli, out.clone()).await,
+        ))
+    } else {
+        run(cli, out.clone()).await
     };
     match result {
         Ok(exit) => exit.code(),

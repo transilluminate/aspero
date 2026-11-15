@@ -408,9 +408,10 @@ impl Engine {
             None => Vec::new(),
         };
         let lookup = async {
-            match claim.ids.is_empty() {
-                true => None,
-                false => Some(self.lookup(&claim.ids, FieldSet::DEFAULT).await),
+            if claim.ids.is_empty() {
+                None
+            } else {
+                Some(self.lookup(&claim.ids, FieldSet::DEFAULT).await)
             }
         };
         let matched = join_all(matchers.iter().map(|p| {

@@ -415,20 +415,19 @@ pub fn assess(claim: &Claim, record: &SourceRecord) -> Assessment {
         .chain(work.other_years.iter().copied())
         .collect();
     let claimed_years = claim.cited_years();
-    let year = match actual_years.is_empty() || claimed_years.is_empty() {
-        false => {
-            // Nearest pairing: any edition's year may be the one cited.
-            let delta = claimed_years
-                .iter()
-                .flat_map(|c| actual_years.iter().map(move |a| c.abs_diff(*a)))
-                .min()
-                .unwrap_or(u16::MAX);
-            // Halves per year off: off by one is common (online-first vs
-            // print, preprint vs published) and counts as partial; two or
-            // more is a mismatch, but a nearer year still ranks higher.
-            FieldCheck::scored(0.5f64.powi(i32::from(delta.min(30))))
-        }
-        true => FieldCheck::UNKNOWN,
+    let year = if actual_years.is_empty() || claimed_years.is_empty() {
+        FieldCheck::UNKNOWN
+    } else {
+        // Nearest pairing: any edition's year may be the one cited.
+        let delta = claimed_years
+            .iter()
+            .flat_map(|c| actual_years.iter().map(move |a| c.abs_diff(*a)))
+            .min()
+            .unwrap_or(u16::MAX);
+        // Halves per year off: off by one is common (online-first vs
+        // print, preprint vs published) and counts as partial; two or
+        // more is a mismatch, but a nearer year still ranks higher.
+        FieldCheck::scored(0.5f64.powi(i32::from(delta.min(30))))
     };
 
     // Only a journal article's journal is held against a citation: books'
@@ -466,9 +465,10 @@ pub fn assess(claim: &Claim, record: &SourceRecord) -> Assessment {
         }
         _ => FieldCheck::UNKNOWN,
     };
-    let container = match preprint_of_cited && container.agreement != Agreement::Match {
-        true => FieldCheck::exact(false),
-        false => container,
+    let container = if preprint_of_cited && container.agreement != Agreement::Match {
+        FieldCheck::exact(false)
+    } else {
+        container
     };
     // A journal article cited in a journal clearly not its own, or a
     // preprint cited as a journal's article.
@@ -494,11 +494,10 @@ pub fn assess(claim: &Claim, record: &SourceRecord) -> Assessment {
     // agreeing, a title missing from the text is not a different one (the
     // page then decides between verified and a wrong page).
     let placed = container.agreement == Agreement::Match && volume.agreement == Agreement::Match;
-    let title = match placed {
-        true if claim.title.is_none() && title.agreement == Agreement::Mismatch => {
-            FieldCheck::UNKNOWN
-        }
-        _ => title,
+    let title = if placed && claim.title.is_none() && title.agreement == Agreement::Mismatch {
+        FieldCheck::UNKNOWN
+    } else {
+        title
     };
 
     let ids = id_agreement(&claim.ids, &record.ids);

@@ -87,12 +87,13 @@ pub fn derivative_work_kind(title: &str) -> Option<WorkKind> {
         }
         _ => words.starts_with(&format!(" {m} ")),
     };
-    let marker = DERIVATIVE_MARKERS
-        .iter()
-        .find(|m| match LEADING_MARKERS.contains(m) {
-            true => leading(m),
-            false => words.contains(&format!(" {m} ")),
-        })?;
+    let marker = DERIVATIVE_MARKERS.iter().find(|m| {
+        if LEADING_MARKERS.contains(m) {
+            leading(m)
+        } else {
+            words.contains(&format!(" {m} "))
+        }
+    })?;
     Some(match *marker {
         "reply" | "response to" | "in response" => WorkKind::Reply,
         "erratum" | "errata" | "corrigendum" | "correction" => WorkKind::Correction,

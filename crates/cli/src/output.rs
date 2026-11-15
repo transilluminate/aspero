@@ -151,9 +151,10 @@ pub fn work_text(record: &SourceRecord, indent: &str) -> String {
             .flatten()
             .collect();
         let link = oa.pdf_url.as_deref().or(oa.url.as_deref()).unwrap_or("");
-        let terms = match terms.is_empty() {
-            true => String::new(),
-            false => format!(" ({})", terms.join(", ")),
+        let terms = if terms.is_empty() {
+            String::new()
+        } else {
+            format!(" ({})", terms.join(", "))
         };
         lines.push(format!("{indent}Free copy{terms}: {link}"));
     }

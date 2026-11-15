@@ -340,26 +340,24 @@ impl Provider for Crossref {
             }
             _ => 0,
         };
-        match by_date {
-            true => params.push(("offset", offset.to_string())),
-            false => {
-                let cursor = query.page.cursor.as_ref().map_or("*", |c| c.0.as_str());
-                params.push(("cursor", cursor.to_owned()));
-            }
+        if by_date {
+            params.push(("offset", offset.to_string()));
+        } else {
+            let cursor = query.page.cursor.as_ref().map_or("*", |c| c.0.as_str());
+            params.push(("cursor", cursor.to_owned()));
         }
 
         let (hits, list) = self.list(&params).await?;
         // Crossref keeps returning a cursor after the last page; an empty
         // page is the real end.
-        let next = match by_date {
-            true => {
-                let next = offset + hits.len() as u64;
-                let more = !hits.is_empty()
-                    && list.total_results.is_none_or(|total| next < total)
-                    && next <= MAX_OFFSET;
-                more.then(|| Cursor(format!("offset:{next}")))
-            }
-            false => list.next_cursor.filter(|_| !hits.is_empty()).map(Cursor),
+        let next = if by_date {
+            let next = offset + hits.len() as u64;
+            let more = !hits.is_empty()
+                && list.total_results.is_none_or(|total| next < total)
+                && next <= MAX_OFFSET;
+            more.then(|| Cursor(format!("offset:{next}")))
+        } else {
+            list.next_cursor.filter(|_| !hits.is_empty()).map(Cursor)
         };
         Ok(Response::new(Page::new(hits, list.total_results, next)))
     }

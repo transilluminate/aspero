@@ -141,9 +141,10 @@ fn text_clause(field: TermField, node: &QueryNode, negated: bool) -> Result<Clau
         (field, negated) => {
             let key = text_key(field).expect("a text field");
             let bang = if negated { "!" } else { "" };
-            match negated && grouped {
-                true => Clause::Filter(format!("{key}:{bang}({expr})")),
-                false => Clause::Filter(format!("{key}:{bang}{expr}")),
+            if negated && grouped {
+                Clause::Filter(format!("{key}:{bang}({expr})"))
+            } else {
+                Clause::Filter(format!("{key}:{bang}{expr}"))
             }
         }
     })

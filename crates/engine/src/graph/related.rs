@@ -677,9 +677,10 @@ impl Engine {
             .zip(works.iter().zip(targets))
             .map(|(row, ((_, count), target))| {
                 let row = row.filter(|r| fresh(r, self.cache_policy.cited_by))?;
-                let enough = match *target >= *count {
-                    true => row.value.complete,
-                    false => row.value.ids.len() as u64 >= *target,
+                let enough = if *target >= *count {
+                    row.value.complete
+                } else {
+                    row.value.ids.len() as u64 >= *target
                 };
                 (*target > 0 && enough).then(|| {
                     let mut ids = row.value.ids;

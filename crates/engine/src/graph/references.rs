@@ -95,12 +95,11 @@ impl Engine {
             .take(limit.max(1) as usize)
             .cloned()
             .collect();
-        let answers = match page.is_empty() {
-            true => Vec::new(),
-            false => {
-                self.lookup_at(entry, &page, FieldSet::DEFAULT, &mut usage)
-                    .await
-            }
+        let answers = if page.is_empty() {
+            Vec::new()
+        } else {
+            self.lookup_at(entry, &page, FieldSet::DEFAULT, &mut usage)
+                .await
         };
         let end = start + page.len();
         let next_cursor = total

@@ -145,9 +145,10 @@ pub async fn analyse(
     if file.is_none() {
         no_kinds_among(&inputs, &kinds)?;
     }
-    let kinds = match kinds.is_empty() {
-        true => DEFAULT_KINDS.to_vec(),
-        false => kinds,
+    let kinds = if kinds.is_empty() {
+        DEFAULT_KINDS.to_vec()
+    } else {
+        kinds
     };
     let seeds = match &file {
         Some(path) => {

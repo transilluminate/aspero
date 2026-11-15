@@ -204,9 +204,10 @@ impl Engine {
             leads.publish(&answers);
             let batch: Vec<WorkId> = chunk.iter().map(|&i| ids[i].clone()).collect();
             let ask = || entry.provider.lookup(&batch, fields);
-            let answer = match batch.len() > free {
-                true => self.call_paid(entry, ask).await,
-                false => self.call(entry, ask).await,
+            let answer = if batch.len() > free {
+                self.call_paid(entry, ask).await
+            } else {
+                self.call(entry, ask).await
             };
 
             let error = match answer {

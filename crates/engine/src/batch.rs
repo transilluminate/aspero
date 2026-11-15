@@ -30,9 +30,10 @@ impl Engine {
     /// claims are verified as by [`verify_many`](Engine::verify_many).
     pub fn verify_batch<'a>(&'a self, claims: &'a [Claim], limit: u32) -> Batch<'a> {
         let prefetch = async move {
-            match claims.len() > 1 {
-                true => self.prefetch(claims).await.usage,
-                false => Vec::new(),
+            if claims.len() > 1 {
+                self.prefetch(claims).await.usage
+            } else {
+                Vec::new()
             }
         };
         let verified = self

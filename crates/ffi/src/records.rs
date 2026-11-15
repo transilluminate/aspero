@@ -941,9 +941,10 @@ impl Verification {
             notes: v.notes.iter().map(Notice::from).collect(),
             read: Some(Claim::read(&v.read, key(claim))),
             best: v.best.map(|i| Candidate::from(&v.report.candidates[i])),
-            candidates: match full {
-                true => v.report.candidates.iter().map(Candidate::from).collect(),
-                false => Vec::new(),
+            candidates: if full {
+                v.report.candidates.iter().map(Candidate::from).collect()
+            } else {
+                Vec::new()
             },
             failures: v.report.failures().iter().map(Failure::from).collect(),
         }

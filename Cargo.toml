@@ -19,7 +19,6 @@ edition = "2024"
 rust-version = "1.91"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/transilluminate/aspero"
-homepage = "https://github.com/transilluminate/aspero"
 authors = ["Adrian Robinson"]
 
 [workspace.dependencies]
@@ -91,6 +90,9 @@ module_name_repetitions = "allow"
 # Option and flag structs (CLI arguments, query settings) are bool-heavy
 # by nature.
 struct_excessive_bools = "allow"
+# `assert!(x.is_empty())` reads plainer than comparing with a typed empty
+# array, the only rewrite the lint offers.
+assert_is_empty = "allow"
 # Score and price arithmetic on counts, which never approach 2^52.
 cast_precision_loss = "allow"
 

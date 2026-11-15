@@ -6,7 +6,6 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
-homepage.workspace = true
 authors.workspace = true
 # Shipped as an .xcframework, not a crate.
 publish = false
@@ -37,6 +36,9 @@ module_name_repetitions = "allow"
 # Option and flag structs (CLI arguments, query settings) are bool-heavy
 # by nature.
 struct_excessive_bools = "allow"
+# `assert!(x.is_empty())` reads plainer than comparing with a typed empty
+# array, the only rewrite the lint offers.
+assert_is_empty = "allow"
 # Score and price arithmetic on counts, which never approach 2^52.
 cast_precision_loss = "allow"
 

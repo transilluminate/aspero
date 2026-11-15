@@ -3,6 +3,7 @@
 //! identifiers in the forms people write them, each one known. Seeded, so
 //! a corpus is the same on every run.
 
+use std::fmt::Write as _;
 use std::ops::Range;
 
 /// A generated document and what `scan` should find in it.
@@ -328,8 +329,7 @@ impl Gen {
             let (prefix, suffix) = doi.split_once('/').unwrap_or_default();
             self.text.push(' ');
             let start = self.text.len();
-            self.text
-                .push_str(&format!("https://doi.org/{prefix}/\n   {suffix}"));
+            let _ = write!(self.text, "https://doi.org/{prefix}/\n   {suffix}");
             self.expected.push((
                 format!("doi:{}", doi.to_lowercase()),
                 start..self.text.len(),

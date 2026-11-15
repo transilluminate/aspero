@@ -1,5 +1,7 @@
 //! The engine tools, independent of any transport.
 
+use std::fmt::Write as _;
+
 use aspero_core::{
     Cursor, ErrorCategory, ErrorKind, FilterValue, ProviderId, QueryNode, Relation, SearchQuery,
     Usage, WorkType, YearRange,
@@ -274,7 +276,7 @@ impl Tools {
         structured["usage"] = aspero_json::usage(&usage);
         structured["session"] = session.json();
         let mut summary = summary::of(name, &structured);
-        summary.push_str(&format!("\nThis call: ${cost:.4}. {}", session.line()));
+        let _ = write!(summary, "\nThis call: ${cost:.4}. {}", session.line());
         Ok(Output {
             structured,
             summary,

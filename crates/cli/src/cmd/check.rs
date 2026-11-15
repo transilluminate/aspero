@@ -1,5 +1,6 @@
 //! `aspero check`: verify every entry of a .bib file and report fixes.
 
+use std::fmt::Write as _;
 use std::io::IsTerminal;
 
 use aspero_bib::BibEntry;
@@ -157,7 +158,7 @@ fn entry_text(entry: &BibEntry, checked: &CheckedEntry, keys: &[&str]) -> String
     };
     let mut out = format!("{status:<8} {}  ({})\n", entry.key, verdict(checked));
     for finding in &checked.findings {
-        out.push_str(&format!("         - {}\n", finding.message(keys)));
+        let _ = writeln!(out, "         - {}", finding.message(keys));
     }
     out
 }

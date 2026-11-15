@@ -1,6 +1,8 @@
 //! Rendering works, results and usage as terminal text and tables. JSON
 //! shapes are the contract in `aspero-json`, re-exported here.
 
+use std::fmt::Write as _;
+
 use aspero_core::matching::{PLAUSIBLE, VERIFIED};
 use aspero_core::{
     Agreement, Hit, IdKind, ProviderId, SourceRecord, UpdateKind, Usage, Work, WorkId,
@@ -343,7 +345,7 @@ pub fn candidate_row(rank: usize, c: &Candidate) -> Vec<comfy_table::Cell> {
         mark(a.year.agreement)
     );
     if a.ids != Agreement::Unknown {
-        checks.push_str(&format!(" id {}", mark(a.ids)));
+        let _ = write!(checks, " id {}", mark(a.ids));
     }
     let level = match a.confidence {
         c if c >= VERIFIED => Level::Good,

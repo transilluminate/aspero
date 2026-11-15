@@ -1,6 +1,8 @@
 //! A few lines of text per result, from its JSON: for clients that show
 //! text, and agents that skim before reading the structured content.
 
+use std::fmt::Write as _;
+
 use serde_json::Value;
 
 /// Items listed before "… and N more".
@@ -146,16 +148,16 @@ fn work_line(work: &Value) -> String {
         .or_else(|| work["ids"][0].as_str());
     let mut line = clip(title, 160);
     if let Some(year) = year {
-        line.push_str(&format!(" ({year})"));
+        let _ = write!(line, " ({year})");
     }
     if let Some(author) = author {
-        line.push_str(&format!(", {author}"));
+        let _ = write!(line, ", {author}");
         if authors.len() > 1 {
             line.push_str(" et al.");
         }
     }
     if let Some(id) = id {
-        line.push_str(&format!(", {id}"));
+        let _ = write!(line, ", {id}");
     }
     line
 }

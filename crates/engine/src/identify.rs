@@ -280,6 +280,8 @@ fn junk_title(title: &str, min_words: usize) -> bool {
 
 #[cfg(test)]
 mod tests {
+    use std::fmt::Write as _;
+
     use super::*;
 
     #[test]
@@ -308,7 +310,7 @@ mod tests {
         let mut page =
             String::from("Journal of Things 12 (2020) 1-9 https://doi.org/10.1234/jt.2020.1\n");
         for i in 0..20 {
-            page.push_str(&format!("Body line {i} citing doi:10.5555/ref.{i}\n"));
+            let _ = writeln!(page, "Body line {i} citing doi:10.5555/ref.{i}");
         }
         page.push_str("© 2020 Elsevier. doi:10.1234/jt.2020.1\n");
         let ids = candidates(&page);

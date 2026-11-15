@@ -228,7 +228,7 @@ pub fn incomplete(i: &Incomplete) -> Value {
 }
 
 pub fn estimate(e: &Estimate) -> Value {
-    json!({"requests": e.requests, "usd": e.usd, "exact": e.exact})
+    json!({"requests": e.requests, "cost_usd": e.cost_usd, "exact": e.exact})
 }
 
 fn retracted(r: &RetractedReference, full: bool) -> Value {

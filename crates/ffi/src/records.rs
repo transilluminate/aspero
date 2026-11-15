@@ -288,10 +288,11 @@ pub struct Failure {
 /// A daily cap reached: paid calls to the provider stop until `resetsAt`.
 #[derive(Debug, Clone, PartialEq, uniffi::Record)]
 pub struct BudgetCap {
-    /// The cap (US dollars), as `Config.openalexDailyCapUsd` set it.
-    pub cap: f64,
-    /// Used today, as the provider reports it: by everything using the key.
-    pub used: f64,
+    /// The cap in US dollars, as `Config.openalexDailyCapUsd` set it.
+    pub cap_usd: f64,
+    /// Spent today in US dollars, as the provider reports it: by everything
+    /// using the key.
+    pub spent_usd: f64,
     /// When the provider's budget resets (OpenAlex: midnight UTC).
     pub resets_at: Option<SystemTime>,
 }
@@ -328,8 +329,8 @@ impl BudgetCap {
                 used,
                 resets_at,
             } => Some(BudgetCap {
-                cap: *cap,
-                used: *used,
+                cap_usd: *cap,
+                spent_usd: *used,
                 resets_at: resets_at.map(time),
             }),
             _ => None,
@@ -2440,7 +2441,8 @@ pub struct RelatedWorks {
 pub struct Estimate {
     /// Paid requests.
     pub requests: u64,
-    pub usd: f64,
+    /// What they'd cost, in US dollars.
+    pub cost_usd: f64,
     /// Whether the counts are known: otherwise a floor (seeds not
     /// resolved), or with related works a ceiling (their citing works'
     /// pages are exact; coupling's pages and the lookups at most).
@@ -2543,7 +2545,7 @@ impl Analysis {
             }),
             estimate: a.estimate.map(|e| Estimate {
                 requests: e.requests,
-                usd: e.usd,
+                cost_usd: e.cost_usd,
                 exact: e.exact,
             }),
             complete: a.complete(),
@@ -2766,8 +2768,8 @@ mod tests {
         assert_eq!(
             failure.budget_cap,
             Some(BudgetCap {
-                cap: 0.5,
-                used: 0.5012,
+                cap_usd: 0.5,
+                spent_usd: 0.5012,
                 resets_at: Some(time(resets)),
             })
         );
@@ -2785,7 +2787,7 @@ mod tests {
         };
         let failure = Failure::from(&unresolved);
         assert_eq!(failure.provider.as_deref(), Some("openalex"));
-        assert_eq!(failure.budget_cap.map(|c| c.cap), Some(0.5));
+        assert_eq!(failure.budget_cap.map(|c| c.cap_usd), Some(0.5));
         // Other failures carry none.
         let other = engine::EngineError::Provider {
             provider: ProviderId::from_static("openalex"),

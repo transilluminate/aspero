@@ -1,9 +1,9 @@
 {
   "complete": true,
   "estimate": {
+    "cost_usd": 0.0012000000000000001,
     "exact": false,
-    "requests": 12,
-    "usd": 0.0012000000000000001
+    "requests": 12
   },
   "incomplete": [],
   "seeds": [

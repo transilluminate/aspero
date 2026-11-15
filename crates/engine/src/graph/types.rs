@@ -376,8 +376,8 @@ impl Missing {
 pub struct Estimate {
     /// Paid requests.
     pub requests: u64,
-    /// At [`LIST_PRICE`](super::LIST_PRICE) each.
-    pub usd: f64,
+    /// In US dollars, at [`LIST_PRICE`](super::LIST_PRICE) each.
+    pub cost_usd: f64,
     /// Whether the counts are known: every seed resolved or settled (else
     /// a floor), and no related works asked for (whose coupling pages and
     /// lookups are a ceiling; their citing works' pages are exact).

@@ -16,6 +16,11 @@ unit. Only names change; values and shapes stay as they were.
 - `aspero budget`'s JSON: `limit` → `limit_usd`, `used` → `spent_usd`,
   `remaining` → `remaining_usd`, `prepaid_remaining` →
   `prepaid_remaining_usd`.
+- A reached daily cap's figures: `BudgetCap.cap` → `capUsd`,
+  `BudgetCap.used` → `spentUsd` (Swift only: JSON gives the cap as an
+  error message).
+- An analysis' estimate: `Estimate.usd` → `costUsd` (Swift), `usd` →
+  `cost_usd` (JSON; Rust: `Estimate::cost_usd`).
 - The OpenAlex daily cap: `Config.openalexDailyCap` →
   `openalexDailyCapUsd` (Swift), `StandardConfig::openalex_daily_cap` →
   `openalex_daily_cap_usd` (Rust), `--openalex-cap` → `--openalex-cap-usd`

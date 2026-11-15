@@ -606,7 +606,7 @@ async fn estimates_make_no_paid_calls() {
     let estimate = analysis.estimate.unwrap();
     // Two retraction checks (157 references) and one batch of candidates.
     assert_eq!(estimate.requests, 3);
-    assert!((estimate.usd - 0.0003).abs() < 1e-12);
+    assert!((estimate.cost_usd - 0.0003).abs() < 1e-12);
     assert!(estimate.exact);
     assert!(analysis.retracted_references.is_none() && analysis.probably_missing.is_none());
     let spent: f64 = analysis.usage.iter().filter_map(|(_, u)| u.cost).sum();
@@ -954,7 +954,7 @@ async fn estimates_agree_with_spend_on_a_mixed_set() {
         let run = engine.analyse(&seeds, &kinds, None, false).await.unwrap();
         let spent: f64 = run.usage.iter().filter_map(|(_, u)| u.cost).sum();
         assert!(
-            (spent - estimate.usd).abs() < 1e-12,
+            (spent - estimate.cost_usd).abs() < 1e-12,
             "cached: {cached}, estimated {estimate:?}, spent {spent}"
         );
         // Without a cache, the seeds' batches are paid again by the run.
@@ -1473,7 +1473,7 @@ async fn related_estimates_agree_with_spend_on_a_mixed_set() {
             .await
             .unwrap();
         assert!(
-            (spent(&run) - estimate.usd).abs() < 1e-12,
+            (spent(&run) - estimate.cost_usd).abs() < 1e-12,
             "cached: {cached}, estimated {estimate:?}, spent {}",
             spent(&run)
         );
@@ -1706,7 +1706,7 @@ async fn a_lookup_of_a_hundred_and_one_pays_once() {
         run.probably_missing.unwrap().incomplete
     );
     assert!(
-        (spent(&run) - estimate.usd).abs() < 1e-12,
+        (spent(&run) - estimate.cost_usd).abs() < 1e-12,
         "{}",
         spent(&run)
     );

@@ -55,27 +55,36 @@ fn engine() -> (Engine, Arc<Recorder>) {
     let client = || -> Arc<dyn HttpClient> { http.clone() };
     let providers: [(Arc<dyn Provider>, i32); 5] = [
         (
-            Arc::new(aspero_openalex::OpenAlex::new(Default::default(), client())),
+            Arc::new(aspero_openalex::OpenAlex::new(
+                aspero_openalex::OpenAlexConfig::default(),
+                client(),
+            )),
             10,
         ),
         (
-            Arc::new(aspero_crossref::Crossref::new(Default::default(), client())),
+            Arc::new(aspero_crossref::Crossref::new(
+                aspero_crossref::CrossrefConfig::default(),
+                client(),
+            )),
             20,
         ),
         (
-            Arc::new(aspero_datacite::Datacite::new(Default::default(), client())),
+            Arc::new(aspero_datacite::Datacite::new(
+                aspero_datacite::DataciteConfig::default(),
+                client(),
+            )),
             25,
         ),
         (
             Arc::new(aspero_europepmc::EuropePmc::new(
-                Default::default(),
+                aspero_europepmc::EuropePmcConfig::default(),
                 client(),
             )),
             35,
         ),
         (
             Arc::new(aspero_openlibrary::OpenLibrary::new(
-                Default::default(),
+                aspero_openlibrary::OpenLibraryConfig::default(),
                 client(),
             )),
             40,

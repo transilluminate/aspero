@@ -17,8 +17,8 @@ mod verify;
 mod work;
 
 pub use claim::{ClaimInput, InputClaim};
-pub use lookup::{Status, disagreements, input as input_lookup, invalid, item as lookup_item};
-pub use query::{QueryTree, parse_query, query_json};
+pub use lookup::{Status, input as input_lookup};
+pub use query::{QueryTree, parse_query};
 pub use scan::mention;
 pub use verify::{invalid_claim, verification};
 pub use work::{candidate, hit, set_abstract, usage, usage_one, work};

@@ -131,7 +131,8 @@ scripts/       fixture recorders, one per provider
   of terms (keywords, title, author, container, abstract, author id,
   identifier), filters and relations, instead of the keywords and fields. The engine
   normalises a tree (blank leaves and empty groups dropped, same-kind
-  groups flattened, an all or any of one node unwrapped), checks its
+  groups flattened, an all or any of one node unwrapped, a none of one
+  none read as any of what it held), checks its
   values (author ids, language codes, year ranges, identifiers, and work
   types beyond aspero's own: letters, digits and hyphens, as the request's
   type is too, never a source's filter syntax), folds the

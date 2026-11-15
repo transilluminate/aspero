@@ -255,9 +255,9 @@ impl QueryNode {
     }
 
     /// The tree with blank leaves and empty groups dropped, groups nested
-    /// in a group of the same kind flattened into it, and an all or any of
-    /// one node replaced by that node. `None` when nothing is left to
-    /// search by.
+    /// in a group of the same kind flattened into it, an all or any of
+    /// one node replaced by that node, and a none of one none by an any of
+    /// what that held. `None` when nothing is left to search by.
     pub fn normalised(self) -> Option<QueryNode> {
         match self {
             QueryNode::All(nodes) => group(Group::All, nodes),
@@ -408,6 +408,12 @@ fn group(kind: Group, nodes: Vec<QueryNode>) -> Option<QueryNode> {
             }
             (_, node) => flat.push(node),
         }
+    }
+    // None of a none is any of what it held.
+    if kind == Group::None
+        && let [QueryNode::None(inner)] = flat.as_mut_slice()
+    {
+        return group(Group::Any, std::mem::take(inner));
     }
     match (kind, flat.len()) {
         (_, 0) => None,
@@ -894,6 +900,23 @@ mod tests {
         assert_eq!(
             QueryNode::All(vec![QueryNode::None(vec![])]).normalised(),
             None
+        );
+        // None of none is any: a range of years, not one left out twice.
+        let years = QueryNode::filter(FilterValue::Years(YearRange {
+            from: Some(2020),
+            to: None,
+        }));
+        assert_eq!(
+            QueryNode::None(vec![QueryNode::None(vec![years.clone()])]).normalised(),
+            Some(years)
+        );
+        assert_eq!(
+            QueryNode::None(vec![QueryNode::None(vec![
+                title("a"),
+                QueryNode::Any(vec![title("b"), title("c")]),
+            ])])
+            .normalised(),
+            Some(QueryNode::Any(vec![title("a"), title("b"), title("c")]))
         );
         assert_eq!(title("  ").normalised(), None);
         assert_eq!(

@@ -400,8 +400,6 @@ pub struct Analysis {
     pub odd_one_out: Option<Section<OddOne>>,
     pub probably_missing: Option<Section<Missing>>,
     pub related: Option<Section<RelatedWork>>,
-    /// Kinds asked for that aren't built yet (none, now).
-    pub not_yet: Vec<AnalysisKind>,
     /// With `estimate_only`: the cost of running it, in place of the
     /// analyses.
     pub estimate: Option<Estimate>,

@@ -444,9 +444,6 @@ fn analysis_text(a: &Analysis, doc: &Value, related: bool) -> String {
             out.push_str(&stopped(i, "citing works read"));
         }
     }
-    for kind in &a.not_yet {
-        out.push_str(&format!("\n{}: not yet\n", kind.as_str().replace('_', " ")));
-    }
     for i in &a.incomplete {
         out.push_str(&format!("\nSeeds{}", stopped(i, "looked up")));
     }

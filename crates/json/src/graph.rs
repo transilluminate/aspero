@@ -48,8 +48,8 @@ pub fn references(input: &str, page: &ReferencesPage, full: bool) -> Value {
 }
 
 /// The analyses: every seed, then each analysis asked for (related works
-/// last), kinds not built yet, an estimate (with `estimate_only`),
-/// `complete`, and the usage.
+/// last), an estimate (with `estimate_only`), `complete`, `incomplete`,
+/// and the usage.
 pub fn analysis(a: &Analysis, full: bool) -> Value {
     let mut out = Map::new();
     let seeds: Vec<Value> = a
@@ -78,10 +78,6 @@ pub fn analysis(a: &Analysis, full: bool) -> Value {
     if let Some(found) = &a.related {
         out.insert("related".into(), section(found, |r| related(r, full)));
     }
-    if !a.not_yet.is_empty() {
-        let kinds: Vec<&str> = a.not_yet.iter().map(|k| k.as_str()).collect();
-        out.insert("not_yet".into(), json!(kinds));
-    }
     if let Some(e) = &a.estimate {
         out.insert("estimate".into(), estimate(e));
     }
@@ -103,8 +99,8 @@ const SECTIONS: [(&str, &str); 4] = [
 /// each item of each analysis tagged with its section (`retracted`,
 /// `odd_one_out`, `probably_missing`, `related`), then a `summary`: the
 /// rest of the document (`with_references`, `complete`, `incomplete`,
-/// `estimate`, `not_yet`, `usage`), with each analysis' own `complete`
-/// and `incomplete` under its name.
+/// `estimate`, `usage`), with each analysis' own `complete` and
+/// `incomplete` under its name.
 pub fn analysis_lines(doc: &Value) -> Vec<Value> {
     let tagged = |section: &str, item: &Value| {
         let mut line = Map::new();

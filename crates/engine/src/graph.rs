@@ -139,7 +139,6 @@ impl Engine {
             odd_one_out: None,
             probably_missing: None,
             related: None,
-            not_yet: Vec::new(),
             estimate: None,
             usage: Vec::new(),
         };

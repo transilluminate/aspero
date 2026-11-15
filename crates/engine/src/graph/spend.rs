@@ -5,7 +5,9 @@ use aspero_core::matching::{same_work, same_work_id};
 use aspero_core::{ErrorKind, FieldSet, ProviderId, SourceRecord, Usage, WorkId};
 
 use super::{Incomplete, IncompleteKind, LIST_PRICE, Seed};
-use crate::{Engine, Entry, Outcome, add_usage};
+use std::sync::Mutex;
+
+use crate::{Engine, Entry, Outcome, add_usage, lock};
 
 /// What an analysis has spent and may spend.
 pub(super) struct Spend {
@@ -45,6 +47,46 @@ impl Spend {
         self.spent += reported.unwrap_or(calls as f64 * LIST_PRICE);
         for (provider, u) in usage {
             add_usage(&mut self.usage, &provider, u);
+        }
+    }
+}
+
+/// What pages read at once may still spend, by what they cost: each page
+/// asked takes list price, then what OpenAlex says it cost. So a page that
+/// costs more than list price leaves less for the others, and none is
+/// asked that could take the spend past the budget at list price.
+pub(super) struct Purse {
+    left: Option<Mutex<f64>>,
+}
+
+impl Purse {
+    /// What `spend` leaves, less `keep` paid calls' worth (kept back).
+    pub(super) fn new(spend: &Spend, keep: usize) -> Self {
+        let left = spend
+            .budget
+            .map(|b| Mutex::new(b - spend.spent - keep as f64 * LIST_PRICE));
+        Purse { left }
+    }
+
+    /// Takes a page's list price, if it fits.
+    pub(super) fn take(&self) -> bool {
+        let Some(left) = &self.left else {
+            return true;
+        };
+        let mut left = lock(left);
+        // A hair over, as `Spend::allows`.
+        let fits = *left + LIST_PRICE * 1e-6 >= LIST_PRICE;
+        if fits {
+            *left -= LIST_PRICE;
+        }
+        fits
+    }
+
+    /// A page taken was asked: it cost `cost` (list price, unreported), or
+    /// nothing when it failed.
+    pub(super) fn settle(&self, cost: Option<f64>) {
+        if let Some(left) = &self.left {
+            *lock(left) -= cost.unwrap_or(LIST_PRICE) - LIST_PRICE;
         }
     }
 }

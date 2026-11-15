@@ -11,7 +11,11 @@
 //! each check of 100 references for retractions (`openalex:…,is_retracted:true`)
 //! and each page of 200 citing works (`cites:…`, for related works).
 //! An analysis spends within its budget: before each paid call, it stops if
-//! the call could take the spend past the budget.
+//! the call could take the spend past the budget, by what calls so far
+//! cost and this one at list price (its own cost is known only after: a
+//! call dearer than list price can pass the budget by the difference).
+//! Related works' pages, read four at a time, each take list price from
+//! what's left as soon as asked.
 //!
 //! The analyses' parts: [`types`] (what they say), [`seeds`] (resolving
 //! and merging the set), [`spend`] (the budget, and what counts as the

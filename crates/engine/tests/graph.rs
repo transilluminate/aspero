@@ -36,6 +36,8 @@ struct Alex {
     broken: Vec<WorkId>,
     /// The day's use, when it reports it (out of $1), as a key does.
     day: Mutex<Option<f64>>,
+    /// What a page of citing works costs.
+    page_cost: f64,
 }
 
 impl Alex {
@@ -56,6 +58,7 @@ impl Alex {
             blind: Vec::new(),
             broken: Vec::new(),
             day: Mutex::default(),
+            page_cost: 0.0001,
         }
     }
 
@@ -221,7 +224,7 @@ impl Provider for Alex {
         if let Some(cited) = filter.strip_prefix("cites:") {
             return Ok(Response::with_usage(
                 self.citing(cited, query),
-                self.charge(0.0001),
+                self.charge(self.page_cost),
             ));
         }
         let ids = filter
@@ -1658,4 +1661,35 @@ async fn a_lookup_of_a_hundred_and_one_pays_once() {
         spent(&run)
     );
     assert_eq!(alex.lookups()[2..], [100, 1]);
+}
+
+/// Pages costing three times list price: the budget shares out four at
+/// list price, but each page is asked only if what's left (by what pages
+/// cost) has it, so two are read, not four.
+#[tokio::test(start_paused = true)]
+async fn pages_dearer_than_list_price_stop_within_the_budget() {
+    let mut alex = Alex::new(with_classic());
+    alex.page_cost = 0.0003;
+    let alex = Arc::new(alex);
+    let engine = engine(alex.clone(), None);
+    // The seeds' batch, the lookup kept back, four pages at list price.
+    let analysis = engine
+        .analyse(
+            &inputs(&CLASSIC),
+            &[AnalysisKind::Related { limit: 5 }],
+            Some(0.0006),
+            false,
+        )
+        .await
+        .unwrap();
+    assert_eq!(alex.citing_pages().len(), 2, "{:?}", alex.citing_pages());
+    let stop = analysis.related.clone().unwrap().incomplete.unwrap();
+    assert_eq!(stop.kind, IncompleteKind::Budget);
+    assert_eq!(stop.stage, Some(Stage::Citing));
+    // Over by what the last page cost past list price, not by three pages.
+    assert!(
+        (spent(&analysis) - 0.0007).abs() < 1e-12,
+        "{}",
+        spent(&analysis)
+    );
 }

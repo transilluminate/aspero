@@ -44,7 +44,7 @@ use aspero_store::{Direction, Edges};
 use futures::StreamExt;
 
 use super::seeds::Group;
-use super::spend::{Spend, TheSet, merge_versions};
+use super::spend::{Purse, Spend, TheSet, merge_versions};
 use super::{
     Incomplete, IncompleteKind, MAX_FILTER, MIN_CITING, Section, Seed, Stage, openalex_id,
 };
@@ -127,6 +127,16 @@ fn citing_query(filter: &str, cursor: Option<Cursor>) -> SearchQuery {
     query.extra.insert("select".into(), SELECT.into());
     query.extra.insert("sort".into(), SORT.into());
     query
+}
+
+/// A `cites:` filter to read: up to `paid` pages after the `cached` ones
+/// (pages already read, from the first), each page read kept in the
+/// search cache when `remember`.
+struct Job {
+    filter: String,
+    paid: usize,
+    cached: Vec<Page>,
+    remember: bool,
 }
 
 /// What reading a filter's pages found.
@@ -325,21 +335,34 @@ impl Engine {
         }
         let coupling_allotted = coupling_paid.min(left);
 
-        let mut jobs: Vec<(String, usize, Vec<Page>, bool)> = Vec::new();
+        let mut jobs: Vec<Job> = Vec::new();
         for (c, &n) in filters.iter().zip(&allotted) {
-            jobs.push((c.filter(), n, Vec::new(), false));
+            jobs.push(Job {
+                filter: c.filter(),
+                paid: n,
+                cached: Vec::new(),
+                remember: false,
+            });
         }
         let coupling_cached = cached_pages.len();
         if let Some(filter) = &coupling {
-            jobs.push((filter.clone(), coupling_allotted, cached_pages, true));
+            jobs.push(Job {
+                filter: filter.clone(),
+                paid: coupling_allotted,
+                cached: cached_pages,
+                remember: true,
+            });
         }
-        let reads =
-            futures::stream::iter(jobs.into_iter().map(|(filter, paid, cached, remember)| {
-                self.read_citing(entry, filter, paid, cached, remember, &years)
-            }))
-            .buffered(READ_AT_ONCE)
-            .collect::<Vec<Read>>()
-            .await;
+        // Read four at a time, each page within what's left by what pages
+        // cost (OpenAlex may charge more than list price).
+        let purse = Purse::new(spend, lookups);
+        let reads = futures::stream::iter(
+            jobs.into_iter()
+                .map(|job| self.read_citing(entry, job, &years, &purse)),
+        )
+        .buffered(READ_AT_ONCE)
+        .collect::<Vec<Read>>()
+        .await;
         let mut reads = reads.into_iter();
         let mut citing: BTreeMap<WorkId, Vec<WorkId>> = BTreeMap::new();
         let mut stops = Stops::default();
@@ -528,18 +551,21 @@ impl Engine {
         Section::new(items, stops.incomplete((done, total), &provider))
     }
 
-    /// Reads up to `paid` pages of a `cites:` filter after the `cached` ones
-    /// (pages already read, from the first), keeping each page read in the
-    /// search cache when `remember`; `years` are the set's works' years.
+    /// Reads a job's pages, each if the `purse` has it; `years` are the
+    /// set's works' years.
     async fn read_citing(
         &self,
         entry: &Entry,
-        filter: String,
-        paid: usize,
-        cached: Vec<Page>,
-        remember: bool,
+        job: Job,
         years: &BTreeMap<WorkId, i16>,
+        purse: &Purse,
     ) -> Read {
+        let Job {
+            filter,
+            paid,
+            cached,
+            remember,
+        } = job;
         let provider = entry.provider.id();
         let mut read = Read::default();
         let mut cursor = None;
@@ -556,10 +582,19 @@ impl Engine {
                 read.failed = true;
                 break;
             }
-            match self
+            if !purse.take() {
+                read.budget = true;
+                break;
+            }
+            let answer = self
                 .call_paid(entry, || entry.provider.search(&query))
-                .await
-            {
+                .await;
+            let cost = match &answer {
+                Ok(resp) => resp.usage.as_ref().and_then(|u| u.cost),
+                Err(_) => Some(0.0),
+            };
+            purse.settle(cost);
+            match answer {
                 Ok(resp) => {
                     read.paid += 1;
                     if let Some(u) = resp.usage {

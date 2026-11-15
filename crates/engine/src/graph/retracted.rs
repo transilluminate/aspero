@@ -89,30 +89,36 @@ impl Engine {
             .filter(|id| !retracted.contains_key(id))
             .map(|id| (*id).clone())
             .collect();
-        let registry = self.registry().map(|e| e.provider.id());
-        for (id, record) in unflagged
+        let records: Vec<(&WorkId, SourceRecord)> = unflagged
             .iter()
             .zip(self.stale_lookups(&provider, &unflagged))
-        {
-            let Some(record) = record else { continue };
+            .filter_map(|(id, record)| Some((id, record?)))
+            .collect();
+        // The registry's notices for the DOIs of those OpenAlex doesn't
+        // flag, in one read of the cache.
+        let registry = self.registry().map(|e| e.provider.id());
+        let dois: Vec<WorkId> = records
+            .iter()
+            .filter(|(_, r)| r.work.retraction().is_none())
+            .flat_map(|(_, r)| r.ids.iter().filter(|i| i.kind() == IdKind::Doi).cloned())
+            .collect::<BTreeSet<WorkId>>()
+            .into_iter()
+            .collect();
+        let notices: BTreeMap<WorkId, String> = match &registry {
+            Some(registry) if !dois.is_empty() => dois
+                .iter()
+                .zip(self.stale_lookups(registry, &dois))
+                .filter_map(|(doi, r)| {
+                    let source = notice_source(r?.work.retraction()?, registry.as_str());
+                    Some((doi.clone(), source))
+                })
+                .collect(),
+            _ => BTreeMap::new(),
+        };
+        for (id, record) in records {
             let notice = match record.work.retraction() {
                 Some(u) => Some(notice_source(u, OPENALEX)),
-                None => registry.as_ref().and_then(|registry| {
-                    let dois: Vec<WorkId> = record
-                        .ids
-                        .iter()
-                        .filter(|i| i.kind() == IdKind::Doi)
-                        .cloned()
-                        .collect();
-                    self.stale_lookups(registry, &dois)
-                        .into_iter()
-                        .flatten()
-                        .find_map(|r| {
-                            r.work
-                                .retraction()
-                                .map(|u| notice_source(u, registry.as_str()))
-                        })
-                }),
+                None => record.ids.iter().find_map(|i| notices.get(i).cloned()),
             };
             if let Some(source) = notice {
                 retracted.insert(id.clone(), (record, source));

@@ -6,7 +6,7 @@ use aspero_core::{IdKind, ProviderId, SearchQuery, SourceRecord, Update, WorkId}
 
 use super::{
     Incomplete, IncompleteKind, MAX_FILTER, OPENALEX, RetractedReference, Section, Seed, Spend,
-    openalex_id,
+    any_of, openalex_id,
 };
 use crate::{Engine, Served};
 
@@ -133,18 +133,11 @@ fn notice_source(update: &Update, fallback: &str) -> String {
 
 /// The search finding which of `ids` OpenAlex flags as retracted.
 fn retracted_query(ids: &[&WorkId]) -> SearchQuery {
-    let values: Vec<String> = ids
-        .iter()
-        .map(|id| match id {
-            WorkId::OpenAlex(w) => w.to_string(),
-            other => other.to_string(),
-        })
-        .collect();
     let mut query = SearchQuery::new("");
     query.page.limit = MAX_FILTER as u32;
     query.extra.insert(
         "filter".into(),
-        format!("openalex:{},is_retracted:true", values.join("|")),
+        format!("openalex:{},is_retracted:true", any_of(ids.iter().copied())),
     );
     query
 }

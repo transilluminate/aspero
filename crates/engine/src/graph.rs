@@ -53,6 +53,18 @@ const MAX_FILTER: usize = 100;
 /// Seeds that must cite a work for it to be probably missing.
 const MIN_CITING: usize = 2;
 
+/// Works ORed in an OpenAlex filter: `W1|W2|…` (OpenAlex ids bare).
+fn any_of<'a>(works: impl IntoIterator<Item = &'a WorkId>) -> String {
+    let values: Vec<String> = works
+        .into_iter()
+        .map(|w| match w {
+            WorkId::OpenAlex(id) => id.to_string(),
+            other => other.to_string(),
+        })
+        .collect();
+    values.join("|")
+}
+
 /// The OpenAlex work id among a record's identifiers.
 fn openalex_id(record: &SourceRecord) -> Option<&WorkId> {
     record.ids.iter().find(|id| id.kind() == IdKind::OpenAlex)

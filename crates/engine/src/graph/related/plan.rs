@@ -4,7 +4,7 @@
 
 use aspero_core::WorkId;
 
-use super::super::MAX_FILTER;
+use super::super::{MAX_FILTER, any_of};
 
 /// Works per page of citing works: OpenAlex's most.
 pub(super) const PAGE: u64 = 200;
@@ -32,15 +32,9 @@ impl Cites {
     }
 }
 
+/// The filter of the works citing any of `works`.
 pub(super) fn cites(works: &[WorkId]) -> String {
-    let values: Vec<String> = works
-        .iter()
-        .map(|w| match w {
-            WorkId::OpenAlex(id) => id.to_string(),
-            other => other.to_string(),
-        })
-        .collect();
-    format!("cites:{}", values.join("|"))
+    format!("cites:{}", any_of(works))
 }
 
 /// Works cited at most a page's worth of times (each with its count),

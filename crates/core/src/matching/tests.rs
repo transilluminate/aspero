@@ -690,6 +690,40 @@ fn another_edition_of_a_cited_book_is_plausible() {
     // Not for articles: a different year there is more often another work.
     book.work.work_type = Some(crate::work::WorkType::JournalArticle);
     assert!(assess(&Claim::from_text(ATLS), &book).confidence < PLAUSIBLE);
+
+    // Nor lowered again after: a structured claim giving the publisher
+    // as its container, for a book in a series.
+    let mut book = record(
+        &[],
+        "Reinforcement Learning: An Introduction",
+        &["Richard S. Sutton", "Andrew G. Barto"],
+        1998,
+    );
+    book.work.work_type = Some(crate::work::WorkType::Book);
+    book.work.container_title = Some("Adaptive Computation and Machine Learning".into());
+    let claim = Claim {
+        title: Some("Reinforcement Learning: An Introduction".into()),
+        authors: vec!["Sutton RS".into(), "Barto AG".into()],
+        year: Some(2018),
+        container: Some("MIT Press".into()),
+        ..Claim::default()
+    };
+    let a = assess(&claim, &book);
+    assert!(a.confidence >= PLAUSIBLE, "{a:?}");
+}
+
+#[test]
+fn a_chapter_is_not_another_edition_of_its_book() {
+    // The book's editor is not the chapter's author.
+    let mut book = record(&[], "Handbook of Sepsis", &["K. Jones"], 2018);
+    book.work.work_type = Some(crate::work::WorkType::Book);
+    for text in [
+        "Smith J. Fluids in shock. In: Jones K, ed. Handbook of Sepsis. Springer; 2010:12-30.",
+        "Smith, J. (2010). Fluids in shock. In K. Jones (Ed.), Handbook of sepsis (pp. 12-30). Springer.",
+    ] {
+        let a = assess(&Claim::from_text(text), &book);
+        assert!(a.confidence < PLAUSIBLE, "{text}: {a:?}");
+    }
 }
 
 #[test]

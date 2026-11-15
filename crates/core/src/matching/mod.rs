@@ -349,6 +349,19 @@ fn is_url(title: &str) -> bool {
         || t.contains("://")
 }
 
+/// Whether a reference cites a chapter in a book: "In: Jones K, ed. …",
+/// "In K. Jones (Ed.), …", "In Handbook of Sepsis, edited by …".
+fn cites_chapter(text: &str) -> bool {
+    let tokens: Vec<&str> = text.split_whitespace().collect();
+    tokens.iter().enumerate().any(|(i, t)| {
+        *t == "In:"
+            || (*t == "In"
+                && tokens[i + 1..]
+                    .iter()
+                    .any(|t| t.starts_with("(Ed") || *t == "edited"))
+    })
+}
+
 fn dedup_years(mut years: Vec<i16>) -> Vec<i16> {
     years.sort_unstable();
     years.dedup();
@@ -553,16 +566,6 @@ pub fn assess(claim: &Claim, record: &SourceRecord) -> Assessment {
     {
         confidence = confidence.min(NO_EVIDENCE_CAP);
     }
-    // Another edition of a book: the same title and authors, another year
-    // (a 9th edition cited, a later one found). The book is right; the
-    // year is a difference.
-    if work.work_type == Some(crate::work::WorkType::Book)
-        && title.agreement == Agreement::Match
-        && authors.score.is_some_and(|s| s >= CORROBORATING_AUTHORS)
-        && year.agreement == Agreement::Mismatch
-    {
-        confidence = confidence.max(EDITION);
-    }
     // Journal, volume and first page together name one work, title or no
     // title ("Injury 47 (2016) 797–804"), unless something contradicts
     // it.
@@ -594,6 +597,19 @@ pub fn assess(claim: &Claim, record: &SourceRecord) -> Assessment {
     }
     if wrong_journal {
         confidence = confidence.min(JOURNAL_MISMATCH_CAP);
+    }
+    // Another edition of a book: the same title and authors, another year
+    // (a 9th edition cited, a later one found). The book is right; the
+    // year, or a publisher given as its container, is a difference. A
+    // chapter cited in the book is not the book: its authors found may be
+    // the book's editors.
+    if work.work_type == Some(crate::work::WorkType::Book)
+        && title.agreement == Agreement::Match
+        && authors.score.is_some_and(|s| s >= CORROBORATING_AUTHORS)
+        && year.agreement == Agreement::Mismatch
+        && !claim.text.as_deref().is_some_and(cites_chapter)
+    {
+        confidence = confidence.max(EDITION);
     }
     // A reply, correction or commentary is not the work it responds to,
     // unless the citation says it is citing one.

@@ -1,10 +1,10 @@
 //! `aspero verify`: does a citation refer to a real work, with matching
 //! details?
 
-use std::io::IsTerminal;
-
 use aspero_core::{ProviderId, Usage};
-use aspero_engine::{Engine, Verdict, Verification};
+use aspero_engine::{
+    Candidate, Difference, Engine, Reason, Verdict, Verification, describe_update,
+};
 use aspero_json::{ClaimInput, InputClaim};
 use futures::StreamExt;
 use serde_json::{Value, json};
@@ -13,7 +13,9 @@ use super::claim::claims;
 use super::{Failure, Out, print, print_line};
 use crate::args::{ClaimArgs, Format};
 use crate::exit::Exit;
+use crate::grid::{self, Col, Grid, Text};
 use crate::output::{self, Level};
+use crate::term::{self, Paint, Progress};
 
 pub async fn run(engine: &Engine, args: ClaimArgs, out: Out) -> Result<Exit, Failure> {
     let limit = args.limit;
@@ -26,18 +28,25 @@ pub async fn run(engine: &Engine, args: ClaimArgs, out: Out) -> Result<Exit, Fai
 
     let (positions, valid) = InputClaim::valid(&claims);
     let total = claims.len();
-    let show_progress = out.format == Format::Table && total > 1 && std::io::stderr().is_terminal();
-    let mut results = Results::new(out.format, total, show_progress);
+    let mut results = Results::new(out.format, total);
     let mut export = output::Exporter::new(&out)?;
     for (i, claim) in claims.iter().enumerate() {
         if let Err(e) = &claim.claim {
             let item = aspero_json::invalid_claim(claim.echo(), e);
-            let text = format!("INVALID  {}\n  {e}\n", claim.input);
+            let invalid = term::paint("INVALID", Paint::Strong(Level::Error));
+            let text = format!("{invalid}  {}\n  {e}\n", claim.input);
+            let row = vec![
+                grid::status("INVALID", Level::Error),
+                Text::default(),
+                Text::from(&claim.input),
+                Text::from(e.as_str()),
+            ];
             results.add(
                 i,
                 Done {
                     item,
                     text,
+                    row,
                     verdict: None,
                 },
             );
@@ -66,6 +75,7 @@ pub async fn run(engine: &Engine, args: ClaimArgs, out: Out) -> Result<Exit, Fai
                 Done {
                     item,
                     text,
+                    row: Vec::new(),
                     verdict: Some(v.verdict),
                 },
             );
@@ -83,11 +93,13 @@ pub async fn run(engine: &Engine, args: ClaimArgs, out: Out) -> Result<Exit, Fai
             text.push_str(&output::abstract_text(found.as_ref(), "  "));
             text.push('\n');
         }
+        let row = row(&claim.input, &v);
         results.add(
             i,
             Done {
                 item,
                 text,
+                row,
                 verdict: Some(v.verdict),
             },
         );
@@ -97,35 +109,39 @@ pub async fn run(engine: &Engine, args: ClaimArgs, out: Out) -> Result<Exit, Fai
     Ok(exit)
 }
 
-/// One claim's result: its JSON, its text, and its verdict (`None` when
-/// the claim couldn't be read).
+/// One claim's result: its JSON, its text, its table row, and its verdict
+/// (`None` when the claim couldn't be read).
 struct Done {
     item: Value,
     text: String,
+    row: Vec<Text>,
     verdict: Option<Verdict>,
 }
 
 /// Results as claims complete: JSON lines at once, in any order (each
 /// echoes its input and key); text in claim order as soon as each is
-/// next; tables and documents at the end.
+/// next; tables and documents at the end. On a terminal, how many are
+/// done shows on stderr meanwhile.
 struct Results {
     format: Format,
     slots: Vec<Option<Done>>,
     /// The next claim to print as text.
     next: usize,
     done: usize,
-    show_progress: bool,
+    progress: Progress,
     exit: Exit,
 }
 
 impl Results {
-    fn new(format: Format, total: usize, show_progress: bool) -> Self {
+    fn new(format: Format, total: usize) -> Self {
+        let mut progress = Progress::new("citations", if format.is_human() { total } else { 0 });
+        progress.show(0);
         Results {
             format,
             slots: (0..total).map(|_| None).collect(),
             next: 0,
             done: 0,
-            show_progress,
+            progress,
             exit: Exit::Ok,
         }
     }
@@ -139,47 +155,43 @@ impl Results {
                 self.slots[i] = Some(done);
                 while let Some(Some(done)) = self.slots.get(self.next) {
                     if !done.text.is_empty() {
-                        println!("{}", done.text);
+                        self.progress.clear();
+                        if self.format == Format::Text {
+                            println!("{}", term::fill(&done.text));
+                        } else {
+                            println!("{}", done.text);
+                        }
                     }
                     self.next += 1;
                 }
+                self.progress.show(self.done);
             }
             _ => {
                 self.slots[i] = Some(done);
-                if self.show_progress {
-                    eprint!("\rverified {}/{}…", self.done, self.slots.len());
-                }
+                self.progress.show(self.done);
             }
         }
     }
 
-    fn finish(self, usage: &[(ProviderId, Usage)]) -> Exit {
-        if self.show_progress {
-            eprint!("\r\x1b[K");
-        }
+    fn finish(mut self, usage: &[(ProviderId, Usage)]) -> Exit {
+        self.progress.clear();
         let done = self.slots.into_iter().flatten();
         match self.format {
             Format::Jsonl | Format::Bibtex | Format::Ris | Format::CslJson | Format::Cite => {}
-            Format::Text => {
-                if let Some(text) = output::usage_text(usage) {
-                    eprintln!("{text}");
-                }
-            }
+            Format::Text => output::eprint_usage(usage),
             Format::Table => {
                 let done: Vec<Done> = done.collect();
                 // One claim is detail, not rows: show it as text.
                 if let [one] = &done[..] {
-                    println!("{}", one.text);
+                    println!("{}", term::fill(&one.text));
                 } else {
-                    let mut table = output::table(&["Verdict", "Conf", "Citation", "Reason"]);
-                    for d in &done {
-                        table.add_row(row(&d.item, d.verdict));
+                    let mut grid = Grid::new(cols());
+                    for d in done {
+                        grid.row(d.row);
                     }
-                    println!("{table}");
+                    println!("{grid}");
                 }
-                if let Some(text) = output::usage_text(usage) {
-                    eprintln!("{text}");
-                }
+                output::eprint_usage(usage);
             }
             Format::Json | Format::Auto => {
                 let items: Vec<Value> = done.map(|d| d.item).collect();
@@ -205,25 +217,106 @@ pub fn split(args: ClaimArgs) -> (Option<String>, ClaimInput) {
     (args.text, fields)
 }
 
-/// One verification as a table row: verdict, confidence, citation, reason.
-fn row(item: &Value, verdict: Option<Verdict>) -> Vec<comfy_table::Cell> {
-    use comfy_table::Cell;
-    let level = match verdict {
-        Some(Verdict::Verified) => Level::Good,
-        Some(Verdict::Plausible | Verdict::Unverifiable) => Level::Warning,
+fn level(verdict: Verdict) -> Level {
+    match verdict {
+        Verdict::Verified => Level::Good,
+        Verdict::Plausible | Verdict::Unverifiable => Level::Warning,
         _ => Level::Error,
-    };
-    let verdict = item["verdict"].as_str().unwrap_or("?");
-    let confidence = item["best_match"]["confidence"]
-        .as_f64()
-        .map(|c| format!("{c:.2}"))
-        .unwrap_or_default();
-    vec![
-        output::status_cell(&verdict.replace('_', " ").to_uppercase(), level),
-        Cell::new(confidence),
-        Cell::new(item["input"].as_str().unwrap_or("")),
-        Cell::new(item["reason_text"].as_str().unwrap_or("")),
+    }
+}
+
+/// "VERIFIED", "NOT FOUND".
+fn verdict_word(verdict: Verdict) -> String {
+    verdict.as_str().replace('_', " ").to_uppercase()
+}
+
+/// The columns of [`row`].
+fn cols() -> [Col; 4] {
+    [
+        Col::content("Verdict"),
+        Col::content("Conf"),
+        Col::fill("Citation"),
+        Col::fill("Match"),
     ]
+}
+
+/// One verification as a table row: verdict, confidence, citation, and
+/// what's wrong (as in the text) above the work matched.
+fn row(input: &str, v: &Verification) -> Vec<Text> {
+    let best = v.best_match.map(|i| &v.report.candidates[i]);
+    let confidence = best.map_or(String::new(), |c| format!("{:.2}", c.assessment.confidence));
+    let mut found: Vec<String> = why(v).into_iter().collect();
+    if let Some(c) = best {
+        found.push(described(c));
+        found.push(output::main_id(&c.ids));
+    }
+    found.extend(v.notes.iter().map(|n| format!("⚠ {}", describe_update(n))));
+    vec![
+        grid::status(verdict_word(v.verdict), level(v.verdict)),
+        Text::from(confidence),
+        Text::from(input),
+        Text::from(found.join("\n")),
+    ]
+}
+
+/// `"Deep learning" (2015)`.
+fn described(c: &Candidate) -> String {
+    let w = &c.record.work;
+    let title = w.title.as_deref().unwrap_or("(untitled)");
+    match w.issued {
+        Some(d) => format!("\"{title}\" ({})", d.year()),
+        None => format!("\"{title}\""),
+    }
+}
+
+/// "its year (2017) differs", "its authors and year (2017) differ".
+fn clause(differs: &[Difference]) -> Option<String> {
+    let fields: Vec<String> = differs.iter().map(ToString::to_string).collect();
+    match fields.len() {
+        0 => None,
+        1 => Some(format!("its {} differs", fields[0])),
+        _ => Some(format!("its {} differ", fields.join(" and "))),
+    }
+}
+
+/// Why the verdict, worded not to repeat the work shown with it: nothing
+/// for a plain match, what differs for a partial one, and what became of
+/// the identifiers cited.
+fn why(v: &Verification) -> Option<String> {
+    let claimed = v
+        .read
+        .ids
+        .iter()
+        .map(ToString::to_string)
+        .collect::<Vec<_>>()
+        .join(", ");
+    let differs = || clause(v.reason.differs());
+    Some(match &v.reason {
+        Reason::Matches | Reason::IdExists | Reason::IdAgrees => return None,
+        Reason::PartlyMatches { .. } => differs().unwrap_or_else(|| "check the details".into()),
+        Reason::Unconfirmed => {
+            "agrees as far as it goes, but gives too little to confirm it".into()
+        }
+        Reason::Closest { .. } => format!(
+            "the closest work, but {}",
+            differs().unwrap_or_else(|| "its details differ".into())
+        ),
+        Reason::NoMatch => "no matching work found".into(),
+        Reason::IdPartlyMatches { .. } => match differs() {
+            Some(d) => format!("{claimed} exists, but {d}"),
+            None => format!("{claimed} exists and partly matches"),
+        },
+        Reason::IdElsewhere { cited } => format!(
+            "{claimed} is another work, {}; the citation matches this one",
+            described(&v.report.candidates[*cited])
+        ),
+        Reason::IdDisagrees => format!("{claimed} is this work, which doesn't match the citation"),
+        Reason::IdMissingElsewhere => {
+            format!("{claimed} doesn't exist; the citation matches this work")
+        }
+        Reason::IdMissing => format!("{claimed} doesn't exist, and no matching work was found"),
+        _ => v.reason_text.clone(),
+    })
 }
 
 pub(super) fn exit_for(verdict: Verdict) -> Exit {
@@ -235,19 +328,57 @@ pub(super) fn exit_for(verdict: Verdict) -> Exit {
     }
 }
 
+/// The verdict and the citation; why, unless it simply matches; then the
+/// work matched: checks, details, and how it was found.
 pub(super) fn verdict_text(input: &str, v: &Verification) -> String {
-    let mut lines = vec![
-        format!(
-            "{}  {input}",
-            v.verdict.as_str().to_uppercase().replace('_', " ")
-        ),
-        format!("  {}", v.reason_text),
-    ];
+    let verdict = term::paint(&verdict_word(v.verdict), Paint::Strong(level(v.verdict)));
+    let mut lines = vec![format!("{verdict}  {input}")];
+    if let Some(why) = why(v) {
+        lines.push(format!("  {why}"));
+    }
     if let Some(best) = v.best_match {
         lines.push(output::candidate_text(&v.report.candidates[best], "  "));
     }
     for e in &v.report.errors {
-        lines.push(format!("  warning: {e}"));
+        let warning = term::paint("warning:", Paint::Warning);
+        lines.push(format!("  {warning} {e}"));
     }
     lines.join("\n") + "\n"
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::cmd::testing::{Scripted, engine, pinned, work};
+
+    /// What `verify` prints, byte for byte, as text and as a table at 80
+    /// columns: a match, a cited DOI that is another work's, and none.
+    #[tokio::test]
+    async fn text_is_pinned() {
+        let lecun = ["Yann LeCun", "Yoshua Bengio", "Geoffrey Hinton"];
+        let engine = engine(vec![Scripted::new(
+            "openalex",
+            vec![
+                work(&["10.1038/nature14539"], "Deep learning", &lecun, 2015),
+                work(&["10.1145/3448250"], "Deep learning for AI", &lecun, 2021),
+            ],
+        )]);
+        let lines = [
+            r#"{"title": "Deep learning", "authors": ["LeCun Y"], "year": 2015}"#,
+            r#"{"title": "Deep learning", "authors": ["LeCun Y"], "year": 2015, "doi": "10.1145/3448250"}"#,
+            r#"{"title": "A wholly invented study", "authors": ["Nobody A"], "year": 2020}"#,
+        ];
+        let mut text = String::new();
+        let mut grid = Grid::new(cols());
+        for line in lines {
+            let claim = InputClaim::from_line(line);
+            let v = engine.verify(claim.claim.as_ref().unwrap(), 5).await;
+            text.push_str(&verdict_text(&claim.input, &v));
+            text.push('\n');
+            grid.row(row(&claim.input, &v));
+        }
+        text.push_str(&grid.render(Some(80), false));
+        text.push('\n');
+        pinned("verify/expected.txt", &text);
+    }
 }

@@ -10,7 +10,8 @@ use serde_json::json;
 use super::{Failure, Out, print, print_line, read_stdin};
 use crate::args::Format;
 use crate::exit::Exit;
-use crate::output;
+use crate::grid::{Col, Grid};
+use crate::term;
 
 // Like every command: main hands over what it parsed.
 #[allow(clippy::needless_pass_by_value)]
@@ -24,20 +25,44 @@ pub fn run(files: Vec<PathBuf>, out: Out) -> Result<Exit, Failure> {
     match out.format {
         Format::Jsonl => mentions.iter().for_each(print_line),
         Format::Table => {
-            let mut table = output::table(&["File", "Line", "Identifier", "Context"]);
+            // One file's name, given on the command line, needn't fill a
+            // column.
+            let files = mentions
+                .iter()
+                .map(|m| m["file"].as_str())
+                .collect::<std::collections::BTreeSet<_>>()
+                .len();
+            let mut cols = vec![
+                Col::cap("File", 30),
+                Col::content("Line"),
+                Col::content("Identifier"),
+                Col::fill("Context"),
+            ];
+            if files < 2 {
+                cols.remove(0);
+            }
+            let mut grid = Grid::new(cols);
             for m in &mentions {
-                table.add_row(vec![
+                let mut row = vec![
                     m["file"].as_str().unwrap_or("").to_owned(),
                     format!("{}:{}", m["line"], m["column"]),
                     m["id"].as_str().unwrap_or("").to_owned(),
                     m["context"].as_str().unwrap_or("").to_owned(),
-                ]);
+                ];
+                if files < 2 {
+                    row.remove(0);
+                }
+                grid.row(row);
             }
-            println!("{table}");
+            if mentions.is_empty() {
+                println!("no identifiers found");
+            } else {
+                println!("{grid}");
+            }
         }
         Format::Text => {
             for m in &mentions {
-                println!(
+                let line = format!(
                     "{}:{}:{}  {}  {}",
                     m["file"].as_str().unwrap_or(""),
                     m["line"],
@@ -45,6 +70,7 @@ pub fn run(files: Vec<PathBuf>, out: Out) -> Result<Exit, Failure> {
                     m["id"].as_str().unwrap_or(""),
                     m["context"].as_str().unwrap_or("")
                 );
+                println!("{}", term::fill(&line));
             }
         }
         _ => print(&json!({ "mentions": mentions })),

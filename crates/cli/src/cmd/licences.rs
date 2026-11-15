@@ -8,7 +8,7 @@ use serde_json::json;
 use super::{Out, print, print_line};
 use crate::args::Format;
 use crate::exit::Exit;
-use crate::output;
+use crate::grid::{Col, Grid};
 
 const NOTICES: &str = include_str!("../../notices/notices.txt");
 const DEPENDENCIES: &str = include_str!("../../notices/dependencies.json");
@@ -46,11 +46,15 @@ pub fn run(out: Out) -> Exit {
             }
         }
         _ => {
-            let mut table = output::table(&["Name", "Version", "Licence"]);
+            let mut grid = Grid::new([
+                Col::content("Name"),
+                Col::content("Version"),
+                Col::fill("Licence"),
+            ]);
             for d in &file.dependencies {
-                table.add_row(vec![&d.name, &d.version, &d.license]);
+                grid.row([&d.name, &d.version, &d.license]);
             }
-            println!("{table}");
+            println!("{grid}");
         }
     }
     Exit::Ok

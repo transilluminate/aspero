@@ -7,7 +7,9 @@ use serde_json::json;
 use super::{Failure, Out, print, print_line, shell_quote};
 use crate::args::{Format, SearchOptions, SortBy};
 use crate::exit::Exit;
+use crate::grid::{Col, Grid};
 use crate::output;
+use crate::term;
 
 pub async fn run(
     engine: &Engine,
@@ -48,24 +50,23 @@ pub async fn run(
             .flatten()
             .for_each(print_line),
         Format::Table => {
-            println!("{}", hits_table(&page.hits));
+            if !page.hits.is_empty() {
+                println!("{}", hits_table(&page.hits));
+            }
             for (i, hit) in page.hits.iter().enumerate() {
                 if let Some(a) = found(i) {
-                    println!(
-                        "\n{}. {}\n{}",
-                        i + 1,
-                        output::main_id(&hit.record.ids),
-                        output::abstract_text(a, "  ")
-                    );
+                    let text = output::abstract_text(a, "  ");
+                    let id = output::main_id(&hit.record.ids);
+                    println!("\n{}. {id}\n{}", i + 1, term::fill(&text));
                 }
             }
             footer(&report, next.as_deref());
         }
         Format::Text => {
             for (i, hit) in page.hits.iter().enumerate() {
-                print!("{}", output::hit_text(i + 1, hit));
+                print!("{}", term::fill(&output::hit_text(i + 1, hit)));
                 if let Some(a) = found(i) {
-                    println!("{}", output::abstract_text(a, "    "));
+                    println!("{}", term::fill(&output::abstract_text(a, "    ")));
                 }
                 println!();
             }
@@ -96,76 +97,75 @@ pub async fn run(
     })
 }
 
-/// Totals, ignored filters, paging and spend, on stderr.
-/// The hits as a table: a Score column when any hit has one (scores are
-/// the provider's, and some give none), and Cited (`cited_by_count`) when
-/// any work says how often it's cited.
-fn hits_table(hits: &[aspero_core::Hit]) -> comfy_table::Table {
-    use comfy_table::CellAlignment;
-    let scored = hits.iter().any(|h| h.score.is_some());
+/// The hits as a table, ranked; Cited (`cited_by_count`) when any work
+/// says how often it's cited. Not the provider's relevance score: a raw
+/// number in its own units, which the rank already says. Too narrow for
+/// them all, the identifier moves under the title, then the citation
+/// count and the author go.
+fn hits_table(hits: &[aspero_core::Hit]) -> Grid {
     let counted = hits.iter().any(|h| h.record.work.cited_by_count.is_some());
-    let mut headers = vec!["#"];
-    if scored {
-        headers.push("Score");
-    }
-    headers.push("Year");
+    let mut cols = vec![
+        Col::content("#").right(),
+        Col::cap("Author", 20).drops(3),
+        Col::content("Year"),
+    ];
     if counted {
-        headers.push("Cited");
+        cols.push(Col::content("Cited").right().drops(2));
     }
-    headers.extend(["Author", "Title", "ID"]);
-    let mut table = output::table(&headers);
+    cols.extend([
+        Col::fill("Title").or_when_folded("Work"),
+        Col::content("ID").folds(1, "Title"),
+    ]);
+    let mut grid = Grid::new(cols);
     for (i, hit) in hits.iter().enumerate() {
         let w = &hit.record.work;
-        let mut row = vec![(i + 1).to_string()];
-        if scored {
-            row.push(hit.score.map(|s| format!("{s:.1}")).unwrap_or_default());
-        }
-        row.push(output::year(w));
+        let mut row = vec![(i + 1).to_string(), output::author_cell(w), output::year(w)];
         if counted {
             row.push(w.cited_by_count.map(output::thousands).unwrap_or_default());
         }
         row.extend([
-            output::first_author(w),
             w.title.clone().unwrap_or_default(),
             output::main_id(&hit.record.ids),
         ]);
-        table.add_row(row);
+        grid.row(row);
     }
-    for (i, header) in headers.iter().enumerate() {
-        if matches!(*header, "#" | "Score" | "Cited")
-            && let Some(column) = table.column_mut(i)
-        {
-            column.set_cell_alignment(CellAlignment::Right);
-        }
-    }
-    table
+    grid
 }
 
+/// Totals, ignored filters, paging and spend, on stderr.
 fn footer(report: &aspero_engine::SearchReport, next: Option<&str>) {
     let page = &report.page;
-    let total = page.total.map(|t| format!(" of {t}")).unwrap_or_default();
+    let total = page
+        .total
+        .map(|t| format!(" of {}", output::thousands(t)))
+        .unwrap_or_default();
     let served = match report.served {
         aspero_engine::Served::Live => String::new(),
         s => format!(" ({})", s.as_str()),
     };
-    eprintln!(
-        "{} results{total} via {}{served}",
-        page.hits.len(),
-        report.provider
-    );
+    let results = match page.hits.len() {
+        1 => "1 result".to_owned(),
+        n => format!("{n} results"),
+    };
+    output::eprint_dim(&format!("{results}{total} via {}{served}", report.provider));
     if !report.ignored_filters.is_empty() {
-        eprintln!(
-            "ignored filters (unsupported by {}): {:?}",
-            report.provider, report.ignored_filters
-        );
+        let ignored: Vec<String> = report
+            .ignored_filters
+            .iter()
+            .map(|f| f.as_str().replace('_', " "))
+            .collect();
+        output::eprint_warning(&format!(
+            "{} can't filter by {}, so ignored it",
+            report.provider,
+            ignored.join(", ")
+        ));
     }
     if let Some(next) = next {
-        eprintln!("next page: {next}");
+        // Whole, to copy and paste.
+        output::eprint_dim(&format!("Next page: {next}"));
     }
-    if let Some(u) = &report.usage
-        && let Some(text) = output::usage_text(&[(report.provider.clone(), *u)])
-    {
-        eprintln!("{text}");
+    if let Some(u) = &report.usage {
+        output::eprint_usage(&[(report.provider.clone(), *u)]);
     }
 }
 
@@ -290,35 +290,27 @@ mod tests {
     use super::*;
 
     #[test]
-    fn tables_show_scores_only_when_given_and_citations_when_known() {
+    fn tables_rank_without_scores_and_show_citations_when_known() {
         use aspero_core::Hit;
         let mut cited = crate::cmd::testing::work(&["W1"], "Deep learning", &["Yann LeCun"], 2015);
         cited.work.cited_by_count = Some(91_234);
         let other = crate::cmd::testing::work(&["W2"], "Backprop", &["David Rumelhart"], 1986);
-        // Sorted by most cited, OpenAlex gives no scores.
-        let unscored = [Hit::new(cited.clone(), None), Hit::new(other.clone(), None)];
-        let table = hits_table(&unscored).to_string();
-        assert!(!table.contains("Score"), "{table}");
-        assert!(
-            table.contains("Cited") && table.contains("91,234"),
-            "{table}"
-        );
-        let header = |t: &comfy_table::Table| -> Vec<String> {
-            t.header()
-                .unwrap()
-                .cell_iter()
-                .map(comfy_table::Cell::content)
-                .collect()
-        };
+        let hits = [
+            Hit::new(cited, Some(145.0)),
+            Hit::new(other.clone(), Some(12.5)),
+        ];
+        let table = hits_table(&hits);
         assert_eq!(
-            header(&hits_table(&unscored)),
-            ["#", "Year", "Cited", "Author", "Title", "ID"]
+            table.headers(),
+            ["#", "Author", "Year", "Cited", "Title", "ID"]
         );
-        // Scored, without counts.
-        let scored = [Hit::new(other, Some(12.5))];
+        let text = table.render(None, false);
+        assert!(text.contains("91,234") && !text.contains("145"), "{text}");
+        // Without counts, no Cited column.
+        let uncounted = [Hit::new(other, None)];
         assert_eq!(
-            header(&hits_table(&scored)),
-            ["#", "Score", "Year", "Author", "Title", "ID"]
+            hits_table(&uncounted).headers(),
+            ["#", "Author", "Year", "Title", "ID"]
         );
     }
 

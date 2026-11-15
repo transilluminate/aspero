@@ -8,6 +8,7 @@ use serde_json::json;
 use super::{Failure, Out, print};
 use crate::args::{CacheAction, Format};
 use crate::exit::Exit;
+use crate::output::thousands;
 
 /// `max_bytes`: the size limit `--cache-max-mb` sets, shown beside the
 /// size (stats doesn't evict: the next write does).
@@ -41,17 +42,20 @@ pub fn run(
     let mb = |bytes: u64| bytes as f64 / 1_000_000.0;
     let limit = max_bytes.map_or(String::new(), |m| format!(" of {:.0} MB", mb(m)));
     match out.format {
-        Format::Text | Format::Table => println!(
-            "{}\n  {} records ({} identifiers), {} not-found answers, {} searches, \
-             {} works' citation links, {:.1} MB{limit}",
-            path.display(),
-            stats.records,
-            stats.identifiers,
-            stats.misses,
-            stats.searches,
-            stats.edges,
-            mb(stats.bytes)
-        ),
+        Format::Text | Format::Table => {
+            let n = thousands;
+            println!(
+                "{} ({:.1} MB{limit})\n  {} records ({} identifiers)\n  {} not-found answers\n  \
+                 {} searches\n  {} works' citation links",
+                path.display(),
+                mb(stats.bytes),
+                n(stats.records),
+                n(stats.identifiers),
+                n(stats.misses),
+                n(stats.searches),
+                n(stats.edges),
+            );
+        }
         _ => print(&json!({
             "path": path,
             "records": stats.records,

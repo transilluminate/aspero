@@ -10,7 +10,9 @@ use aspero_json::check::keys;
 use super::{Failure, Out, print, print_line, read_stdin};
 use crate::args::{FailOn, Format};
 use crate::exit::Exit;
+use crate::grid::{self, Col, Grid, Text};
 use crate::output::{self, Level};
+use crate::term::{self, Paint, Progress};
 
 pub async fn run(
     engine: &Engine,
@@ -34,40 +36,39 @@ pub async fn run(
         return Err(Failure::usage(format!("{path}: no entries")));
     }
 
-    let show_progress = out.format.is_human() && std::io::stderr().is_terminal();
     let total = entries.iter().filter(|e| e.is_checkable()).count();
+    let mut progress = Progress::new("entries", if out.format.is_human() { total } else { 0 });
+    progress.show(0);
     let mut done = 0;
     let report = engine
         .check_entries(&entries, limit, |_| {
             done += 1;
-            if show_progress {
-                eprint!("\rchecking {done}/{total}…");
-            }
+            progress.show(done);
         })
         .await;
-    if show_progress {
-        eprint!("\r\x1b[K");
-    }
+    progress.clear();
 
     let failed = report.entries.iter().any(|e| fails(e.severity(), fail_on));
     let keys = keys(&entries);
     let checked = || entries.iter().zip(&report.entries);
     match out.format {
         Format::Table => {
-            let mut table = output::table(&["Status", "Key", "Verdict", "Findings"]);
+            let mut grid = Grid::new([
+                Col::content("Status"),
+                Col::cap("Key", 24),
+                Col::content("Verdict"),
+                Col::fill("Findings"),
+            ]);
             for (entry, c) in checked() {
-                table.add_row(row(entry, c, &keys));
+                grid.row(row(entry, c, &keys));
             }
-            println!("{table}\n{}", summary_text(&path, &report.summary()));
-            if let Some(text) = output::usage_text(&report.usage) {
-                eprintln!("{text}");
-            }
+            println!("{grid}");
+            println!("{}", term::fill(&summary_text(&path, &report.summary())));
+            output::eprint_usage(&report.usage);
         }
         Format::Text => {
-            print!("{}", text(&path, &entries, &report));
-            if let Some(text) = output::usage_text(&report.usage) {
-                eprintln!("{text}");
-            }
+            print!("{}", term::fill(&text(&path, &entries, &report)));
+            output::eprint_usage(&report.usage);
         }
         Format::Jsonl => {
             for (entry, c) in checked() {
@@ -123,20 +124,35 @@ fn verdict(checked: &CheckedEntry) -> String {
         .replace('_', " ")
 }
 
-/// Status, key, verdict, and one finding per line.
-fn row(entry: &BibEntry, checked: &CheckedEntry, keys: &[&str]) -> Vec<comfy_table::Cell> {
-    let status = match checked.severity() {
-        None => output::status_cell("ok", Level::Good),
-        Some(Severity::Info) => output::status_cell("info", Level::Info),
-        Some(Severity::Warning) => output::status_cell("WARNING", Level::Warning),
-        Some(_) => output::status_cell("ERROR", Level::Error),
-    };
+/// How much attention an entry needs: problems in capitals, to stand out
+/// without colour.
+fn status(checked: &CheckedEntry) -> (&'static str, Level) {
+    match checked.severity() {
+        None => ("ok", Level::Good),
+        Some(Severity::Info) => ("info", Level::Info),
+        Some(Severity::Warning) => ("WARNING", Level::Warning),
+        Some(_) => ("ERROR", Level::Error),
+    }
+}
+
+/// Status, key, verdict, and the findings, each marked when there are
+/// several (a long one wraps).
+fn row(entry: &BibEntry, checked: &CheckedEntry, keys: &[&str]) -> Vec<Text> {
+    let (status, level) = status(checked);
     let findings: Vec<String> = checked.findings.iter().map(|f| f.message(keys)).collect();
+    let findings = match findings.as_slice() {
+        [one] => one.clone(),
+        many => many
+            .iter()
+            .map(|f| format!("• {f}"))
+            .collect::<Vec<_>>()
+            .join("\n"),
+    };
     vec![
-        status,
-        comfy_table::Cell::new(&entry.key),
-        comfy_table::Cell::new(verdict(checked)),
-        comfy_table::Cell::new(findings.join("\n")),
+        grid::status(status, level),
+        Text::from(&entry.key),
+        Text::from(verdict(checked)),
+        Text::from(findings),
     ]
 }
 
@@ -152,22 +168,46 @@ fn text(path: &str, entries: &[BibEntry], report: &BibliographyReport) -> String
 }
 
 fn entry_text(entry: &BibEntry, checked: &CheckedEntry, keys: &[&str]) -> String {
+    let (status, level) = status(checked);
+    // Every status in capitals, but a quiet ok.
     let status = match checked.severity() {
-        None => return format!("ok       {}\n", entry.key),
-        Some(s) => s.as_str().to_uppercase(),
+        None => status.to_owned(),
+        Some(_) => status.to_uppercase(),
     };
-    let mut out = format!("{status:<8} {}  ({})\n", entry.key, verdict(checked));
+    let status = term::paint(&format!("{status:<8}"), Paint::Strong(level));
+    if checked.severity().is_none() {
+        return format!("{status} {}\n", entry.key);
+    }
+    let mut out = format!("{status} {}  ({})\n", entry.key, verdict(checked));
     for finding in &checked.findings {
         let _ = writeln!(out, "         - {}", finding.message(keys));
     }
     out
 }
 
+/// "refs.bib: 8 entries, 4 verified; 4 with errors, 1 skipped": counts
+/// that are zero left out.
 fn summary_text(path: &str, s: &CheckSummary) -> String {
-    format!(
-        "{path}: {} entries, {} verified; {} with errors, {} with warnings, {} with suggestions, {} skipped",
-        s.entries, s.verified, s.errors, s.warnings, s.suggestions, s.skipped
-    )
+    let entries = match s.entries {
+        1 => "1 entry".to_owned(),
+        n => format!("{n} entries"),
+    };
+    let problems: Vec<String> = [
+        (s.errors, "with errors"),
+        (s.warnings, "with warnings"),
+        (s.suggestions, "with suggestions"),
+        (s.skipped, "skipped"),
+    ]
+    .into_iter()
+    .filter(|(n, _)| *n > 0)
+    .map(|(n, what)| format!("{n} {what}"))
+    .collect();
+    let problems = if problems.is_empty() {
+        String::new()
+    } else {
+        format!("; {}", problems.join(", "))
+    };
+    format!("{path}: {entries}, {} verified{problems}", s.verified)
 }
 #[cfg(test)]
 mod tests {

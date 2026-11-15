@@ -776,7 +776,8 @@ CLI builds without it and serves stdio only) and, over it, the FFI's
   arguments must hold the input schema's `required` fields (checked
   here; the rest of the schema is the app's to check), then the app has
   30 s; a `HostToolError` or a timeout is a tool error (`isError`) with
-  its message, and `structured` must be a JSON object: the result's
+  its message (a timeout's says the outcome is unknown: the app may still
+  finish, so a retry could write twice), and `structured` must be a JSON object: the result's
   `structuredContent`, with `summary` as its text. Host tools cost $0.
 - **Budgets.** Per session, as over stdio. Per key per UTC day: engine
   spend only, refused (a tool error; free tools still work) once a paid

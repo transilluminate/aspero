@@ -188,10 +188,13 @@ impl Handler {
         let timeout = self.shared.host_timeout;
         let answer = tokio::time::timeout(timeout, host.call(name.into(), json, caller)).await;
         match answer {
+            // Given up on here, but the app may finish (a write committed):
+            // a retry could do it twice.
             Err(_) => fail(
                 "timeout",
                 format!(
-                    "the app didn't answer {name} within {} s",
+                    "the app didn't answer {name} within {} s, so whether it did anything \
+                     is unknown (it may yet): check before calling it again",
                     timeout.as_secs_f64()
                 ),
             ),

@@ -503,7 +503,8 @@ async fn required_fields_are_checked_and_a_slow_host_times_out() {
     assert!(is_error(&result));
     assert_eq!(
         text(&result),
-        "Error (timeout): the app didn't answer history_slow within 0.3 s"
+        "Error (timeout): the app didn't answer history_slow within 0.3 s, so whether it \
+         did anything is unknown (it may yet): check before calling it again"
     );
     assert!(started.elapsed() < Duration::from_secs(5));
     server.stop().await;

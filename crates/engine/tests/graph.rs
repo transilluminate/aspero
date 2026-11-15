@@ -292,7 +292,7 @@ fn engine(alex: Arc<Alex>, cache: Option<Arc<SqliteCache>>) -> Engine {
 }
 
 fn inputs(ids: &[&str]) -> Vec<String> {
-    ids.iter().map(|s| s.to_string()).collect()
+    ids.iter().map(ToString::to_string).collect()
 }
 
 /// A set: a preprint (W1) and its published version (W2: the same title,

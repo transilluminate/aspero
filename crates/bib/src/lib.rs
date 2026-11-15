@@ -146,7 +146,7 @@ fn line_at(src: &str, at: usize) -> usize {
 fn entry(e: &biblatex::Entry) -> BibEntry {
     let field = |name: &str| {
         e.get(name)
-            .map(|chunks| chunks.format_verbatim())
+            .map(ChunksExt::format_verbatim)
             .map(|s| s.split_whitespace().collect::<Vec<_>>().join(" "))
             .filter(|s| !s.is_empty())
     };

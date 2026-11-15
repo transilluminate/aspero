@@ -121,7 +121,7 @@ pub fn work_text(record: &SourceRecord, indent: &str) -> String {
         .authors
         .iter()
         .take(TABLE_AUTHORS)
-        .filter_map(|a| a.display_name())
+        .filter_map(aspero_core::Person::display_name)
         .collect();
     if w.authors.len() > TABLE_AUTHORS {
         names.push("et al.".into());

@@ -139,7 +139,7 @@ impl Fields {
                 Ok(Event::Text(t)) => {
                     let Ok(s) = t.decode() else { continue };
                     let s = quick_xml::escape::unescape(&s)
-                        .map_or_else(|_| s.to_string(), |u| u.into_owned());
+                        .map_or_else(|_| s.to_string(), std::borrow::Cow::into_owned);
                     if in_instr {
                         if let Some(instr) = open.last_mut() {
                             instr.push_str(&s);

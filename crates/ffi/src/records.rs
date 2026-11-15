@@ -86,7 +86,7 @@ impl Work {
         Work {
             source: record.source.to_string(),
             ids: record.ids.iter().map(ToString::to_string).collect(),
-            canonical: aspero_core::canonical(&record.ids).map(|id| id.to_string()),
+            canonical: aspero_core::canonical(&record.ids).map(ToString::to_string),
             title: w.title.clone(),
             authors: w
                 .authors

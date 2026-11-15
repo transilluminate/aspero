@@ -26,8 +26,8 @@
 //! pacing slots) once the database passes it; see [`ACCESS`].
 
 use std::path::Path;
-use std::sync::Mutex;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Mutex, PoisonError};
 use std::time::Duration;
 
 use aspero_core::{Page, ProviderId, SearchQuery, SourceRecord, WorkId};
@@ -369,7 +369,7 @@ impl SqliteCache {
     fn conn(&self) -> std::sync::MutexGuard<'_, Connection> {
         // A panic while holding the lock leaves SQLite consistent (writes
         // are transactional), so poisoning is ignorable.
-        self.conn.lock().unwrap_or_else(|e| e.into_inner())
+        self.conn.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
     /// Limits the cache to `max` bytes (as [`Stats::bytes`] counts them),

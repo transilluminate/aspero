@@ -185,7 +185,10 @@ pub fn seed(index: usize, s: &Seed, full: bool) -> Value {
         }
         (None, problem) => {
             out.insert("status".into(), json!("unresolved"));
-            out.insert("reason".into(), json!(problem.map(|p| p.as_str())));
+            out.insert(
+                "reason".into(),
+                json!(problem.map(aspero_engine::SeedProblem::as_str)),
+            );
             if let Some(message) = &s.message {
                 out.insert("error".into(), json!(message));
             }

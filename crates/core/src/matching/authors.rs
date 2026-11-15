@@ -98,7 +98,7 @@ pub(super) fn names_given(text: &str) -> bool {
                 .chars()
                 .all(|c| c.is_alphabetic() || matches!(c, '-' | '\''))
             && (1..=3).contains(&initials.chars().count())
-            && initials.chars().all(|c| c.is_uppercase())
+            && initials.chars().all(char::is_uppercase)
     })
 }
 

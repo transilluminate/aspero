@@ -308,7 +308,7 @@ mod tests {
             t.header()
                 .unwrap()
                 .cell_iter()
-                .map(|c| c.content())
+                .map(comfy_table::Cell::content)
                 .collect()
         };
         assert_eq!(

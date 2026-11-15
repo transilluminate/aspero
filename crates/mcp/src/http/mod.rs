@@ -34,7 +34,7 @@ use std::collections::HashMap;
 use std::convert::Infallible;
 use std::net::{Ipv4Addr, SocketAddr};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex, RwLock};
+use std::sync::{Arc, Mutex, PoisonError, RwLock};
 use std::time::Duration;
 
 use bytes::Bytes;
@@ -191,7 +191,7 @@ pub struct MemoryLedger(Mutex<HashMap<(String, String), f64>>);
 
 impl Ledger for MemoryLedger {
     fn spent(&self, key_id: &str, day: &str) -> Result<f64, String> {
-        let map = self.0.lock().unwrap_or_else(|e| e.into_inner());
+        let map = self.0.lock().unwrap_or_else(PoisonError::into_inner);
         Ok(map
             .get(&(key_id.to_owned(), day.to_owned()))
             .copied()
@@ -199,7 +199,7 @@ impl Ledger for MemoryLedger {
     }
 
     fn add(&self, key_id: &str, day: &str, usd: f64) -> Result<(), String> {
-        let mut map = self.0.lock().unwrap_or_else(|e| e.into_inner());
+        let mut map = self.0.lock().unwrap_or_else(PoisonError::into_inner);
         *map.entry((key_id.to_owned(), day.to_owned())).or_default() += usd;
         Ok(())
     }
@@ -265,13 +265,13 @@ impl Shared {
     fn catalog(&self) -> Arc<Vec<Listed>> {
         self.catalog
             .read()
-            .unwrap_or_else(|e| e.into_inner())
+            .unwrap_or_else(PoisonError::into_inner)
             .clone()
     }
 
     /// The paid calls in flight of the key `key_id`.
     fn paid(&self, key_id: &str) -> Arc<Reservations> {
-        let mut paid = self.paid.lock().unwrap_or_else(|e| e.into_inner());
+        let mut paid = self.paid.lock().unwrap_or_else(PoisonError::into_inner);
         paid.entry(key_id.to_owned())
             .or_insert_with(|| Arc::new(Reservations::new(PAID_IN_FLIGHT)))
             .clone()
@@ -280,7 +280,10 @@ impl Shared {
     /// Adds to what the key `key_id` spent today, in the ledger or, if it
     /// can't write, here until it can.
     fn ledger_add(&self, key_id: &str, usd: f64) {
-        let mut unrecorded = self.unrecorded.lock().unwrap_or_else(|e| e.into_inner());
+        let mut unrecorded = self
+            .unrecorded
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
         *unrecorded.entry((key_id.to_owned(), today())).or_default() += usd;
         self.record(&mut unrecorded, key_id);
     }
@@ -289,7 +292,10 @@ impl Shared {
     /// it couldn't record yet (tried again first).
     fn key_spent(&self, key_id: &str) -> Result<f64, String> {
         let day = today();
-        let mut unrecorded = self.unrecorded.lock().unwrap_or_else(|e| e.into_inner());
+        let mut unrecorded = self
+            .unrecorded
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
         self.record(&mut unrecorded, key_id);
         let owed = unrecorded
             .get(&(key_id.to_owned(), day.clone()))
@@ -317,7 +323,10 @@ impl Shared {
 
     /// Keeps a session's client, to tell it when its tools change.
     fn listen(&self, key: &Credential, peer: Peer<RoleServer>) {
-        let mut listeners = self.listeners.lock().unwrap_or_else(|e| e.into_inner());
+        let mut listeners = self
+            .listeners
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
         listeners.retain(|l| !l.peer.is_transport_closed());
         listeners.push(Listener {
             key_id: key.key.id.clone(),
@@ -328,7 +337,10 @@ impl Shared {
 
     /// Initialized sessions whose clients are still connected.
     fn listening(&self) -> usize {
-        let mut listeners = self.listeners.lock().unwrap_or_else(|e| e.into_inner());
+        let mut listeners = self
+            .listeners
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
         listeners.retain(|l| !l.peer.is_transport_closed());
         listeners.len()
     }
@@ -341,7 +353,10 @@ impl Shared {
         runtime: &tokio::runtime::Handle,
         which: impl Fn(&str, &[u8; 32]) -> bool,
     ) {
-        let mut listeners = self.listeners.lock().unwrap_or_else(|e| e.into_inner());
+        let mut listeners = self
+            .listeners
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
         listeners.retain(|l| !l.peer.is_transport_closed());
         for listener in listeners.iter().filter(|l| which(&l.key_id, &l.digest)) {
             let peer = listener.peer.clone();
@@ -357,7 +372,7 @@ impl Shared {
     /// Hands `activity` to the host's thread, or drops it if the host is
     /// [`ACTIVITY_QUEUE`] behind.
     fn report(&self, activity: Activity) {
-        if let Some(tx) = &*self.activity.lock().unwrap_or_else(|e| e.into_inner())
+        if let Some(tx) = &*self.activity.lock().unwrap_or_else(PoisonError::into_inner)
             && let Err(std::sync::mpsc::TrySendError::Full(a)) = tx.try_send(activity)
         {
             tracing::debug!(target: "aspero::mcp", tool = %a.tool, "the app is behind on activity; dropped");
@@ -401,7 +416,11 @@ struct Opening<'a> {
 
 impl Drop for Opening<'_> {
     fn drop(&mut self) {
-        let mut opening = self.state.opening.lock().unwrap_or_else(|e| e.into_inner());
+        let mut opening = self
+            .state
+            .opening
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
         if let Some(n) = opening.get_mut(&self.key_id) {
             *n -= 1;
             if *n == 0 {
@@ -438,7 +457,7 @@ impl State {
     fn credentials(&self) -> Arc<Vec<Arc<Credential>>> {
         self.credentials
             .read()
-            .unwrap_or_else(|e| e.into_inner())
+            .unwrap_or_else(PoisonError::into_inner)
             .clone()
     }
 
@@ -468,7 +487,7 @@ impl State {
             .and_then(|v| v.to_str().ok())
             .map(String::from);
         if let Some(id) = &session {
-            let owners = self.owners.lock().unwrap_or_else(|e| e.into_inner());
+            let owners = self.owners.lock().unwrap_or_else(PoisonError::into_inner);
             if let Some(owner) = owners.get(id)
                 && (owner.key_id != credential.key.id || owner.digest != credential.digest)
             {
@@ -499,12 +518,12 @@ impl State {
             (Some(id), _) if delete && response.status().is_success() => {
                 self.owners
                     .lock()
-                    .unwrap_or_else(|e| e.into_inner())
+                    .unwrap_or_else(PoisonError::into_inner)
                     .remove(id);
             }
             _ => {}
         }
-        response.map(|b| b.boxed())
+        response.map(BodyExt::boxed)
     }
 
     /// Records that `credential`'s key opened the session `id`, and ends it
@@ -512,7 +531,7 @@ impl State {
     /// ends the sessions on record, which this one wasn't yet.
     async fn opened(&self, id: &str, credential: &Credential) {
         {
-            let mut owners = self.owners.lock().unwrap_or_else(|e| e.into_inner());
+            let mut owners = self.owners.lock().unwrap_or_else(PoisonError::into_inner);
             owners.insert(
                 id.to_owned(),
                 Owner {
@@ -542,12 +561,12 @@ impl State {
     /// has [`MAX_SESSIONS_PER_KEY`] open or opening.
     async fn place(&self, key_id: &str) -> Option<Opening<'_>> {
         let live = self.manager.sessions.read().await;
-        let mut owners = self.owners.lock().unwrap_or_else(|e| e.into_inner());
+        let mut owners = self.owners.lock().unwrap_or_else(PoisonError::into_inner);
         // Sessions that ended on their own (idle) don't count.
         owners.retain(|id, _| live.contains_key(id.as_str()));
         drop(live);
         let open = owners.values().filter(|o| o.key_id == key_id).count();
-        let mut opening = self.opening.lock().unwrap_or_else(|e| e.into_inner());
+        let mut opening = self.opening.lock().unwrap_or_else(PoisonError::into_inner);
         let n = opening.entry(key_id.to_owned()).or_default();
         if open + *n >= MAX_SESSIONS_PER_KEY {
             return None;
@@ -561,7 +580,7 @@ impl State {
 
     fn used(&self, credential: &Credential) {
         let now = Timestamp::now();
-        let mut usage = self.usage.lock().unwrap_or_else(|e| e.into_inner());
+        let mut usage = self.usage.lock().unwrap_or_else(PoisonError::into_inner);
         usage.last_at = Some(now);
         usage.last_key_name = Some(credential.key.name.clone());
         usage.keys.insert(credential.key.id.clone(), now);
@@ -707,7 +726,7 @@ impl HttpServer {
                 .state
                 .credentials
                 .write()
-                .unwrap_or_else(|e| e.into_inner());
+                .unwrap_or_else(PoisonError::into_inner);
             let rescoped = credentials
                 .iter()
                 .filter(|c| {
@@ -731,7 +750,7 @@ impl HttpServer {
             .state
             .owners
             .lock()
-            .unwrap_or_else(|e| e.into_inner())
+            .unwrap_or_else(PoisonError::into_inner)
             .iter()
             .filter(|(_, o)| {
                 !credentials
@@ -767,7 +786,10 @@ impl HttpServer {
             return Ok(());
         };
         let catalog = host::catalog(host.as_ref(), &shared.engine_names)?;
-        *shared.catalog.write().unwrap_or_else(|e| e.into_inner()) = Arc::new(catalog);
+        *shared
+            .catalog
+            .write()
+            .unwrap_or_else(PoisonError::into_inner) = Arc::new(catalog);
         shared.tools_changed(&self.runtime, |_, _| true);
         Ok(())
     }
@@ -778,7 +800,7 @@ impl HttpServer {
 
     pub fn status(&self) -> Status {
         let state = &self.state;
-        let usage = state.usage.lock().unwrap_or_else(|e| e.into_inner());
+        let usage = state.usage.lock().unwrap_or_else(PoisonError::into_inner);
         // Without waiting: while a session opens or closes, the sessions
         // whose clients are connected. (The owners on record can include
         // sessions ended idle.)
@@ -829,7 +851,7 @@ impl HttpServer {
             .shared
             .activity
             .lock()
-            .unwrap_or_else(|e| e.into_inner())
+            .unwrap_or_else(PoisonError::into_inner)
             .take();
         if self.running.swap(false, Ordering::Relaxed) {
             tracing::info!(target: "aspero::mcp", port = self.state.port, "MCP server stopped");

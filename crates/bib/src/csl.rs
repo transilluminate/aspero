@@ -2,7 +2,7 @@
 //! of items, or a single item. Read with the lenient [`CslItem`] used for
 //! doi.org's responses.
 
-use aspero_core::csl::{CslItem, OneOrMany};
+use aspero_core::csl::{CslItem, OneOrMany, Scalar};
 use aspero_core::{Claim, Person};
 
 use crate::{BibEntry, Format, Ids, ReadError};
@@ -63,7 +63,7 @@ pub(crate) fn entry(item: &CslItem, position: usize) -> BibEntry {
         key: item
             .id
             .as_ref()
-            .map_or_else(|| position.to_string(), |id| id.text()),
+            .map_or_else(|| position.to_string(), Scalar::text),
         entry_type: item.item_type.clone().unwrap_or_default().to_lowercase(),
         claim,
         notes: ids.notes,

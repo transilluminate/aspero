@@ -29,7 +29,11 @@ fn sources_turned_off_are_never_built() {
     config.disable(&["europepmc", " OpenLibrary ", ""]).unwrap();
     let engine = standard(config).unwrap();
     assert_eq!(names(&engine), ["openalex", "crossref", "datacite", "doi"]);
-    let ids: Vec<&str> = engine.disabled().iter().map(|p| p.as_str()).collect();
+    let ids: Vec<&str> = engine
+        .disabled()
+        .iter()
+        .map(aspero_core::ProviderId::as_str)
+        .collect();
     assert_eq!(ids, ["europepmc", "openlibrary"]);
     let searching: Vec<String> = engine
         .search_providers()

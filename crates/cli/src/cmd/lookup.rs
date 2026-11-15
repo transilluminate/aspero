@@ -94,7 +94,7 @@ pub async fn run(engine: &Engine, ids: Vec<String>, out: Out) -> Result<Exit, Fa
 fn looked(lookup: &InputLookup) -> Option<&Looked> {
     match lookup {
         InputLookup::Looked(l) => Some(l),
-        _ => None,
+        InputLookup::Invalid(_) => None,
     }
 }
 

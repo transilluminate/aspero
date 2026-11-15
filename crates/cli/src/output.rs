@@ -230,7 +230,7 @@ fn agreement_word(g: Agreement) -> &'static str {
         Agreement::Match => "match",
         Agreement::Partial => "partial",
         Agreement::Mismatch => "MISMATCH",
-        _ => "unknown",
+        Agreement::Unknown => "unknown",
     }
 }
 
@@ -336,7 +336,7 @@ pub fn candidate_row(rank: usize, c: &Candidate) -> Vec<comfy_table::Cell> {
         Agreement::Match => "✓",
         Agreement::Partial => "~",
         Agreement::Mismatch => "✗",
-        _ => "?",
+        Agreement::Unknown => "?",
     };
     let mut checks = format!(
         "title {} authors {} year {}",

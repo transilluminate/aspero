@@ -146,7 +146,10 @@ scripts/       fixture recorders, one per provider
   asking again by DOI or PMID when the record found (Europe PMC's, for a
   PMCID) has none. Newest first, a tree stops at this year unless a years
   filter that bounds every hit (the tree itself or one of its top-level
-  all) has an upper year; years under any or none don't count.
+  all) has an upper year; years under any or none don't count. The cap
+  never changes what a source can search: the tree as asked decides, as
+  `search_supports` (which takes no sort) says, so Open Library's none
+  alone stays refused newest first too.
 - **Identifier terms** (#65) name works in a tree, beside anything else:
   the value is any `WorkId` (else a bad query), and each source takes
   the kinds its syntax can find, refusing others with the reason, so

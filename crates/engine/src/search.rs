@@ -365,17 +365,27 @@ impl Engine {
             return Ok(None);
         };
         tree.validate().map_err(EngineError::InvalidQuery)?;
+        let express = |tree: &QueryNode| {
+            entry
+                .provider
+                .express(tree)
+                .map_err(|reason| EngineError::Provider {
+                    provider: provider.clone(),
+                    error: Error::UnsupportedQuery(reason),
+                })
+        };
+        // The tree as asked decides, as `search_supports` (which knows no
+        // sort) says: the cap's years beside it mustn't make a none alone
+        // searchable where it isn't.
+        express(&tree)?;
         let tree = match newest_cap {
-            Some(year) => cap_years(tree, year),
+            Some(year) => {
+                let capped = cap_years(tree, year);
+                express(&capped)?;
+                capped
+            }
             None => tree,
         };
-        entry
-            .provider
-            .express(&tree)
-            .map_err(|reason| EngineError::Provider {
-                provider,
-                error: Error::UnsupportedQuery(reason),
-            })?;
         Ok(Some(tree))
     }
 

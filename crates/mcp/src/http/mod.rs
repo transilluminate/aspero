@@ -78,6 +78,9 @@ pub const HOST_TIMEOUT: Duration = Duration::from_secs(30);
 /// How long a session may take to take a notification before it's given
 /// up on.
 const NOTIFY_TIMEOUT: Duration = Duration::from_secs(10);
+/// Activity waiting for the app to take it; more is dropped (it's
+/// informational) while the app is this far behind.
+pub const ACTIVITY_QUEUE: usize = 256;
 /// Paid calls a key may have in flight at once, across its sessions;
 /// more wait. Calls hold their estimated cost while in flight, so the
 /// daily budget is passed by one call's cost at most; this bounds what
@@ -242,7 +245,7 @@ pub(crate) struct Shared {
     paid: Mutex<HashMap<String, Arc<Reservations>>>,
     session_budget_usd: f64,
     host_timeout: Duration,
-    activity: Mutex<Option<std::sync::mpsc::Sender<Activity>>>,
+    activity: Mutex<Option<std::sync::mpsc::SyncSender<Activity>>>,
     /// Each initialized session's line back to its client, for telling it
     /// the tools changed.
     listeners: Mutex<Vec<Listener>>,
@@ -309,10 +312,13 @@ impl Shared {
         }
     }
 
-    /// Hands `activity` to the host's thread.
+    /// Hands `activity` to the host's thread, or drops it if the host is
+    /// [`ACTIVITY_QUEUE`] behind.
     fn report(&self, activity: Activity) {
-        if let Some(tx) = &*self.activity.lock().unwrap_or_else(|e| e.into_inner()) {
-            let _ = tx.send(activity);
+        if let Some(tx) = &*self.activity.lock().unwrap_or_else(|e| e.into_inner())
+            && let Err(std::sync::mpsc::TrySendError::Full(a)) = tx.try_send(activity)
+        {
+            tracing::debug!(target: "aspero::mcp", tool = %a.tool, "the app is behind on activity; dropped");
         }
     }
 }
@@ -572,7 +578,7 @@ impl HttpServer {
             .port();
 
         let activity = host.clone().map(|host| {
-            let (tx, rx) = std::sync::mpsc::channel::<Activity>();
+            let (tx, rx) = std::sync::mpsc::sync_channel::<Activity>(ACTIVITY_QUEUE);
             let spawned = std::thread::Builder::new()
                 .name("aspero-mcp-activity".into())
                 .spawn(move || {

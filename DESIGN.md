@@ -797,7 +797,8 @@ CLI builds without it and serves stdio only) and, over it, the FFI's
   words ("searched ‘lactate clearance’", "looked up 3 works", "verified 2
   citations", "identified a document"; an app tool's summary's first
   line; "error: …"), whether it failed, and its cost, on a thread of its
-  own, in order, never holding up a request.
+  own, in order, never holding up a request. Up to 256 wait for the app;
+  while it's that far behind, more are dropped (they're informational).
 
 **Threat model.** The server is for agents on the same machine, acting
 for the user. Loopback only: nothing off the machine can connect. Every

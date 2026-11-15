@@ -8,8 +8,8 @@ use std::time::Duration;
 
 use aspero_mcp::Scope::{ReadHistory, Sources, WriteHistory};
 use aspero_mcp::http::{
-    Activity, Host, HostError, HostOutput, HostTool, HttpConfig, HttpServer, Key, Ledger,
-    MemoryLedger, StartError, sha256_hex,
+    ACTIVITY_QUEUE, Activity, Host, HostError, HostOutput, HostTool, HttpConfig, HttpServer, Key,
+    Ledger, MemoryLedger, StartError, sha256_hex,
 };
 use aspero_mcp::{Caller, Scope, Tools};
 use async_trait::async_trait;
@@ -749,6 +749,69 @@ async fn a_stop_cut_short_finishes_when_called_again() {
     assert!(!server.status().running);
     std::net::TcpListener::bind(("127.0.0.1", port)).expect("the port is free");
     server.stop().await;
+}
+
+/// An app whose activity callback is stuck until let go.
+#[derive(Default)]
+struct StuckHost {
+    open: Mutex<bool>,
+    opened: std::sync::Condvar,
+    heard: std::sync::atomic::AtomicUsize,
+}
+
+#[async_trait]
+impl Host for StuckHost {
+    fn tools(&self) -> Vec<HostTool> {
+        vec![tool("history_search", ReadHistory, &[])]
+    }
+
+    async fn call(&self, _: String, _: String, _: Caller) -> Result<HostOutput, HostError> {
+        Ok(HostOutput {
+            structured: "{}".into(),
+            summary: "nothing".into(),
+        })
+    }
+
+    fn activity(&self, _: Activity) {
+        let mut open = self.open.lock().unwrap();
+        while !*open {
+            open = self.opened.wait(open).unwrap();
+        }
+        self.heard
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn activity_the_app_is_slow_to_take_is_dropped_past_a_queue() {
+    let host = Arc::new(StuckHost::default());
+    let server = HttpServer::start(
+        Arc::new(tools(vec![source()])),
+        config(free_port()),
+        Some(host.clone() as Arc<dyn Host>),
+        Arc::new(MemoryLedger::default()),
+    )
+    .await
+    .unwrap();
+    let mut agent = Agent::new(server.port(), FULL);
+    agent.initialize().await;
+    let calls = ACTIVITY_QUEUE + 50;
+    for _ in 0..calls {
+        assert!(!is_error(&agent.call("history_search", json!({})).await));
+    }
+    *host.open.lock().unwrap() = true;
+    host.opened.notify_all();
+    server.stop().await;
+    // Once the app has heard all it's going to: the queue, and the one it
+    // was stuck on.
+    let heard = || host.heard.load(std::sync::atomic::Ordering::Relaxed);
+    let mut before = usize::MAX;
+    while heard() != before {
+        before = heard();
+        tokio::time::sleep(Duration::from_millis(200)).await;
+    }
+    let heard = heard();
+    assert!(heard <= ACTIVITY_QUEUE + 1, "{heard} of {calls}");
 }
 
 #[tokio::test(flavor = "multi_thread")]

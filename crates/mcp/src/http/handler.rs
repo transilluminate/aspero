@@ -16,7 +16,7 @@ use serde_json::{Map, Value};
 use super::Shared;
 use super::auth::Credential;
 use super::host::{Activity, HostError};
-use crate::server::{INSTRUCTIONS, engine_result, server_info};
+use crate::server::{INSTRUCTIONS, engine_result, error_text, server_info};
 use crate::session::usd;
 use crate::{Caller, Scope, Session, ToolError, ToolErrorKind, tools};
 
@@ -154,13 +154,9 @@ impl Handler {
             is_error,
             cost_usd: 0.0,
         };
-        let fail = |kind: &str, message: String| {
-            let summary = error_summary(&message);
-            (tool_error(kind, &message), activity(summary, true))
-        };
+        let fail = |e: ToolError| (tool_error(&e), activity(error_summary(&e.message), true));
         if !k.scopes.contains(&scope) {
-            let e = lacks(name, scope);
-            return fail("forbidden", e.message);
+            return fail(lacks(name, scope));
         }
         let missing: Vec<&str> = required
             .iter()
@@ -168,8 +164,8 @@ impl Handler {
             .map(String::as_str)
             .collect();
         if !missing.is_empty() {
-            return fail(
-                "invalid_arguments",
+            return fail(ToolError::new(
+                ToolErrorKind::InvalidArguments,
                 format!(
                     "invalid arguments for {name}: missing {}",
                     missing
@@ -178,10 +174,13 @@ impl Handler {
                         .collect::<Vec<_>>()
                         .join(", ")
                 ),
-            );
+            ));
         }
         let Some(host) = &self.shared.host else {
-            return fail("failed", format!("{name} has no host to call"));
+            return fail(ToolError::new(
+                ToolErrorKind::Failed,
+                format!("{name} has no host to call"),
+            ));
         };
         let caller = caller(k, context);
         let json = Value::Object(arguments).to_string();
@@ -190,15 +189,15 @@ impl Handler {
         match answer {
             // Given up on here, but the app may finish (a write committed):
             // a retry could do it twice.
-            Err(_) => fail(
-                "timeout",
+            Err(_) => fail(ToolError::new(
+                ToolErrorKind::Timeout,
                 format!(
                     "the app didn't answer {name} within {} s, so whether it did anything \
                      is unknown (it may yet): check before calling it again",
                     timeout.as_secs_f64()
                 ),
-            ),
-            Ok(Err(e)) => fail(e.kind(), host_message(&e)),
+            )),
+            Ok(Err(e)) => fail(ToolError::new(host_kind(&e), host_message(&e))),
             Ok(Ok(output)) => match serde_json::from_str::<Value>(&output.structured) {
                 Ok(structured @ Value::Object(_)) => {
                     let first = output
@@ -213,10 +212,10 @@ impl Handler {
                     result.structured_content = Some(structured);
                     (result, activity(first, false))
                 }
-                _ => fail(
-                    "failed",
+                _ => fail(ToolError::new(
+                    ToolErrorKind::Failed,
                     format!("the app's {name} answered with something other than a JSON object"),
-                ),
+                )),
             },
         }
     }
@@ -284,10 +283,10 @@ impl ServerHandler for Handler {
     ) -> Result<CallToolResponse, ErrorData> {
         let key = authed(&context)?;
         if !self.initialized.load(Ordering::Relaxed) {
-            return Ok(tool_error(
-                "no_session",
+            return Ok(tool_error(&ToolError::new(
+                ToolErrorKind::NoSession,
                 "start a session (initialize) first: budgets are per session",
-            )
+            ))
             .into());
         }
         let name = request.name.to_string();
@@ -358,10 +357,18 @@ fn lacks(tool: &str, scope: Scope) -> ToolError {
     )
 }
 
-fn tool_error(kind: &str, message: &str) -> CallToolResult {
-    CallToolResult::error(vec![ContentBlock::text(format!(
-        "Error ({kind}): {message}"
-    ))])
+fn tool_error(e: &ToolError) -> CallToolResult {
+    CallToolResult::error(vec![ContentBlock::text(error_text(e))])
+}
+
+/// A host error's kind, as the agent reads it.
+fn host_kind(e: &HostError) -> ToolErrorKind {
+    match e {
+        HostError::InvalidArguments(_) => ToolErrorKind::InvalidArguments,
+        HostError::NotFound(_) => ToolErrorKind::NotFound,
+        HostError::Refused(_) => ToolErrorKind::Refused,
+        HostError::Failed(_) => ToolErrorKind::Failed,
+    }
 }
 
 /// A host error's message, or its kind when the app gave none.

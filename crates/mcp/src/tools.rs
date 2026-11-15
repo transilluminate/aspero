@@ -96,6 +96,15 @@ pub enum ToolErrorKind {
     Unavailable,
     /// A provider answered unexpectedly.
     Protocol,
+    /// A call outside a session (HTTP): budgets are per session.
+    NoSession,
+    /// The app took too long with one of its tools (HTTP): whether it
+    /// did anything is unknown.
+    Timeout,
+    /// The app refused one of its tools' calls (HTTP).
+    Refused,
+    /// One of the app's tools failed (HTTP).
+    Failed,
 }
 
 impl ToolErrorKind {
@@ -111,6 +120,10 @@ impl ToolErrorKind {
             ToolErrorKind::Auth => "auth",
             ToolErrorKind::Unavailable => "unavailable",
             ToolErrorKind::Protocol => "protocol",
+            ToolErrorKind::NoSession => "no_session",
+            ToolErrorKind::Timeout => "timeout",
+            ToolErrorKind::Refused => "refused",
+            ToolErrorKind::Failed => "failed",
         }
     }
 }

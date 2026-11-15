@@ -74,13 +74,17 @@ pub(crate) fn engine_result(
         Err(e) => {
             tracing::info!(target: "aspero::mcp", tool = %name, error = %e, "tool failed");
             CallToolResult::error(vec![ContentBlock::text(format!(
-                "Error ({}): {}\n{}",
-                e.kind.as_str(),
-                e.message,
+                "{}\n{}",
+                error_text(&e),
                 session.line()
             ))])
         }
     })
+}
+
+/// A tool error as the agent reads it: "Error (kind): message".
+pub(crate) fn error_text(e: &ToolError) -> String {
+    format!("Error ({}): {}", e.kind.as_str(), e.message)
 }
 
 /// One session's handler. The tools are listed from [`Tools`] at each

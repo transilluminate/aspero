@@ -307,6 +307,8 @@ impl Tools {
         self.run_search(a.source.as_deref(), &query, a.full).await
     }
 
+    // A tool handler, shaped like the others: its arguments by value, an `Answer`.
+    #[allow(clippy::needless_pass_by_value, clippy::unnecessary_wraps)]
     fn supports(&self, a: SupportsArgs) -> Answer {
         let answer = match self.engine.search_supports(a.source.as_deref(), &a.query.0) {
             None => json!({"supported": true}),

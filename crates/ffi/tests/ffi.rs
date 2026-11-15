@@ -6,9 +6,9 @@ use std::collections::HashMap;
 use aspero_ffi::records::ReadError;
 use aspero_ffi::records::{
     AnalysisKind, Author, BibFormat, BibProblem, CitationManager, CiteFormat, Claim, Coverage,
-    ErrorKind, ExportFormat, KeyStatus, LookupStatus, Reason, SearchBoolean, SearchField,
-    SearchFilter, SearchFilterValue, SearchNode, SearchRelation, SearchRequest, SearchSort,
-    SeedProblem, StyleError, StyleSource, Verdict, Work,
+    ErrorKind, ExportFormat, KeyStatus, LookupStatus, PageSource, Reason, SearchBoolean,
+    SearchField, SearchFilter, SearchFilterValue, SearchNode, SearchRelation, SearchRequest,
+    SearchSort, SeedProblem, StyleError, StyleSource, Verdict, Work,
 };
 use aspero_ffi::{Aspero, AsperoError, CallToken, Config, Patience};
 
@@ -34,6 +34,52 @@ fn block_on<T>(f: impl Future<Output = T>) -> T {
         .build()
         .unwrap()
         .block_on(f)
+}
+
+#[test]
+fn claims_from_pages_offline() {
+    let html = std::fs::read_to_string(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../core/tests/fixtures/pages/jama.html"
+    ))
+    .unwrap();
+    let url = "https://jamanetwork.com/journals/jama/article-abstract/2856706";
+    let page = aspero(None).claim_from_page(Some(html), url.into(), Some("Full Text".into()));
+    assert_eq!(page.source, PageSource::Highwire);
+    let ids: Vec<_> = page
+        .ids
+        .iter()
+        .map(|m| (m.id.as_str(), m.from_url))
+        .collect();
+    assert_eq!(ids, [("doi:10.1001/jama.2026.19482", false)]);
+    assert_eq!(page.ids[0].text, "10.1001/jama.2026.19482");
+    let claim = page.claim.unwrap();
+    assert_eq!(claim.ids, ["doi:10.1001/jama.2026.19482"]);
+    assert_eq!(claim.container.as_deref(), Some("JAMA"));
+    assert_eq!(claim.year, Some(2026));
+    assert_eq!(claim.authors.len(), 2);
+
+    // Not loaded: the address and the drag's name.
+    let pii = "https://www.sciencedirect.com/science/article/pii/S2772940026000032";
+    let page = aspero(None).claim_from_page(
+        None,
+        pii.into(),
+        Some("Ambient air pollution and stroke - ScienceDirect".into()),
+    );
+    assert_eq!(page.source, PageSource::TitleHint);
+    assert_eq!(page.ids[0].id, "pii:S2772940026000032");
+    assert!(page.ids[0].from_url);
+    assert_eq!(page.ids[0].utf16.end, pii.len() as u64);
+    let claim = page.claim.unwrap();
+    assert_eq!(
+        claim.title.as_deref(),
+        Some("Ambient air pollution and stroke")
+    );
+
+    // Link text, and nothing in the address: no claim.
+    let page = aspero(None).claim_from_page(None, url.into(), Some("PDF".into()));
+    assert!(page.claim.is_none() && page.ids.is_empty());
+    assert_eq!(page.source, PageSource::Url);
 }
 
 #[test]

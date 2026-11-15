@@ -31,8 +31,8 @@ pub mod records;
 use records::{
     Analysis, AnalysisKind, Bibliography, Budget, CacheStats, CitationStyle, CiteFormat,
     CitedEntry, Claim as ClaimRecord, Dependency, DocxReferences, ExportFormat, Identification,
-    KeyCheck, Line, LineReference, Lookup, Lookups, Mention, ProviderUsage, ReadError, Reference,
-    ReferencesPage, SearchNode, SearchRequest, SearchResults, SourceSearch, StyleError,
+    KeyCheck, Line, LineReference, Lookup, Lookups, Mention, PageClaim, ProviderUsage, ReadError,
+    Reference, ReferencesPage, SearchNode, SearchRequest, SearchResults, SourceSearch, StyleError,
     StyleProject, StyleSource, Unavailable, Utf16Offsets, Verification, Verifications, Work,
 };
 
@@ -521,6 +521,25 @@ impl Aspero {
             .iter()
             .map(|m| Mention::new(&text, m, &mut utf16))
             .collect()
+    }
+
+    /// The work a publisher's article page shows, from its rendered markup
+    /// (`html`: its `<head>` and JSON-LD scripts, or `nil` when the page
+    /// wasn't loaded), its address, and the title the drag gave it (link
+    /// text such as "Full Text" is ignored). Reads Highwire, PRISM, Dublin
+    /// Core and JSON-LD metadata, then the page's title, then `title`, and
+    /// the address's identifiers. Verify `claim`, or look up `ids`.
+    /// Offline.
+    #[uniffi::method(default(title = None))]
+    // Exported: UniFFI hands the arguments over by value.
+    #[allow(clippy::needless_pass_by_value)]
+    pub fn claim_from_page(
+        &self,
+        html: Option<String>,
+        url: String,
+        title: Option<String>,
+    ) -> PageClaim {
+        (&aspero_core::claim_from_page(html.as_deref(), &url, title.as_deref())).into()
     }
 
     /// The references in a pasted list (numbered, bulleted, one per

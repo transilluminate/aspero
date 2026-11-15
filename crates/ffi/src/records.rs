@@ -1064,6 +1064,71 @@ impl Reference {
     }
 }
 
+/// What an article page says the work is (`claimFromPage`).
+#[derive(Debug, Clone, uniffi::Record)]
+pub struct PageClaim {
+    /// Every identifier found, each once, in priority order: pass their
+    /// `id`s to `lookup` for an exact answer. Each is located in what it
+    /// was read from (a tag's value, or the address); `fromUrl` only when
+    /// read from the page's address.
+    pub ids: Vec<Mention>,
+    /// The work as the page describes it, its identifiers included, ready
+    /// for `verify`; `nil` with no identifier and no title.
+    pub claim: Option<Claim>,
+    /// What answered: the first vocabulary, in priority order, that gave
+    /// an identifier or the title; `url` when nothing did.
+    pub source: PageSource,
+}
+
+impl From<&aspero_core::PageClaim> for PageClaim {
+    fn from(p: &aspero_core::PageClaim) -> Self {
+        PageClaim {
+            ids: p
+                .ids
+                .iter()
+                .map(|id| Mention::new(&id.text, &id.mention, &mut Utf16Offsets::new(&id.text)))
+                .collect(),
+            claim: p.claim.as_ref().map(|c| Claim::read(c, None)),
+            source: p.source.into(),
+        }
+    }
+}
+
+/// Where a page's claim came from, in priority order.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Enum)]
+pub enum PageSource {
+    /// Highwire Press `citation_*` meta tags.
+    Highwire,
+    /// PRISM `prism.*` meta tags.
+    Prism,
+    /// Dublin Core `dc.*` / `dcterms.*` meta tags.
+    DublinCore,
+    /// schema.org JSON-LD.
+    JsonLd,
+    /// The page's `og:title` or `<title>`.
+    Title,
+    /// The title passed in (a dragged link's name).
+    TitleHint,
+    /// The page's address.
+    Url,
+}
+
+impl From<aspero_core::PageSource> for PageSource {
+    fn from(source: aspero_core::PageSource) -> Self {
+        use aspero_core::PageSource as Core;
+        match source {
+            Core::Highwire => PageSource::Highwire,
+            Core::Prism => PageSource::Prism,
+            Core::DublinCore => PageSource::DublinCore,
+            Core::JsonLd => PageSource::JsonLd,
+            Core::Title => PageSource::Title,
+            Core::TitleHint => PageSource::TitleHint,
+            // `PageSource` is non-exhaustive: the address is the fallback.
+            _ => PageSource::Url,
+        }
+    }
+}
+
 /// A line of a reference list as laid out: its text and its distance from
 /// the left edge (PDFKit's x-offset, in any unit).
 #[derive(Debug, Clone, uniffi::Record)]

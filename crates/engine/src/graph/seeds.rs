@@ -121,20 +121,41 @@ impl Engine {
             let mut again: Vec<(usize, WorkId)> = Vec::new();
             for (&k, result) in missed.iter().zip(&report.results) {
                 let Some(record) = &result.record else {
+                    // Not a settled miss when the lookup elsewhere failed.
+                    if let Some((SeedProblem::ProviderFailed, _)) = seed_failure(result)
+                        && let Some(e) = result.attempts.iter().find_map(|a| match &a.outcome {
+                            Outcome::Failed(e) => Some(e.clone()),
+                            _ => None,
+                        })
+                    {
+                        answers[k] = Some((Outcome::Failed(e), None));
+                    }
                     continue;
                 };
                 if let Some(other) = ask_by(record, accepts, &asks[k].1) {
                     again.push((k, other.clone()));
                 }
             }
-            if !again.is_empty() && stopped.is_none() {
-                let found = self
-                    .ask_openalex(&quick, entry, &again, spend, &mut stopped)
-                    .await;
-                for ((k, _), answer) in again.iter().zip(found) {
-                    if let Some((outcome, Some(record))) = answer {
-                        answers[*k] = Some((outcome, Some(record)));
+            // A miss is settled only once asked again: a failure or the
+            // budget stopping that leaves it unsettled.
+            let found = match (again.is_empty(), stopped.is_none()) {
+                (true, _) => Vec::new(),
+                (false, true) => {
+                    let found = self
+                        .ask_openalex(&quick, entry, &again, spend, &mut stopped)
+                        .await;
+                    if let Some(s) = &mut stopped {
+                        s.done += (asks.len() - again.len()) as u64;
+                        s.total = asks.len() as u64;
                     }
+                    found
+                }
+                (false, false) => vec![None; again.len()],
+            };
+            for ((k, _), answer) in again.iter().zip(found) {
+                match answer {
+                    Some((Outcome::NotFound, None)) => {}
+                    answer => answers[*k] = answer,
                 }
             }
         }

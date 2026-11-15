@@ -32,6 +32,8 @@ struct Alex {
     searches: Mutex<Vec<String>>,
     /// Identifiers its lookups don't find works by.
     blind: Vec<WorkId>,
+    /// Identifiers whose lookups fail, with a server error.
+    broken: Vec<WorkId>,
 }
 
 impl Alex {
@@ -49,6 +51,7 @@ impl Alex {
             lookups: Mutex::default(),
             searches: Mutex::default(),
             blind: Vec::new(),
+            broken: Vec::new(),
         }
     }
 
@@ -56,6 +59,12 @@ impl Alex {
     /// a DOI it doesn't index.
     fn blind(mut self, ids: &[&str]) -> Self {
         self.blind = ids.iter().map(|i| i.parse().unwrap()).collect();
+        self
+    }
+
+    /// Fails every lookup asking about any of `ids`.
+    fn broken(mut self, ids: &[&str]) -> Self {
+        self.broken = ids.iter().map(|i| i.parse().unwrap()).collect();
         self
     }
 
@@ -161,6 +170,12 @@ impl Provider for Alex {
             });
         }
         drop(failing);
+        if ids.iter().any(|id| self.broken.contains(id)) {
+            return Err(Error::Server {
+                status: 503,
+                message: None,
+            });
+        }
         let lookups = ids
             .iter()
             .map(|id| Lookup {
@@ -665,6 +680,8 @@ struct Doiorg {
     caps: Capabilities,
     works: Vec<SourceRecord>,
     lookups: Mutex<Vec<Vec<WorkId>>>,
+    /// Every lookup fails, with a server error.
+    down: bool,
 }
 
 impl Doiorg {
@@ -676,6 +693,7 @@ impl Doiorg {
             caps,
             works,
             lookups: Mutex::default(),
+            down: false,
         }
     }
 }
@@ -692,6 +710,12 @@ impl Provider for Doiorg {
 
     async fn lookup(&self, ids: &[WorkId], _: FieldSet) -> Result<Response<Vec<Lookup>>> {
         self.lookups.lock().unwrap().push(ids.to_vec());
+        if self.down {
+            return Err(Error::Server {
+                status: 503,
+                message: None,
+            });
+        }
         let lookups = ids
             .iter()
             .map(|id| Lookup {
@@ -801,6 +825,82 @@ async fn seeds_missed_by_their_doi_resolve_as_lookup_finds_them() {
     assert!(!missing.contains(&"openalex:W90".into()), "{missing:?}");
     assert!(!missing.contains(&"openalex:W91".into()), "{missing:?}");
     assert!(missing.contains(&"openalex:W11".into()));
+}
+
+/// A seed OpenAlex misses by its DOI is `not_found` only once settled:
+/// the lookup elsewhere failing, or OpenAlex failing when asked again,
+/// leaves it unresolved by a failure, and the analysis incomplete.
+#[tokio::test(start_paused = true)]
+async fn a_miss_is_not_found_only_once_settled() {
+    let (works, registered) = moved();
+    let seeds = inputs(&["10.1000/b", "10.2000/old"]);
+    let kinds = [AnalysisKind::OddOneOut];
+    // The registry fails.
+    let alex = Arc::new(Alex::new(works.clone()));
+    let mut doiorg = Doiorg::new(registered.clone());
+    doiorg.down = true;
+    let engine = Engine::builder()
+        .provider(alex, policy(), 10)
+        .provider(Arc::new(doiorg), policy(), 20)
+        .build();
+    let analysis = engine.analyse(&seeds, &kinds, None, false).await.unwrap();
+    assert_eq!(analysis.seeds[1].problem, Some(SeedProblem::ProviderFailed));
+    assert!(!analysis.complete());
+
+    // The registry finds it, but OpenAlex fails asked by its PMID.
+    let alex = Arc::new(Alex::new(works).broken(&["pmid:777"]));
+    let engine = Engine::builder()
+        .provider(alex, policy(), 10)
+        .provider(Arc::new(Doiorg::new(registered)), policy(), 20)
+        .build();
+    let analysis = engine.analyse(&seeds, &kinds, None, false).await.unwrap();
+    assert_eq!(analysis.seeds[1].problem, Some(SeedProblem::ProviderFailed));
+    assert!(!analysis.complete());
+}
+
+/// Two seeds missed by their old DOIs, asked again by their PMIDs in a
+/// paid batch the budget doesn't cover: over budget, not `not_found`.
+#[tokio::test(start_paused = true)]
+async fn a_miss_asked_again_past_the_budget_is_over_budget() {
+    let (mut works, mut registered) = moved();
+    works.push(work(
+        &["W92", "10.2000/new2", "pmid:778"],
+        "Fluids in the emergency department",
+        "Lu Park",
+        2006,
+        None,
+    ));
+    let mut old2 = work(
+        &["10.2000/old2", "pmid:778"],
+        "Fluids in the emergency department",
+        "Lu Park",
+        2006,
+        None,
+    );
+    old2.source = CROSSREF;
+    registered.push(old2);
+    let alex = Arc::new(Alex::new(works));
+    let engine = Engine::builder()
+        .provider(alex.clone(), policy(), 10)
+        .provider(Arc::new(Doiorg::new(registered)), policy(), 20)
+        .build();
+    // Enough for the DOIs' batch only.
+    let analysis = engine
+        .analyse(
+            &inputs(&["10.2000/old", "10.2000/old2"]),
+            &[AnalysisKind::OddOneOut],
+            Some(0.0001),
+            false,
+        )
+        .await
+        .unwrap();
+    let problems: Vec<Option<SeedProblem>> = analysis.seeds.iter().map(|s| s.problem).collect();
+    assert_eq!(problems, [Some(SeedProblem::OverBudget); 2]);
+    assert_eq!(alex.lookups(), [2]);
+    let stop = analysis.incomplete.as_ref().unwrap();
+    assert_eq!(stop.kind, IncompleteKind::Budget);
+    assert_eq!((stop.done, stop.total), (0, 2));
+    assert!(!analysis.complete());
 }
 
 /// What `estimate_only` counts is what the run then spends, with a cache

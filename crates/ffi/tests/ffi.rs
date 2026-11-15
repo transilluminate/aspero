@@ -417,7 +417,8 @@ fn analyses_say_why_each_seed_is_unresolved() {
     ];
     let seeds = vec!["10.1234/never-seen".into(), "not an id".into()];
     let analysis =
-        block_on(handle.analyse(seeds, kinds, Some(0.01), false, Patience::Offline, None)).unwrap();
+        block_on(handle.analyse(seeds, kinds, Some(0.01), false, Patience::Offline, 20, None))
+            .unwrap();
     let problems: Vec<_> = analysis.seeds.iter().map(|s| s.problem).collect();
     assert_eq!(
         problems,

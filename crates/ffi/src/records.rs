@@ -2118,24 +2118,22 @@ pub enum AnalysisKind {
     OddOneOut,
     /// The best `limit` works several seeds cite that the set lacks.
     ProbablyMissing { limit: u32 },
-    /// The best 20 works around the set, by co-citation and bibliographic
-    /// coupling (`related`).
+    /// The best works around the set, by co-citation and bibliographic
+    /// coupling (`related`): as many as `analyse`'s `relatedLimit`.
     Related,
 }
 
-/// Related works listed: as many as `aspero analyse` lists by default.
-const RELATED_LIMIT: u32 = 20;
-
-impl From<AnalysisKind> for engine::AnalysisKind {
-    fn from(k: AnalysisKind) -> Self {
-        match k {
+impl AnalysisKind {
+    /// The engine's kind, `related_limit` the number of related works.
+    pub(crate) fn to_engine(self, related_limit: u32) -> engine::AnalysisKind {
+        match self {
             AnalysisKind::RetractedReferences => engine::AnalysisKind::RetractedReferences,
             AnalysisKind::OddOneOut => engine::AnalysisKind::OddOneOut,
             AnalysisKind::ProbablyMissing { limit } => {
                 engine::AnalysisKind::ProbablyMissing { limit }
             }
             AnalysisKind::Related => engine::AnalysisKind::Related {
-                limit: RELATED_LIMIT,
+                limit: related_limit,
             },
         }
     }
@@ -2624,7 +2622,7 @@ mod tests {
         for k in engine::AnalysisKind::ALL {
             let kind = AnalysisKind::from(*k);
             assert_eq!(name(kind), k.as_str());
-            assert_eq!(engine::AnalysisKind::from(kind), *k);
+            assert_eq!(kind.to_engine(20), *k);
         }
         for c in engine::Coverage::ALL {
             assert_eq!(name(Coverage::from(*c)), c.as_str());

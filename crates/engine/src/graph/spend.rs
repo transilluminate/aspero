@@ -7,6 +7,7 @@ use aspero_core::{ErrorKind, FieldSet, ProviderId, SourceRecord, Usage, WorkId};
 use super::{Incomplete, IncompleteKind, LIST_PRICE, Seed};
 use std::sync::Mutex;
 
+use crate::lookup::Cached;
 use crate::{Engine, Entry, Outcome, add_usage, lock};
 
 /// What an analysis has spent and may spend.
@@ -168,7 +169,7 @@ impl Engine {
         let uncached = self
             .cached_lookups(&provider, ids, FieldSet::DEFAULT)
             .iter()
-            .filter(|c| c.is_none())
+            .filter(|c| matches!(c, Cached::Uncached))
             .count();
         let paid = paid_batches(uncached, entry);
         let mut looked = Looked {

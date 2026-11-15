@@ -22,7 +22,9 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use aspero_core::http::{escape_lucene, path_segment, status_error};
-use aspero_core::query::{check_supported, lucene_and, lucene_term, lucene_years, render_lucene};
+use aspero_core::query::{
+    check_supported, lucene_and, lucene_quoted, lucene_term, lucene_years, render_lucene,
+};
 use aspero_core::{
     AuthorId, BooleanSupport, Capabilities, Cursor, Doi, Error, Field, FieldSet, Filter,
     FilterValue, Hit, HttpClient, HttpRequest, HttpResponse, IdKind, Lookup, Page, Provider,
@@ -220,10 +222,7 @@ impl Provider for Datacite {
         }
         let mut found = Vec::new();
         for chunk in dois.chunks(MAX_BATCH) {
-            let terms: Vec<String> = chunk
-                .iter()
-                .map(|d| format!("\"{}\"", d.as_str().replace('"', "\\\"")))
-                .collect();
+            let terms: Vec<String> = chunk.iter().map(|d| lucene_quoted(d.as_str())).collect();
             let params = [
                 ("query", format!("doi:({})", terms.join(" OR "))),
                 ("page[size]", chunk.len().to_string()),
@@ -364,7 +363,7 @@ fn express(tree: &QueryNode, caps: &Capabilities) -> std::result::Result<String,
                         WorkId::Arxiv(arxiv) => arxiv.doi(),
                         _ => return Err(format!("{NAME} finds works by DOI or arXiv id only")),
                     };
-                    return Ok(format!("doi:\"{}\"", doi.as_str().replace('"', "\\\"")));
+                    return Ok(format!("doi:{}", lucene_quoted(doi.as_str())));
                 }
                 TermField::AuthorId => {
                     return match AuthorId::parse(&t.value) {

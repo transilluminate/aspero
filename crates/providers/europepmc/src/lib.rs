@@ -15,7 +15,9 @@ use std::time::Duration;
 
 use aspero_core::csl::{null_default, plain_text, strip_markup};
 use aspero_core::http::{escape_lucene, status_error};
-use aspero_core::query::{check_supported, lucene_and, lucene_term, lucene_years, render_lucene};
+use aspero_core::query::{
+    check_supported, lucene_and, lucene_quoted, lucene_term, lucene_years, render_lucene,
+};
 use aspero_core::{
     BooleanSupport, Capabilities, Cursor, Doi, Error, FieldSet, Filter, FilterValue, Hit,
     HttpClient, HttpRequest, HttpResponse, IdKind, Lookup, Nbk, OpenAccess, Page, PartialDate,
@@ -423,7 +425,7 @@ fn clause(id: &WorkId) -> Result<String> {
         WorkId::Pmid(p) => format!("(EXT_ID:{p} AND SRC:MED)"),
         WorkId::Pmcid(p) => format!("PMCID:{p}"),
         WorkId::Nbk(n) => format!("BOOK_ID:{n}"),
-        WorkId::Doi(d) => format!("DOI:\"{}\"", d.as_str().replace('"', "\\\"")),
+        WorkId::Doi(d) => format!("DOI:{}", lucene_quoted(d.as_str())),
         _ => {
             return Err(Error::Unsupported(
                 "Europe PMC lookup of this identifier kind",

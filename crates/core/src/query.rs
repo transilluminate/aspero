@@ -824,6 +824,12 @@ pub fn lucene_term(prefix: Option<&str>, value: &str, phrase: bool) -> String {
     }
 }
 
+/// A value as one quoted Lucene term, `"…"`, its `\` and `"` escaped: a
+/// DOI, whose suffix may hold either.
+pub fn lucene_quoted(value: &str) -> String {
+    format!("\"{}\"", value.replace('\\', "\\\\").replace('"', "\\\""))
+}
+
 /// User text as words, never syntax: special characters escaped, and the
 /// operators `AND`, `OR` and `NOT` (as words) quoted, so they are searched
 /// for rather than obeyed. `<`, `>` and `=` are dropped: Elasticsearch

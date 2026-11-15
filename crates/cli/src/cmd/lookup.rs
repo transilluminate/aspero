@@ -166,7 +166,7 @@ fn row(item: &Value, result: Option<&LookupResult>) -> Vec<comfy_table::Cell> {
         }
         None => {
             let level = match item["status"].as_str() {
-                Some("not_found") | Some("invalid") => Level::Error,
+                Some("not_found" | "invalid") => Level::Error,
                 _ => Level::Warning,
             };
             let why = item["error"].as_str().unwrap_or("");

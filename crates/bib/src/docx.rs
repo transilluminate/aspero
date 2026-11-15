@@ -109,7 +109,7 @@ impl Fields {
         let mut in_text = false;
         loop {
             match reader.read_event() {
-                Ok(Event::Start(e)) | Ok(Event::Empty(e)) => match e.name().as_ref() {
+                Ok(Event::Start(e) | Event::Empty(e)) => match e.name().as_ref() {
                     b"w:fldChar" => match attr(&e, b"w:fldCharType").as_deref() {
                         Some("begin") => open.push(String::new()),
                         Some("end") => {

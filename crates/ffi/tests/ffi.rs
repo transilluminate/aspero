@@ -550,6 +550,7 @@ fn failed_searches_say_why() {
 
 #[test]
 fn the_first_searching_source_is_the_one_search_picks() {
+    use SearchBoolean::{Anywhere, No, WithinField};
     let aspero = aspero(None);
     let sources = aspero.search_capabilities();
     let names: Vec<&str> = sources.iter().map(|s| s.source.as_str()).collect();
@@ -594,7 +595,6 @@ fn the_first_searching_source_is_the_one_search_picks() {
         .iter()
         .map(|s| (s.any, s.none, s.nesting, s.relations.len()))
         .collect();
-    use SearchBoolean::{Anywhere, No, WithinField};
     assert_eq!(
         reach,
         [

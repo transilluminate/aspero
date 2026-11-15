@@ -179,6 +179,7 @@ impl HttpClient for Paced {
 /// A URL for logs: path and query only, contact and key parameters
 /// redacted (logs get pasted into issues), long queries shortened.
 fn loggable_url(url: &str) -> String {
+    const MAX: usize = 140;
     let path = url
         .split_once("://")
         .map_or(url, |(_, rest)| rest.find('/').map_or("/", |i| &rest[i..]));
@@ -195,7 +196,6 @@ fn loggable_url(url: &str) -> String {
             format!("{p}?{}", params.join("&"))
         }
     };
-    const MAX: usize = 140;
     match redacted.char_indices().nth(MAX) {
         Some((cut, _)) => format!("{}…", &redacted[..cut]),
         None => redacted,

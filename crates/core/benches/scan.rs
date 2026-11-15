@@ -23,8 +23,8 @@ enum Run {
 }
 
 fn main() {
-    let filter = std::env::args().skip(1).find(|a| !a.starts_with('-'));
     const MB: usize = 1 << 20;
+    let filter = std::env::args().skip(1).find(|a| !a.starts_with('-'));
     let cases = [
         ("scan/plain/16M", Density::None, 16 * MB, Run::Scan),
         ("scan/prose/64K", Density::Prose, 64 << 10, Run::Scan),

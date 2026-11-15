@@ -1,5 +1,25 @@
 # Changelog
 
+## Unreleased
+
+Added:
+
+- A claim's site, the page it was read from (#98): `claimFromPage` and
+  `verify --url` fill it from the address's host (`jamanetwork.com`),
+  `site` in a JSON claim and `--site HOST` give it otherwise, and Swift's
+  `Claim` has `site`. It's a hint of the publisher, never the journal nor
+  a difference reported. For a claim without identifiers from a known
+  publisher's site (JAMA Network, Oxford Academic, Nature, Elsevier's
+  sites, Wiley, Springer and BMC, ACS and some 30 more, by registrable
+  domain), Crossref is also asked for the title among the publisher's
+  works (its DOI prefixes, free), and between candidates that match about
+  as well the publisher's is chosen: a title shared from JAMA's page
+  ("Treatment of Acute Ischemic Stroke: A Review") is now JAMA's review,
+  not an older article of that title elsewhere. It never makes a match
+  verified, never outranks a clearly better one, and with no candidate
+  from the publisher changes nothing. When it decided, JSON says
+  `chosen_by_site: true` and Swift's `Verification.chosenBySite`.
+
 ## 0.24.0
 
 Added:

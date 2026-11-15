@@ -74,6 +74,10 @@ aspero verify https://www.sciencedirect.com/science/article/pii/S277294002600003
 # An article page whose address doesn't say (JAMA, Oxford Academic): its
 # saved markup's citation_*, PRISM, Dublin Core or JSON-LD metadata (offline)
 aspero verify --html page.html --url https://jamanetwork.com/journals/jama/fullarticle/2856706
+# Or its address and the title a browser gave it: the site's publisher
+# (JAMA's 10.1001) decides between works of the same title
+aspero verify --url https://jamanetwork.com/journals/jama/article-abstract/2856706 \
+  --title "Treatment of Acute Ischemic Stroke: A Review | JAMA | JAMA Network"
 
 # Which paper is this PDF? From its first page's text and title
 pdftotext -l 1 paper.pdf - | aspero identify --title "Deep learning"

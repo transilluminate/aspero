@@ -210,6 +210,7 @@ proptest! {
             IdKind::OpenAlex => format!("W{n}"),
             IdKind::S2Paper => format!("{n:040x}"),
             IdKind::Isbn => isbn13("978", n % 1_000_000_000),
+            IdKind::Pii => format!("S{:016}", n % 10_000_000_000_000_000),
             _ => n.to_string(),
         };
         let id = WorkId::parse_as(kind, &input).unwrap();

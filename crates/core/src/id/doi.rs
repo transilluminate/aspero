@@ -115,6 +115,45 @@ fn without_landing_suffix(doi: &str) -> &str {
         .map_or(doi, |s| &doi[..doi.len() - s.len()])
 }
 
+/// The DOI a `nature.com/articles/<suffix>` page is: Springer Nature's
+/// prefix and the page's name (`nature14539`, `s41586-020-2649-2`,
+/// `ncomms1234`, `nbt.3122`, `35057062`, `171737a0`), under `10.1038`
+/// but for the Palgrave journals it hosts (`s41599-…`, `palcomms…`:
+/// `10.1057`, `palcomms20162` naming `palcomms.2016.2`). Older pages
+/// whose name is only part of the DOI aren't read: `/articles/6605004`
+/// is `10.1038/sj.bjc.6605004`, `/articles/ncb0200_57` is
+/// `10.1038/35000001` (checked against Crossref 2026-11-15).
+fn nature_doi(url: &Url<'_>) -> Option<String> {
+    let mut segs = url.segments();
+    if segs.next()? != "articles" {
+        return None;
+    }
+    let name = segs.next()?.to_ascii_lowercase();
+    let name = name.strip_suffix(".pdf").unwrap_or(&name);
+    let shaped = name.starts_with(|c: char| c.is_ascii_alphanumeric())
+        && name
+            .bytes()
+            .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || matches!(b, b'.' | b'-'));
+    // Nature's own numbers (1997 to 2001) have eight digits; seven are
+    // another journal's `sj.…`.
+    if !shaped || (is_digits(name) && name.len() != 8) {
+        return None;
+    }
+    if let Some(rest) = name.strip_prefix("palcomms") {
+        let rest = match rest.get(..4) {
+            Some(year) if is_digits(rest) && rest.len() > 4 => format!(".{year}.{}", &rest[4..]),
+            _ => rest.to_owned(),
+        };
+        return Some(format!("10.1057/palcomms{rest}"));
+    }
+    let prefix = if name.starts_with("s41599-") {
+        "10.1057"
+    } else {
+        "10.1038"
+    };
+    Some(format!("{prefix}/{name}"))
+}
+
 pub(crate) fn has_info_prefix(s: &str) -> bool {
     strip_prefix_ci(s, INFO_PREFIX).is_some()
 }
@@ -159,6 +198,11 @@ impl IdSyntax for Doi {
         };
         if url.is_host(&["doi.org", "dx.doi.org"]) {
             return Some(decode(url.path));
+        }
+        if url.is_host(&["nature.com"])
+            && let Some(doi) = nature_doi(url)
+        {
+            return Some(Ok(Cow::Owned(doi)));
         }
         // A path segment starting "10.<digits>/" begins the DOI.
         let at = url.path.match_indices("10.").map(|(i, _)| i).find(|&i| {
@@ -304,6 +348,95 @@ mod tests {
             doi("https://doi.org/10.1234/report.pdf").unwrap().as_str(),
             "10.1234/report.pdf"
         );
+    }
+
+    #[test]
+    fn nature_pages_give_the_doi_their_name_ends() {
+        // Each checked against Crossref (2026-11-15).
+        for (url, want) in [
+            (
+                "https://www.nature.com/articles/nature14539",
+                "10.1038/nature14539",
+            ),
+            (
+                "https://www.nature.com/articles/s41586-020-2649-2.pdf",
+                "10.1038/s41586-020-2649-2",
+            ),
+            (
+                "https://www.nature.com/articles/ncomms1234?error=cookies_not_supported",
+                "10.1038/ncomms1234",
+            ),
+            ("http://nature.com/articles/srep01234/", "10.1038/srep01234"),
+            ("nature.com/articles/nbt.3122#Sec2", "10.1038/nbt.3122"),
+            (
+                "https://www.nature.com/articles/35057062",
+                "10.1038/35057062",
+            ),
+            (
+                "https://www.nature.com/articles/171737a0",
+                "10.1038/171737a0",
+            ),
+            (
+                "https://www.nature.com/articles/d41586-020-00502-w",
+                "10.1038/d41586-020-00502-w",
+            ),
+            (
+                "https://www.nature.com/articles/nrg2484/figures/1",
+                "10.1038/nrg2484",
+            ),
+            (
+                "https://www.nature.com/articles/s41599-020-0499-z",
+                "10.1057/s41599-020-0499-z",
+            ),
+            (
+                "https://www.nature.com/articles/palcomms20162",
+                "10.1057/palcomms.2016.2",
+            ),
+            // An old link by DOI.
+            (
+                "http://www.nature.com/doifinder/10.1038/ncomms1234",
+                "10.1038/ncomms1234",
+            ),
+        ] {
+            assert_eq!(doi(url).unwrap().as_str(), want, "{url}");
+        }
+        for url in [
+            "https://www.nature.com/articles?type=article",
+            "https://www.nature.com/articles/",
+            "https://www.nature.com/subjects/machine-learning",
+            "https://www.nature.com/nature/articles?year=2020",
+            "https://www.nature.com/nature",
+            // Older pages named by only part of their DOI.
+            "https://www.nature.com/articles/6605004",
+            "https://www.nature.com/articles/ncb0200_57",
+            "https://example.com/articles/nature14539",
+        ] {
+            assert!(doi(url).is_err(), "{url}");
+        }
+    }
+
+    #[test]
+    fn springer_bmc_and_other_publisher_paths_hold_the_doi() {
+        for (url, want) in [
+            (
+                "https://link.springer.com/article/10.1007/s00134-020-06294-x",
+                "10.1007/s00134-020-06294-x",
+            ),
+            (
+                "https://link.springer.com/content/pdf/10.1007/s00134-020-06294-x.pdf",
+                "10.1007/s00134-020-06294-x",
+            ),
+            (
+                "https://bmcmedicine.biomedcentral.com/articles/10.1186/s12916-020-01726-3",
+                "10.1186/s12916-020-01726-3",
+            ),
+            (
+                "https://onlinelibrary.wiley.com/doi/10.1111/anae.15000",
+                "10.1111/anae.15000",
+            ),
+        ] {
+            assert_eq!(doi(url).unwrap().as_str(), want, "{url}");
+        }
     }
 
     #[test]

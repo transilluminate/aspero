@@ -20,6 +20,7 @@ mod arxiv;
 mod doi;
 mod isbn;
 mod numeric;
+mod pii;
 mod s2;
 mod scan;
 mod syntax;
@@ -32,6 +33,7 @@ pub use arxiv::ArxivId;
 pub use doi::Doi;
 pub use isbn::Isbn;
 pub use numeric::{CorpusId, Nbk, OpenAlexId, Pmcid, Pmid};
+pub use pii::Pii;
 pub use s2::S2PaperId;
 pub use scan::{Mention, scan};
 
@@ -53,6 +55,9 @@ pub enum IdKind {
     Isbn,
     /// NCBI Bookshelf.
     Nbk,
+    /// Elsevier's Publisher Item Identifier (ScienceDirect, Cell, The
+    /// Lancet).
+    Pii,
 }
 
 impl IdKind {
@@ -67,6 +72,7 @@ impl IdKind {
         IdKind::CorpusId,
         IdKind::Isbn,
         IdKind::Nbk,
+        IdKind::Pii,
     ];
 
     /// The lowercase prefix used in `kind:value` form.
@@ -81,6 +87,7 @@ impl IdKind {
             IdKind::CorpusId => "corpusid",
             IdKind::Isbn => "isbn",
             IdKind::Nbk => "nbk",
+            IdKind::Pii => "pii",
         }
     }
 
@@ -96,6 +103,7 @@ impl IdKind {
             IdKind::CorpusId => "Semantic Scholar CorpusId",
             IdKind::Isbn => "ISBN",
             IdKind::Nbk => "NCBI Bookshelf id",
+            IdKind::Pii => "Elsevier PII",
         }
     }
 
@@ -180,6 +188,7 @@ pub enum WorkId {
     CorpusId(CorpusId),
     Isbn(Isbn),
     Nbk(Nbk),
+    Pii(Pii),
 }
 
 impl WorkId {
@@ -194,6 +203,7 @@ impl WorkId {
             WorkId::CorpusId(_) => IdKind::CorpusId,
             WorkId::Isbn(_) => IdKind::Isbn,
             WorkId::Nbk(_) => IdKind::Nbk,
+            WorkId::Pii(_) => IdKind::Pii,
         }
     }
 
@@ -210,6 +220,7 @@ impl WorkId {
             IdKind::CorpusId => WorkId::CorpusId(input.parse()?),
             IdKind::Isbn => WorkId::Isbn(input.parse()?),
             IdKind::Nbk => WorkId::Nbk(input.parse()?),
+            IdKind::Pii => WorkId::Pii(input.parse()?),
         })
     }
 
@@ -231,6 +242,7 @@ impl WorkId {
             .or_else(|| try_kind(url, input, WorkId::CorpusId))
             .or_else(|| try_kind(url, input, WorkId::Isbn))
             .or_else(|| try_kind(url, input, WorkId::Nbk))
+            .or_else(|| try_kind(url, input, WorkId::Pii))
             .unwrap_or_else(|| Err(IdError::Unrecognised(input.to_owned())))
     }
 
@@ -251,6 +263,9 @@ impl WorkId {
         }
         if s.starts_with(['W', 'w']) && is_digits(&s[1..]) {
             return WorkId::parse_as(IdKind::OpenAlex, input);
+        }
+        if let Ok(pii) = s.parse::<Pii>() {
+            return Ok(WorkId::Pii(pii));
         }
         // 13 digits from the book prefixes with a valid checksum, or a
         // hyphenated form, can only be an ISBN; plain 10 digits might be.
@@ -284,7 +299,7 @@ impl WorkId {
 
 /// The identifier a work is best known by, the same whichever of its
 /// identifiers it was found through: a DOI (other than arXiv's DataCite
-/// one), then arXiv, PMID, PMCID, ISBN, NBK, any DOI, any other.
+/// one), then arXiv, PMID, PMCID, ISBN, NBK, PII, any DOI, any other.
 pub fn canonical(ids: &[WorkId]) -> Option<&WorkId> {
     let arxiv_doi = |id: &&WorkId| matches!(id, WorkId::Doi(d) if d.is_arxiv());
     let of = |kind: IdKind| ids.iter().find(move |id| id.kind() == kind);
@@ -297,6 +312,7 @@ pub fn canonical(ids: &[WorkId]) -> Option<&WorkId> {
                 IdKind::Pmcid,
                 IdKind::Isbn,
                 IdKind::Nbk,
+                IdKind::Pii,
                 IdKind::Doi,
             ]
             .into_iter()
@@ -359,6 +375,7 @@ impl fmt::Display for WorkId {
             WorkId::CorpusId(id) => id.fmt(f),
             WorkId::Isbn(id) => id.fmt(f),
             WorkId::Nbk(id) => id.fmt(f),
+            WorkId::Pii(id) => id.fmt(f),
         }
     }
 }
@@ -385,6 +402,7 @@ impl_from_for_work_id!(
     CorpusId(CorpusId),
     Isbn(Isbn),
     Nbk(Nbk),
+    Pii(Pii),
 );
 
 #[cfg(test)]
@@ -419,6 +437,16 @@ mod tests {
                 "nbk:NBK526056",
             ),
             ("W2741809807", "openalex:W2741809807"),
+            ("pii:S0140-6736(20)30183-5", "pii:S0140673620301835"),
+            ("S0140-6736(20)30183-5", "pii:S0140673620301835"),
+            (
+                "https://www.sciencedirect.com/science/article/pii/S2772940026000032",
+                "pii:S2772940026000032",
+            ),
+            (
+                "https://www.nature.com/articles/nature14539",
+                "doi:10.1038/nature14539",
+            ),
             ("https://openalex.org/W2741809807", "openalex:W2741809807"),
             ("CorpusId:13756489", "corpusid:13756489"),
             (

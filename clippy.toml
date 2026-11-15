@@ -12,5 +12,6 @@ doc-valid-idents = [
     "CorpusId",
     "JaLC",
     "SplitMix64",
+    "ScienceDirect",
     "..",
 ]

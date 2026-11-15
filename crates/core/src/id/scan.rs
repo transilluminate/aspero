@@ -2,11 +2,14 @@
 //! was written. Which mentions matter (a citation, an aside, a reference
 //! list) is the caller's call; this only says what is a valid identifier.
 //!
-//! Recognised anywhere: DOIs (bare, `doi:`-prefixed or as URLs), PMCIDs
-//! (`PMC…`) and NCBI Bookshelf IDs (`NBK…`). Recognised only when labelled
-//! (`PMID: 123`, `ISBN 978-…`), prefixed (`arXiv:…`) or as a URL: everything
-//! else, since bare digits, `W1` or a 40-digit hex string in prose are more
-//! often something else. Mentions are cleaned like pasted input: wrapping
+//! Recognised anywhere: DOIs (bare, `doi:`-prefixed or as URLs, publishers'
+//! article pages included: a DOI in the path, or Nature's
+//! `nature.com/articles/<suffix>`), PMCIDs (`PMC…`) and NCBI Bookshelf IDs
+//! (`NBK…`). Recognised only when labelled (`PMID: 123`, `ISBN 978-…`),
+//! prefixed (`arXiv:…`, `pii:…`) or as a URL: everything else, since bare
+//! digits, `W1` or a 40-digit hex string in prose are more often something
+//! else. Elsevier's PIIs are read from ScienceDirect, Cell and Lancet
+//! pages. Each mention says whether it was [`Mention::from_url`]. Mentions are cleaned like pasted input: wrapping
 //! brackets, quotes and emphasis and trailing sentence punctuation are not
 //! part of them, while brackets inside a DOI are. Markdown links and table
 //! cells are split apart. A DOI or URL broken across lines, as text from
@@ -31,6 +34,12 @@ pub struct Mention {
     /// 123`), wrappers and trailing punctuation not. A link broken across
     /// lines spans both, line break included.
     pub span: Range<usize>,
+    /// Written as a web address: a link with its scheme, or on a host known
+    /// without one (`doi.org/…`, `nature.com/articles/…`), or a DOI in a
+    /// host's path (`wiley.com/doi/10.…`). Identifier links (doi.org,
+    /// PubMed, arXiv) count as much as publishers' pages: the identifier
+    /// was read from an address, not written out.
+    pub from_url: bool,
 }
 
 impl Mention {
@@ -186,12 +195,14 @@ fn located(text: &str) -> Vec<(Mention, usize)> {
         // A mention mended or rejoined across lines covers what starts the
         // next.
         resume = resume.max(span.end);
+        let from_url = written_as_url(&text[span.clone()]);
         found.push((
             Mention {
                 id,
                 line,
                 column: 0,
                 span,
+                from_url,
             },
             line_start,
         ));
@@ -627,6 +638,29 @@ fn prefixed(piece: &str) -> bool {
     })
 }
 
+/// Whether a mention as written (see [`Mention::from_url`]) is a web
+/// address, after any label (`DOI: https://doi.org/…`).
+fn written_as_url(written: &str) -> bool {
+    let s = match written.find(|c: char| c == ':' || c.is_whitespace()) {
+        Some(at)
+            if IdKind::from_label(&written[..at])
+                .or_else(|| IdKind::from_prefix(&written[..at]))
+                .is_some() =>
+        {
+            written[at..].trim_start_matches(':').trim_start()
+        }
+        _ => written,
+    };
+    if Url::parse(s).is_some() {
+        return true;
+    }
+    // A DOI on a host given without its scheme.
+    s.find("/10.").is_some_and(|at| {
+        let host = s[..at].split('/').next().unwrap_or_default();
+        host.contains('.') && !host.contains(':') && !host.starts_with("10.")
+    })
+}
+
 /// Byte offset of `part`, a subslice of `whole`.
 fn offset(whole: &str, part: &str) -> usize {
     part.as_ptr() as usize - whole.as_ptr() as usize
@@ -694,6 +728,8 @@ mod tests {
                 "1706.03762", "https://", "http://", "doi.org/", "www.", "arxiv.org/abs/",
                 "pubmed.ncbi.nlm.nih.gov/", "s2:", "corpusid:", "openalex:", "info:doi/",
                 "hep-th/9901001", "0123456789abcdef0123456789abcdef01234567",
+                "nature.com/articles/", "nature14539", "sciencedirect.com/science/article/pii/",
+                "thelancet.com/journals/lancet/article/PII", "S0140-6736(20)30183-5", "pii:",
             ]), 0..40),
         ) {
             let text = parts.concat();
@@ -974,6 +1010,74 @@ mod tests {
                 ),
             ]
         );
+    }
+
+    #[test]
+    fn publishers_article_pages_are_read_as_their_identifiers() {
+        let text = "Deep learning https://www.nature.com/articles/nature14539.\n\
+            Solar cookers: <https://www.sciencedirect.com/science/article/pii/S2772940026000032>\n\
+            [Huang](https://www.thelancet.com/journals/lancet/article/PIIS0140-6736(20)30183-5/fulltext)\n\
+            Cell: www.cell.com/cell/fulltext/S0092-8674(20)30229-4, and\n\
+            onlinelibrary.wiley.com/doi/10.1111/anae.15000 or arxiv.org/pdf/1706.03762v2\n\
+            not https://www.nature.com/subjects/machine-learning nor \
+            https://www.sciencedirect.com/journal/the-lancet nor nature.com/articles?type=article";
+        assert_eq!(
+            found(text),
+            [
+                (
+                    "doi:10.1038/nature14539".into(),
+                    "https://www.nature.com/articles/nature14539"
+                ),
+                (
+                    "pii:S2772940026000032".into(),
+                    "https://www.sciencedirect.com/science/article/pii/S2772940026000032"
+                ),
+                (
+                    "pii:S0140673620301835".into(),
+                    "https://www.thelancet.com/journals/lancet/article/PIIS0140-6736(20)30183-5/fulltext"
+                ),
+                (
+                    "pii:S0092867420302294".into(),
+                    "www.cell.com/cell/fulltext/S0092-8674(20)30229-4"
+                ),
+                (
+                    "doi:10.1111/anae.15000".into(),
+                    "onlinelibrary.wiley.com/doi/10.1111/anae.15000"
+                ),
+                ("arxiv:1706.03762v2".into(), "arxiv.org/pdf/1706.03762v2"),
+            ]
+        );
+        assert!(scan(text).iter().all(|m| m.from_url));
+    }
+
+    #[test]
+    fn mentions_say_whether_they_were_written_as_addresses() {
+        let text = "doi:10.1056/NEJMoa1302097 DOI: https://doi.org/10.1056/NEJMoa1302097 \
+            10.1001/jama.2014.2135 PMID: 31452104 https://pubmed.ncbi.nlm.nih.gov/31452104/ \
+            pii:S0140-6736(20)30183-5 info:doi/10.1145/3368089 see:10.1145/3368089 \
+            doi.org/10.1145/3368089 PMC6716493 arXiv:1706.03762";
+        let read: Vec<(String, bool)> = scan(text)
+            .into_iter()
+            .map(|m| (text[m.span].to_owned(), m.from_url))
+            .collect();
+        let want = [
+            ("doi:10.1056/NEJMoa1302097", false),
+            ("DOI: https://doi.org/10.1056/NEJMoa1302097", true),
+            ("10.1001/jama.2014.2135", false),
+            ("PMID: 31452104", false),
+            ("https://pubmed.ncbi.nlm.nih.gov/31452104/", true),
+            ("pii:S0140-6736(20)30183-5", false),
+            ("info:doi/10.1145/3368089", false),
+            ("see:10.1145/3368089", false),
+            ("doi.org/10.1145/3368089", true),
+            ("PMC6716493", false),
+            ("arXiv:1706.03762", false),
+        ];
+        let want: Vec<(String, bool)> = want.iter().map(|&(t, u)| (t.to_owned(), u)).collect();
+        assert_eq!(read, want);
+        // Mended across a line break, still an address.
+        let text = "http://dx.doi.org/10.1017/\n   S1049023X15004653.";
+        assert!(scan(text)[0].from_url);
     }
 
     #[test]

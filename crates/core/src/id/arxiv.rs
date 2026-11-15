@@ -151,6 +151,19 @@ mod tests {
             ("HEP-TH/9901001", "hep-th/9901001", None),
             ("https://arxiv.org/abs/1706.03762v7", "1706.03762", Some(7)),
             ("https://arxiv.org/pdf/1706.03762.pdf", "1706.03762", None),
+            ("https://arxiv.org/pdf/1706.03762", "1706.03762", None),
+            ("https://arxiv.org/pdf/1706.03762v2", "1706.03762", Some(2)),
+            (
+                "https://arxiv.org/pdf/1706.03762v2.pdf",
+                "1706.03762",
+                Some(2),
+            ),
+            (
+                "https://arxiv.org/abs/1706.03762?context=cs",
+                "1706.03762",
+                None,
+            ),
+            ("https://arxiv.org/html/2310.06825v1", "2310.06825", Some(1)),
             ("arxiv.org/abs/hep-th/9901001", "hep-th/9901001", None),
             (
                 "https://export.arxiv.org/abs/2101.00001/",

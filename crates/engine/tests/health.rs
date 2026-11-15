@@ -124,6 +124,20 @@ async fn a_spent_quota_is_waited_out_until_it_resets() {
     assert!(engine.unavailable().is_empty());
 }
 
+/// A quota spent with no reset time is waited out an hour, and says so.
+#[tokio::test(start_paused = true)]
+async fn a_spent_quota_of_unknown_reset_says_when_it_is_tried_again() {
+    let failing = Failing::new(vec![Error::QuotaExhausted { resets_at: None }]);
+    let engine = engine(failing.clone());
+    outcome(&engine).await;
+    tokio::time::advance(Duration::from_secs(600)).await;
+    let hour_on = Timestamp::UNIX_EPOCH + jiff::SignedDuration::from_secs(3000);
+    assert!(matches!(
+        engine.unavailable()[..],
+        [(_, Error::QuotaExhausted { resets_at: Some(t) })] if t == hour_on
+    ));
+}
+
 #[tokio::test(start_paused = true)]
 async fn a_spent_budget_is_remembered_without_asking_again() {
     let resets_at = Timestamp::UNIX_EPOCH + jiff::SignedDuration::from_secs(600);

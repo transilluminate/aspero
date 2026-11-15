@@ -462,9 +462,6 @@ impl Lookup {
             InputLookup::Looked(looked) => looked,
         };
         let mut lookup = Lookup::from_result(input, &looked.result);
-        if let (Some(work), Some(found)) = (&mut lookup.work, &looked.abstract_text) {
-            work.abstract_text = found.as_ref().map(|a| a.text.clone());
-        }
         lookup.with_punctuation = looked.with_punctuation;
         lookup.latest = looked.latest.as_ref().map(Work::from_record);
         lookup.disagreements = looked.disagreements.iter().map(Into::into).collect();
@@ -488,6 +485,10 @@ impl Lookup {
                 let (outcome, failure) = match &a.outcome {
                     Outcome::Found => (AttemptOutcome::Found, None),
                     Outcome::Failed(e) => (AttemptOutcome::Failed, Some(e)),
+                    Outcome::NotFound => (AttemptOutcome::NotFound, None),
+                    // `Outcome` is non-exhaustive: an outcome added later
+                    // found nothing usable here, and it isn't a failure the
+                    // app could word, so it shows as not found.
                     _ => (AttemptOutcome::NotFound, None),
                 };
                 Attempt {
@@ -817,7 +818,7 @@ impl From<CoreAgreement> for Agreement {
             CoreAgreement::Match => Agreement::Match,
             CoreAgreement::Partial => Agreement::Partial,
             CoreAgreement::Mismatch => Agreement::Mismatch,
-            _ => Agreement::Unknown,
+            CoreAgreement::Unknown => Agreement::Unknown,
         }
     }
 }

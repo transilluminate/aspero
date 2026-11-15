@@ -9,7 +9,9 @@ use super::verify::split;
 use super::{Failure, Out, merged, print, print_line};
 use crate::args::{ClaimArgs, Format};
 use crate::exit::Exit;
+use crate::grid::Grid;
 use crate::output;
+use crate::term;
 
 pub async fn run(engine: &Engine, args: ClaimArgs, out: Out) -> Result<Exit, Failure> {
     let limit = args.limit;
@@ -69,33 +71,33 @@ pub async fn run(engine: &Engine, args: ClaimArgs, out: Out) -> Result<Exit, Fai
                 if report.candidates.is_empty() {
                     println!("  no candidates");
                 } else {
-                    let mut table = output::table(&[
-                        "#", "Conf", "Checks", "Year", "Author", "Title", "ID", "Found by",
-                    ]);
+                    let mut grid = Grid::new(output::candidate_cols());
                     for (i, c) in report.candidates.iter().enumerate() {
-                        table.add_row(output::candidate_row(i + 1, c));
+                        grid.row(output::candidate_row(i + 1, c));
                     }
-                    println!("{table}");
+                    println!("{grid}");
                 }
                 for (i, c) in report.candidates.iter().enumerate() {
                     if let Some(a) = found(i) {
                         let id = output::main_id(&c.ids);
-                        println!("\n{}. {id}\n{}", i + 1, output::abstract_text(a, "  "));
+                        let text = output::abstract_text(a, "  ");
+                        println!("\n{}. {id}\n{}", i + 1, term::fill(&text));
                     }
                 }
                 for e in &errors {
-                    eprintln!("warning: {e}");
+                    output::eprint_warning(e);
                 }
-                if let Some(text) = output::usage_text(&report.usage) {
-                    eprintln!("{text}");
-                }
+                output::eprint_usage(&report.usage);
             }
             Format::Text => {
-                println!("{input}\n");
+                println!("{}\n", term::fill(&input));
                 for (i, c) in report.candidates.iter().enumerate() {
-                    println!("{}", output::candidate_text(c, "  "));
+                    // Numbered as in the table.
+                    let text = output::candidate_text(c, "    ");
+                    let text = format!("{:>2}. {}", i + 1, text.trim_start_matches(' '));
+                    println!("{}", term::fill(&text));
                     if let Some(a) = found(i) {
-                        println!("{}", output::abstract_text(a, "  "));
+                        println!("{}", term::fill(&output::abstract_text(a, "    ")));
                     }
                     println!();
                 }
@@ -103,11 +105,9 @@ pub async fn run(engine: &Engine, args: ClaimArgs, out: Out) -> Result<Exit, Fai
                     println!("  no candidates\n");
                 }
                 for e in &errors {
-                    eprintln!("warning: {e}");
+                    output::eprint_warning(e);
                 }
-                if let Some(text) = output::usage_text(&report.usage) {
-                    eprintln!("{text}");
-                }
+                output::eprint_usage(&report.usage);
             }
             Format::Jsonl => candidates.iter().for_each(print_line),
             Format::Bibtex | Format::Ris | Format::CslJson | Format::Cite => {

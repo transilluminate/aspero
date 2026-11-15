@@ -15,6 +15,7 @@ use super::{Failure, Out, lines, print, print_line, read_stdin, shell_quote};
 use crate::args::{AnalysisArg, Format};
 use crate::exit::Exit;
 use crate::output::{self, thousands};
+use crate::term;
 
 pub async fn references(
     engine: &Engine,
@@ -33,17 +34,15 @@ pub async fn references(
             }
         }
         Format::Table | Format::Text => {
-            print!("{}", references_text(&page));
+            print!("{}", term::fill(&references_text(&page)));
             if let Some(next) = &page.next_cursor {
-                eprintln!(
-                    "next page: aspero references {} --limit {limit} --cursor {}",
+                output::eprint_dim(&format!(
+                    "Next page: aspero references {} --limit {limit} --cursor {}",
                     shell_quote(&id),
                     next.0
-                );
+                ));
             }
-            if let Some(text) = output::usage_text(&page.usage) {
-                eprintln!("{text}");
-            }
+            output::eprint_usage(&page.usage);
         }
         Format::Bibtex | Format::Ris | Format::CslJson | Format::Cite => {
             unreachable!("rejected in main")
@@ -62,7 +61,12 @@ fn references_text(page: &ReferencesPage) -> String {
         .map(|t| format!(" \"{t}\""))
         .unwrap_or_default();
     let mut out = match page.total {
-        Some(total) => format!("{}{title}: cites {total} works\n", page.work),
+        Some(1) => format!("{}{title}: cites 1 work\n", page.work),
+        Some(total) => format!(
+            "{}{title}: cites {} works\n",
+            page.work,
+            thousands(total as u64)
+        ),
         None => format!(
             "{}{title}: references unknown (OpenAlex has no reference data for it)\n",
             page.work
@@ -73,7 +77,7 @@ fn references_text(page: &ReferencesPage) -> String {
             Some(record) => one_line(record),
             None => "(not found)".into(),
         };
-        let _ = writeln!(out, "  {}  {line}", r.id);
+        let _ = writeln!(out, "  {line} · {}", r.id);
     }
     out
 }
@@ -194,10 +198,8 @@ pub async fn analyse(
             let related = kinds
                 .iter()
                 .any(|k| matches!(k, AnalysisKind::Related { .. }));
-            print!("{}", analysis_text(&analysis, &doc, related));
-            if let Some(text) = output::usage_text(&analysis.usage) {
-                eprintln!("{text}");
-            }
+            print!("{}", term::fill(&analysis_text(&analysis, &doc, related)));
+            output::eprint_usage(&analysis.usage);
         }
         Format::Bibtex | Format::Ris | Format::CslJson | Format::Cite => {
             unreachable!("rejected in main")
@@ -288,6 +290,11 @@ fn exit_for(a: &Analysis) -> Exit {
     seeds.chain(failed).fold(Exit::Ok, Exit::worst)
 }
 
+/// A section's heading, bold on a terminal.
+fn heading(text: &str) -> String {
+    term::paint(text, term::Paint::Bold)
+}
+
 /// "stopped at the budget: 1,200 of 4,300 references checked".
 fn stopped(i: &Incomplete, what: &str) -> String {
     let why = match i.kind {
@@ -301,16 +308,20 @@ fn stopped(i: &Incomplete, what: &str) -> String {
         Some(Stage::Lookup) => "works looked up",
         _ => what,
     };
-    format!(
-        "  ⚠ {why}: {} of {} {what}\n",
+    let note = format!(
+        "⚠ {why}: {} of {} {what}",
         thousands(i.done),
         thousands(i.total)
-    )
+    );
+    format!("  {}\n", term::paint(&note, term::Paint::Warning))
 }
 
 /// The analysis as a readable report; `related` when related works were
-/// asked for (an estimate of them is a ceiling).
+/// asked for (an estimate of them is a ceiling). Seeds are numbered from
+/// 1, for people (JSON's `seed` indexes count from 0).
 fn analysis_text(a: &Analysis, doc: &Value, related: bool) -> String {
+    let n = |i: usize| format!("[{}]", i + 1);
+    let all = |seeds: &[usize]| seeds.iter().map(|&i| n(i)).collect::<Vec<_>>().join(" ");
     let label = |i: usize| {
         let seed = &doc["seeds"][i];
         seed["key"]
@@ -328,21 +339,19 @@ fn analysis_text(a: &Analysis, doc: &Value, related: bool) -> String {
     for (i, seed) in doc["seeds"].as_array().into_iter().flatten().enumerate() {
         let detail = match seed["status"].as_str() {
             Some("resolved") => {
-                let refs = match &seed["references"] {
-                    Value::Number(n) if n.as_u64() == Some(1) => "1 reference".into(),
-                    Value::Number(n) => format!("{n} references"),
-                    _ => "references unknown".into(),
+                let refs = match seed["references"].as_u64() {
+                    Some(1) => "1 reference".into(),
+                    Some(count) => format!("{} references", thousands(count)),
+                    None => "references unknown".into(),
                 };
                 let same = seed["same_as"]
                     .as_u64()
-                    .map(|f| format!(", same work as [{f}]"))
+                    .and_then(|f| usize::try_from(f).ok())
+                    .map(|f| format!(", same work as {}", n(f)))
                     .unwrap_or_default();
                 let record = a.seeds.get(i).and_then(|s| s.record.as_ref());
-                format!(
-                    "{}  {refs}{same}  {}",
-                    seed["id"].as_str().unwrap_or("?"),
-                    record.map(one_line).unwrap_or_default()
-                )
+                let work = record.map(one_line).unwrap_or_default();
+                format!("{work} · {refs}{same}")
             }
             Some("skipped") => "skipped: no identifier".into(),
             _ => format!(
@@ -351,27 +360,27 @@ fn analysis_text(a: &Analysis, doc: &Value, related: bool) -> String {
                 seed["error"].as_str().unwrap_or("")
             ),
         };
-        let _ = writeln!(out, "  [{i}] {}  {detail}", label(i));
+        let _ = writeln!(out, "  {} {detail} · {}", n(i), label(i));
     }
 
     if let Some(found) = &a.retracted_references {
-        out.push_str("\nRetracted references\n");
+        let _ = writeln!(out, "\n{}", heading("Retracted references"));
         if found.items.is_empty() {
             out.push_str("  none found\n");
         }
         for r in &found.items {
             let _ = writeln!(
                 out,
-                "  [{}] {} cites {}  {} (retracted, says {})",
-                r.seed,
+                "  {} {} cites {} (retracted, says {}) · {}",
+                n(r.seed),
                 label(r.seed),
+                one_line(&r.cites),
+                r.source,
                 r.cites
                     .ids
                     .first()
                     .map(ToString::to_string)
-                    .unwrap_or_default(),
-                one_line(&r.cites),
-                r.source
+                    .unwrap_or_default()
             );
         }
         for i in &found.incomplete {
@@ -379,7 +388,7 @@ fn analysis_text(a: &Analysis, doc: &Value, related: bool) -> String {
         }
     }
     if let Some(found) = &a.odd_one_out {
-        out.push_str("\nOdd ones out\n");
+        let _ = writeln!(out, "\n{}", heading("Odd ones out"));
         if found.items.is_empty() {
             out.push_str("  none: every work is linked to another\n");
         }
@@ -395,27 +404,31 @@ fn analysis_text(a: &Analysis, doc: &Value, related: bool) -> String {
                      may cite it"
                 }
             };
-            let _ = writeln!(out, "  [{}] {}: {why}", o.seed, label(o.seed));
+            let _ = writeln!(out, "  {} {}: {why}", n(o.seed), label(o.seed));
         }
     }
     if let Some(found) = &a.probably_missing {
         let _ = writeln!(
             out,
-            "\nProbably missing (cited by k of the {} works with known references)",
+            "\n{} (cited by k of the {} works with known references)",
+            heading("Probably missing"),
             a.with_references
         );
         if found.items.is_empty() {
             out.push_str("  none: no work outside the set is cited by two of it\n");
         }
         for m in &found.items {
-            let by: Vec<String> = m.cited_by.iter().map(|i| format!("[{i}]")).collect();
-            let work = m.record.as_ref().map(one_line).unwrap_or_default();
+            let work = m
+                .record
+                .as_ref()
+                .map(|r| format!("{} · ", one_line(r)))
+                .unwrap_or_default();
             let _ = writeln!(
                 out,
-                "  {}  {}  {work}  cited by {}",
+                "  {}  {work}cited by {} · {}",
                 m.count(),
-                m.id,
-                by.join(" ")
+                all(&m.cited_by),
+                m.id
             );
         }
         for i in &found.incomplete {
@@ -423,13 +436,20 @@ fn analysis_text(a: &Analysis, doc: &Value, related: bool) -> String {
         }
     }
     if let Some(found) = &a.related {
-        out.push_str("\nRelated works (score: co-cited with the set, sharing its references)\n");
+        let _ = writeln!(
+            out,
+            "\n{} (score: co-cited with the set, sharing its references)",
+            heading("Related works")
+        );
         if found.items.is_empty() {
             out.push_str("  none found\n");
         }
         for r in &found.items {
-            let seeds: Vec<String> = r.seeds.iter().map(|i| format!("[{i}]")).collect();
-            let work = r.record.as_ref().map(one_line).unwrap_or_default();
+            let work = r
+                .record
+                .as_ref()
+                .map(|r| format!("{} · ", one_line(r)))
+                .unwrap_or_default();
             let cited = r
                 .record
                 .as_ref()
@@ -438,12 +458,12 @@ fn analysis_text(a: &Analysis, doc: &Value, related: bool) -> String {
                 .unwrap_or_default();
             let _ = writeln!(
                 out,
-                "  {:.2}  {}  {work}  co-cited {}, shares {}; with {}{cited}",
+                "  {:.2}  {work}co-cited {}, shares {}; with {}{cited} · {}",
                 r.score,
-                r.id,
-                r.co_cited_with,
-                r.shared_references,
-                seeds.join(" ")
+                thousands(r.co_cited_with as u64),
+                thousands(r.shared_references as u64),
+                all(&r.seeds),
+                r.id
             );
         }
         for i in &found.incomplete {
@@ -451,7 +471,7 @@ fn analysis_text(a: &Analysis, doc: &Value, related: bool) -> String {
         }
     }
     for i in &a.incomplete {
-        let _ = write!(out, "\nSeeds{}", stopped(i, "looked up"));
+        let _ = write!(out, "\n{}{}", heading("Seeds"), stopped(i, "looked up"));
     }
     if let Some(e) = &a.estimate {
         // Seeds not settled make it a floor; related works' coupling and

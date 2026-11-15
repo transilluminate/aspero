@@ -1,8 +1,6 @@
 //! Rendering works, results and usage as terminal text and tables. JSON
 //! shapes are the contract in `aspero-json`, re-exported here.
 
-use std::fmt::Write as _;
-
 use aspero_core::matching::{PLAUSIBLE, VERIFIED};
 use aspero_core::{
     Agreement, Hit, IdKind, ProviderId, SourceRecord, UpdateKind, Usage, Work, WorkId,
@@ -10,11 +8,18 @@ use aspero_core::{
 use aspero_engine::{Abstract, Candidate, describe_update};
 pub use aspero_json::{candidate, set_abstract, usage};
 
+use crate::grid::{self, Col, Text};
+pub use crate::term::Level;
+use crate::term::{self, Paint};
+
 /// Abstract characters shown in tables; JSON has the full text.
 const TABLE_ABSTRACT: usize = 600;
 
-/// Authors shown in a table before "et al.".
+/// Authors shown in a work's text before "et al.".
 const TABLE_AUTHORS: usize = 3;
+
+/// The widest first-author cell in a table: "Krizhevsky et al." fits.
+const TABLE_AUTHOR: usize = 20;
 
 /// Works written as BibTeX entries or RIS records (BibTeX keys kept
 /// distinct: `lecun2015deep`, `lecun2015deepa`, …), or gathered into a
@@ -132,7 +137,7 @@ pub fn work_text(record: &SourceRecord, indent: &str) -> String {
         (!names.is_empty()).then(|| names.join(", ")),
         w.issued.map(|d| d.year().to_string()),
         w.container_title.clone(),
-        w.work_type.as_ref().map(|t| t.as_csl().to_owned()),
+        w.work_type.as_ref().map(aspero_core::WorkType::label),
     ]
     .into_iter()
     .flatten()
@@ -143,9 +148,13 @@ pub fn work_text(record: &SourceRecord, indent: &str) -> String {
     let ids: Vec<String> = record.ids.iter().map(ToString::to_string).collect();
     lines.push(format!("{indent}{}", ids.join("  ")));
     for update in &w.updates {
-        if !matches!(update.kind, UpdateKind::Correction) {
-            lines.push(format!("{indent}⚠ {}", describe_update(update)));
-        }
+        let paint = match update.kind {
+            UpdateKind::Correction => continue,
+            UpdateKind::Retraction | UpdateKind::Withdrawal => Paint::Error,
+            _ => Paint::Warning,
+        };
+        let note = format!("⚠ {}", describe_update(update));
+        lines.push(format!("{indent}{}", term::paint(&note, paint)));
     }
     if let Some(oa) = w.open_access.as_ref().filter(|oa| oa.is_oa) {
         let terms: Vec<&str> = [oa.status.as_deref(), oa.license.as_deref()]
@@ -163,11 +172,11 @@ pub fn work_text(record: &SourceRecord, indent: &str) -> String {
     lines.join("\n")
 }
 
-/// "pdf" when a free PDF is known, "yes" for a free copy without one, "no"
-/// when known to be closed, "" when unknown.
+/// "PDF" when a free PDF is known, "yes" for a free copy without one,
+/// "no" when known to be closed, "" when unknown.
 pub fn free_copy(w: &Work) -> &'static str {
     match &w.open_access {
-        Some(oa) if oa.pdf_url.is_some() => "pdf",
+        Some(oa) if oa.pdf_url.is_some() => "PDF",
         Some(oa) if oa.is_oa => "yes",
         Some(_) => "no",
         None => "",
@@ -186,52 +195,78 @@ pub fn abstract_text(found: Option<&Abstract>, indent: &str) -> String {
     format!("{indent}abstract ({}): {text}", a.source)
 }
 
-/// A ranked search hit: `" 1. [91.9]"` then the work, indented.
+/// A ranked search hit: `" 1. Title"`, then the rest of the work under it.
 pub fn hit_text(rank: usize, hit: &Hit) -> String {
-    let score = hit.score.map(|s| format!(" [{s:.1}]")).unwrap_or_default();
-    format!("{rank:>2}.{score}\n{}\n", work_text(&hit.record, "    "))
+    let work = work_text(&hit.record, "    ");
+    format!("{rank:>2}. {}\n", work.trim_start_matches(' '))
 }
 
-/// A candidate as terminal text: confidence and checks, then the work.
-pub fn candidate_text(c: &Candidate, indent: &str) -> String {
+/// ✓ agrees, ~ partly, ✗ differs, ? unknown.
+fn mark(g: Agreement) -> &'static str {
+    match g {
+        Agreement::Match => "✓",
+        Agreement::Partial => "~",
+        Agreement::Mismatch => "✗",
+        Agreement::Unknown => "?",
+    }
+}
+
+/// The fields compared with the citation, and how each agrees; those
+/// that couldn't be compared left out.
+fn checks(c: &Candidate) -> Vec<(&'static str, Agreement)> {
     let a = &c.assessment;
-    let check = |name: &str, g: Agreement| match g {
-        Agreement::Unknown => None,
-        g => Some(format!("{name} {}", agreement_word(g))),
-    };
-    let checks: Vec<String> = [
-        check("title", a.title.agreement),
-        check("authors", a.authors.agreement),
-        check("year", a.year.agreement),
-        check("journal", a.container.agreement),
-        check("volume", a.volume.agreement),
-        check("page", a.page.agreement),
-        check("id", a.ids),
+    [
+        ("title", a.title.agreement),
+        ("authors", a.authors.agreement),
+        ("year", a.year.agreement),
+        ("journal", a.container.agreement),
+        ("volume", a.volume.agreement),
+        ("page", a.page.agreement),
+        ("id", a.ids),
     ]
     .into_iter()
-    .flatten()
-    .collect();
-    let via: Vec<String> = c
-        .sightings
+    .filter(|(_, g)| *g != Agreement::Unknown)
+    .collect()
+}
+
+/// "crossref citation match", "openalex lookup": how a candidate was found.
+fn found_via(c: &Candidate) -> Vec<String> {
+    c.sightings
         .iter()
         .map(|s| format!("{} {}", s.provider, s.via.as_str().replace('_', " ")))
+        .collect()
+}
+
+/// "confidence 0.97  title ✓  authors ✓  year ✓  id ✓", marks coloured.
+pub fn checks_text(c: &Candidate) -> String {
+    let checks: Vec<String> = checks(c)
+        .into_iter()
+        .map(|(name, g)| {
+            let paint = match g {
+                Agreement::Match => Paint::Good,
+                Agreement::Partial => Paint::Warning,
+                _ => Paint::Error,
+            };
+            format!("{name} {}", term::paint(mark(g), paint))
+        })
         .collect();
     format!(
-        "{indent}{:.2}  {}  (via {})\n{}",
-        a.confidence,
-        checks.join(" · "),
-        via.join(", "),
-        work_text(&c.merged_record(), indent)
+        "confidence {:.2}  {}",
+        c.assessment.confidence,
+        checks.join("  ")
     )
 }
 
-fn agreement_word(g: Agreement) -> &'static str {
-    match g {
-        Agreement::Match => "match",
-        Agreement::Partial => "partial",
-        Agreement::Mismatch => "MISMATCH",
-        Agreement::Unknown => "unknown",
-    }
+/// A candidate as terminal text: confidence and checks, the work, and how
+/// it was found.
+pub fn candidate_text(c: &Candidate, indent: &str) -> String {
+    let via = format!("via {}", found_via(c).join(", "));
+    format!(
+        "{indent}{}\n{}\n{indent}{}",
+        checks_text(c),
+        work_text(&c.merged_record(), indent),
+        term::paint(&via, Paint::Dim)
+    )
 }
 
 /// One line per provider, for stderr: "openalex: $0.0010 spent, $0.9960 left".
@@ -253,21 +288,21 @@ pub fn usage_text(usage: &[(ProviderId, Usage)]) -> Option<String> {
     (!lines.is_empty()).then(|| lines.join("\n"))
 }
 
-// ------------------------------------------------------------ tables
+/// [`usage_text`] on stderr, dimmed: it's secondary to the results.
+pub fn eprint_usage(usage: &[(ProviderId, Usage)]) {
+    if let Some(text) = usage_text(usage) {
+        eprint_dim(&text);
+    }
+}
 
-/// A table in aspero's style: rounded borders, bold headers, columns that
-/// wrap to the terminal's width. Colours apply only on a terminal.
-pub fn table(headers: &[&str]) -> comfy_table::Table {
-    use comfy_table::{Attribute, Cell, ContentArrangement, Table, presets};
-    let mut t = Table::new();
-    t.load_style(presets::UTF8_FULL_CONDENSED.with_rounded_corners())
-        .set_content_arrangement(ContentArrangement::Dynamic)
-        .set_header(
-            headers
-                .iter()
-                .map(|h| Cell::new(h).add_attribute(Attribute::Bold)),
-        );
-    t
+/// A secondary line on stderr (totals, paging, cost), dimmed.
+pub fn eprint_dim(text: &str) {
+    eprintln!("{}", term::paint_err(text, Paint::Dim));
+}
+
+/// "warning: …" on stderr.
+pub fn eprint_warning(text: &str) {
+    eprintln!("{} {text}", term::paint_err("warning:", Paint::Warning));
 }
 
 /// "LeCun et al.", "Bishop", or "" when there are no authors.
@@ -288,6 +323,21 @@ pub fn first_author(w: &Work) -> String {
     } else {
         name
     }
+}
+
+/// [`first_author`] cut to fit a table: "Société française… et al.".
+pub fn author_cell(w: &Work) -> String {
+    let name = first_author(w);
+    if name.chars().count() <= TABLE_AUTHOR {
+        return name;
+    }
+    let (name, rest) = match name.strip_suffix(" et al.") {
+        Some(name) => (name, " et al."),
+        None => (name.as_str(), ""),
+    };
+    let keep = TABLE_AUTHOR - 1 - rest.chars().count();
+    let cut: String = name.chars().take(keep).collect();
+    format!("{}…{rest}", cut.trim_end())
 }
 
 /// 4300 → "4,300".
@@ -316,70 +366,56 @@ pub fn main_id(ids: &[WorkId]) -> String {
         .unwrap_or_default()
 }
 
-/// A cell coloured by how much attention it needs.
-pub fn status_cell(text: &str, level: Level) -> comfy_table::Cell {
-    use comfy_table::{Cell, Color};
-    let colour = match level {
-        Level::Good => Color::Green,
-        Level::Info => Color::Blue,
-        Level::Warning => Color::Yellow,
-        Level::Error => Color::Red,
-    };
-    Cell::new(text).fg(colour)
-}
-
-/// A scored candidate as a table row, coloured by confidence.
-pub fn candidate_row(rank: usize, c: &Candidate) -> Vec<comfy_table::Cell> {
-    use comfy_table::Cell;
-    let a = &c.assessment;
-    let mark = |g: Agreement| match g {
-        Agreement::Match => "✓",
-        Agreement::Partial => "~",
-        Agreement::Mismatch => "✗",
-        Agreement::Unknown => "?",
-    };
-    let mut checks = format!(
-        "title {} authors {} year {}",
-        mark(a.title.agreement),
-        mark(a.authors.agreement),
-        mark(a.year.agreement)
-    );
-    if a.ids != Agreement::Unknown {
-        let _ = write!(checks, " id {}", mark(a.ids));
-    }
-    let level = match a.confidence {
+/// How much a match's confidence needs looking at.
+pub fn confidence_level(confidence: f64) -> Level {
+    match confidence {
         c if c >= VERIFIED => Level::Good,
         c if c >= PLAUSIBLE => Level::Warning,
         _ => Level::Error,
-    };
+    }
+}
+
+/// The columns of [`candidate_row`]. Too narrow for them all, how each
+/// work was found goes first, then its identifier, author and year move
+/// under its title.
+pub fn candidate_cols() -> [Col; 8] {
+    [
+        Col::content("#").right(),
+        Col::content("Conf"),
+        Col::content("Checks"),
+        Col::cap("Author", TABLE_AUTHOR).folds(3, "Title"),
+        Col::content("Year").folds_beside(3, "Title"),
+        Col::fill("Title").or_when_folded("Work"),
+        Col::content("ID").folds(2, "Title"),
+        Col::cap("Via", 16).drops(1),
+    ]
+}
+
+/// A scored candidate as a table row, coloured by confidence.
+pub fn candidate_row(rank: usize, c: &Candidate) -> Vec<Text> {
+    let checks: Vec<String> = checks(c)
+        .into_iter()
+        .filter(|(name, _)| matches!(*name, "title" | "authors" | "year" | "id"))
+        .map(|(name, g)| format!("{name} {}", mark(g)))
+        .collect();
     let w = &c.record.work;
     let mut title = w.title.clone().unwrap_or_default();
     if let Some(r) = c.retraction() {
         title = format!("{title}\n⚠ {}", describe_update(r));
     }
-    let found_by: Vec<String> = c
-        .sightings
-        .iter()
-        .map(|s| format!("{} {}", s.provider, s.via.as_str().replace('_', " ")))
-        .collect();
     vec![
-        Cell::new(rank),
-        status_cell(&format!("{:.2}", a.confidence), level),
-        Cell::new(checks),
-        Cell::new(year(w)),
-        Cell::new(first_author(w)),
-        Cell::new(title),
-        Cell::new(main_id(&c.ids)),
-        Cell::new(found_by.join("\n")),
+        Text::from(rank.to_string()),
+        grid::status(
+            format!("{:.2}", c.assessment.confidence),
+            confidence_level(c.assessment.confidence),
+        ),
+        Text::from(checks.join("\n")),
+        Text::from(author_cell(w)),
+        Text::from(year(w)),
+        Text::from(title),
+        Text::from(main_id(&c.ids)),
+        Text::from(found_via(c).join("\n")),
     ]
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Level {
-    Good,
-    Info,
-    Warning,
-    Error,
 }
 
 #[cfg(test)]
@@ -422,7 +458,7 @@ mod tests {
     fn text_abbreviates_long_author_lists() {
         assert_eq!(
             work_text(&record(), "  "),
-            "  Deep learning\n  Yann LeCun, Yoshua Bengio, Geoffrey Hinton, et al. · 2015 · Nature · article-journal\n  doi:10.1038/nature14539"
+            "  Deep learning\n  Yann LeCun, Yoshua Bengio, Geoffrey Hinton, et al. · 2015 · Nature · journal article\n  doi:10.1038/nature14539"
         );
     }
 

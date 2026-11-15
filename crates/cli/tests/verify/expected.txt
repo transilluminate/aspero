@@ -1,0 +1,37 @@
+VERIFIED  {"title": "Deep learning", "authors": ["LeCun Y"], "year": 2015}
+  confidence 1.00  title ✓  authors ✓  year ✓
+  Deep learning
+  Yann LeCun, Yoshua Bengio, Geoffrey Hinton · 2015
+  doi:10.1038/nature14539
+  via openalex title search
+
+MISMATCH  {"title": "Deep learning", "authors": ["LeCun Y"], "year": 2015, "doi": "10.1145/3448250"}
+  doi:10.1145/3448250 is another work, "Deep learning for AI" (2021); the citation matches this one
+  confidence 1.00  title ✓  authors ✓  year ✓  id ✗
+  Deep learning
+  Yann LeCun, Yoshua Bengio, Geoffrey Hinton · 2015
+  doi:10.1038/nature14539
+  via openalex title search
+
+NOT FOUND  {"title": "A wholly invented study", "authors": ["Nobody A"], "year": 2020}
+  no matching work found
+
+╭───────────┬──────┬─────────────────────────────┬─────────────────────────────╮
+│ Verdict   ┆ Conf ┆ Citation                    ┆ Match                       │
+╞═══════════╪══════╪═════════════════════════════╪═════════════════════════════╡
+│ VERIFIED  ┆ 1.00 ┆ {"title": "Deep learning",  ┆ "Deep learning" (2015)      │
+│           ┆      ┆ "authors": ["LeCun Y"],     ┆ doi:10.1038/nature14539     │
+│           ┆      ┆ "year": 2015}               ┆                             │
+├╌╌╌╌╌╌╌╌╌╌╌┼╌╌╌╌╌╌┼╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌┼╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌┤
+│ MISMATCH  ┆ 1.00 ┆ {"title": "Deep learning",  ┆ doi:10.1145/3448250 is      │
+│           ┆      ┆ "authors": ["LeCun Y"],     ┆ another work, "Deep         │
+│           ┆      ┆ "year": 2015, "doi":        ┆ learning for AI" (2021);    │
+│           ┆      ┆ "10.1145/3448250"}          ┆ the citation matches this   │
+│           ┆      ┆                             ┆ one                         │
+│           ┆      ┆                             ┆ "Deep learning" (2015)      │
+│           ┆      ┆                             ┆ doi:10.1038/nature14539     │
+├╌╌╌╌╌╌╌╌╌╌╌┼╌╌╌╌╌╌┼╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌┼╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌┤
+│ NOT FOUND ┆      ┆ {"title": "A wholly         ┆ no matching work found      │
+│           ┆      ┆ invented study", "authors": ┆                             │
+│           ┆      ┆ ["Nobody A"], "year": 2020} ┆                             │
+╰───────────┴──────┴─────────────────────────────┴─────────────────────────────╯

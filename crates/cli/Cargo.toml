@@ -59,8 +59,10 @@ futures.workspace = true
 jiff.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+terminal_size = "0.4.4"
 tokio = { workspace = true, features = ["macros", "rt"] }
 tracing-subscriber = { workspace = true, features = ["registry"] }
+unicode-width = "0.2.3"
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2.191"

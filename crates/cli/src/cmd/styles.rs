@@ -6,7 +6,7 @@ use serde_json::json;
 use super::{Out, print};
 use crate::args::Format;
 use crate::exit::Exit;
-use crate::output;
+use crate::grid::{Col, Grid};
 
 // Like every command: main hands over what it parsed.
 #[allow(clippy::needless_pass_by_value)]
@@ -26,11 +26,11 @@ pub fn run(credits: bool, out: Out) -> Exit {
                 .collect::<Vec<_>>(),
         })),
         _ => {
-            let mut table = output::table(&["Style", "Title"]);
+            let mut grid = Grid::new([Col::content("Style"), Col::fill("Title")]);
             for b in cite::BUNDLED {
-                table.add_row(vec![b.id, b.title]);
+                grid.row([b.id, b.title]);
             }
-            println!("{table}");
+            println!("{grid}");
         }
     }
     Exit::Ok

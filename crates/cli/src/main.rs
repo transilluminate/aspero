@@ -6,7 +6,9 @@
 mod args;
 mod cmd;
 mod exit;
+mod grid;
 mod output;
+mod term;
 
 use std::io::IsTerminal;
 use std::path::PathBuf;
@@ -31,6 +33,7 @@ async fn main() -> ExitCode {
     }
     let cli = Cli::parse();
     init_logging(cli.global.verbose);
+    term::init();
     let format = match cli.global.format {
         Format::Auto if cli.global.style.is_some() => Format::Cite,
         Format::Auto if std::io::stdout().is_terminal() => Format::Table,
@@ -59,7 +62,8 @@ async fn main() -> ExitCode {
         Ok(exit) => exit.code(),
         Err(failure) => {
             if format.is_human() || format.is_export() {
-                eprintln!("error: {}", failure.message);
+                let error = term::paint_err("error:", term::Paint::Error);
+                eprintln!("{error} {}", failure.message);
             } else {
                 let category = failure.exit.as_str();
                 eprintln!(
@@ -140,14 +144,14 @@ fn open_cache(max_bytes: Option<u64>) -> Option<Arc<SqliteCache>> {
     let opened = cache_path().map_err(|f| f.message).and_then(|path| {
         let cache = SqliteCache::open(&path).map_err(|e| format!("{e} ({})", path.display()))?;
         if let Err(e) = cache.set_max_bytes(max_bytes) {
-            eprintln!("warning: couldn't hold the cache to its size limit: {e}");
+            output::eprint_warning(&format!("couldn't hold the cache to its size limit: {e}"));
         }
         Ok(cache)
     });
     match opened {
         Ok(cache) => Some(Arc::new(cache)),
         Err(message) => {
-            eprintln!("warning: running without a cache: {message}");
+            output::eprint_warning(&format!("running without a cache: {message}"));
             None
         }
     }

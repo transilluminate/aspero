@@ -10,6 +10,7 @@ use super::verify::{exit_for, verdict_text};
 use super::{Failure, Out, print, read_stdin};
 use crate::args::Format;
 use crate::exit::Exit;
+use crate::term::{self, Level, Paint};
 
 pub async fn run(
     engine: &Engine,
@@ -38,7 +39,8 @@ pub async fn run(
     else {
         match out.format {
             Format::Text | Format::Table => {
-                println!("NOT IDENTIFIED\n  nothing on the page is sure enough");
+                let verdict = term::paint("NOT IDENTIFIED", Paint::Strong(Level::Warning));
+                println!("{verdict}\n  nothing on the page is sure enough");
             }
             _ => print(&json!({"identified": false})),
         }
@@ -48,11 +50,10 @@ pub async fn run(
     let input = found.input();
     match out.format {
         Format::Text | Format::Table => {
-            println!(
-                "IDENTIFIED by {}",
-                found.decided_by.as_str().replace('_', " ")
-            );
-            print!("{}", verdict_text(&input, v));
+            let verdict = term::paint("IDENTIFIED", Paint::Strong(Level::Good));
+            let by = found.decided_by.as_str().replace('_', " ");
+            println!("{verdict} by {by}");
+            print!("{}", term::fill(&verdict_text(&input, v)));
         }
         _ => {
             let mut item = aspero_json::verification(json!({"input": input}), v, out.full);

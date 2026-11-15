@@ -65,7 +65,7 @@ use auth::Credential;
 use handler::{Authed, Handler};
 use host::Listed;
 
-use crate::server::engine_tool;
+use crate::server::engine_tools;
 use crate::session::Reservations;
 use crate::{DEFAULT_BUDGET_USD, Scope, Tools};
 
@@ -627,7 +627,7 @@ impl HttpServer {
             tx
         });
         let shared = Arc::new(Shared {
-            engine_listed: tools.specs().iter().map(engine_tool).collect(),
+            engine_listed: engine_tools(&tools),
             engine_names,
             tools,
             engine_tools: config.engine_tools,

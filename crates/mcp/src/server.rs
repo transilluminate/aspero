@@ -40,8 +40,14 @@ pub(crate) fn server_info(instructions: &str) -> ServerConfig {
     .with_instructions(instructions)
 }
 
+/// The engine tools as listed, in order: built once per server, as they
+/// never change.
+pub(crate) fn engine_tools(tools: &Tools) -> Vec<Tool> {
+    tools.specs().iter().map(engine_tool).collect()
+}
+
 /// An engine tool as listed.
-pub(crate) fn engine_tool(s: &ToolSpec) -> Tool {
+fn engine_tool(s: &ToolSpec) -> Tool {
     Tool::new(s.name, s.description.clone(), s.input_schema.clone())
         .with_title(s.title)
         .with_raw_output_schema(Arc::new(s.output_schema.clone()))
@@ -87,17 +93,22 @@ pub(crate) fn error_text(e: &ToolError) -> String {
     format!("Error ({}): {}", e.kind.as_str(), e.message)
 }
 
-/// One session's handler. The tools are listed from [`Tools`] at each
-/// request, not kept from the session's start.
+/// One session's handler, with the engine tools as listed.
 #[derive(Clone)]
 struct Handler {
     tools: Arc<Tools>,
+    listed: Arc<Vec<Tool>>,
     session: Arc<Session>,
 }
 
 impl Handler {
     fn new(tools: Arc<Tools>, session: Arc<Session>) -> Self {
-        Handler { tools, session }
+        let listed = Arc::new(engine_tools(&tools));
+        Handler {
+            tools,
+            listed,
+            session,
+        }
     }
 }
 
@@ -111,13 +122,11 @@ impl ServerHandler for Handler {
         _: Option<PaginatedRequestParams>,
         _: RequestContext<RoleServer>,
     ) -> Result<ListToolsResult, ErrorData> {
-        Ok(ListToolsResult::with_all_items(
-            self.tools.specs().iter().map(engine_tool).collect(),
-        ))
+        Ok(ListToolsResult::with_all_items(self.listed.to_vec()))
     }
 
     fn get_tool(&self, name: &str) -> Option<Tool> {
-        self.tools.spec(name).map(engine_tool)
+        self.listed.iter().find(|t| t.name == name).cloned()
     }
 
     async fn call_tool(

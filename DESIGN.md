@@ -771,8 +771,9 @@ CLI builds without it and serves stdio only) and, over it, the FFI's
   runtime (`Peer::notify_tool_list_changed`, given up after 10 s, errors
   ignored), so neither call waits on a client. `rmcp` puts it on the
   session's GET stream, or keeps it (up to 16 messages, the newest) until
-  the client opens one. Over stdio the list never changes, but is still listed from
-  `Tools` at each request.
+  the client opens one. The engine tools' listing is built once, over
+  either transport, since `Tools` never changes; over stdio the list
+  never changes at all.
 - **Host tools.** Names must differ from the engine tools' (even with
   `engineTools` off) and each other's, or `start` / `hostToolsChanged`
   throws `toolNameClash`; schemas must be JSON objects. A call's

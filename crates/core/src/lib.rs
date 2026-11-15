@@ -9,6 +9,7 @@
 //! - [`matching`]: does a record match what a citation claims?
 //! - [`references`]: splitting a pasted reference list.
 //! - [`resilience`]: per-provider [`ResiliencePolicy`].
+//! - [`webpage`]: a claim from a publisher's article page's markup.
 //! - [`http`]: the [`HttpClient`] transport seam.
 //! - `testing` (feature): fixture replay for provider tests.
 
@@ -24,6 +25,7 @@ pub mod query;
 pub mod record;
 pub mod references;
 pub mod resilience;
+pub mod webpage;
 pub mod work;
 
 #[cfg(feature = "testing")]
@@ -46,6 +48,7 @@ pub use query::{
 pub use record::{Field, FieldSet, Raw, SourceRecord};
 pub use references::{IndentedLine, LineReference, Reference, split_lines, split_references};
 pub use resilience::ResiliencePolicy;
+pub use webpage::{PageClaim, PageId, PageSource, claim_from_page};
 pub use work::{
     OpenAccess, PartialDate, Person, Update, UpdateKind, UpdateTo, Work, WorkType, orcid,
     tidy_abstract,

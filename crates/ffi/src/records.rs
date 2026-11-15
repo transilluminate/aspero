@@ -1597,6 +1597,10 @@ pub struct SearchResults {
     /// Why there are no hits, if the search failed.
     pub failure: Option<Failure>,
     pub usage: Vec<ProviderUsage>,
+    /// Filters asked for that the source can't apply, so ignored (a query
+    /// tree's never are: they fail).
+    #[uniffi(default = [])]
+    pub ignored_filters: Vec<SearchFilter>,
 }
 
 impl SearchResults {
@@ -1610,6 +1614,7 @@ impl SearchResults {
                 freshness: None,
                 failure: Some(Failure::from(&e)),
                 usage: Vec::new(),
+                ignored_filters: Vec::new(),
             },
             Ok(report) => SearchResults {
                 provider: Some(report.provider.to_string()),
@@ -1630,6 +1635,11 @@ impl SearchResults {
                     .usage
                     .map(|u| usage(&[(report.provider.clone(), u)]))
                     .unwrap_or_default(),
+                ignored_filters: report
+                    .ignored_filters
+                    .iter()
+                    .filter_map(|&f| SearchFilter::from_core(f))
+                    .collect(),
             },
         }
     }
@@ -2605,6 +2615,25 @@ mod tests {
         for r in engine::Reason::ALL {
             assert_eq!(name(Reason::new(r, &candidates)), r.as_str());
         }
+    }
+
+    #[test]
+    fn searches_say_which_filters_were_ignored() {
+        let report = engine::SearchReport {
+            provider: ProviderId::from_static("crossref"),
+            page: aspero_core::Page::default(),
+            // `place` is internal: the app never asks for it by name.
+            ignored_filters: vec![Filter::Years, Filter::Place, Filter::OpenAccess],
+            usage: None,
+            served: Served::Live,
+        };
+        let results = SearchResults::new(Ok(report));
+        assert_eq!(
+            results.ignored_filters,
+            [SearchFilter::Years, SearchFilter::OpenAccess]
+        );
+        let failed = SearchResults::new(Err(engine::EngineError::NoCapableProvider("search")));
+        assert!(failed.ignored_filters.is_empty());
     }
 
     #[test]

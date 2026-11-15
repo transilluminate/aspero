@@ -8,8 +8,8 @@ mod common;
 use std::sync::Arc;
 
 use aspero_core::{
-    Agreement, Capabilities, Claim, Error, Page, Provider, ProviderId, ResiliencePolicy, Response,
-    Result, SearchMode, SearchQuery, WorkId,
+    Agreement, Capabilities, Claim, Error, IdKind, Page, Provider, ProviderId, ResiliencePolicy,
+    Response, Result, SearchMode, SearchQuery, WorkId,
 };
 use aspero_engine::{CitedField, Engine, Reason, Verdict, Via, WorkKind};
 use async_trait::async_trait;
@@ -330,6 +330,53 @@ async fn identifier_only_claims_check_existence_without_searching() {
     assert!(v.reason_text.contains("exists"));
     assert_eq!(v.reason, Reason::IdExists);
     assert!(openalex.queries().is_empty() && crossref.queries().is_empty());
+}
+
+#[tokio::test]
+async fn a_sciencedirect_page_verifies_as_its_doi() {
+    const DOI: &str = "10.1016/j.solcom.2026.100158";
+    const TITLE: &str = "Feasibility of combined solar cookers and dryers";
+    let by_doi = |source| work(source, &[DOI, "W4400000000"], TITLE, &["Abebe"], 2026);
+    let openalex = Arc::new(
+        Scripted::new("openalex")
+            .keyword()
+            .with(vec![by_doi("openalex")]),
+    );
+    let mut crossref = Scripted::new("crossref").with(vec![work(
+        "crossref",
+        &[DOI, "pii:S2772940026000032"],
+        TITLE,
+        &["Abebe"],
+        2026,
+    )]);
+    crossref.caps.lookup_kinds.push(IdKind::Pii);
+    let engine = engine(vec![openalex.clone(), Arc::new(crossref)]);
+    let url = "https://www.sciencedirect.com/science/article/pii/S2772940026000032";
+
+    // Pasted alone: an existence check, ending at the DOI's record.
+    let v = engine.verify(&Claim::from_input(url), 5).await;
+    assert_eq!(v.verdict, Verdict::Verified, "{}", v.reason_text);
+    assert_eq!(v.reason, Reason::IdExists);
+    let best = &v.report.candidates[v.best_match.unwrap()];
+    assert_eq!(best.record.source.as_str(), "openalex");
+    assert!(best.ids.contains(&DOI.parse().unwrap()));
+    assert!(best.ids.contains(&"pii:S2772940026000032".parse().unwrap()));
+
+    // In a reference, the claimed PII is the work's.
+    let v = engine
+        .verify(&Claim::from_text(format!("Abebe. {TITLE}. 2026. {url}")), 5)
+        .await;
+    assert_eq!(v.verdict, Verdict::Verified, "{}", v.reason_text);
+    let best = &v.report.candidates[v.best_match.unwrap()];
+    assert_eq!(best.assessment.ids, Agreement::Match);
+
+    let lookup = engine
+        .lookup(&[url.parse().unwrap()], aspero_core::FieldSet::DEFAULT)
+        .await;
+    assert_eq!(
+        lookup.results[0].record.as_ref().unwrap().source.as_str(),
+        "openalex"
+    );
 }
 
 #[tokio::test]

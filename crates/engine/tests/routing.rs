@@ -234,6 +234,59 @@ async fn a_final_not_found_ends_the_search() {
 }
 
 #[tokio::test(start_paused = true)]
+async fn a_pii_ends_at_the_record_its_doi_gives() {
+    const PII: &str = "pii:S2772940026000032";
+    const DOI: &str = "10.1016/j.solcom.2026.100158";
+    // Crossref finds the PII, whose record gives its DOI; OpenAlex, first
+    // for DOIs, answers that.
+    let openalex = Arc::new(Mock::new("openalex", &[IdKind::Doi]).knows(DOI, "Solar cookers"));
+    let crossref = Arc::new(
+        Mock::new("crossref", &[IdKind::Doi, IdKind::Pii])
+            .knows_also(PII, DOI)
+            .knows(DOI, "Solar cookers"),
+    );
+    let both = engine(vec![(openalex.clone(), 10), (crossref.clone(), 20)]);
+
+    let url = "https://www.sciencedirect.com/science/article/pii/S2772940026000032";
+    let report = both
+        .lookup(&ids(&[url, "pii:S0140673699999990"]), FieldSet::DEFAULT)
+        .await;
+
+    assert_eq!(
+        crossref.lookup_calls(),
+        [[PII, "pii:S0140673699999990"]],
+        "PIIs only where they're known; the DOI found first elsewhere"
+    );
+    assert_eq!(openalex.lookup_calls(), [[format!("doi:{DOI}")]]);
+    let [found, missing] = &report.results[..] else {
+        panic!()
+    };
+    assert_eq!(found.id.to_string(), PII, "as requested");
+    let record = found.record.as_ref().unwrap();
+    assert_eq!(record.source.as_str(), "openalex");
+    assert_eq!(record.ids, ids(&[DOI, PII]));
+    assert_eq!(
+        outcomes(&found.attempts),
+        ["crossref found", "openalex found"]
+    );
+    // A PII Crossref doesn't know is not found, like any identifier.
+    assert!(missing.is_not_found());
+    assert_eq!(outcomes(&missing.attempts), ["crossref not-found"]);
+
+    // Where the DOI isn't found again, the PII's own record stands.
+    let crossref =
+        Arc::new(Mock::new("crossref", &[IdKind::Doi, IdKind::Pii]).knows_also(PII, DOI));
+    let engine = engine(vec![(crossref, 20)]);
+    let report = engine.lookup(&ids(&[PII]), FieldSet::DEFAULT).await;
+    let found = &report.results[0];
+    assert_eq!(found.record.as_ref().unwrap().ids, ids(&[PII, DOI]));
+    assert_eq!(
+        outcomes(&found.attempts),
+        ["crossref found", "crossref not-found"]
+    );
+}
+
+#[tokio::test(start_paused = true)]
 async fn routes_ids_only_to_providers_accepting_their_kind() {
     let dois_only = Arc::new(Mock::new("dois", &[IdKind::Doi]).knows(DOI_A, "A"));
     let pmids = Arc::new(Mock::new("pmids", &[IdKind::Pmid]).knows("pmid:42", "P"));

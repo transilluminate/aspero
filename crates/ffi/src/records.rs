@@ -302,6 +302,12 @@ impl From<&engine::EngineError> for Failure {
                 (Some(provider.to_string()), BudgetCap::of(error))
             }
             engine::EngineError::Disabled(provider) => (Some(provider.to_string()), None),
+            engine::EngineError::Unresolved {
+                provider, error, ..
+            } => (
+                provider.as_ref().map(ToString::to_string),
+                error.as_deref().and_then(BudgetCap::of),
+            ),
             _ => (None, None),
         };
         Failure {
@@ -2741,6 +2747,21 @@ mod tests {
                 resets_at: Some(time(resets)),
             })
         );
+        // So does a relation's work left unresolved by the cap.
+        let unresolved = engine::EngineError::Unresolved {
+            id: "10.1038/nature14539".into(),
+            reason: "the lookup failed: …".into(),
+            kind: aspero_core::ErrorKind::BudgetCapped,
+            provider: Some(ProviderId::from_static("openalex")),
+            error: Some(Box::new(aspero_core::Error::BudgetCapped {
+                cap: 0.5,
+                used: 0.5012,
+                resets_at: Some(resets),
+            })),
+        };
+        let failure = Failure::from(&unresolved);
+        assert_eq!(failure.provider.as_deref(), Some("openalex"));
+        assert_eq!(failure.budget_cap.map(|c| c.cap), Some(0.5));
         // Other failures carry none.
         let other = engine::EngineError::Provider {
             provider: ProviderId::from_static("openalex"),

@@ -439,6 +439,18 @@ fn analyses_say_why_each_seed_is_unresolved() {
         block_on(handle.references("not an id".into(), None, 25, Patience::Offline, None)).unwrap();
     assert_eq!(page.failure.unwrap().kind, ErrorKind::InvalidId);
     assert_eq!(page.coverage, Coverage::Unknown);
+    // A work the cache doesn't have: the failing provider is named.
+    let page = block_on(handle.references(
+        "10.1234/never-seen".into(),
+        None,
+        25,
+        Patience::Offline,
+        None,
+    ))
+    .unwrap();
+    let failure = page.failure.unwrap();
+    assert_eq!(failure.kind, ErrorKind::NotCached);
+    assert!(failure.provider.is_some(), "{failure:?}");
 }
 
 #[test]

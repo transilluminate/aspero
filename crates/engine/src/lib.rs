@@ -335,6 +335,12 @@ pub enum EngineError {
         id: String,
         reason: String,
         kind: ErrorKind,
+        /// The provider whose failure left it unresolved, if one did.
+        provider: Option<ProviderId>,
+        /// That provider's error (`kind` is its kind), boxed to keep the
+        /// enum small.
+        #[source]
+        error: Option<Box<Error>>,
     },
     #[error("{provider}: {error}")]
     Provider {

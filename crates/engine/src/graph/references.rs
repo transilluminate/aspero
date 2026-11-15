@@ -42,6 +42,8 @@ impl Engine {
                             id: id.to_owned(),
                             reason: e.to_string(),
                             kind: aspero_core::ErrorKind::Decode,
+                            provider: None,
+                            error: None,
                         }
                     })?);
                 let (attempt, record) = self
@@ -55,17 +57,21 @@ impl Engine {
                     .pop()
                     .expect("one answer per id");
                 let Some(record) = record else {
-                    let (reason, kind) = match attempt.outcome {
-                        Outcome::Failed(e) => (format!("the lookup failed: {e}"), e.kind()),
-                        _ => (
-                            "OpenAlex has no record of it".into(),
-                            aspero_core::ErrorKind::NotFound,
-                        ),
-                    };
-                    return Err(EngineError::Unresolved {
-                        id: id.to_owned(),
-                        reason,
-                        kind,
+                    return Err(match attempt.outcome {
+                        Outcome::Failed(e) => EngineError::Unresolved {
+                            id: id.to_owned(),
+                            reason: format!("the lookup failed: {e}"),
+                            kind: e.kind(),
+                            provider: Some(attempt.provider),
+                            error: Some(Box::new(e)),
+                        },
+                        _ => EngineError::Unresolved {
+                            id: id.to_owned(),
+                            reason: "OpenAlex has no record of it".into(),
+                            kind: aspero_core::ErrorKind::NotFound,
+                            provider: None,
+                            error: None,
+                        },
                     });
                 };
                 // Not a stale record (served when OpenAlex failed): its

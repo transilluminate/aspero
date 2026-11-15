@@ -417,6 +417,8 @@ impl Engine {
             id: id.to_owned(),
             reason,
             kind,
+            provider: None,
+            error: None,
         };
         let work: WorkId = id.parse().map_err(|e: aspero_core::IdError| {
             unresolved(e.to_string(), aspero_core::ErrorKind::InvalidId)
@@ -445,11 +447,17 @@ impl Engine {
                     ));
                 }
                 let failed = result.attempts.iter().find_map(|a| match &a.outcome {
-                    crate::Outcome::Failed(e) => Some(e),
+                    crate::Outcome::Failed(e) => Some((&a.provider, e)),
                     _ => None,
                 });
                 return Err(match failed {
-                    Some(e) => unresolved(format!("the lookup failed: {e}"), e.kind()),
+                    Some((provider, e)) => EngineError::Unresolved {
+                        id: id.to_owned(),
+                        reason: format!("the lookup failed: {e}"),
+                        kind: e.kind(),
+                        provider: Some(provider.clone()),
+                        error: Some(Box::new(e.clone())),
+                    },
                     None => unresolved(
                         "no such work found".into(),
                         aspero_core::ErrorKind::NotFound,

@@ -1197,6 +1197,10 @@ pub struct CacheStats {
     /// aside), as `Config.cacheMaxMb` limits it.
     #[uniffi(default = 0)]
     pub bytes: u64,
+    /// Works with cached citation links, counted once per direction (the
+    /// works one cites, the works citing it).
+    #[uniffi(default = 0)]
+    pub edges: u64,
 }
 
 // Searching.

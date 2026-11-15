@@ -729,6 +729,7 @@ impl Aspero {
             misses: s.misses,
             searches: s.searches,
             bytes: s.bytes,
+            edges: s.edges,
         }))
     }
 

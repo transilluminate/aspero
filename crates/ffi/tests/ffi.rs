@@ -959,6 +959,7 @@ fn caches_report_and_clear() {
     let handle = aspero(Some(dir.display().to_string()));
     let stats = handle.cache_stats().unwrap().unwrap();
     assert_eq!(stats.records, 0);
+    assert_eq!(stats.edges, 0);
     assert!(stats.bytes > 0, "an empty cache's pages");
     handle.clear_cache().unwrap();
     assert!(aspero(None).cache_stats().unwrap().is_none());

@@ -1192,6 +1192,10 @@ async fn related_works_are_the_same_every_time_and_reuse_the_cache() {
 
     let again = engine.analyse(&seeds, &kinds, None, false).await.unwrap();
     assert_eq!(found(&again), found(&first));
+    // The shared page left out W107 (misdated: its references dropped)
+    // from the rows it cached: counted the same, read or cached.
+    let stop = |a: &Analysis| a.related.as_ref().unwrap().incomplete.clone();
+    assert_eq!((stop(&first), stop(&again)), (None, None));
     // Citing works, coupling's page and the candidates all cached.
     assert_eq!(
         alex.citing_pages().len(),

@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.22.0
 
 Breaking: names now agree between Swift and JSON, and money says its
 unit. Only names change; values and shapes stay as they were.

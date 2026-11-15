@@ -225,6 +225,7 @@ dependencies = [
  "fastrand",
  "futures",
  "jiff",
+ "proptest",
  "reqwest",
  "secrecy",
  "serde",

@@ -42,6 +42,7 @@ openlibrary = ["dep:aspero-openlibrary"]
 
 [dev-dependencies]
 aspero-core = { workspace = true, features = ["testing"] }
+proptest.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 tokio = { workspace = true, features = ["macros", "rt", "test-util"] }

@@ -723,8 +723,10 @@ async fn a_stop_cut_short_finishes_when_called_again() {
     let mut agent = Agent::new(port, FULL);
     agent.initialize().await;
     // Dropped at its first wait (closing the session), as an app's task
-    // can be: no new session opens meanwhile.
-    assert!(server.stop().now_or_never().is_none());
+    // can be: no new session opens meanwhile. On a fast machine it may
+    // finish in that one poll, which leaves nothing to cut short; the
+    // library's unit test cuts one short for certain.
+    let _ = server.stop().now_or_never();
     let mut late = Agent::new(port, FULL);
     late.http = reqwest::Client::builder()
         .no_proxy()

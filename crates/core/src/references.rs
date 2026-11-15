@@ -108,7 +108,7 @@ pub fn split_lines(lines: &[IndentedLine]) -> Vec<LineReference> {
                                 .last()
                                 .is_some_and(|l| folded.text[l.clone()].ends_with('-')) =>
                     {
-                        group.push(line.clone())
+                        group.push(line.clone());
                     }
                     _ => groups.push(vec![line.clone()]),
                 }

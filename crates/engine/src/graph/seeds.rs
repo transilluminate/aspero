@@ -80,7 +80,7 @@ impl Engine {
                         input,
                         SeedProblem::InvalidId,
                         e.to_string(),
-                    ))
+                    ));
                 }
                 Ok(id) if accepts.contains(&id.kind()) => asks.push((i, id)),
                 Ok(id) => elsewhere.push((i, id)),
@@ -99,7 +99,7 @@ impl Engine {
                 match (found, seed_failure(&result)) {
                     (Some(other), _) => asks.push((i, other.clone())),
                     (None, Some((problem, message))) => {
-                        seeds[i] = Some(Seed::unresolved(input, problem, message))
+                        seeds[i] = Some(Seed::unresolved(input, problem, message));
                     }
                     (None, None) => {
                         seeds[i] = Some(Seed::unresolved(
@@ -110,7 +110,7 @@ impl Engine {
                                  has no DOI or PMID it does",
                                 id.kind()
                             ),
-                        ))
+                        ));
                     }
                 }
             }

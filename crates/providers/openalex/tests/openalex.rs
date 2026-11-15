@@ -592,7 +592,7 @@ fn without_a_key_paging_on_is_unsupported_not_a_rejected_key() {
             assert!(
                 m.starts_with("OpenAlex needs an API key for this: Paging past"),
                 "{m}"
-            )
+            );
         }
         other => panic!("{other:?}"),
     }

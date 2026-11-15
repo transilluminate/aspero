@@ -179,7 +179,7 @@ fn entry(e: &biblatex::Entry) -> BibEntry {
     match (field("eprint"), eprint_type.as_deref()) {
         (Some(eprint), None) => ids.arxiv("eprint", &eprint, false),
         (Some(eprint), Some(t)) if t.eq_ignore_ascii_case("arxiv") => {
-            ids.arxiv("eprint", &eprint, true)
+            ids.arxiv("eprint", &eprint, true);
         }
         (Some(eprint), Some(t)) if t.eq_ignore_ascii_case("pubmed") => ids.pmid("eprint", &eprint),
         _ => {}

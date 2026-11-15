@@ -296,16 +296,19 @@ impl ServerHandler for Handler {
             let (result, activity) = self.engine_call(&key, &name, arguments).await;
             (result, Some(activity))
         } else {
-            let host = self
-                .shared
-                .catalog()
-                .iter()
-                .find(|l| l.tool.name == name)
-                .map(|l| (l.scope, l.required.clone()));
-            match host {
-                Some((scope, required)) => {
+            // The host's tools as they are now, kept for the call.
+            let catalog = self.shared.catalog();
+            match catalog.iter().find(|l| l.tool.name == name) {
+                Some(listed) => {
                     let (result, activity) = self
-                        .host_call(&key, &context, &name, scope, &required, arguments)
+                        .host_call(
+                            &key,
+                            &context,
+                            &name,
+                            listed.scope,
+                            &listed.required,
+                            arguments,
+                        )
                         .await;
                     (Ok(result), Some(activity))
                 }

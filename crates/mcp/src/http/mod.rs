@@ -394,28 +394,50 @@ impl State {
         let opened = response
             .headers()
             .get(SESSION_ID)
-            .and_then(|v| v.to_str().ok());
-        let mut owners = self.owners.lock().unwrap_or_else(|e| e.into_inner());
+            .and_then(|v| v.to_str().ok())
+            .map(String::from);
         match (&session, opened) {
-            (None, Some(id)) => {
-                owners.insert(
-                    id.to_owned(),
-                    Owner {
-                        key_id: credential.key.id.clone(),
-                        digest: credential.digest,
-                    },
-                );
-                // Forget sessions that ended on their own (idle).
-                if let Ok(live) = self.manager.sessions.try_read() {
-                    owners.retain(|id, _| live.contains_key(id.as_str()));
-                }
-            }
+            (None, Some(id)) => self.opened(&id, &credential).await,
             (Some(id), _) if delete && response.status().is_success() => {
-                owners.remove(id);
+                self.owners
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .remove(id);
             }
             _ => {}
         }
         response.map(|b| b.boxed())
+    }
+
+    /// Records that `credential`'s key opened the session `id`, and ends it
+    /// if the key went (or was re-hashed) meanwhile: [`HttpServer::set_keys`]
+    /// ends the sessions on record, which this one wasn't yet.
+    async fn opened(&self, id: &str, credential: &Credential) {
+        {
+            let mut owners = self.owners.lock().unwrap_or_else(|e| e.into_inner());
+            owners.insert(
+                id.to_owned(),
+                Owner {
+                    key_id: credential.key.id.clone(),
+                    digest: credential.digest,
+                },
+            );
+            // Forget sessions that ended on their own (idle).
+            if let Ok(live) = self.manager.sessions.try_read() {
+                owners.retain(|id, _| live.contains_key(id.as_str()));
+            }
+        }
+        // After the owner's on record: `set_keys` swaps the keys before it
+        // reads the owners, so one of the two sees the other.
+        let current = self
+            .credentials()
+            .iter()
+            .any(|c| c.key.id == credential.key.id && c.digest == credential.digest);
+        if !current {
+            // Its owner stays on record until it's gone, as `set_keys` leaves
+            // them.
+            let _ = self.manager.close_session(&id.into()).await;
+        }
     }
 
     fn used(&self, credential: &Credential) {
@@ -557,22 +579,7 @@ impl HttpServer {
                 }
             })
             .collect();
-        // Their owners stay on record (until the sessions are gone), so no
-        // other key, nor the same id with a new hash, takes them over
-        // before they close.
-        let ended: Vec<String> = self
-            .state
-            .owners
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .iter()
-            .filter(|(_, o)| {
-                !credentials
-                    .iter()
-                    .any(|c| c.key.id == o.key_id && c.digest == o.digest)
-            })
-            .map(|(id, _)| id.clone())
-            .collect();
+        let credentials = Arc::new(credentials);
         // Kept keys whose scopes changed: their sessions' lists did.
         let rescoped: Vec<(String, [u8; 32])> = {
             let mut current = self
@@ -591,9 +598,27 @@ impl HttpServer {
                 })
                 .map(|c| (c.key.id.clone(), c.digest))
                 .collect();
-            *current = Arc::new(credentials);
+            *current = credentials.clone();
             rescoped
         };
+        // Read after the swap: a session opening meanwhile is on record
+        // here, or its opening sees the new keys and ends it. Their owners
+        // stay on record (until the sessions are gone), so no other key,
+        // nor the same id with a new hash, takes them over before they
+        // close.
+        let ended: Vec<String> = self
+            .state
+            .owners
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .iter()
+            .filter(|(_, o)| {
+                !credentials
+                    .iter()
+                    .any(|c| c.key.id == o.key_id && c.digest == o.digest)
+            })
+            .map(|(id, _)| id.clone())
+            .collect();
         if !rescoped.is_empty() {
             self.state
                 .shared
@@ -763,6 +788,36 @@ mod tests {
         assert!(!server.status().running);
         std::net::TcpListener::bind(("127.0.0.1", port)).expect("the port is free");
         // And again: nothing left to do.
+        server.stop().await;
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_session_opening_as_its_key_goes_ends() {
+        let tools = Arc::new(Tools::new(aspero_engine::Engine::builder().build()));
+        let key = Key {
+            id: "k".into(),
+            name: "agent".into(),
+            scopes: vec![Scope::Sources],
+            sha256: sha256_hex("token"),
+            daily_budget_usd: 1.0,
+        };
+        let config = HttpConfig {
+            port: 0,
+            keys: vec![key],
+            ..HttpConfig::default()
+        };
+        let ledger = Arc::new(MemoryLedger::default());
+        let server = HttpServer::start(tools, config, None, ledger)
+            .await
+            .unwrap();
+        let state = &server.state;
+        let credential = state.credentials()[0].clone();
+        // Mid-initialize: open, its owner not yet on record, as the key
+        // goes.
+        let (id, _transport) = state.manager.create_session().await.unwrap();
+        server.set_keys(Vec::new());
+        state.opened(&id, &credential).await;
+        assert!(!state.manager.sessions.read().await.contains_key(&id));
         server.stop().await;
     }
 }

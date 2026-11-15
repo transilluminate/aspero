@@ -497,6 +497,26 @@ async fn a_spent_session_is_refused_but_free_tools_still_answer() {
 }
 
 #[tokio::test]
+async fn calls_at_once_pass_a_sessions_budget_by_one_call_at_most() {
+    // Searches that overlap, against a budget smaller than one's estimate:
+    // the first runs alone, and the rest find the budget spent.
+    let slow = Scripted::new("openalex", vec![deep_learning()])
+        .slow(std::time::Duration::from_millis(100));
+    let tools = tools(vec![std::sync::Arc::new(slow)]);
+    let session = session(0.0005);
+    let search = json!({"text": "Deep learning"});
+    let calls = (0..10).map(|_| tools.call(&session, "search", search.clone()));
+    let results = futures::future::join_all(calls).await;
+    let done = results.iter().filter(|r| r.is_ok()).count();
+    assert_eq!(done, 1, "{results:?}");
+    assert!(results.iter().all(|r| match r {
+        Ok(_) => true,
+        Err(e) => e.kind == ToolErrorKind::BudgetSpent,
+    }));
+    assert_eq!(session.spent_usd(), SEARCH_COST);
+}
+
+#[tokio::test]
 async fn unknown_tools_are_their_own_kind_of_error() {
     let tools = tools(vec![source()]);
     let e = err(&tools, &session(1.0), "searhc", json!({})).await;

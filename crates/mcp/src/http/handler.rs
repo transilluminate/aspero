@@ -18,7 +18,7 @@ use super::host::{Activity, HostError};
 use super::{Shared, today};
 use crate::server::{INSTRUCTIONS, engine_result, server_info};
 use crate::session::usd;
-use crate::{Caller, Scope, Session, ToolError, ToolErrorKind};
+use crate::{Caller, Scope, Session, ToolError, ToolErrorKind, tools};
 
 const HOST_INSTRUCTIONS: &str = "Tools provided by the app that embeds aspero.";
 
@@ -70,36 +70,42 @@ impl Handler {
         arguments: Map<String, Value>,
     ) -> (Result<CallToolResult, ErrorData>, Activity) {
         let k = &key.key;
+        let said = engine_summary(name, &arguments);
+        let arguments = Value::Object(arguments);
         let spends = self.shared.tools.spec(name).is_some_and(|s| s.spends);
-        let refused = if !k.scopes.contains(&Scope::Sources) {
-            Some(lacks(name, Scope::Sources))
+        // The key's sessions' paid calls in flight hold their estimates, as
+        // a session's do.
+        let paid = self.shared.paid(&k.id);
+        let held = if !k.scopes.contains(&Scope::Sources) {
+            Err(lacks(name, Scope::Sources))
         } else if spends {
-            self.over_daily_budget(key).err()
+            let estimate = tools::estimate(name, &arguments);
+            paid.hold(estimate, || self.daily_left(key)).await.map(Some)
         } else {
-            None
+            Ok(None)
         };
-        let result = match refused {
-            Some(e) => Err(e),
-            None => {
-                self.shared
-                    .tools
-                    .call(&self.session, name, Value::Object(arguments.clone()))
-                    .await
+        let (result, cost) = match held {
+            Err(e) => (Err(e), 0.0),
+            Ok(held) => {
+                let result = self.shared.tools.call(&self.session, name, arguments).await;
+                // Spent all the same when the call failed after spending.
+                let cost = match &result {
+                    Ok(output) => output.cost_usd,
+                    Err(e) => e.cost_usd,
+                };
+                if cost > 0.0 {
+                    self.shared.ledger_add(&k.id, cost);
+                }
+                // Let go once the spend is on record.
+                drop(held);
+                (result, cost)
             }
         };
-        // Spent all the same when the call failed after spending.
-        let cost = match &result {
-            Ok(output) => output.cost_usd,
-            Err(e) => e.cost_usd,
-        };
-        if cost > 0.0 {
-            self.shared.ledger_add(&k.id, cost);
-        }
         let activity = Activity {
             key_name: k.name.clone(),
             tool: name.into(),
             summary: match &result {
-                Ok(_) => engine_summary(name, &arguments),
+                Ok(_) => said,
                 Err(e) => error_summary(&e.message),
             },
             is_error: result.is_err(),
@@ -108,12 +114,12 @@ impl Handler {
         (engine_result(&self.session, name, result), activity)
     }
 
-    /// Refuses a paid call once the key has spent its daily budget (or its
-    /// spend can't be read).
-    fn over_daily_budget(&self, key: &Credential) -> Result<(), ToolError> {
+    /// What's left of the key's daily budget; refuses a paid call once it's
+    /// spent (or its spend can't be read).
+    fn daily_left(&self, key: &Credential) -> Result<f64, ToolError> {
         let k = &key.key;
         match self.shared.ledger.spent(&k.id, &today()) {
-            Ok(spent) if spent < k.daily_budget_usd => Ok(()),
+            Ok(spent) if spent < k.daily_budget_usd => Ok(k.daily_budget_usd - spent),
             Ok(spent) => Err(ToolError::new(
                 ToolErrorKind::BudgetSpent,
                 format!(

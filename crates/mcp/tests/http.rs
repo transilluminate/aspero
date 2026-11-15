@@ -780,6 +780,60 @@ async fn a_keys_daily_budget_outlasts_a_restart() {
     server.stop().await;
 }
 
+/// UTC today, as the ledger keeps it.
+fn today() -> String {
+    jiff::Timestamp::now()
+        .to_zoned(jiff::tz::TimeZone::UTC)
+        .date()
+        .to_string()
+}
+
+/// `n` searches at once, each in a session of its own for the key `FULL`
+/// (its daily budget `daily_usd`), on a source whose searches take a
+/// while: how many succeeded, and what the key spent.
+async fn searches_at_once(n: usize, daily_usd: f64) -> (usize, f64) {
+    let slow = common::Scripted::new("openalex", vec![common::deep_learning()])
+        .slow(Duration::from_millis(100));
+    let tools = Arc::new(tools(vec![Arc::new(slow)]));
+    let ledger = Arc::new(MemoryLedger::default());
+    let mut config = config(free_port());
+    config.keys = vec![key("full", FULL, &[Sources], daily_usd)];
+    let server = HttpServer::start(tools, config, None, ledger.clone())
+        .await
+        .unwrap();
+    let mut agents = Vec::new();
+    for _ in 0..n {
+        let mut agent = Agent::new(server.port(), FULL);
+        agent.initialize().await;
+        agents.push(agent);
+    }
+    let calls = agents
+        .iter_mut()
+        .map(|a| a.call("search", json!({"text": "Deep learning"})));
+    let results = futures::future::join_all(calls).await;
+    for r in results.iter().filter(|r| is_error(r)) {
+        assert!(
+            text(r).starts_with("Error (budget_spent): this key's daily budget is spent"),
+            "{r}"
+        );
+    }
+    server.stop().await;
+    let done = results.iter().filter(|r| !is_error(r)).count();
+    (done, ledger.spent("full", &today()).unwrap())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn calls_at_once_pass_a_keys_budget_by_one_call_at_most() {
+    // A budget under one search's estimate: one runs, alone.
+    assert_eq!(searches_at_once(10, 0.0005).await, (1, SEARCH_COST));
+    // Searches costing far more than estimated (the test source's): at
+    // most four paid calls run at once, so the key passes its budget by
+    // four calls' cost at most.
+    let (done, spent) = searches_at_once(12, 4.0 * SEARCH_COST).await;
+    assert!(done >= 4, "{done}");
+    assert!(spent <= 8.0 * SEARCH_COST, "{spent}");
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn a_failed_call_spends_from_the_keys_budget_too() {
     let ledger = Arc::new(MemoryLedger::default());

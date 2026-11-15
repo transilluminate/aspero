@@ -689,7 +689,13 @@ fixture recorded with different parameters once hid a ranking bug.
 A **`Session`** is one connection: its `Caller` (empty over stdio; over
 HTTP, the key) and a spend cap in USD (`--budget`, default $0.25). Tools that may spend are refused once the session has spent it,
 checked before each call; a call's cost is known only after it, so the
-last one can overshoot by its own cost. Spend is the engine's reported
+last one can overshoot by its own cost. Calls at once can't overshoot
+more: each holds an estimate of its cost while in flight (at OpenAlex's
+prices: a search $0.001, one more per journal term; a citation two
+searches and its lookups' list calls), and a call whose estimate doesn't
+fit in what's left beside those held waits for the calls in flight,
+running once it fits or alone. A call costing more than its estimate
+(prices changed) overshoots by the difference. Spend is the engine's reported
 usage (OpenAlex's `cost`), as the CLI totals it, charged whether or not
 the call succeeds (a document not identified was still searched for);
 every result carries the
@@ -772,7 +778,9 @@ CLI builds without it and serves stdio only) and, over it, the FFI's
 - **Budgets.** Per session, as over stdio. Per key per UTC day: engine
   spend only, refused (a tool error; free tools still work) once a paid
   call would start at or past `dailyBudgetUsd`, overshooting as sessions
-  do. Kept in the cache file (`mcp_spend (key_id, day, usd)`, beside the
+  do, estimates held across all the key's sessions. At most four paid
+  calls per key run at once (more wait), which bounds what calls costing
+  more than estimated can add. Kept in the cache file (`mcp_spend (key_id, day, usd)`, beside the
   versioned schema like the pacing slots: rebuilds, `clear` and eviction
   keep it; days over a month old are pruned), so restarts don't reset it;
   in memory without a cache. A spend that can't be read refuses the

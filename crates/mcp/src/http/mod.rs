@@ -66,6 +66,7 @@ use handler::{Authed, Handler};
 use host::Listed;
 
 use crate::server::engine_tool;
+use crate::session::Reservations;
 use crate::{DEFAULT_BUDGET_USD, Scope, Tools};
 
 /// The port unless the app picks another.
@@ -77,6 +78,11 @@ pub const HOST_TIMEOUT: Duration = Duration::from_secs(30);
 /// How long a session may take to take a notification before it's given
 /// up on.
 const NOTIFY_TIMEOUT: Duration = Duration::from_secs(10);
+/// Paid calls a key may have in flight at once, across its sessions;
+/// more wait. Calls hold their estimated cost while in flight, so the
+/// daily budget is passed by one call's cost at most; this bounds what
+/// calls costing more than estimated can add.
+pub const PAID_IN_FLIGHT: usize = 4;
 /// The path the protocol is served at.
 pub const PATH: &str = "/mcp";
 
@@ -228,6 +234,8 @@ pub(crate) struct Shared {
     host: Option<Arc<dyn Host>>,
     catalog: RwLock<Arc<Vec<Listed>>>,
     ledger: Arc<dyn Ledger>,
+    /// Each key's paid calls in flight, by key id.
+    paid: Mutex<HashMap<String, Arc<Reservations>>>,
     session_budget_usd: f64,
     host_timeout: Duration,
     activity: Mutex<Option<std::sync::mpsc::Sender<Activity>>>,
@@ -248,6 +256,14 @@ impl Shared {
         self.catalog
             .read()
             .unwrap_or_else(|e| e.into_inner())
+            .clone()
+    }
+
+    /// The paid calls in flight of the key `key_id`.
+    fn paid(&self, key_id: &str) -> Arc<Reservations> {
+        let mut paid = self.paid.lock().unwrap_or_else(|e| e.into_inner());
+        paid.entry(key_id.to_owned())
+            .or_insert_with(|| Arc::new(Reservations::new(PAID_IN_FLIGHT)))
             .clone()
     }
 
@@ -478,6 +494,7 @@ impl HttpServer {
             host,
             catalog: RwLock::new(Arc::new(catalog)),
             ledger,
+            paid: Mutex::default(),
             session_budget_usd: budget,
             host_timeout: config.host_timeout,
             activity: Mutex::new(activity),

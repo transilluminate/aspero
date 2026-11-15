@@ -227,9 +227,12 @@ impl Tools {
                 format!("no tool named {name:?}"),
             )
         })?;
-        if spec.spends {
-            session.admit()?;
-        }
+        // Held until the call's charged, at the end of this.
+        let _held = if spec.spends {
+            Some(session.admit(estimate(name, &arguments)).await?)
+        } else {
+            None
+        };
         let full = arguments["full"].as_bool().unwrap_or(false);
         let answer = match name {
             "search" => self.search(parse(name, arguments)?).await,
@@ -462,6 +465,47 @@ impl Tools {
             .map(|u| vec![(report.provider.clone(), u)])
             .unwrap_or_default();
         Ok((answer, usage))
+    }
+}
+
+/// OpenAlex's prices, in USD: a search, and a list (filter) call such as a
+/// batch lookup. The other sources are free.
+const SEARCH_USD: f64 = 0.001;
+const LIST_USD: f64 = 0.0001;
+/// A lookup at most: a list call per kind of identifier (DOI, PMID,
+/// arXiv, …) and, with `full`, as many again for notices and versions.
+const LOOKUP_USD: f64 = 16.0 * LIST_USD;
+/// A citation's verification at most: two title searches, and its
+/// identifiers' lookups.
+const CLAIM_USD: f64 = 2.0 * SEARCH_USD + LOOKUP_USD;
+
+/// What a call to the tool `name` with `arguments` may cost, in USD, at
+/// OpenAlex's prices: held while it runs, so calls at once can't together
+/// pass a budget by more than one call's cost. A call that costs more
+/// (prices changed) passes it by the difference.
+pub(crate) fn estimate(name: &str, arguments: &Value) -> f64 {
+    match name {
+        // One more search per journal term, to find the journals.
+        "search" => (1 + journals(&arguments["query"])) as f64 * SEARCH_USD,
+        "lookup" => LOOKUP_USD,
+        "verify" => {
+            let n = arguments["citations"].as_array().map_or(1, Vec::len);
+            n.max(1) as f64 * CLAIM_USD
+        }
+        "identify" => LOOKUP_USD + CLAIM_USD,
+        "citing_works" | "references" => SEARCH_USD,
+        _ => 0.0,
+    }
+}
+
+/// How many journal terms a query tree has.
+fn journals(node: &Value) -> usize {
+    match node {
+        Value::Object(map) => {
+            usize::from(map.contains_key("journal")) + map.values().map(journals).sum::<usize>()
+        }
+        Value::Array(items) => items.iter().map(journals).sum(),
+        _ => 0,
     }
 }
 

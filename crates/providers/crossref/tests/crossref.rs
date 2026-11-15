@@ -492,6 +492,31 @@ fn trees_crossref_cant_say_and_why() {
         ])),
         "Crossref can't require two work types at once"
     );
+    // A journal's name only ranks: beside other words, works from any
+    // journal come first.
+    let journal = "Crossref can't keep to a journal beside other terms: it ranks works by \
+                   the journal's name, without requiring it";
+    assert_eq!(
+        reason(QueryNode::All(vec![
+            QueryNode::term(TermField::Keywords, "sepsis"),
+            QueryNode::term(TermField::Container, "Lancet"),
+        ])),
+        journal
+    );
+    assert_eq!(
+        reason(QueryNode::All(vec![
+            QueryNode::term(TermField::Container, "Lancet"),
+            QueryNode::term(TermField::Author, "Singer"),
+        ])),
+        journal
+    );
+    // Alone, or beside filters, it is the one thing ranked by.
+    let alone = QueryNode::All(vec![
+        QueryNode::term(TermField::Container, "Lancet"),
+        years(2020, 2021),
+        id_term("10.1016/s0140-6736(20)30183-5"),
+    ]);
+    assert_eq!(cr.express(&alone), Ok(()));
     // An ORCID and an abstract are filters.
     let (cr2, http2) = provider([response(200, &[], r#"{"message": {"items": []}}"#)]);
     let tree = QueryNode::All(vec![

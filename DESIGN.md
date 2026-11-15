@@ -631,7 +631,12 @@ fixture recorded with different parameters once hid a ranking bug.
   unless `sort=score&order=desc` is sent. Lookalike re-deposits exist (2025
   copies of "Attention Is All You Need" with the real authors). Field
   queries: `query.author`, `query.title` (titles only, unlike
-  `query.bibliographic`), `query.container-title`. It doesn't
+  `query.bibliographic`), `query.container-title`. They rank rather
+  than require, scored together: in a tree, terms of one field join its
+  parameter (as one term of all their words would), and a journal term
+  goes alone among terms (filters beside it are fine), since beside
+  keywords or a title works from any journal outrank it; such a tree is
+  refused, saying so. It doesn't
   index DataCite DOIs (arXiv). Its "CSL" uses Crossref type names. Top
   matches can be derivative records ("Faculty Opinions recommendation of
   X"). `updated-by` carries Retraction Watch notices.

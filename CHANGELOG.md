@@ -1,5 +1,69 @@
 # Changelog
 
+## Unreleased
+
+Breaking:
+
+- An analysis's `incomplete` lists every stop it met, not only the
+  first: a JSON array, always present (`[]` when complete), at the top
+  level and in each section; `[Incomplete]` in Swift. A sample of a
+  much-cited seed (`capped`) is no longer hidden behind a budget stop or
+  a failure.
+- Removed from the library: the unused `Capabilities` flags `citations`,
+  `references` and `recommend` and their `Provider` methods,
+  `ArxivId::is_old_style`, `ReplayClient::then_fail` and
+  `Analysis::not_yet` (the app's `notYet` stays, always empty).
+  `Engine::identify` returns an `IdentifyReport` with its usage.
+
+Added:
+
+- The app's search results say which filters were ignored
+  (`ignoredFilters`); usage gives a source's daily budget and prepaid
+  balance; cache stats count cached citation links; `analyse` takes how
+  many related works to list (`relatedLimit`, 20); a stop says which
+  related-works stage stopped (`stage`) and which source failed.
+
+Fixed:
+
+- A search naming no source asks Europe PMC before DataCite, in the order
+  the search sources are listed.
+- Search refuses what it couldn't search faithfully, rather than
+  widening or narrowing it: work types that would be filter syntax
+  (`book,is_oa:true`), terms with no letters or digits, a journal beside
+  other terms on Crossref (which only ranks by it), and leaving out on
+  OpenAlex a journal naming more sources than a filter takes. `<`, `>`
+  and `=` are dropped from searched words.
+- Europe PMC and DataCite bracket a query tree beside an expert query,
+  and escape backslashes in DOIs. A none of a none means an any. Sorting
+  newest first no longer changes what a tree can search.
+- MCP budgets hold: a failed `identify` charges what it spent; calls at
+  once pass a session's or a key's budget by one call at most, and a key
+  runs at most four paid calls at once; spend the ledger couldn't save is
+  kept and saved later.
+- The MCP server: stopping refuses new requests at once, and a stop cut
+  short finishes when called again; a session opening as its key is
+  revoked is closed; a key may hold 16 sessions (then HTTP 429); activity
+  the app is far behind on is dropped, not queued without limit; an app
+  tool that times out is reported as of unknown outcome, to check before
+  retrying.
+- Related works read at most 75 pages of citing works however little
+  each seed is cited, and the estimate agrees; works of unknown citation
+  count are read, not taken as uncited; pages keep to the budget by what
+  OpenAlex charges.
+- A seed is `not_found` only once that's settled: a failure or the budget
+  stopping a second ask says so. A daily cap stops an analysis as
+  `budget`, not `provider_failed` (the CLI no longer exits
+  "unavailable"). Preprints and published versions linked only through a
+  third record count as one work. A stale cached record's references
+  aren't cached as fresh. A lookup of 101 works counts one paid request.
+- Odd one out says `no_reference_data`, not `no_links`, where a seed of
+  unknown references may cite the work.
+- A failed lookup behind `references` or a search by citations names its
+  source and any daily cap reached; a spent quota with no stated reset
+  says when it is tried again (`until`).
+- `--style Foo.CSL` is read as a file. Counts given the app saturate
+  rather than wrap.
+
 ## 0.20.1
 
 Fixed:

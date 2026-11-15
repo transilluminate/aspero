@@ -24,7 +24,7 @@ Environment:
   OPENALEX_API_KEY  OpenAlex key ($1/day free budget; $0.10/day without)
   ASPERO_MAILTO     contact address for polite API pools (Crossref)
   ASPERO_CACHE_DIR  where to keep the answer cache (default: platform cache dir)
-  ASPERO_OPENALEX_CAP  --openalex-cap
+  ASPERO_OPENALEX_CAP_USD  --openalex-cap-usd; ASPERO_OPENALEX_CAP still read
   ASPERO_DISABLED_SOURCES  --without
   ASPERO_CACHE_FOUND_DAYS, ASPERO_CACHE_NOT_FOUND_DAYS, ASPERO_CACHE_MAX_MB
                     --cache-found-days, --cache-not-found-days, --cache-max-mb
@@ -155,12 +155,13 @@ pub struct Global {
         long,
         global = true,
         value_name = "USD",
-        env = "ASPERO_OPENALEX_CAP",
+        env = "ASPERO_OPENALEX_CAP_USD",
+        alias = "openalex-cap",
         value_parser = cap,
         help_heading = "Sources and budget",
         hide_short_help = true
     )]
-    pub openalex_cap: Option<f64>,
+    pub openalex_cap_usd: Option<f64>,
 
     /// Sources never to ask, for lookups, checks or searches: openalex,
     /// crossref, datacite, doi, europepmc, openlibrary (comma-separated or
@@ -225,6 +226,29 @@ impl Global {
     pub fn cache_max_bytes(&self) -> Option<u64> {
         self.cache_max_mb.map(aspero_engine::megabytes)
     }
+
+    /// The OpenAlex daily cap: `--openalex-cap-usd` or
+    /// `ASPERO_OPENALEX_CAP_USD`, else the old `ASPERO_OPENALEX_CAP`, still
+    /// read so a cap set under that name isn't lost.
+    pub fn openalex_daily_cap_usd(&self) -> Result<Option<f64>, String> {
+        or_old_cap(
+            self.openalex_cap_usd,
+            std::env::var(OLD_CAP).ok().as_deref(),
+        )
+    }
+}
+
+/// The OpenAlex daily cap's environment variable before it said USD.
+const OLD_CAP: &str = "ASPERO_OPENALEX_CAP";
+
+/// The cap given under its new name, else `old` (blank is unset), read as
+/// `--openalex-cap-usd` reads it.
+fn or_old_cap(given: Option<f64>, old: Option<&str>) -> Result<Option<f64>, String> {
+    match (given, old.filter(|v| !v.trim().is_empty())) {
+        (Some(usd), _) => Ok(Some(usd)),
+        (None, Some(old)) => cap(old).map(Some).map_err(|e| format!("{OLD_CAP}: {e}")),
+        (None, None) => Ok(None),
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
@@ -277,7 +301,7 @@ path (…/10.3389/fneur.2019.01343/full, page suffixes dropped):
 Bare digits are ambiguous; prefix them (pmid:, corpusid:).
 
 JSON works:
-  canonical    the work's key, the same whichever of its IDs found it (a
+  canonical_id the work's key, the same whichever of its IDs found it (a
                DOI, else arXiv, PMID, PMCID, …): dedupe works on it
   authors      [{\"name\": \"Yann LeCun\", \"orcid\": \"...\"}, ...], the same
                shape with or without --full (which adds given and family)
@@ -400,7 +424,8 @@ Verdicts:
   verified      a matching work exists (and so do its claimed identifiers)
   plausible     a work partly matches; check the details          (exit 9)
   mismatch      the claimed DOI/arXiv ID doesn't exist or is another
-                work's; `reason` names the work the citation matches (exit 9)
+                work's; `reason_text` names the work the citation matches
+                                                                   (exit 9)
   not_found     no matching work                                   (exit 3)
   unverifiable  providers failed                                   (exit 4)
 
@@ -415,10 +440,11 @@ reference, or a JSON object of what you know (more reliable than text):
   {\"key\": \"pe.md:7\", \"title\": \"...\", \"authors\": [\"Meyer G\"], \"year\": 2014,
    \"journal\": \"N Engl J Med\", \"volume\": 370, \"page\": \"1402-11\", \"doi\": \"...\"}
   keys: text, title, authors, year, journal (or container), volume, page,
-        doi, arxiv, id, ids, and key: anything, echoed back untouched
+        doi, arxiv, id, ids, and key: anything, echoed back untouched as
+        claim_key
 Unknown keys are refused. To paste a reference list as it is (numbered,
 one per paragraph, wrapped), use --split instead. With --format jsonl, one result per line as
-each finishes, in any order: match them up by `input` or your `key`. Each
+each finishes, in any order: match them up by `input` or `claim_key`. Each
 also carries the `claim` as understood. Other formats keep input order.
 
 The journal, volume and first page are checked too, from fields or from
@@ -684,9 +710,9 @@ With OPENALEX_API_KEY set, asks OpenAlex's /rate-limit, which costs nothing:
 Without a key, /rate-limit doesn't answer, so one work is looked up alone,
 past the cache (free), and its response's headers say the budget:
   openalex: $0.0153 of $0.10 used today (no key), resets 00:00 UTC
-JSON: {\"budgets\": [{\"provider\", \"limit\", \"used\", \"remaining\",
-\"prepaid_remaining\", \"resets_at\", \"seen_at\"}]}, and \"key\": false without
-one.
+JSON: {\"budgets\": [{\"provider\", \"limit_usd\", \"spent_usd\",
+\"remaining_usd\", \"prepaid_remaining_usd\", \"resets_at\", \"seen_at\"}]}, and
+\"key\": false without one.
 
 Examples:
   aspero budget
@@ -739,7 +765,7 @@ Examples:
     Licences,
 }
 
-/// `--openalex-cap`: zero or more dollars.
+/// `--openalex-cap-usd`: zero or more dollars.
 fn cap(s: &str) -> Result<f64, String> {
     match s.trim().parse::<f64>() {
         Ok(usd) if usd.is_finite() && usd >= 0.0 => Ok(usd),
@@ -902,14 +928,29 @@ mod tests {
 
     #[test]
     fn the_openalex_cap_is_an_amount() {
-        let cli = parse(&["--openalex-cap", "0.5", "search", "x"]).unwrap();
-        assert_eq!(cli.global.openalex_cap, Some(0.5));
-        let after = parse(&["search", "x", "--openalex-cap", "0"]).unwrap();
-        assert_eq!(after.global.openalex_cap, Some(0.0));
+        let cli = parse(&["--openalex-cap-usd", "0.5", "search", "x"]).unwrap();
+        assert_eq!(cli.global.openalex_cap_usd, Some(0.5));
+        let after = parse(&["search", "x", "--openalex-cap-usd", "0"]).unwrap();
+        assert_eq!(after.global.openalex_cap_usd, Some(0.0));
+        // The old name still works.
+        let old = parse(&["--openalex-cap", "0.25", "search", "x"]).unwrap();
+        assert_eq!(old.global.openalex_cap_usd, Some(0.25));
         for bad in ["-1", "half", "inf"] {
-            let error = parse(&["--openalex-cap", bad, "search", "x"]).expect_err(bad);
+            let error = parse(&["--openalex-cap-usd", bad, "search", "x"]).expect_err(bad);
             assert_eq!(error.exit_code(), 2);
         }
+    }
+
+    #[test]
+    fn the_old_cap_variable_is_read_when_the_new_name_is_not_set() {
+        assert_eq!(or_old_cap(None, None), Ok(None));
+        assert_eq!(or_old_cap(None, Some("0.5")), Ok(Some(0.5)));
+        assert_eq!(or_old_cap(None, Some(" ")), Ok(None));
+        // The new name wins, even over an old value that isn't an amount.
+        assert_eq!(or_old_cap(Some(0.25), Some("0.5")), Ok(Some(0.25)));
+        assert_eq!(or_old_cap(Some(0.25), Some("half")), Ok(Some(0.25)));
+        let error = or_old_cap(None, Some("half")).unwrap_err();
+        assert!(error.starts_with("ASPERO_OPENALEX_CAP: "), "{error}");
     }
 
     #[test]

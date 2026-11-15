@@ -57,7 +57,7 @@ fn judge(case: &Case, v: &Verification) -> Option<String> {
     }
     if let Some(want) = case.retracted {
         let got = v
-            .best
+            .best_match
             .is_some_and(|i| v.report.candidates[i].retraction().is_some());
         if got != want {
             return Some(format!("expected retracted={want}, got {got}"));
@@ -66,7 +66,7 @@ fn judge(case: &Case, v: &Verification) -> Option<String> {
     if case.ids.is_empty() {
         return None;
     }
-    let matched = v.best.map(|i| &v.report.candidates[i].ids);
+    let matched = v.best_match.map(|i| &v.report.candidates[i].ids);
     let ok = matched.is_some_and(|ids| case.ids.iter().any(|want| ids.contains(want)));
     (!ok).then(|| {
         let wanted: Vec<String> = case.ids.iter().map(ToString::to_string).collect();
@@ -108,7 +108,7 @@ async fn main() -> std::process::ExitCode {
             .iter()
             .filter_map(|(_, u)| u.cost)
             .sum::<f64>();
-        let confidence = v.best.map_or_else(
+        let confidence = v.best_match.map_or_else(
             || "  - ".into(),
             |i| format!("{:.2}", v.report.candidates[i].assessment.confidence),
         );
@@ -126,7 +126,7 @@ async fn main() -> std::process::ExitCode {
                     "FAIL  {:<12} {confidence}  {}\n      {problem}\n      reason: {}",
                     v.verdict.as_str(),
                     case.why,
-                    v.reason
+                    v.reason_text
                 );
                 for e in &v.report.errors {
                     println!("      error: {e}");

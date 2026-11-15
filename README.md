@@ -183,7 +183,7 @@ its `Config`):
 
 | Flag (variable) | Effect |
 |---|---|
-| `--openalex-cap USD` (`ASPERO_OPENALEX_CAP`) | Stop OpenAlex's paid calls once today's use, as OpenAlex reports it for the key, reaches this; lookups (free) go on, checks fall back to the free sources, searches that need OpenAlex fail (exit 5). `aspero budget` shows today's use. |
+| `--openalex-cap-usd USD` (`ASPERO_OPENALEX_CAP_USD`) | Stop OpenAlex's paid calls once today's use, as OpenAlex reports it for the key, reaches this; lookups (free) go on, checks fall back to the free sources, searches that need OpenAlex fail (exit 5). `aspero budget` shows today's use. |
 | `--without europepmc,openlibrary` (`ASPERO_DISABLED_SOURCES`) | Sources never to ask: `openalex`, `crossref`, `datacite`, `doi`, `europepmc`, `openlibrary`. |
 | `--cache-found-days N` (`ASPERO_CACHE_FOUND_DAYS`) | How long a found record is trusted (default 7). |
 | `--cache-not-found-days N` (`ASPERO_CACHE_NOT_FOUND_DAYS`) | How long a "not found" is trusted (default 1). |

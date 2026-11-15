@@ -654,7 +654,7 @@ fn specs(sources: &[String]) -> Vec<ToolSpec> {
             "Which work a document is, from its first page's text: each identifier on the \
              page is looked up and must be confirmed by its title (`title_hint`, `title`) or \
              its title and first author on the page; otherwise the top of the page is \
-             verified as a citation. `decided_by` says which; the match's `checks` compare \
+             verified as a citation. `decided_by` says which; the `best_match`'s `checks` compare \
              the identifier alone. Fails as not found when nothing is sure enough. `full` \
              adds volume, issue, pages and the abstract.",
             input_schema::<IdentifyArgs>(),

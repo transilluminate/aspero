@@ -25,8 +25,8 @@ async fn a_lookalike_from_the_matcher_leads_to_the_real_paper() {
         )
         .await;
 
-    assert_eq!(v.verdict, Verdict::Verified, "{}", v.reason);
-    let best = &v.report.candidates[v.best.unwrap()];
+    assert_eq!(v.verdict, Verdict::Verified, "{}", v.reason_text);
+    let best = &v.report.candidates[v.best_match.unwrap()];
     assert!(best.ids.contains(&"arXiv:1706.03762".parse().unwrap()));
     // The title the reference cites, located via the matcher's (lookalike)
     // hit, became the OpenAlex query.
@@ -61,7 +61,7 @@ async fn verify_skips_paid_searches_once_the_claimed_doi_verifies() {
     );
 
     let v = engine.verify(&claim, 5).await;
-    assert_eq!(v.verdict, Verdict::Verified, "{}", v.reason);
+    assert_eq!(v.verdict, Verdict::Verified, "{}", v.reason_text);
     assert!(openalex.queries().is_empty(), "no OpenAlex search needed");
 
     // resolve, by contrast, gathers everything.
@@ -96,9 +96,9 @@ async fn one_matchers_exact_hit_does_not_stop_the_search_for_the_original() {
     let claim = Claim::from_text("LeCun Y, Bengio Y, Hinton G. Deep learning. 2015.");
 
     let v = engine.verify(&claim, 5).await;
-    assert_eq!(v.verdict, Verdict::Verified, "{}", v.reason);
+    assert_eq!(v.verdict, Verdict::Verified, "{}", v.reason_text);
     assert_eq!(openalex.queries().len(), 1);
-    let best = &v.report.candidates[v.best.unwrap()];
+    let best = &v.report.candidates[v.best_match.unwrap()];
     assert!(best.ids.contains(&"10.1038/nature14539".parse().unwrap()));
 }
 
@@ -112,17 +112,25 @@ async fn an_invented_doi_is_a_mismatch_pointing_at_the_real_work() {
     let engine2 = self::engine(vec![crossref_matches_real]);
 
     let v = engine2.verify(&claim, 5).await;
-    assert_eq!(v.verdict, Verdict::Mismatch, "{}", v.reason);
-    assert!(v.reason.contains("does not exist"), "{}", v.reason);
-    assert!(v.reason.contains("10.1038/nature14539"), "{}", v.reason);
-    assert_eq!(v.why, Reason::IdMissingElsewhere);
+    assert_eq!(v.verdict, Verdict::Mismatch, "{}", v.reason_text);
+    assert!(
+        v.reason_text.contains("does not exist"),
+        "{}",
+        v.reason_text
+    );
+    assert!(
+        v.reason_text.contains("10.1038/nature14539"),
+        "{}",
+        v.reason_text
+    );
+    assert_eq!(v.reason, Reason::IdMissingElsewhere);
 
     // With no matching work anywhere, it's simply not found.
     let nothing =
         Claim::from_text("Smith J. A paper that was never written. 2019. doi:10.9999/nope");
     let v = engine.verify(&nothing, 5).await;
-    assert_eq!(v.verdict, Verdict::NotFound, "{}", v.reason);
-    assert_eq!(v.why, Reason::IdMissing);
+    assert_eq!(v.verdict, Verdict::NotFound, "{}", v.reason_text);
+    assert_eq!(v.reason, Reason::IdMissing);
 }
 
 #[tokio::test(start_paused = true)]
@@ -140,7 +148,7 @@ async fn a_verifying_lookup_does_not_wait_for_slow_matchers() {
 
     let start = tokio::time::Instant::now();
     let v = engine.verify(&claim, 5).await;
-    assert_eq!(v.verdict, Verdict::Verified, "{}", v.reason);
+    assert_eq!(v.verdict, Verdict::Verified, "{}", v.reason_text);
     assert!(start.elapsed() < std::time::Duration::from_secs(60));
 
     // Without an identifier to settle it, the matcher is waited for.
@@ -172,7 +180,7 @@ async fn a_match_two_providers_agree_on_does_not_wait_for_slow_searches() {
     let text =
         Claim::from_text("LeCun Y, Bengio Y, Hinton G. Deep learning. Nature. 2015;521:436-444.");
     let v = engine.verify(&text, 5).await;
-    assert_eq!(v.verdict, Verdict::Verified, "{}", v.reason);
+    assert_eq!(v.verdict, Verdict::Verified, "{}", v.reason_text);
     assert!(start.elapsed() < minute);
 
     // A DOI naming another work is settled the same way.
@@ -181,8 +189,12 @@ async fn a_match_two_providers_agree_on_does_not_wait_for_slow_searches() {
         "LeCun Y, Bengio Y, Hinton G. Deep learning. Nature. 2015. doi:10.1145/3448250",
     );
     let v = engine.verify(&claim, 5).await;
-    assert_eq!(v.verdict, Verdict::Mismatch, "{}", v.reason);
-    assert!(matches!(v.why, Reason::IdElsewhere { .. }), "{:?}", v.why);
+    assert_eq!(v.verdict, Verdict::Mismatch, "{}", v.reason_text);
+    assert!(
+        matches!(v.reason, Reason::IdElsewhere { .. }),
+        "{:?}",
+        v.reason
+    );
     assert!(start.elapsed() < minute);
 }
 
@@ -198,11 +210,11 @@ async fn a_doi_broken_at_a_hyphen_is_tried_without_it() {
     )];
 
     let v = engine.verify(&claim, 5).await;
-    assert_eq!(v.verdict, Verdict::Verified, "{}", v.reason);
+    assert_eq!(v.verdict, Verdict::Verified, "{}", v.reason_text);
     assert!(
-        v.reason.starts_with("doi:10.1038/nature14539"),
+        v.reason_text.starts_with("doi:10.1038/nature14539"),
         "{}",
-        v.reason
+        v.reason_text
     );
 }
 
@@ -225,12 +237,16 @@ async fn an_alternative_is_ignored_when_the_printed_doi_exists() {
     )];
 
     let v = engine.verify(&claim, 5).await;
-    assert_eq!(v.verdict, Verdict::Mismatch, "{}", v.reason);
-    assert!(matches!(v.why, Reason::IdElsewhere { .. }), "{:?}", v.why);
+    assert_eq!(v.verdict, Verdict::Mismatch, "{}", v.reason_text);
     assert!(
-        v.reason.starts_with("doi:10.1145/3448250 is"),
-        "{}",
+        matches!(v.reason, Reason::IdElsewhere { .. }),
+        "{:?}",
         v.reason
+    );
+    assert!(
+        v.reason_text.starts_with("doi:10.1145/3448250 is"),
+        "{}",
+        v.reason_text
     );
 }
 
@@ -248,16 +264,20 @@ async fn a_real_doi_attached_to_the_wrong_citation_is_a_mismatch() {
     );
 
     let v = engine.verify(&claim, 5).await;
-    assert_eq!(v.verdict, Verdict::Mismatch, "{}", v.reason);
-    assert!(v.reason.contains("Deep learning for AI"), "{}", v.reason);
-    let Reason::IdElsewhere { cited } = v.why else {
-        panic!("{:?}", v.why)
+    assert_eq!(v.verdict, Verdict::Mismatch, "{}", v.reason_text);
+    assert!(
+        v.reason_text.contains("Deep learning for AI"),
+        "{}",
+        v.reason_text
+    );
+    let Reason::IdElsewhere { cited } = v.reason else {
+        panic!("{:?}", v.reason)
     };
     assert_eq!(
         v.report.candidates[cited].record.work.title.as_deref(),
         Some("Deep learning for AI")
     );
-    let best = &v.report.candidates[v.best.unwrap()];
+    let best = &v.report.candidates[v.best_match.unwrap()];
     assert_eq!(
         best.record.ids,
         ["10.1038/nature14539".parse::<WorkId>().unwrap()]
@@ -270,11 +290,15 @@ async fn the_right_paper_with_the_wrong_year_is_a_mismatch_not_a_miss() {
     let claim = Claim::from_text("Vaswani A, Shazeer N. Attention is all you need. NeurIPS 2019.");
 
     let v = engine.verify(&claim, 5).await;
-    assert_eq!(v.verdict, Verdict::Mismatch, "{}", v.reason);
-    assert!(v.reason.contains("year (2017)"), "{}", v.reason);
-    let year = v.why.differs().iter().find(|d| d.field == CitedField::Year);
+    assert_eq!(v.verdict, Verdict::Mismatch, "{}", v.reason_text);
+    assert!(v.reason_text.contains("year (2017)"), "{}", v.reason_text);
+    let year = v
+        .reason
+        .differs()
+        .iter()
+        .find(|d| d.field == CitedField::Year);
     assert_eq!(year.unwrap().actual.as_deref(), Some("2017"));
-    let best = &v.report.candidates[v.best.unwrap()];
+    let best = &v.report.candidates[v.best_match.unwrap()];
     assert!(best.ids.contains(&"arXiv:1706.03762".parse().unwrap()));
 }
 
@@ -286,9 +310,9 @@ async fn the_cited_doi_with_the_wrong_year_partly_matches() {
     );
 
     let v = engine.verify(&claim, 5).await;
-    assert_eq!(v.verdict, Verdict::Plausible, "{}", v.reason);
-    let Reason::IdPartlyMatches { differs } = &v.why else {
-        panic!("{:?}", v.why)
+    assert_eq!(v.verdict, Verdict::Plausible, "{}", v.reason_text);
+    let Reason::IdPartlyMatches { differs } = &v.reason else {
+        panic!("{:?}", v.reason)
     };
     assert_eq!(differs.len(), 1, "{differs:?}");
     assert_eq!(differs[0].field, CitedField::Year);
@@ -302,9 +326,9 @@ async fn identifier_only_claims_check_existence_without_searching() {
     claim.ids = vec!["10.1038/nature14539".parse().unwrap()];
 
     let v = engine.verify(&claim, 5).await;
-    assert_eq!(v.verdict, Verdict::Verified, "{}", v.reason);
-    assert!(v.reason.contains("exists"));
-    assert_eq!(v.why, Reason::IdExists);
+    assert_eq!(v.verdict, Verdict::Verified, "{}", v.reason_text);
+    assert!(v.reason_text.contains("exists"));
+    assert_eq!(v.reason, Reason::IdExists);
     assert!(openalex.queries().is_empty() && crossref.queries().is_empty());
 }
 
@@ -316,9 +340,9 @@ async fn an_identifier_with_a_wrong_year_is_plausible() {
     claim.year = Some(1999);
 
     let v = engine.verify(&claim, 5).await;
-    assert_eq!(v.verdict, Verdict::Plausible, "{}", v.reason);
-    let Reason::IdPartlyMatches { differs } = &v.why else {
-        panic!("{:?}", v.why);
+    assert_eq!(v.verdict, Verdict::Plausible, "{}", v.reason_text);
+    let Reason::IdPartlyMatches { differs } = &v.reason else {
+        panic!("{:?}", v.reason);
     };
     assert_eq!(differs.len(), 1);
     assert_eq!(differs[0].field, CitedField::Year);
@@ -326,8 +350,8 @@ async fn an_identifier_with_a_wrong_year_is_plausible() {
 
     claim.year = Some(2015);
     let v = engine.verify(&claim, 5).await;
-    assert_eq!(v.verdict, Verdict::Verified, "{}", v.reason);
-    assert_eq!(v.why, Reason::IdExists);
+    assert_eq!(v.verdict, Verdict::Verified, "{}", v.reason_text);
+    assert_eq!(v.reason, Reason::IdExists);
 }
 
 #[tokio::test]
@@ -417,8 +441,8 @@ async fn provider_failures_make_an_empty_result_unverifiable() {
     let v = engine
         .verify(&Claim::from_text("Anything at all, 2020"), 5)
         .await;
-    assert_eq!(v.verdict, Verdict::Unverifiable, "{}", v.reason);
-    assert_eq!(v.why, Reason::ProvidersFailed);
+    assert_eq!(v.verdict, Verdict::Unverifiable, "{}", v.reason_text);
+    assert_eq!(v.reason, Reason::ProvidersFailed);
     assert_eq!(v.report.errors.len(), 1);
     assert_eq!(
         v.report.errors[0].kind(),
@@ -488,8 +512,8 @@ async fn a_reference_without_a_title_is_found_by_where_it_appeared() {
             5,
         )
         .await;
-    assert_eq!(v.verdict, Verdict::Verified, "{}", v.reason);
-    let found = &v.report.candidates[v.best.unwrap()];
+    assert_eq!(v.verdict, Verdict::Verified, "{}", v.reason_text);
+    let found = &v.report.candidates[v.best_match.unwrap()];
     assert!(found.sightings.iter().any(|s| s.via == Via::PlaceSearch));
     let placed: Vec<_> = openalex
         .sent()
@@ -519,7 +543,7 @@ async fn extreme_years_do_not_overflow() {
     let mut claim = Claim::from_text("Injury, Int. J. Care Injured 47 (2016) 797\u{2013}804");
     claim.year = Some(i16::MAX);
     let v = engine.verify(&claim, 5).await;
-    assert_ne!(v.verdict, Verdict::Verified, "{}", v.reason);
+    assert_ne!(v.verdict, Verdict::Verified, "{}", v.reason_text);
     let years = openalex.sent().iter().find_map(|q| q.years).unwrap();
     assert_eq!((years.from, years.to), (Some(i16::MAX - 1), Some(i16::MAX)));
 }
@@ -543,9 +567,9 @@ async fn agreeing_without_corroboration_is_unconfirmed() {
             5,
         )
         .await;
-    assert_eq!(v.verdict, Verdict::Plausible, "{}", v.reason);
-    assert_eq!(v.why, Reason::Unconfirmed);
-    assert_eq!(v.why.as_str(), "unconfirmed");
+    assert_eq!(v.verdict, Verdict::Plausible, "{}", v.reason_text);
+    assert_eq!(v.reason, Reason::Unconfirmed);
+    assert_eq!(v.reason.as_str(), "unconfirmed");
 }
 
 #[tokio::test]
@@ -564,13 +588,17 @@ async fn a_reply_with_the_cited_title_is_named_as_one() {
             5,
         )
         .await;
-    let kind = v.why.differs().iter().find(|d| d.field == CitedField::Kind);
+    let kind = v
+        .reason
+        .differs()
+        .iter()
+        .find(|d| d.field == CitedField::Kind);
     assert_eq!(
         kind.and_then(|d| d.actual.as_deref()),
         Some("reply"),
         "{:?}: {}",
-        v.why,
-        v.reason
+        v.reason,
+        v.reason_text
     );
     assert_eq!(kind.and_then(|d| d.kind), Some(WorkKind::Reply));
 }
@@ -624,16 +652,16 @@ async fn reasons_that_list_differences_always_list_one() {
                 .verify(&Claim::from_text(text), 5)
                 .await;
             let listing = matches!(
-                v.why,
+                v.reason,
                 Reason::PartlyMatches { .. }
                     | Reason::Closest { .. }
                     | Reason::IdPartlyMatches { .. }
             );
             assert!(
-                !listing || !v.why.differs().is_empty(),
+                !listing || !v.reason.differs().is_empty(),
                 "{text:?} against {:?}: {:?}",
                 candidate.work.title,
-                v.why
+                v.reason
             );
         }
     }
@@ -664,8 +692,14 @@ async fn a_doi_cut_short_at_a_line_break_is_the_work_whose_doi_it_starts() {
             5,
         )
         .await;
-    assert_eq!(v.verdict, Verdict::Verified, "{:?}: {}", v.why, v.reason);
-    let best = &v.report.candidates[v.best.unwrap()];
+    assert_eq!(
+        v.verdict,
+        Verdict::Verified,
+        "{:?}: {}",
+        v.reason,
+        v.reason_text
+    );
+    let best = &v.report.candidates[v.best_match.unwrap()];
     assert!(
         best.ids
             .contains(&"doi:10.1097/hjh.0b013e3282f35c67".parse().unwrap())
@@ -689,12 +723,16 @@ async fn the_claim_as_read_and_cited_values_come_back() {
         (v.read.volume.as_deref(), v.read.page.as_deref()),
         (Some("521"), Some("436"))
     );
-    let year = v.why.differs().iter().find(|d| d.field == CitedField::Year);
+    let year = v
+        .reason
+        .differs()
+        .iter()
+        .find(|d| d.field == CitedField::Year);
     assert_eq!(
         year.map(|d| (d.cited.as_deref(), d.actual.as_deref())),
         Some((Some("2019"), Some("2015"))),
         "{:?}",
-        v.why
+        v.reason
     );
 }
 
@@ -726,14 +764,26 @@ async fn a_reference_naming_another_journal_is_plausible_and_says_which() {
     };
 
     let v = engine.verify(&cite("Environ Int"), 5).await;
-    assert_eq!(v.verdict, Verdict::Verified, "{:?}: {}", v.why, v.reason);
+    assert_eq!(
+        v.verdict,
+        Verdict::Verified,
+        "{:?}: {}",
+        v.reason,
+        v.reason_text
+    );
     assert_eq!(v.read.container.as_deref(), Some("Environ Int"));
 
     let v = engine.verify(&cite("Environ Sci Technol"), 5).await;
-    assert_eq!(v.verdict, Verdict::Plausible, "{:?}: {}", v.why, v.reason);
+    assert_eq!(
+        v.verdict,
+        Verdict::Plausible,
+        "{:?}: {}",
+        v.reason,
+        v.reason_text
+    );
     assert_eq!(v.read.container.as_deref(), Some("Environ Sci Technol"));
     let journal = v
-        .why
+        .reason
         .differs()
         .iter()
         .find(|d| d.field == CitedField::Journal);
@@ -744,7 +794,7 @@ async fn a_reference_naming_another_journal_is_plausible_and_says_which() {
             Some("Environment International")
         )),
         "{:?}",
-        v.why
+        v.reason
     );
 }
 

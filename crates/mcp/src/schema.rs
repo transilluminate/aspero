@@ -26,7 +26,7 @@ fn work() -> Value {
         &json!({
             "source": {"type": "string", "description": "the provider whose record this is"},
             "ids": {"type": "array", "items": {"type": "string"}, "description": "every identifier, prefixed: doi:…, arxiv:…, pmid:…"},
-            "canonical": {
+            "canonical_id": {
                 "type": ["string", "null"],
                 "description": "the work's key, the same whichever identifier found it: dedupe on it",
             },
@@ -71,33 +71,34 @@ fn verification() -> Value {
     object(
         &json!({
             "input": {"type": "string", "description": "the citation as given"},
-            "key": {"description": "your key for the citation, echoed"},
+            "claim_key": {"description": "your key for the citation, echoed"},
             "claim": {"type": "object", "description": "the citation as understood"},
             "verdict": {
                 "type": "string",
                 "enum": ["verified", "plausible", "mismatch", "not_found", "unverifiable", "invalid"],
             },
-            "reason": {"type": "string", "description": "one sentence"},
-            "why": {"type": "object", "description": "the reason as data: code, and the fields that differ"},
+            "reason_text": {"type": "string", "description": "the reason in one English sentence"},
+            "reason": {"type": "object", "description": "the reason as data: code, and the fields that differ"},
             "read": {"type": "object"},
-            "match": candidate(),
+            "best_match": candidate(),
             "errors": {"type": "array", "items": {"type": "string"}, "description": "providers that failed"},
             "error_kinds": {"type": "array", "items": {"type": "string"}},
             "candidates": {"type": "array", "items": candidate(), "description": "with full: every candidate"},
         }),
-        &["input", "verdict", "reason"],
+        &["input", "verdict", "reason_text"],
     )
 }
 
-/// What each provider's calls cost: `{provider: {cost, remaining, resets_at}}`.
+/// What each provider's calls cost: `{provider: {cost_usd, remaining_usd,
+/// resets_at}}`.
 fn usage() -> Value {
     json!({
         "type": "object",
         "description": "this call's usage per provider: cost and what's left of its budget, in USD",
         "additionalProperties": object(
             &json!({
-                "cost": {"type": "number"},
-                "remaining": {"type": "number"},
+                "cost_usd": {"type": "number"},
+                "remaining_usd": {"type": "number"},
                 "resets_at": {"type": "string"},
             }),
             &[],
@@ -180,7 +181,10 @@ pub fn lookup() -> Map<String, Value> {
             "work": work(),
             "error": {"type": "string"},
             "attempts": {"type": "array", "items": {"type": "object"}, "description": "each provider asked, when not found (or with full)"},
-            "note": {"type": "string"},
+            "found_with_trailing_punctuation": {
+                "type": "boolean",
+                "description": "the DOI missed with its trailing punctuation stripped, and was found with it kept",
+            },
             "latest": work(),
             "disagreements": {"type": "array", "items": {"type": "object"}},
         }),
@@ -208,6 +212,12 @@ pub fn identify() -> Map<String, Value> {
     });
     output(
         properties,
-        &["input", "verdict", "reason", "identified", "decided_by"],
+        &[
+            "input",
+            "verdict",
+            "reason_text",
+            "identified",
+            "decided_by",
+        ],
     )
 }

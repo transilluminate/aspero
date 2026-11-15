@@ -1,9 +1,9 @@
 {
   "complete": true,
   "estimate": {
+    "cost_usd": 0.0012000000000000001,
     "exact": false,
-    "requests": 12,
-    "usd": 0.0012000000000000001
+    "requests": 12
   },
   "incomplete": [],
   "seeds": [
@@ -22,7 +22,7 @@
             "name": "Bo Chen"
           }
         ],
-        "canonical": "doi:10.1234/a",
+        "canonical_id": "doi:10.1234/a",
         "cited_by_count": 2,
         "ids": [
           "openalex:W1",
@@ -45,7 +45,7 @@
             "name": "Bo Chen"
           }
         ],
-        "canonical": "doi:10.1234/b",
+        "canonical_id": "doi:10.1234/b",
         "cited_by_count": 1,
         "ids": [
           "openalex:W2",
@@ -68,7 +68,7 @@
             "name": "Cy Dee"
           }
         ],
-        "canonical": "doi:10.1234/book",
+        "canonical_id": "doi:10.1234/book",
         "ids": [
           "openalex:W3",
           "doi:10.1234/book"
@@ -90,7 +90,7 @@
             "name": "Di Wool"
           }
         ],
-        "canonical": "doi:10.1234/knitting",
+        "canonical_id": "doi:10.1234/knitting",
         "ids": [
           "openalex:W4",
           "doi:10.1234/knitting"
@@ -117,7 +117,7 @@
   ],
   "usage": {
     "openalex": {
-      "cost": 0.3125
+      "cost_usd": 0.3125
     }
   },
   "with_references": 3

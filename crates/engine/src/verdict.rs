@@ -41,11 +41,11 @@ impl Verdict {
 #[non_exhaustive]
 pub struct Verification {
     pub verdict: Verdict,
-    /// One sentence, for people and agents: [`why`](Self::why) and
+    /// One sentence, for logs and agents: [`reason`](Self::reason) and
     /// [`notes`](Self::notes) in English.
-    pub reason: String,
+    pub reason_text: String,
     /// Why, as data, for front ends that word it themselves.
-    pub why: Reason,
+    pub reason: Reason,
     /// What to know about the work the verdict is about, whatever the
     /// verdict: its retraction or withdrawal, and its newer version.
     pub notes: Vec<Update>,
@@ -57,12 +57,12 @@ pub struct Verification {
     /// The candidate the verdict is about, as an index into
     /// `report.candidates`: the matching work, or the best guess at what was
     /// meant.
-    pub best: Option<usize>,
+    pub best_match: Option<usize>,
     pub report: ResolveReport,
 }
 
 /// Why a verdict was reached. "The work" is the verdict's candidate
-/// ([`Verification::best`]); "the identifiers" are those the claim gave.
+/// ([`Verification::best_match`]); "the identifiers" are those the claim gave.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum Reason {
@@ -334,11 +334,11 @@ pub(crate) fn judge(claim: &Claim, report: ResolveReport) -> Verification {
     }
     Verification {
         verdict,
-        reason,
-        why,
+        reason_text: reason,
+        reason: why,
         notes,
         read: claim.as_read(),
-        best,
+        best_match: best,
         report,
     }
 }

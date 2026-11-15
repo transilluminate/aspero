@@ -93,10 +93,13 @@ async fn search_takes_a_query_tree_as_the_cli_does() {
     assert_eq!(v["total"], 42);
     assert_eq!(v["hits"][0]["rank"], 1);
     assert_eq!(v["hits"][0]["work"]["title"], "Deep learning");
-    assert_eq!(v["hits"][0]["work"]["canonical"], "doi:10.1038/nature14539");
+    assert_eq!(
+        v["hits"][0]["work"]["canonical_id"],
+        "doi:10.1038/nature14539"
+    );
     // Lean: no abstract, no fetch time.
     assert!(v["hits"][0]["work"].get("abstract").is_none());
-    assert_eq!(v["usage"], json!({"openalex": {"cost": SEARCH_COST}}));
+    assert_eq!(v["usage"], json!({"openalex": {"cost_usd": SEARCH_COST}}));
     assert_eq!(
         v["session"],
         json!({"spent_usd": 0.25, "budget_usd": 1.0, "left_usd": 0.75})
@@ -270,7 +273,7 @@ async fn verify_takes_one_citation_or_a_batch_and_keeps_its_order() {
     let result = &one.structured["results"][0];
     assert_eq!(result["verdict"], "verified", "{result}");
     assert_eq!(
-        result["match"]["work"]["canonical"],
+        result["best_match"]["work"]["canonical_id"],
         "doi:10.1038/nature14539"
     );
     assert!(
@@ -296,10 +299,10 @@ async fn verify_takes_one_citation_or_a_batch_and_keeps_its_order() {
         .map(|r| r["verdict"].as_str().unwrap())
         .collect();
     assert_eq!(verdicts, ["verified", "invalid", "verified"]);
-    assert_eq!(results[0]["key"], "a");
-    assert_eq!(results[1]["key"], "b");
+    assert_eq!(results[0]["claim_key"], "a");
+    assert_eq!(results[1]["claim_key"], "b");
     assert!(
-        results[1]["reason"]
+        results[1]["reason_text"]
             .as_str()
             .unwrap()
             .contains("unknown field `titel`")
@@ -356,7 +359,10 @@ async fn identify_names_the_work_a_page_is() {
     .await;
     assert_eq!(out.structured["identified"], true);
     assert_eq!(out.structured["decided_by"], "identifier_and_title");
-    assert_eq!(out.structured["match"]["work"]["title"], "Deep learning");
+    assert_eq!(
+        out.structured["best_match"]["work"]["title"],
+        "Deep learning"
+    );
     assert!(
         out.summary.starts_with(
             "IDENTIFIED by an identifier on the page, confirmed by the title\nVERIFIED"

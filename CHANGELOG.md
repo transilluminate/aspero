@@ -1,5 +1,59 @@
 # Changelog
 
+## Unreleased
+
+Breaking: names now agree between Swift and JSON, and money says its
+unit. Only names change; values and shapes stay as they were.
+
+- Usage's cost: `cost` → `costUsd` (Swift), `cost` → `cost_usd` (JSON).
+- Usage's remaining budget: `remaining` → `remainingUsd`, `remaining` →
+  `remaining_usd`.
+- Usage's daily allowance: `limit` → `limitUsd`, `limit` → `limit_usd`.
+- Usage's prepaid balance: `prepaidRemaining` → `prepaidRemainingUsd`,
+  `prepaid_remaining` → `prepaid_remaining_usd`.
+- `Budget`'s fields in Swift: `remaining` → `remainingUsd`, `limit` →
+  `limitUsd`, `prepaidRemaining` → `prepaidRemainingUsd`.
+- `aspero budget`'s JSON: `limit` → `limit_usd`, `used` → `spent_usd`,
+  `remaining` → `remaining_usd`, `prepaid_remaining` →
+  `prepaid_remaining_usd`.
+- A reached daily cap's figures: `BudgetCap.cap` → `capUsd`,
+  `BudgetCap.used` → `spentUsd` (Swift only: JSON gives the cap as an
+  error message).
+- An analysis' estimate: `Estimate.usd` → `costUsd` (Swift), `usd` →
+  `cost_usd` (JSON; Rust: `Estimate::cost_usd`).
+- The OpenAlex daily cap: `Config.openalexDailyCap` →
+  `openalexDailyCapUsd` (Swift), `StandardConfig::openalex_daily_cap` →
+  `openalex_daily_cap_usd` (Rust), `--openalex-cap` → `--openalex-cap-usd`
+  (the old flag still works) and `ASPERO_OPENALEX_CAP` →
+  `ASPERO_OPENALEX_CAP_USD` (the old variable is still read when the new
+  one isn't set).
+- A search's cursor for the next page: `SearchResults.next` →
+  `nextCursor` (JSON already `next_cursor`).
+- How a result was served: `SearchResults.freshness` and
+  `Lookup.freshness` → `served` (JSON already `served`; the enum is still
+  `Freshness`).
+- A lookup attempt's failure: `Attempt.message` → `error` (JSON already
+  `error`).
+- A work's deduplicating identifier: `Work.canonical` → `canonicalId`,
+  `canonical` → `canonical_id`.
+- A DOI found only with its trailing punctuation kept:
+  `Lookup.withPunctuation` → `foundWithTrailingPunctuation`; JSON's
+  `"note"` → `"found_with_trailing_punctuation": true` (Rust:
+  `Looked::found_with_trailing_punctuation`).
+- The work a verdict is about: `Verification.best` → `bestMatch`, `match`
+  → `best_match` (a `check` entry's `match` too; Rust:
+  `Verification::best_match`).
+- Providers that failed: `Verification.failures` → `errors` (JSON already
+  `errors`).
+- The caller's key, echoed: `Verification.key` → `claimKey`, `key` →
+  `claim_key` (claims are still written with `key`).
+- Why, as data: `Verification.why` → `reason`, `why` → `reason` (Rust:
+  `Verification::reason`).
+- Why, in an English sentence for logs and agents: `Verification.reason`
+  → `reasonText`, `reason` → `reason_text` (Rust:
+  `Verification::reason_text`).
+- `Analysis.notYet`, always empty, is removed from Swift.
+
 ## 0.21.0
 
 Breaking:

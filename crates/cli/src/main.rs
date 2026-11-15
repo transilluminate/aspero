@@ -165,7 +165,7 @@ fn engine(
 ) -> Result<Engine, Failure> {
     let mut config = StandardConfig::all(env("OPENALEX_API_KEY").map(SecretString::from));
     config.mailto = env("ASPERO_MAILTO");
-    config.openalex_daily_cap = global.openalex_cap;
+    config.openalex_daily_cap_usd = global.openalex_daily_cap_usd().map_err(Failure::usage)?;
     config.cache_policy = global.cache_policy();
     config
         .disable(&global.without)

@@ -472,7 +472,7 @@ fn analysis_text(a: &Analysis, doc: &Value, related: bool) -> String {
             out,
             "\nEstimate:{bound} {} paid requests, ${:.4}",
             thousands(e.requests),
-            e.usd
+            e.cost_usd
         );
     }
     out

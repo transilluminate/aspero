@@ -47,8 +47,9 @@ pub struct Work {
     /// The provider the record came from.
     pub source: String,
     pub ids: Vec<String>,
-    /// One identifier per work, whichever found it: for deduplicating.
-    pub canonical: Option<String>,
+    /// The work's one identifier, the same whichever identifier found it:
+    /// for deduplicating.
+    pub canonical_id: Option<String>,
     pub title: Option<String>,
     pub authors: Vec<Author>,
     /// `2015`, `2015-05` or `2015-05-27`.
@@ -86,7 +87,7 @@ impl Work {
         Work {
             source: record.source.to_string(),
             ids: record.ids.iter().map(ToString::to_string).collect(),
-            canonical: aspero_core::canonical(&record.ids).map(ToString::to_string),
+            canonical_id: aspero_core::canonical(&record.ids).map(ToString::to_string),
             title: w.title.clone(),
             authors: w
                 .authors
@@ -242,7 +243,7 @@ pub enum ErrorKind {
     Decode,
     InvalidId,
     Other,
-    /// The app's daily cap on the provider's spend (`Config.openalexDailyCap`)
+    /// The app's daily cap on the provider's spend (`Config.openalexDailyCapUsd`)
     /// is reached until the budget resets: see `Failure.budgetCap`. Last, so
     /// the cases before keep their places.
     BudgetCapped,
@@ -287,10 +288,11 @@ pub struct Failure {
 /// A daily cap reached: paid calls to the provider stop until `resetsAt`.
 #[derive(Debug, Clone, PartialEq, uniffi::Record)]
 pub struct BudgetCap {
-    /// The cap (US dollars), as `Config.openalexDailyCap` set it.
-    pub cap: f64,
-    /// Used today, as the provider reports it: by everything using the key.
-    pub used: f64,
+    /// The cap in US dollars, as `Config.openalexDailyCapUsd` set it.
+    pub cap_usd: f64,
+    /// Spent today in US dollars, as the provider reports it: by everything
+    /// using the key.
+    pub spent_usd: f64,
     /// When the provider's budget resets (OpenAlex: midnight UTC).
     pub resets_at: Option<SystemTime>,
 }
@@ -327,8 +329,8 @@ impl BudgetCap {
                 used,
                 resets_at,
             } => Some(BudgetCap {
-                cap: *cap,
-                used: *used,
+                cap_usd: *cap,
+                spent_usd: *used,
                 resets_at: resets_at.map(time),
             }),
             _ => None,
@@ -339,19 +341,19 @@ impl BudgetCap {
 #[derive(Debug, Clone, uniffi::Record)]
 pub struct ProviderUsage {
     pub provider: String,
-    /// Spent by the call (OpenAlex: US dollars).
-    pub cost: Option<f64>,
-    /// Left in the budget period.
-    pub remaining: Option<f64>,
+    /// Spent by the call, in US dollars.
+    pub cost_usd: Option<f64>,
+    /// Left in the budget period, in US dollars.
+    pub remaining_usd: Option<f64>,
     pub resets_at: Option<SystemTime>,
-    /// The budget for the period (OpenAlex: the daily allowance), as the
-    /// provider says it.
+    /// The budget for the period (OpenAlex: the daily allowance), in US
+    /// dollars, as the provider says it.
     #[uniffi(default = None)]
-    pub limit: Option<f64>,
-    /// A prepaid balance left beside the period's budget, where the
-    /// provider says one.
+    pub limit_usd: Option<f64>,
+    /// A prepaid balance left beside the period's budget, in US dollars,
+    /// where the provider says one.
     #[uniffi(default = None)]
-    pub prepaid_remaining: Option<f64>,
+    pub prepaid_remaining_usd: Option<f64>,
 }
 
 pub(crate) fn usage(usage: &[(aspero_core::ProviderId, aspero_core::Usage)]) -> Vec<ProviderUsage> {
@@ -359,11 +361,11 @@ pub(crate) fn usage(usage: &[(aspero_core::ProviderId, aspero_core::Usage)]) -> 
         .iter()
         .map(|(p, u)| ProviderUsage {
             provider: p.to_string(),
-            cost: u.cost,
-            remaining: u.remaining,
+            cost_usd: u.cost,
+            remaining_usd: u.remaining,
             resets_at: u.resets_at.map(time),
-            limit: u.limit,
-            prepaid_remaining: u.prepaid_remaining,
+            limit_usd: u.limit,
+            prepaid_remaining_usd: u.prepaid_remaining,
         })
         .collect()
 }
@@ -417,7 +419,8 @@ pub struct Attempt {
     pub outcome: AttemptOutcome,
     /// For failures.
     pub kind: Option<ErrorKind>,
-    pub message: Option<String>,
+    /// For failures: what went wrong, in English.
+    pub error: Option<String>,
 }
 
 /// Where a record contradicts its DOI's registry.
@@ -451,12 +454,13 @@ pub struct Lookup {
     pub status: LookupStatus,
     pub work: Option<Work>,
     /// For works found.
-    pub freshness: Option<Freshness>,
+    pub served: Option<Freshness>,
     pub attempts: Vec<Attempt>,
     /// Why the input isn't an identifier, or isn't supported.
     pub error: Option<String>,
-    /// Found only with the DOI's trailing punctuation kept.
-    pub with_punctuation: bool,
+    /// The DOI missed with its trailing punctuation stripped, and was
+    /// found with it kept.
+    pub found_with_trailing_punctuation: bool,
     /// With `full`: the latest version, if superseded.
     pub latest: Option<Work>,
     /// With `full`.
@@ -472,10 +476,10 @@ impl Lookup {
                     id: None,
                     status: LookupStatus::Invalid,
                     work: None,
-                    freshness: None,
+                    served: None,
                     attempts: Vec::new(),
                     error: Some(e.to_string()),
-                    with_punctuation: false,
+                    found_with_trailing_punctuation: false,
                     latest: None,
                     disagreements: Vec::new(),
                 };
@@ -483,7 +487,7 @@ impl Lookup {
             InputLookup::Looked(looked) => looked,
         };
         let mut lookup = Lookup::from_result(input, &looked.result);
-        lookup.with_punctuation = looked.with_punctuation;
+        lookup.found_with_trailing_punctuation = looked.found_with_trailing_punctuation;
         lookup.latest = looked.latest.as_ref().map(Work::from_record);
         lookup.disagreements = looked.disagreements.iter().map(Into::into).collect();
         lookup
@@ -498,7 +502,7 @@ impl Lookup {
             Status::Failed(_) => LookupStatus::Failed,
             _ => LookupStatus::NotFound,
         };
-        let freshness = result.served().map(Freshness::from);
+        let served = result.served().map(Freshness::from);
         let attempts = result
             .attempts
             .iter()
@@ -517,7 +521,7 @@ impl Lookup {
                     provider: a.provider.to_string(),
                     outcome,
                     kind: failure.map(|e| e.kind().into()),
-                    message: failure.map(ToString::to_string),
+                    error: failure.map(ToString::to_string),
                 }
             })
             .collect();
@@ -527,10 +531,10 @@ impl Lookup {
             id: Some(result.id.to_string()),
             status,
             work,
-            freshness,
+            served,
             attempts,
             error: result.unsupported(),
-            with_punctuation: false,
+            found_with_trailing_punctuation: false,
             latest: None,
             disagreements: Vec::new(),
         }
@@ -753,7 +757,7 @@ impl From<&engine::Difference> for Difference {
     }
 }
 
-/// Why a verdict was reached. "The work" is the verification's `best`;
+/// Why a verdict was reached. "The work" is the verification's `bestMatch`;
 /// "the identifiers" are those the claim gave.
 // Records cross the boundary by value; UniFFI can't box them.
 #[allow(clippy::large_enum_variant)]
@@ -903,13 +907,15 @@ pub struct Verification {
     /// The claim's text, or its fields on one line.
     pub input: String,
     /// The claim's `key`.
-    pub key: Option<String>,
+    pub claim_key: Option<String>,
     pub verdict: Verdict,
-    pub why: Reason,
-    /// One sentence in English: `why` and `notes`.
-    pub reason: String,
-    /// About `best`, whatever the verdict: its retraction or withdrawal,
-    /// and its newer version.
+    /// Why, as data, for the app to word.
+    pub reason: Reason,
+    /// One sentence in English, `reason` and `notes`: for logs and agents,
+    /// not for display in an app UI.
+    pub reason_text: String,
+    /// About `bestMatch`, whatever the verdict: its retraction or
+    /// withdrawal, and its newer version.
     pub notes: Vec<Notice>,
     /// The claim as read: identifiers as written (with the other readings
     /// tried in `alternativeIds`), and from free text the year, journal
@@ -917,12 +923,12 @@ pub struct Verification {
     /// for an invalid claim.
     pub read: Option<Claim>,
     /// The work the verdict is about: the match, or the best guess.
-    pub best: Option<Candidate>,
+    pub best_match: Option<Candidate>,
     /// With `full`: every candidate, most confident first.
     pub candidates: Vec<Candidate>,
     /// Providers that failed, searching or looking up the claim's
     /// identifiers; what they'd have found is unknown.
-    pub failures: Vec<Failure>,
+    pub errors: Vec<Failure>,
 }
 
 impl Verification {
@@ -935,19 +941,21 @@ impl Verification {
         Verification {
             index: count(index),
             input: claim.input.clone(),
-            key: key(claim),
+            claim_key: key(claim),
             verdict: v.verdict.into(),
-            why: Reason::new(&v.why, &v.report.candidates),
-            reason: v.reason.clone(),
+            reason: Reason::new(&v.reason, &v.report.candidates),
+            reason_text: v.reason_text.clone(),
             notes: v.notes.iter().map(Notice::from).collect(),
             read: Some(Claim::read(&v.read, key(claim))),
-            best: v.best.map(|i| Candidate::from(&v.report.candidates[i])),
+            best_match: v
+                .best_match
+                .map(|i| Candidate::from(&v.report.candidates[i])),
             candidates: if full {
                 v.report.candidates.iter().map(Candidate::from).collect()
             } else {
                 Vec::new()
             },
-            failures: v.report.failures().iter().map(Failure::from).collect(),
+            errors: v.report.failures().iter().map(Failure::from).collect(),
         }
     }
 
@@ -955,17 +963,17 @@ impl Verification {
         Verification {
             index: count(index),
             input: claim.input.clone(),
-            key: key(claim),
+            claim_key: key(claim),
             verdict: Verdict::Invalid,
-            why: Reason::InvalidClaim {
+            reason: Reason::InvalidClaim {
                 why: why.to_owned(),
             },
-            reason: why.to_owned(),
+            reason_text: why.to_owned(),
             notes: Vec::new(),
             read: None,
-            best: None,
+            best_match: None,
             candidates: Vec::new(),
-            failures: Vec::new(),
+            errors: Vec::new(),
         }
     }
 }
@@ -1138,30 +1146,31 @@ pub struct Unavailable {
 #[derive(Debug, Clone, uniffi::Record)]
 pub struct Budget {
     pub provider: String,
-    /// OpenAlex: US dollars.
-    pub remaining: Option<f64>,
+    /// Left today, in US dollars.
+    pub remaining_usd: Option<f64>,
     pub resets_at: Option<SystemTime>,
     /// When the provider said so.
     pub seen_at: SystemTime,
-    /// The daily allowance, as the provider says it (OpenAlex: $1 with a
-    /// key, $0.10 without). Used today is `limit - remaining`.
+    /// The daily allowance in US dollars, as the provider says it
+    /// (OpenAlex: $1 with a key, $0.10 without). Spent today is
+    /// `limitUsd - remainingUsd`.
     #[uniffi(default = None)]
-    pub limit: Option<f64>,
-    /// A prepaid balance beside the daily allowance, where the provider
-    /// says one.
+    pub limit_usd: Option<f64>,
+    /// A prepaid balance beside the daily allowance, in US dollars, where
+    /// the provider says one.
     #[uniffi(default = None)]
-    pub prepaid_remaining: Option<f64>,
+    pub prepaid_remaining_usd: Option<f64>,
 }
 
 impl Budget {
     pub(crate) fn new(provider: &aspero_core::ProviderId, b: &engine::Budget) -> Self {
         Budget {
             provider: provider.to_string(),
-            remaining: b.remaining,
+            remaining_usd: b.remaining,
             resets_at: b.resets_at.map(time),
             seen_at: time(b.seen_at),
-            limit: b.limit,
-            prepaid_remaining: b.prepaid_remaining,
+            limit_usd: b.limit,
+            prepaid_remaining_usd: b.prepaid_remaining,
         }
     }
 }
@@ -1232,7 +1241,7 @@ pub struct SearchRequest {
     /// $0.001 a page).
     #[uniffi(default = None)]
     pub source: Option<String>,
-    /// A previous page's `next`, with the same request otherwise. Crossref
+    /// A previous page's `nextCursor`, with the same request otherwise. Crossref
     /// sorted by `newest` pages by offset, and orders works sharing a date
     /// differently from one request to the next, so its pages may repeat
     /// or skip such works.
@@ -1614,8 +1623,8 @@ pub struct SearchResults {
     /// Total matches, if the provider reports it.
     pub total: Option<u64>,
     /// The cursor for the next page; none on the last.
-    pub next: Option<String>,
-    pub freshness: Option<Freshness>,
+    pub next_cursor: Option<String>,
+    pub served: Option<Freshness>,
     /// Why there are no hits, if the search failed.
     pub failure: Option<Failure>,
     pub usage: Vec<ProviderUsage>,
@@ -1632,8 +1641,8 @@ impl SearchResults {
                 provider: None,
                 hits: Vec::new(),
                 total: None,
-                next: None,
-                freshness: None,
+                next_cursor: None,
+                served: None,
                 failure: Some(Failure::from(&e)),
                 usage: Vec::new(),
                 ignored_filters: Vec::new(),
@@ -1650,8 +1659,8 @@ impl SearchResults {
                     })
                     .collect(),
                 total: report.page.total,
-                next: report.page.next.map(|c| c.0),
-                freshness: Some(report.served.into()),
+                next_cursor: report.page.next.map(|c| c.0),
+                served: Some(report.served.into()),
                 failure: None,
                 usage: report
                     .usage
@@ -2432,7 +2441,8 @@ pub struct RelatedWorks {
 pub struct Estimate {
     /// Paid requests.
     pub requests: u64,
-    pub usd: f64,
+    /// What they'd cost, in US dollars.
+    pub cost_usd: f64,
     /// Whether the counts are known: otherwise a floor (seeds not
     /// resolved), or with related works a ceiling (their citing works'
     /// pages are exact; coupling's pages and the lookups at most).
@@ -2450,8 +2460,6 @@ pub struct Analysis {
     pub retracted_references: Option<RetractedReferences>,
     pub odd_one_out: Option<OddOnesOut>,
     pub probably_missing: Option<ProbablyMissing>,
-    /// Always empty; kept for compatibility (every kind is built).
-    pub not_yet: Vec<AnalysisKind>,
     /// With `estimateOnly`: the cost of running it, in place of findings.
     pub estimate: Option<Estimate>,
     /// Every seed settled and every analysis run to the end.
@@ -2477,7 +2485,6 @@ impl Analysis {
                     retracted_references: None,
                     odd_one_out: None,
                     probably_missing: None,
-                    not_yet: Vec::new(),
                     estimate: None,
                     complete: false,
                     incomplete: Vec::new(),
@@ -2536,10 +2543,9 @@ impl Analysis {
                     .collect(),
                 incomplete: incomplete(&s.incomplete),
             }),
-            not_yet: Vec::new(),
             estimate: a.estimate.map(|e| Estimate {
                 requests: e.requests,
-                usd: e.usd,
+                cost_usd: e.cost_usd,
                 exact: e.exact,
             }),
             complete: a.complete(),
@@ -2707,9 +2713,9 @@ mod tests {
         u.prepaid_remaining = Some(4.5);
         let used = usage(&[(ProviderId::from_static("openalex"), u)]);
         assert_eq!(used[0].provider, "openalex");
-        assert_eq!(used[0].limit, Some(1.0));
-        assert_eq!(used[0].prepaid_remaining, Some(4.5));
-        assert_eq!(used[0].remaining, None);
+        assert_eq!(used[0].limit_usd, Some(1.0));
+        assert_eq!(used[0].prepaid_remaining_usd, Some(4.5));
+        assert_eq!(used[0].remaining_usd, None);
     }
 
     #[test]
@@ -2762,8 +2768,8 @@ mod tests {
         assert_eq!(
             failure.budget_cap,
             Some(BudgetCap {
-                cap: 0.5,
-                used: 0.5012,
+                cap_usd: 0.5,
+                spent_usd: 0.5012,
                 resets_at: Some(time(resets)),
             })
         );
@@ -2781,7 +2787,7 @@ mod tests {
         };
         let failure = Failure::from(&unresolved);
         assert_eq!(failure.provider.as_deref(), Some("openalex"));
-        assert_eq!(failure.budget_cap.map(|c| c.cap), Some(0.5));
+        assert_eq!(failure.budget_cap.map(|c| c.cap_usd), Some(0.5));
         // Other failures carry none.
         let other = engine::EngineError::Provider {
             provider: ProviderId::from_static("openalex"),

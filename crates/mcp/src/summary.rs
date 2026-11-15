@@ -114,7 +114,7 @@ fn lookup_line(item: &Value) -> String {
         .to_owned()
 }
 
-/// "VERIFIED  <citation>", the reason, and the match.
+/// "VERIFIED  <citation>", the reason, and the best match.
 fn verdict_lines(item: &Value) -> String {
     let mut lines = vec![
         format!(
@@ -122,13 +122,13 @@ fn verdict_lines(item: &Value) -> String {
             str(&item["verdict"]).to_uppercase().replace('_', " "),
             clip(str(&item["input"]), 120)
         ),
-        format!("  {}", str(&item["reason"])),
+        format!("  {}", str(&item["reason_text"])),
     ];
-    if item["match"].is_object() {
+    if item["best_match"].is_object() {
         lines.push(format!(
             "  match ({}): {}",
-            item["match"]["confidence"],
-            work_line(&item["match"]["work"])
+            item["best_match"]["confidence"],
+            work_line(&item["best_match"]["work"])
         ));
     }
     lines.join("\n")
@@ -143,7 +143,7 @@ fn work_line(work: &Value) -> String {
         .map(Vec::as_slice)
         .unwrap_or_default();
     let author = authors.first().and_then(|a| a["name"].as_str());
-    let id = work["canonical"]
+    let id = work["canonical_id"]
         .as_str()
         .or_else(|| work["ids"][0].as_str());
     let mut line = clip(title, 160);

@@ -269,8 +269,8 @@ async fn checks_fall_back_to_the_free_sources_past_the_cap() {
             5,
         )
         .await;
-    assert_ne!(v.verdict, Verdict::Unverifiable, "{}", v.reason);
-    let best = &v.report.candidates[v.best.unwrap()];
+    assert_ne!(v.verdict, Verdict::Unverifiable, "{}", v.reason_text);
+    let best = &v.report.candidates[v.best_match.unwrap()];
     assert_eq!(best.record.source.as_str(), "crossref");
     assert_eq!(openalex.count("search"), 0, "{:?}", openalex.calls());
     assert!(

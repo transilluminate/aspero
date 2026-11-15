@@ -146,7 +146,7 @@ fn works_export_as_bibtex_and_ris() {
     let work = Work {
         source: "test".into(),
         ids: read.entries[0].claim.ids.clone(),
-        canonical: None,
+        canonical_id: None,
         title: read.entries[0].claim.title.clone(),
         authors: vec![Author {
             name: "Yann LeCun".into(),
@@ -204,7 +204,7 @@ fn work(title: &str, author: &str, year: i16) -> Work {
     Work {
         source: "test".into(),
         ids: Vec::new(),
-        canonical: None,
+        canonical_id: None,
         title: Some(title.into()),
         authors: vec![Author {
             name: author.into(),
@@ -428,7 +428,6 @@ fn analyses_say_why_each_seed_is_unresolved() {
             Some(SeedProblem::InvalidId)
         ]
     );
-    assert!(analysis.not_yet.is_empty());
     // Nothing to read about: no seed resolved.
     let related = analysis.related.unwrap();
     assert!(related.items.is_empty() && related.incomplete.is_empty());
@@ -468,8 +467,8 @@ fn unreadable_claims_answer_at_once() {
     .unwrap();
     let v = &checked.results[0];
     assert_eq!(v.verdict, Verdict::Invalid);
-    assert!(matches!(v.why, Reason::InvalidClaim { .. }));
-    assert_eq!(v.key.as_deref(), Some("7"));
+    assert!(matches!(v.reason, Reason::InvalidClaim { .. }));
+    assert_eq!(v.claim_key.as_deref(), Some("7"));
 }
 
 #[test]
@@ -484,7 +483,7 @@ fn claims_can_be_fields() {
         block_on(aspero(None).verify(vec![claim], false, Patience::Offline, None)).unwrap();
     let v = &checked.results[0];
     assert_eq!(v.input, "Deep learning. 2015. 10.1234/never-seen");
-    assert_eq!(v.verdict, Verdict::Unverifiable, "{}", v.reason);
+    assert_eq!(v.verdict, Verdict::Unverifiable, "{}", v.reason_text);
 }
 
 #[test]
@@ -498,10 +497,10 @@ fn failures_say_what_kind() {
     .unwrap();
     let v = &checked.results[1];
     assert_eq!(v.index, 1);
-    assert_eq!(v.verdict, Verdict::Unverifiable, "{}", v.reason);
-    assert!(matches!(v.why, Reason::ProvidersFailed));
-    assert!(!v.failures.is_empty());
-    assert!(v.failures.iter().all(|f| f.kind == ErrorKind::NotCached));
+    assert_eq!(v.verdict, Verdict::Unverifiable, "{}", v.reason_text);
+    assert!(matches!(v.reason, Reason::ProvidersFailed));
+    assert!(!v.errors.is_empty());
+    assert!(v.errors.iter().all(|f| f.kind == ErrorKind::NotCached));
 }
 
 #[test]
@@ -1002,7 +1001,7 @@ fn settings_default_as_before() {
     assert_eq!(config.cache_found_days, 7);
     assert_eq!(config.cache_not_found_days, 1);
     assert_eq!(config.cache_max_mb, None);
-    assert_eq!(config.openalex_daily_cap, None);
+    assert_eq!(config.openalex_daily_cap_usd, None);
     assert!(config.disabled_sources.is_empty());
 }
 
@@ -1125,14 +1124,14 @@ fn checks_work_with_one_source_left() {
 fn a_daily_cap_must_be_an_amount() {
     for cap in [-0.5, f64::NAN, f64::INFINITY] {
         let made = Aspero::new(Config {
-            openalex_daily_cap: Some(cap),
+            openalex_daily_cap_usd: Some(cap),
             ..Config::default()
         });
         assert!(matches!(made, Err(AsperoError::Setup(_))), "{cap}");
     }
     for cap in [0.0, 0.5] {
         let config = Config {
-            openalex_daily_cap: Some(cap),
+            openalex_daily_cap_usd: Some(cap),
             ..Config::default()
         };
         assert!(Aspero::new(config).is_ok());
@@ -1165,7 +1164,7 @@ fn live_key_checks() {
         let checked = block_on(handle.check_openalex_key(key, None)).unwrap();
         eprintln!("{checked:?}");
         assert_eq!(checked.status, KeyStatus::Valid);
-        assert!(checked.budget.is_some_and(|b| b.remaining.is_some()));
+        assert!(checked.budget.is_some_and(|b| b.remaining_usd.is_some()));
     }
 }
 
@@ -1202,7 +1201,7 @@ fn alternative_timing() {
                 "{run} {name}: {:.1}s {:?} {}",
                 start.elapsed().as_secs_f64(),
                 v.results[0].verdict,
-                v.results[0].reason
+                v.results[0].reason_text
             );
         }
     }

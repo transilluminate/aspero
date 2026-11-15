@@ -228,7 +228,7 @@ pub fn incomplete(i: &Incomplete) -> Value {
 }
 
 pub fn estimate(e: &Estimate) -> Value {
-    json!({"requests": e.requests, "usd": e.usd, "exact": e.exact})
+    json!({"requests": e.requests, "cost_usd": e.cost_usd, "exact": e.exact})
 }
 
 fn retracted(r: &RetractedReference, full: bool) -> Value {
@@ -308,7 +308,7 @@ mod tests {
             },
             "complete": false,
             "incomplete": [],
-            "usage": {"openalex": {"cost": 0.0002}},
+            "usage": {"openalex": {"cost_usd": 0.0002}},
         });
         assert_eq!(
             analysis_lines(&doc),
@@ -326,7 +326,7 @@ mod tests {
                     },
                     "complete": false,
                     "incomplete": [],
-                    "usage": {"openalex": {"cost": 0.0002}},
+                    "usage": {"openalex": {"cost_usd": 0.0002}},
                 }),
             ]
         );

@@ -41,10 +41,10 @@ pub async fn run(engine: &Engine, out: Out) -> Result<Exit, Failure> {
                         row.insert(k.into(), json!(v));
                     }
                 };
-                put("limit", b.limit);
-                put("used", b.used());
-                put("remaining", b.remaining);
-                put("prepaid_remaining", b.prepaid_remaining);
+                put("limit_usd", b.limit);
+                put("spent_usd", b.used());
+                put("remaining_usd", b.remaining);
+                put("prepaid_remaining_usd", b.prepaid_remaining);
                 if let Some(t) = b.resets_at {
                     row.insert("resets_at".into(), json!(t.to_string()));
                 }

@@ -130,8 +130,8 @@ async fn checks_work_with_only_one_source_left() {
             5,
         )
         .await;
-    assert_eq!(v.verdict, Verdict::Verified, "{}", v.reason);
-    let best = &v.report.candidates[v.best.unwrap()];
+    assert_eq!(v.verdict, Verdict::Verified, "{}", v.reason_text);
+    let best = &v.report.candidates[v.best_match.unwrap()];
     assert_eq!(best.record.source.as_str(), "crossref");
     assert!(v.report.failures().is_empty());
 }

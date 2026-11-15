@@ -37,7 +37,7 @@ pub fn entry(entry: &BibEntry, checked: &CheckedEntry, keys: &[&str], full: bool
         "findings": checked.findings.iter().map(|f| finding(f, keys)).collect::<Vec<_>>(),
     });
     if let Some(m) = checked.matched() {
-        doc["match"] = work::candidate(m, full);
+        doc["best_match"] = work::candidate(m, full);
     }
     doc
 }

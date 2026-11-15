@@ -107,8 +107,8 @@ pub fn input(input: &str, lookup: &InputLookup, full: bool) -> Value {
         InputLookup::Looked(looked) => looked,
     };
     let mut out = item(input, &looked.result, full);
-    if looked.with_punctuation {
-        out["note"] = json!("found with the trailing punctuation kept");
+    if looked.found_with_trailing_punctuation {
+        out["found_with_trailing_punctuation"] = json!(true);
     }
     if let Some(found) = &looked.abstract_text {
         work::set_abstract(&mut out["work"], found.as_ref());

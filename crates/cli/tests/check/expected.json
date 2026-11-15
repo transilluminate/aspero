@@ -1,16 +1,7 @@
 {
   "entries": [
     {
-      "findings": [
-        {
-          "doi": "10.1038/nature14539",
-          "kind": "add_doi",
-          "message": "add doi = {10.1038/nature14539}",
-          "severity": "info"
-        }
-      ],
-      "key": "lecun",
-      "match": {
+      "best_match": {
         "checks": {
           "authors": "match",
           "container": "unknown",
@@ -41,7 +32,7 @@
               "name": "Geoffrey Hinton"
             }
           ],
-          "canonical": "doi:10.1038/nature14539",
+          "canonical_id": "doi:10.1038/nature14539",
           "ids": [
             "doi:10.1038/nature14539"
           ],
@@ -50,33 +41,21 @@
           "title": "Deep learning"
         }
       },
+      "findings": [
+        {
+          "doi": "10.1038/nature14539",
+          "kind": "add_doi",
+          "message": "add doi = {10.1038/nature14539}",
+          "severity": "info"
+        }
+      ],
+      "key": "lecun",
       "severity": "info",
       "type": "article",
       "verdict": "verified"
     },
     {
-      "findings": [
-        {
-          "kind": "verdict",
-          "message": "doi:10.1145/3448250 is \"Deep learning for AI\" (2021), doi:10.1145/3448250, but the citation matches \"Deep learning\" (2015), doi:10.1038/nature14539",
-          "severity": "error"
-        },
-        {
-          "claimed": "doi:10.1145/3448250",
-          "kind": "replace_id",
-          "message": "replace doi:10.1145/3448250 with doi:10.1038/nature14539",
-          "severity": "error",
-          "with": "doi:10.1038/nature14539"
-        },
-        {
-          "kind": "duplicate",
-          "message": "duplicate of lecun",
-          "of": "lecun",
-          "severity": "warning"
-        }
-      ],
-      "key": "wrongdoi",
-      "match": {
+      "best_match": {
         "checks": {
           "authors": "match",
           "container": "unknown",
@@ -107,7 +86,7 @@
               "name": "Geoffrey Hinton"
             }
           ],
-          "canonical": "doi:10.1038/nature14539",
+          "canonical_id": "doi:10.1038/nature14539",
           "ids": [
             "doi:10.1038/nature14539"
           ],
@@ -116,22 +95,33 @@
           "title": "Deep learning"
         }
       },
+      "findings": [
+        {
+          "kind": "verdict",
+          "message": "doi:10.1145/3448250 is \"Deep learning for AI\" (2021), doi:10.1145/3448250, but the citation matches \"Deep learning\" (2015), doi:10.1038/nature14539",
+          "severity": "error"
+        },
+        {
+          "claimed": "doi:10.1145/3448250",
+          "kind": "replace_id",
+          "message": "replace doi:10.1145/3448250 with doi:10.1038/nature14539",
+          "severity": "error",
+          "with": "doi:10.1038/nature14539"
+        },
+        {
+          "kind": "duplicate",
+          "message": "duplicate of lecun",
+          "of": "lecun",
+          "severity": "warning"
+        }
+      ],
+      "key": "wrongdoi",
       "severity": "error",
       "type": "article",
       "verdict": "mismatch"
     },
     {
-      "findings": [
-        {
-          "actual": 2017,
-          "claimed": 2018,
-          "kind": "year_differs",
-          "message": "year 2018 → 2017 (often preprint vs published, or online vs print)",
-          "severity": "info"
-        }
-      ],
-      "key": "vaswani",
-      "match": {
+      "best_match": {
         "checks": {
           "authors": "match",
           "container": "unknown",
@@ -167,7 +157,7 @@
               "name": "Niki Parmar"
             }
           ],
-          "canonical": "arxiv:1706.03762",
+          "canonical_id": "arxiv:1706.03762",
           "ids": [
             "openalex:W2626778328",
             "arxiv:1706.03762",
@@ -178,27 +168,22 @@
           "title": "Attention Is All You Need"
         }
       },
+      "findings": [
+        {
+          "actual": 2017,
+          "claimed": 2018,
+          "kind": "year_differs",
+          "message": "year 2018 → 2017 (often preprint vs published, or online vs print)",
+          "severity": "info"
+        }
+      ],
+      "key": "vaswani",
       "severity": "info",
       "type": "inproceedings",
       "verdict": "verified"
     },
     {
-      "findings": [
-        {
-          "kind": "verdict",
-          "message": "closest work is \"Deep learning for AI\" (2021), doi:10.1145/3448250, but its year (2021) differs",
-          "severity": "error"
-        },
-        {
-          "actual": 2021,
-          "claimed": 2015,
-          "kind": "year_differs",
-          "message": "year 2015 → 2021",
-          "severity": "error"
-        }
-      ],
-      "key": "late",
-      "match": {
+      "best_match": {
         "checks": {
           "authors": "match",
           "container": "unknown",
@@ -229,7 +214,7 @@
               "name": "Geoffrey Hinton"
             }
           ],
-          "canonical": "doi:10.1145/3448250",
+          "canonical_id": "doi:10.1145/3448250",
           "ids": [
             "doi:10.1145/3448250"
           ],
@@ -238,6 +223,21 @@
           "title": "Deep learning for AI"
         }
       },
+      "findings": [
+        {
+          "kind": "verdict",
+          "message": "closest work is \"Deep learning for AI\" (2021), doi:10.1145/3448250, but its year (2021) differs",
+          "severity": "error"
+        },
+        {
+          "actual": 2021,
+          "claimed": 2015,
+          "kind": "year_differs",
+          "message": "year 2015 → 2021",
+          "severity": "error"
+        }
+      ],
+      "key": "late",
       "severity": "error",
       "type": "article",
       "verdict": "mismatch"
@@ -256,19 +256,7 @@
       "verdict": "not_found"
     },
     {
-      "findings": [
-        {
-          "kind": "updated",
-          "message": "RETRACTED (notice doi:10.1234/notice)",
-          "severity": "error",
-          "update": {
-            "kind": "retraction",
-            "notice": "doi:10.1234/notice"
-          }
-        }
-      ],
-      "key": "retracted",
-      "match": {
+      "best_match": {
         "checks": {
           "authors": "match",
           "container": "unknown",
@@ -292,7 +280,7 @@
               "name": "Jane Doe"
             }
           ],
-          "canonical": "doi:10.1234/retracted",
+          "canonical_id": "doi:10.1234/retracted",
           "ids": [
             "doi:10.1234/retracted"
           ],
@@ -307,35 +295,24 @@
           ]
         }
       },
+      "findings": [
+        {
+          "kind": "updated",
+          "message": "RETRACTED (notice doi:10.1234/notice)",
+          "severity": "error",
+          "update": {
+            "kind": "retraction",
+            "notice": "doi:10.1234/notice"
+          }
+        }
+      ],
+      "key": "retracted",
       "severity": "error",
       "type": "article",
       "verdict": "verified"
     },
     {
-      "findings": [
-        {
-          "field": "doi",
-          "kind": "entry",
-          "message": "doi field \"not a doi\" is not a valid DOI",
-          "problem": "not_a_doi",
-          "severity": "warning",
-          "value": "not a doi"
-        },
-        {
-          "doi": "10.1038/nature14539",
-          "kind": "add_doi",
-          "message": "add doi = {10.1038/nature14539}",
-          "severity": "info"
-        },
-        {
-          "kind": "duplicate",
-          "message": "duplicate of lecun",
-          "of": "lecun",
-          "severity": "warning"
-        }
-      ],
-      "key": "baddoi",
-      "match": {
+      "best_match": {
         "checks": {
           "authors": "match",
           "container": "unknown",
@@ -366,7 +343,7 @@
               "name": "Geoffrey Hinton"
             }
           ],
-          "canonical": "doi:10.1038/nature14539",
+          "canonical_id": "doi:10.1038/nature14539",
           "ids": [
             "doi:10.1038/nature14539"
           ],
@@ -375,6 +352,29 @@
           "title": "Deep learning"
         }
       },
+      "findings": [
+        {
+          "field": "doi",
+          "kind": "entry",
+          "message": "doi field \"not a doi\" is not a valid DOI",
+          "problem": "not_a_doi",
+          "severity": "warning",
+          "value": "not a doi"
+        },
+        {
+          "doi": "10.1038/nature14539",
+          "kind": "add_doi",
+          "message": "add doi = {10.1038/nature14539}",
+          "severity": "info"
+        },
+        {
+          "kind": "duplicate",
+          "message": "duplicate of lecun",
+          "of": "lecun",
+          "severity": "warning"
+        }
+      ],
+      "key": "baddoi",
       "severity": "warning",
       "type": "article",
       "verdict": "verified"
@@ -404,7 +404,7 @@
   },
   "usage": {
     "openalex": {
-      "cost": 3.25
+      "cost_usd": 3.25
     }
   }
 }

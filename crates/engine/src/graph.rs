@@ -173,7 +173,7 @@ impl Engine {
             let settled = analysis.seeds.iter().all(Seed::settled);
             analysis.estimate = Some(Estimate {
                 requests: spend.requests,
-                usd: spend.requests as f64 * LIST_PRICE,
+                cost_usd: spend.requests as f64 * LIST_PRICE,
                 exact: settled && !spend.ceiling,
             });
         }

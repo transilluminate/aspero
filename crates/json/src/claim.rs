@@ -55,6 +55,10 @@ pub struct ClaimInput {
     /// More identifiers, in any form `lookup` accepts.
     #[serde(default)]
     pub ids: Vec<String>,
+    /// The site the claim was read from: an article page's host
+    /// ("jamanetwork.com") or address. A hint of the publisher for a claim
+    /// without identifiers, never compared as the journal.
+    pub site: Option<String>,
 }
 
 #[cfg(feature = "schemars")]
@@ -120,6 +124,12 @@ impl ClaimInput {
         claim.container = self.container;
         claim.volume = self.volume;
         claim.page = self.page;
+        if let Some(site) = self.site {
+            claim.site = Some(
+                aspero_core::site::site_of(&site)
+                    .ok_or_else(|| format!("site {site:?} is not a host or address"))?,
+            );
+        }
         if claim.is_empty() {
             return Err(EMPTY.into());
         }
@@ -221,6 +231,24 @@ mod tests {
         assert_eq!(c.volume.as_deref(), Some("376"));
         assert_eq!(c.page.as_deref(), Some("2545-55"));
         assert!(claim(r#"{"title": "X", "volume": [1]}"#).is_err());
+    }
+
+    #[test]
+    fn a_site_is_read_as_a_host_and_echoed() {
+        let line = r#"{"title": "X", "site": "https://WWW.JAMAnetwork.com/journals/jama"}"#;
+        let ok = InputClaim::from_line(line);
+        let site = ok.claim.as_ref().unwrap().site.as_deref();
+        assert_eq!(site, Some("jamanetwork.com"));
+        assert_eq!(
+            ok.echo()["claim"],
+            json!({"title": "X", "site": "jamanetwork.com"})
+        );
+        // Not echoed when not given.
+        let plain = InputClaim::from_line(r#"{"title": "X"}"#).echo();
+        assert!(plain["claim"].get("site").is_none());
+        assert!(claim(r#"{"title": "X", "site": "not a host"}"#).is_err());
+        // A site alone is nothing to verify.
+        assert!(claim(r#"{"site": "jamanetwork.com"}"#).is_err());
     }
 
     #[test]

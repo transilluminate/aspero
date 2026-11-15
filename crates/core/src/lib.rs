@@ -9,6 +9,7 @@
 //! - [`matching`]: does a record match what a citation claims?
 //! - [`references`]: splitting a pasted reference list.
 //! - [`resilience`]: per-provider [`ResiliencePolicy`].
+//! - [`site`]: an article page's site, and its publisher's DOI prefixes.
 //! - [`webpage`]: a claim from a publisher's article page's markup.
 //! - [`http`]: the [`HttpClient`] transport seam.
 //! - `testing` (feature): fixture replay for provider tests.
@@ -25,6 +26,7 @@ pub mod query;
 pub mod record;
 pub mod references;
 pub mod resilience;
+pub mod site;
 pub mod webpage;
 pub mod work;
 

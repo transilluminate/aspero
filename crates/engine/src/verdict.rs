@@ -58,6 +58,10 @@ pub struct Verification {
     /// `report.candidates`: the matching work, or the best guess at what was
     /// meant.
     pub best_match: Option<usize>,
+    /// Whether the claim's site decided which work the verdict is about:
+    /// of candidates matching about as well, the best match is the page's
+    /// publisher's ([`Claim::site`], [`ResolveReport::chosen_by_site`]).
+    pub chosen_by_site: bool,
     pub report: ResolveReport,
 }
 
@@ -339,6 +343,7 @@ pub(crate) fn judge(claim: &Claim, report: ResolveReport) -> Verification {
         notes,
         read: claim.as_read(),
         best_match: best,
+        chosen_by_site: report.chosen_by_site && best == Some(0),
         report,
     }
 }

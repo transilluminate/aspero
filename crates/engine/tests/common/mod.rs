@@ -14,7 +14,9 @@ use jiff::Timestamp;
 
 /// A provider with a fixed set of works. Lookups find works by ID; citation
 /// matching returns `matcher_hits` whatever the query; keyword search returns
-/// works whose title equals the query (case-insensitively).
+/// works whose title equals the query, or its title field
+/// (case-insensitively), and with Crossref's `filter=prefix:P` only those
+/// with a DOI under `P`.
 pub struct Scripted {
     pub id: ProviderId,
     pub caps: Capabilities,
@@ -65,6 +67,12 @@ impl Scripted {
 
     pub fn keyword(mut self) -> Self {
         self.caps.search = true;
+        self
+    }
+
+    /// Searches titles too (`SearchQuery::title`), as Crossref does.
+    pub fn titles(mut self) -> Self {
+        self.caps.search_filters.push(aspero_core::Filter::Title);
         self
     }
 
@@ -145,15 +153,32 @@ impl Provider for Scripted {
                 })
                 .cloned()
                 .collect(),
-            _ => self
-                .works
-                .iter()
-                .filter(|w| {
-                    w.work.title.as_deref().map(str::to_lowercase)
-                        == Some(query.text.to_lowercase())
-                })
-                .cloned()
-                .collect(),
+            _ => {
+                let wanted = match query.title.as_deref() {
+                    Some(title) if query.text.is_empty() => title,
+                    _ => query.text.as_str(),
+                }
+                .to_lowercase();
+                let prefix = query
+                    .extra
+                    .get("filter")
+                    .and_then(|f| f.strip_prefix("prefix:"))
+                    .map(|p| format!("{p}/"));
+                self.works
+                    .iter()
+                    .filter(|w| {
+                        w.work.title.as_deref().map(str::to_lowercase) == Some(wanted.clone())
+                    })
+                    .filter(|w| {
+                        prefix.as_deref().is_none_or(|p| {
+                            w.ids
+                                .iter()
+                                .any(|id| matches!(id, WorkId::Doi(d) if d.as_str().starts_with(p)))
+                        })
+                    })
+                    .cloned()
+                    .collect()
+            }
         };
         let hits = records
             .into_iter()

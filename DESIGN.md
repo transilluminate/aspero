@@ -239,7 +239,9 @@ scripts/       fixture recorders, one per provider
   no identifier and no title there's no claim, rather than a junk one.
   The journal is only ever the page's metadata, never guessed from the
   host: a wrong one makes `verify` report a journal mismatch and cap at
-  plausible. Authors keep page order and their written form ("Last,
+  plausible. The host is the claim's `site` instead (lower case, `www.`
+  dropped; always, identifiers or not), a hint of the publisher (see
+  Resolve, verify and check: Sites). Authors keep page order and their written form ("Last,
   First" or "First Last", as claims take them), blanks and "et al."
   dropped, at most 50.
   - The markup is read by a small hand-written scanner, not a parser
@@ -389,6 +391,41 @@ citation styles. The rules, each from a real failure:
 - **First author alone is an author match** ("Vaswani et al."); an
   unmentioned sole author is no match.
 - **"RETRACTED:" title markers are ignored** when comparing titles.
+
+**Sites** (#98). A claim's `site` (the page it was read from:
+`claimFromPage`, `verify --url`, `--site`, JSON `site`) is evidence of the
+publisher, never a claimed field: not compared as the journal, not a
+difference. Only for a claim without identifiers (with them, the site says
+nothing they don't), and only for a site in `site::PUBLISHERS`: publishers'
+sites by registrable domain (the last two labels, three under a country's
+`co`, `ac`, `com`, … : `pubs.acs.org` is `acs.org`, `notnature.com` isn't
+`nature.com`; no Public Suffix List) and the DOI prefixes their works are
+under (`nature.com`: `10.1038` and Palgrave's `10.1057`; `wiley.com`:
+`10.1002` and `10.1111`; each checked against Crossref's `/prefixes`,
+2026-11-15). Then:
+
+- *Recall*: Crossref is asked for the title among the publisher's works,
+  `query.title` with `filter=prefix:…`, one search per prefix (at most
+  two), beside the title searches and whatever they find, nothing
+  included: the open searches may rank the publisher's own work low, or
+  miss it. Free, so the budget is as it was.
+- *Ranking*: a tie-break, not a score. After ranking, the first gives way
+  to the publisher's best-fitting candidate (a DOI under its prefixes)
+  when that one matches about as well: confidence within 0.05 of the
+  first's, its title agreeing as well (match, partial), and of the same
+  verdict, plausible at least. 0.05 is less than any whole field's
+  disagreement costs (a year one off, 0.125 with title, authors and year;
+  the caps, 0.1; another journal, 0.06 and more), so only part of a
+  title's or byline's words separate the two: the claim can't tell them
+  apart, the site can. Of the publisher's, the most confident, then the
+  best title, then the best whole title (Crossref keeps subtitles apart,
+  so JAMA's "Treatment of Acute Ischemic Stroke" of 1986, "Open Trial
+  With …", ties with the 2026 review on its main title; the review's
+  whole title is the one cited). Confidences stay their own, so the
+  verdict is the chosen work's own assessment, the one the first would
+  have had: a title-only claim the site settles stays plausible. With no
+  candidate from the publisher, nothing changes. `chosen_by_site` says
+  when the site decided (another work would be first without it).
 
 Verdicts: verified, plausible, mismatch (claimed ID missing or another
 work's; or same title with matching authors *or* year but the other wrong),
@@ -765,7 +802,11 @@ fixture recorded with different parameters once hid a ranking bug.
   goes alone among terms (filters beside it are fine), since beside
   keywords or a title works from any journal outrank it; such a tree is
   refused, saying so. It doesn't
-  index DataCite DOIs (arXiv). Its "CSL" uses Crossref type names. Top
+  index DataCite DOIs (arXiv). Its "CSL" uses Crossref type names.
+  `filter=prefix:10.1001` keeps to one registrant's DOIs, with
+  `query.title` ranking them: JAMA's review first of 33,845 (checked
+  2026-11-15). Subtitles are a separate `subtitle` field, which aspero
+  doesn't join to the title. Top
   matches can be derivative records ("Faculty Opinions recommendation of
   X"). `updated-by` carries Retraction Watch notices.
 - **DataCite.** arXiv, Zenodo, data and software. **Relevance only with

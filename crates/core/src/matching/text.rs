@@ -55,6 +55,14 @@ pub fn title_similarity(a: &str, b: &str) -> f64 {
         .fold(0.0, f64::max)
 }
 
+/// [`title_similarity`] of the whole titles, subtitles included: of two
+/// works whose main title is the one cited, the one whose subtitle is too
+/// ("Treatment of Acute Ischemic Stroke: A Review" over "…: Open Trial
+/// With Continuous Intravenous Heparinization").
+pub fn whole_title_similarity(a: &str, b: &str) -> f64 {
+    dice(&content_words(unmarked(a)), &content_words(unmarked(b)))
+}
+
 pub(super) fn dice(a: &[String], b: &[String]) -> f64 {
     if a.is_empty() || b.is_empty() {
         return 0.0;

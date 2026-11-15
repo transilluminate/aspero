@@ -24,6 +24,10 @@ pub fn verification(echo: Value, v: &Verification, full: bool) -> Value {
     if let Some(best) = v.best_match {
         item["best_match"] = work::candidate(&v.report.candidates[best], full);
     }
+    // Only when the claim's site decided which work it is (#98).
+    if v.chosen_by_site {
+        item["chosen_by_site"] = json!(true);
+    }
     let failures = v.report.failures();
     if !failures.is_empty() {
         let errors: Vec<String> = failures.iter().map(ToString::to_string).collect();

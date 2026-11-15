@@ -58,6 +58,8 @@ fn claims_from_pages_offline() {
     assert_eq!(claim.container.as_deref(), Some("JAMA"));
     assert_eq!(claim.year, Some(2026));
     assert_eq!(claim.authors.len(), 2);
+    // The host is the site, a hint; never the journal.
+    assert_eq!(claim.site.as_deref(), Some("jamanetwork.com"));
 
     // Not loaded: the address and the drag's name.
     let pii = "https://www.sciencedirect.com/science/article/pii/S2772940026000032";

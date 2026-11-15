@@ -34,7 +34,9 @@
 //! Every identifier found, in that order and each once, is in
 //! [`PageClaim::ids`] and the claim's. The journal is only ever the page's
 //! metadata, never guessed from the address: a wrong one makes `verify`
-//! report a journal mismatch. The page's address is not an identifier
+//! report a journal mismatch. The address's host is the claim's
+//! [`site`](Claim::site), a hint of the publisher for a claim without
+//! identifiers (see [`crate::site`]), never a claimed field. The page's address is not an identifier
 //! unless it holds one. With no identifier and no title, there's no claim.
 //!
 //! Caps: [`MAX_INPUT`] bytes of markup and [`MAX_TAGS`] tags are read,
@@ -211,6 +213,7 @@ pub fn claim_from_page(html: Option<&str>, url: &str, title: Option<&str>) -> Pa
         add_id(&mut ids, id);
     }
     claim.ids = ids.iter().map(|id| id.mention.id.clone()).collect();
+    claim.site = crate::site::site_of(url);
     let claim = (!claim.ids.is_empty() || claim.title.is_some()).then_some(claim);
     PageClaim {
         ids,

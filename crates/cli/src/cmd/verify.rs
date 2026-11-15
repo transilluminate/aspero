@@ -276,6 +276,7 @@ pub fn split(args: ClaimArgs) -> (Option<String>, ClaimInput) {
         volume: args.volume,
         page: args.page,
         ids: args.ids,
+        site: args.site,
         ..ClaimInput::default()
     };
     (args.text, fields)
@@ -402,6 +403,11 @@ pub(super) fn verdict_text(input: &str, v: &Verification) -> String {
     }
     if let Some(best) = v.best_match {
         lines.push(output::candidate_text(&v.report.candidates[best], "  "));
+    }
+    if v.chosen_by_site {
+        let site = v.read.site.as_deref().unwrap_or("the site");
+        let note = format!("chosen as {site}'s publisher's, of works matching about as well");
+        lines.push(format!("  {}", term::paint(&note, Paint::Dim)));
     }
     for e in &v.report.errors {
         let warning = term::paint("warning:", Paint::Warning);

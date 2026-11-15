@@ -872,3 +872,129 @@ async fn a_doi_cut_short_reads_as_written() {
     assert_eq!(v.verdict, Verdict::Verified);
     assert_eq!(v.read.ids[0].to_string(), "doi:10.1097/hjh.0b013e");
 }
+
+/// #98: a JAMA review shared from the browser, its title alone, and an
+/// article of the same title in another journal, published earlier.
+const STROKE: &str = "Treatment of Acute Ischemic Stroke: A Review";
+const JAMA_DOI: &str = "10.1001/jama.2026.19482";
+const OTHER_DOI: &str = "10.7897/2230-8407.08567";
+
+fn stroke(source: &'static str, doi: &str, year: i16) -> aspero_core::SourceRecord {
+    work(source, &[doi], STROKE, &[], year)
+}
+
+fn stroke_page(site: Option<&str>) -> Claim {
+    let mut claim = Claim::default();
+    claim.title = Some(STROKE.into());
+    claim.site = site.map(str::to_owned);
+    claim
+}
+
+/// The prefix-filtered searches Crossref was sent: (title, filter).
+fn prefix_searches(crossref: &Scripted) -> Vec<(String, String)> {
+    crossref
+        .sent()
+        .iter()
+        .filter_map(|q| Some((q.title.clone()?, q.extra.get("filter")?.clone())))
+        .collect()
+}
+
+fn best_ids(v: &aspero_engine::Verification) -> &[WorkId] {
+    &v.report.candidates[v.best_match.unwrap()].ids
+}
+
+#[tokio::test]
+async fn a_pages_site_picks_its_publishers_work_among_same_titled_ones() {
+    let openalex = Arc::new(Scripted::new("openalex").keyword().with(vec![
+        stroke("openalex", OTHER_DOI, 2017),
+        stroke("openalex", JAMA_DOI, 2026),
+    ]));
+    let crossref = Arc::new(
+        Scripted::new("crossref")
+            .matcher(Vec::new())
+            .titles()
+            .with(vec![stroke("crossref", JAMA_DOI, 2026)]),
+    );
+    let engine = engine(vec![openalex, crossref.clone()]);
+
+    // Without the site, the earlier of the two ties: the wrong one.
+    let v = engine.verify(&stroke_page(None), 5).await;
+    assert_eq!(v.verdict, Verdict::Plausible, "{}", v.reason_text);
+    assert!(best_ids(&v).contains(&OTHER_DOI.parse().unwrap()));
+    assert!(!v.chosen_by_site);
+    assert!(prefix_searches(&crossref).is_empty());
+
+    // With it, the publisher's, at its own confidence: still plausible, a
+    // title alone being too little to verify.
+    let v = engine
+        .verify(&stroke_page(Some("jamanetwork.com")), 5)
+        .await;
+    assert_eq!(v.verdict, Verdict::Plausible, "{}", v.reason_text);
+    assert!(best_ids(&v).contains(&JAMA_DOI.parse().unwrap()));
+    assert!(v.chosen_by_site);
+    let best = &v.report.candidates[0];
+    let own = aspero_core::matching::assess(&v.read, &best.record);
+    assert!((best.assessment.confidence - own.confidence).abs() < f64::EPSILON);
+    assert_eq!(
+        prefix_searches(&crossref),
+        [(STROKE.to_owned(), "prefix:10.1001".to_owned())]
+    );
+
+    // A site whose publisher has neither: as without one.
+    let v = engine.verify(&stroke_page(Some("www.nature.com")), 5).await;
+    assert_eq!(v.verdict, Verdict::Plausible);
+    assert!(best_ids(&v).contains(&OTHER_DOI.parse().unwrap()));
+    assert!(!v.chosen_by_site);
+}
+
+#[tokio::test]
+async fn a_pages_publisher_is_searched_when_the_open_searches_miss_its_work() {
+    let crossref = || {
+        Arc::new(
+            Scripted::new("crossref")
+                .matcher(Vec::new())
+                .titles()
+                .with(vec![stroke("crossref", JAMA_DOI, 2026)]),
+        )
+    };
+    // The open search finds only the other.
+    let openalex = Arc::new(
+        Scripted::new("openalex")
+            .keyword()
+            .with(vec![stroke("openalex", OTHER_DOI, 2017)]),
+    );
+    let v = engine(vec![openalex, crossref()])
+        .verify(&stroke_page(Some("jamanetwork.com")), 5)
+        .await;
+    assert_eq!(v.verdict, Verdict::Plausible, "{}", v.reason_text);
+    assert!(best_ids(&v).contains(&JAMA_DOI.parse().unwrap()));
+    assert!(v.chosen_by_site);
+
+    // It finds nothing at all: the publisher's search still runs.
+    let openalex = Arc::new(Scripted::new("openalex").keyword());
+    let crossref = crossref();
+    let v = engine(vec![openalex, crossref.clone()])
+        .verify(&stroke_page(Some("jamanetwork.com")), 5)
+        .await;
+    assert_eq!(v.verdict, Verdict::Plausible, "{}", v.reason_text);
+    assert!(best_ids(&v).contains(&JAMA_DOI.parse().unwrap()));
+    // The only candidate: first without the site too.
+    assert!(!v.chosen_by_site);
+    assert_eq!(prefix_searches(&crossref).len(), 1);
+}
+
+#[tokio::test]
+async fn a_site_changes_nothing_beside_identifiers() {
+    let openalex = Arc::new(Scripted::new("openalex").keyword().with(vec![
+        stroke("openalex", OTHER_DOI, 2017),
+        stroke("openalex", JAMA_DOI, 2026),
+    ]));
+    let crossref = Arc::new(Scripted::new("crossref").matcher(Vec::new()).titles());
+    let engine = engine(vec![openalex, crossref.clone()]);
+    let mut claim = stroke_page(Some("jamanetwork.com"));
+    claim.ids = vec![OTHER_DOI.parse().unwrap()];
+    let v = engine.verify(&claim, 5).await;
+    assert!(best_ids(&v).contains(&OTHER_DOI.parse().unwrap()));
+    assert!(!v.chosen_by_site);
+    assert!(prefix_searches(&crossref).is_empty());
+}

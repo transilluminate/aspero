@@ -1322,3 +1322,41 @@ async fn related_estimates_agree_with_spend_on_a_mixed_set() {
         assert_eq!(estimate.requests, expected, "cached: {cached}");
     }
 }
+
+/// 120 papers cited 150 times each: no two share a page, so 120 pages are
+/// wanted, and the set's cap (75) holds, the estimate agreeing. Before, the
+/// papers the plan left out were read anyway.
+#[tokio::test(start_paused = true)]
+async fn the_cap_on_pages_holds_for_works_cited_little() {
+    let works: Vec<SourceRecord> = (1..=120)
+        .map(|n| {
+            let mut w = work(
+                &[&format!("W{n}"), &format!("10.5555/{n}")],
+                &format!("{n}"),
+                &format!("Author Q{n}"),
+                2020,
+                None,
+            );
+            w.work.cited_by_count = Some(150);
+            w
+        })
+        .collect();
+    let seeds: Vec<String> = (1..=120).map(|n| format!("10.5555/{n}")).collect();
+    let alex = Arc::new(Alex::new(works));
+    let engine = engine(alex.clone(), None);
+    let kinds = [AnalysisKind::Related { limit: 20 }];
+    let estimate = engine
+        .analyse(&seeds, &kinds, None, true)
+        .await
+        .unwrap()
+        .estimate
+        .unwrap();
+    let run = engine.analyse(&seeds, &kinds, None, false).await.unwrap();
+    assert_eq!(alex.citing_pages().len(), 75);
+    // The seeds' two batches, 75 pages and the lookup (a ceiling).
+    assert_eq!(estimate.requests, 2 + 75 + 1);
+    assert!((spent(&run) - 0.0077).abs() < 1e-12, "{}", spent(&run));
+    let stop = run.related.unwrap().incomplete.unwrap();
+    assert_eq!(stop.kind, IncompleteKind::Capped);
+    assert_eq!((stop.done, stop.total), (75 * 150, 120 * 150));
+}

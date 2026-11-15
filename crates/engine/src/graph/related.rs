@@ -53,7 +53,7 @@ use crate::{Engine, Entry};
 mod plan;
 mod score;
 
-use plan::{Cites, Counted, PAGE, PAGES_PER_WORK, bins, cites, plan, target};
+use plan::{Counted, PAGE, PAGES_PER_WORK, cites, plan, target, to_read};
 use score::{Tally, citing_weight, highest, score};
 
 /// Pages of the works citing the set's most shared references at most.
@@ -260,31 +260,10 @@ impl Engine {
         let targets: Vec<u64> = works.iter().map(|(w, c)| target(&full, w, *c)).collect();
         let cached = self.cached_citing(&works, &targets);
 
-        // Works not cached: read alone with the plan's pages, or sharing
-        // filters again among themselves.
-        let mut filters: Vec<Cites> = Vec::new();
-        let small: Vec<(WorkId, u64)> = works
-            .iter()
-            .zip(&cached)
-            .filter(|((_, c), cached)| cached.is_none() && (1..=PAGE).contains(c))
-            .map(|(w, _)| w.clone())
-            .collect();
-        filters.extend(
-            bins(&small)
-                .into_iter()
-                .map(|works| Cites { works, pages: 1 }),
-        );
-        filters.extend(
-            full.iter()
-                .filter(|c| {
-                    c.pages > 0
-                        && c.works.len() == 1
-                        && works.iter().zip(&cached).any(|((w, n), cached)| {
-                            cached.is_none() && *n > PAGE && *w == c.works[0]
-                        })
-                })
-                .cloned(),
-        );
+        // Works the plan reads not cached: alone with the plan's pages, or
+        // sharing filters again among themselves.
+        let is_cached: Vec<bool> = cached.iter().map(Option::is_some).collect();
+        let filters = to_read(&full, &works, &is_cached);
 
         // Coupling: the works citing the set's most shared references.
         let shared = most_shared(groups);

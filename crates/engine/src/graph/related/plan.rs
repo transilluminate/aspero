@@ -70,7 +70,7 @@ pub(super) fn plan(works: &[(WorkId, u64)], per_work: usize) -> Vec<Cites> {
         .filter(|(_, count)| *count > 0)
         .cloned()
         .partition(|(_, count)| *count <= PAGE);
-    let mut shared: Vec<Cites> = bins(&small)
+    let shared: Vec<Cites> = bins(&small)
         .into_iter()
         .map(|works| Cites { works, pages: 1 })
         .collect();
@@ -88,6 +88,13 @@ pub(super) fn plan(works: &[(WorkId, u64)], per_work: usize) -> Vec<Cites> {
         })
         .collect();
     alone.sort_by(|(x, a), (y, b)| x.cmp(y).then(a.works.cmp(&b.works)));
+    capped(shared, alone)
+}
+
+/// Shared filters, then works alone (with their counts, least cited
+/// first): over [`CITING_PAGES`] in all, pages come off the works read
+/// most (the most cited of them first), then the last shared filters.
+fn capped(mut shared: Vec<Cites>, mut alone: Vec<(u64, Cites)>) -> Vec<Cites> {
     let mut total = shared.len() + alone.iter().map(|(_, c)| c.pages).sum::<usize>();
     while total > CITING_PAGES {
         // The last of the most pages: the most cited of them.
@@ -107,6 +114,39 @@ pub(super) fn plan(works: &[(WorkId, u64)], per_work: usize) -> Vec<Cites> {
         .into_iter()
         .chain(alone.into_iter().map(|(_, c)| c))
         .collect()
+}
+
+/// What to read of the works `plan` reads that aren't `cached` (one flag
+/// per work of `works`, with its count): works alone keep their pages, the
+/// others share filters again among themselves; works the plan left out
+/// stay out. Capped again, so a set never reads more than
+/// [`CITING_PAGES`] (packing fewer works can, rarely, take a page more).
+pub(super) fn to_read(plan: &[Cites], works: &[Counted], cached: &[bool]) -> Vec<Cites> {
+    let reads = |w: &WorkId| plan.iter().any(|c| c.pages > 0 && c.works.contains(w));
+    let todo: Vec<&Counted> = works
+        .iter()
+        .zip(cached)
+        .filter(|(_, cached)| !**cached)
+        .map(|(w, _)| w)
+        .collect();
+    let small: Vec<Counted> = todo
+        .iter()
+        .filter(|(w, c)| (1..=PAGE).contains(c) && reads(w))
+        .map(|w| (*w).clone())
+        .collect();
+    let shared = bins(&small)
+        .into_iter()
+        .map(|works| Cites { works, pages: 1 })
+        .collect();
+    let alone = plan
+        .iter()
+        .filter(|c| c.pages > 0 && c.works.len() == 1)
+        .filter_map(|c| {
+            let (_, count) = todo.iter().find(|(w, n)| *n > PAGE && *w == c.works[0])?;
+            Some((*count, c.clone()))
+        })
+        .collect();
+    capped(shared, alone)
 }
 
 /// The citing works of `work` (cited `count` times) a plan reads: all of

@@ -1,5 +1,33 @@
 # Changelog
 
+## Unreleased
+
+Fixed:
+
+- Standard journal abbreviations that leave out or join words ("Proc Biol
+  Sci", "Philos Trans R Soc Lond B Biol Sci", "Acta Crystallogr D Biol
+  Crystallogr", "Eur J Cardiothorac Surg") are no longer taken for another
+  journal, so a correct citation using one verifies. A subject word left
+  out still means another journal ("Am J Med" isn't the American Journal
+  of Emergency Medicine).
+- An author's initials or a word of the title no longer count as the
+  journal ("SR" for Scientific Reports, "mice" for Medicine), nor outweigh
+  the journal a reference names.
+- Structured claims compare the journal as free-text references do, so a
+  `container` the rules can't recognise no longer lowers a correct
+  citation; only one that's clearly another journal is a `mismatch`.
+- An OpenAlex work whose main copy is in a repository (PubMed Central,
+  arXiv) gives the journal it appeared in, not the repository; an
+  `article` in a book series is a chapter.
+- A merged work's cited-by count no longer depends on the order sources
+  answer in.
+- Another edition of a cited book stays `plausible` when the claim gives
+  the publisher as its container; a chapter cited from a book no longer
+  makes another edition of the book plausible.
+- More organisations ("Public Health England", "World Bank", "Cancer
+  Research UK", "Sepsis Task Force") are no longer split into given and
+  family names in exports.
+
 ## 0.20.0
 
 Fixed:

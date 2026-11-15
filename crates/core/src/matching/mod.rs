@@ -30,7 +30,7 @@ use authors::{author_overlap, family_name, same_family};
 pub use derivative::{
     WorkKind, claim_mentions_derivative, derivative_kind, derivative_work_kind, is_derivative,
 };
-use text::{Normalised, content_words};
+use text::{Normalised, content_words, words};
 pub use text::{normalise, search_terms, shared_title, title_similarity, unmarked};
 
 /// Field weights in the confidence (before penalties).
@@ -70,8 +70,8 @@ const SHORT_TITLE_WORDS: usize = 3;
 const DERIVATIVE_PENALTY: f64 = 0.5;
 /// Confidence ceiling when the claimed volume or first page differs.
 const LOCATION_MISMATCH_CAP: f64 = 0.8;
-/// Multiplier when the claim names a different journal (by
-/// [`same_journal`]'s rule, which misses some pairs): lowers the ranking.
+/// Multiplier when the claim names a journal clearly another
+/// ([`other_journal`]): lowers the ranking.
 const JOURNAL_MISMATCH_PENALTY: f64 = 0.9;
 /// Confidence ceiling when a journal article is cited in a journal that is
 /// clearly another ([`other_journal`]): a citation error, as a wrong volume
@@ -327,8 +327,8 @@ pub struct Assessment {
     pub authors: FieldCheck,
     pub year: FieldCheck,
     /// The journal: `Match` when the claim names it (or an abbreviation),
-    /// `Mismatch` when a structured claim names another, or a journal
-    /// article's reference clearly cites another
+    /// `Mismatch` when a structured claim names one clearly another, or a
+    /// journal article's reference cites one
     /// ([`Claim::cited_container`], [`other_journal`]).
     pub container: FieldCheck,
     pub volume: FieldCheck,
@@ -347,6 +347,19 @@ fn is_url(title: &str) -> bool {
         .iter()
         .any(|p| starts_with_ci(t, p))
         || t.contains("://")
+}
+
+/// Whether a reference cites a chapter in a book: "In: Jones K, ed. …",
+/// "In K. Jones (Ed.), …", "In Handbook of Sepsis, edited by …".
+fn cites_chapter(text: &str) -> bool {
+    let tokens: Vec<&str> = text.split_whitespace().collect();
+    tokens.iter().enumerate().any(|(i, t)| {
+        *t == "In:"
+            || (*t == "In"
+                && tokens[i + 1..]
+                    .iter()
+                    .any(|t| t.starts_with("(Ed") || *t == "edited"))
+    })
 }
 
 fn dedup_years(mut years: Vec<i16>) -> Vec<i16> {
@@ -400,11 +413,7 @@ pub fn assess(claim: &Claim, record: &SourceRecord) -> Assessment {
         .into_iter()
         .chain(work.other_years.iter().copied())
         .collect();
-    let claimed_years: Vec<i16> = match (claim.year, &text) {
-        (Some(y), _) => vec![y],
-        (None, Some(text)) => text.years(),
-        _ => Vec::new(),
-    };
+    let claimed_years = claim.cited_years();
     let year = match actual_years.is_empty() || claimed_years.is_empty() {
         false => {
             // Nearest pairing: any edition's year may be the one cited.
@@ -434,18 +443,25 @@ pub fn assess(claim: &Claim, record: &SourceRecord) -> Assessment {
         && cited_journal.is_some()
         && cited_place.volume.is_some()
         && cited_place.page.is_some();
-    let container = match (&claim.container, &work.container_title, &text) {
-        (Some(claimed), Some(actual), _) => FieldCheck::exact(same_journal(claimed, actual)),
-        (None, Some(actual), Some(text)) => {
-            let cited = cited_journal.as_deref();
-            if journal_in(&text.words, actual) || cited.is_some_and(|c| same_journal(c, actual)) {
-                FieldCheck::exact(true)
-            } else if article && cited.is_some_and(|c| other_journal(c, actual)) {
-                // Another journal, clearly named where the journal goes.
-                FieldCheck::exact(false)
-            } else {
-                FieldCheck::UNKNOWN
-            }
+    // The journal the claim names, or reads where its reference gives one,
+    // decides, not words elsewhere in a reference (an author's initials
+    // "SR" for Scientific Reports). Names compare by rule, which misses
+    // some pairs, so only one clearly another is a mismatch: any work's
+    // when claimed, a journal article's when read from text (where a
+    // book's publisher may stand).
+    let container = match (cited_journal.as_deref(), &work.container_title, &text) {
+        (Some(cited), Some(actual), _)
+            if same_journal(cited, actual) || journal_in(&words(cited), actual) =>
+        {
+            FieldCheck::exact(true)
+        }
+        (Some(cited), Some(actual), _)
+            if (article || claim.container.is_some()) && other_journal(cited, actual) =>
+        {
+            FieldCheck::exact(false)
+        }
+        (None, Some(actual), Some(text)) if journal_in(&text.words, actual) => {
+            FieldCheck::exact(true)
         }
         _ => FieldCheck::UNKNOWN,
     };
@@ -455,13 +471,8 @@ pub fn assess(claim: &Claim, record: &SourceRecord) -> Assessment {
     };
     // A journal article cited in a journal clearly not its own, or a
     // preprint cited as a journal's article.
-    let wrong_journal = container.agreement == Agreement::Mismatch
-        && (preprint_of_cited
-            || article
-                && cited_journal
-                    .as_deref()
-                    .zip(work.container_title.as_deref())
-                    .is_some_and(|(c, a)| other_journal(c, a)));
+    let wrong_journal =
+        container.agreement == Agreement::Mismatch && (preprint_of_cited || article);
     let located = cited_place;
     let same = |claimed: Option<&str>, actual: Option<&str>| match (claimed, actual) {
         (Some(c), Some(a)) if !c.is_empty() && !a.is_empty() => {
@@ -546,16 +557,6 @@ pub fn assess(claim: &Claim, record: &SourceRecord) -> Assessment {
     {
         confidence = confidence.min(NO_EVIDENCE_CAP);
     }
-    // Another edition of a book: the same title and authors, another year
-    // (a 9th edition cited, a later one found). The book is right; the
-    // year is a difference.
-    if work.work_type == Some(crate::work::WorkType::Book)
-        && title.agreement == Agreement::Match
-        && authors.score.is_some_and(|s| s >= CORROBORATING_AUTHORS)
-        && year.agreement == Agreement::Mismatch
-    {
-        confidence = confidence.max(EDITION);
-    }
     // Journal, volume and first page together name one work, title or no
     // title ("Injury 47 (2016) 797–804"), unless something contradicts
     // it.
@@ -579,15 +580,27 @@ pub fn assess(claim: &Claim, record: &SourceRecord) -> Assessment {
     {
         confidence = confidence.min(LOCATION_MISMATCH_CAP);
     }
-    // Journal names compare by rule, which misses some pairs, so a journal
-    // that may only be named otherwise lowers the ranking; one clearly
-    // another (the wrong journal, a common error in real and invented
-    // references) is an error in the citation, as a wrong volume is.
+    // Another journal lowers the ranking; for a journal article (the wrong
+    // journal, a common error in real and invented references) it is an
+    // error in the citation, as a wrong volume is.
     if container.agreement == Agreement::Mismatch {
         confidence *= JOURNAL_MISMATCH_PENALTY;
     }
     if wrong_journal {
         confidence = confidence.min(JOURNAL_MISMATCH_CAP);
+    }
+    // Another edition of a book: the same title and authors, another year
+    // (a 9th edition cited, a later one found). The book is right; the
+    // year, or a publisher given as its container, is a difference. A
+    // chapter cited in the book is not the book: its authors found may be
+    // the book's editors.
+    if work.work_type == Some(crate::work::WorkType::Book)
+        && title.agreement == Agreement::Match
+        && authors.score.is_some_and(|s| s >= CORROBORATING_AUTHORS)
+        && year.agreement == Agreement::Mismatch
+        && !claim.text.as_deref().is_some_and(cites_chapter)
+    {
+        confidence = confidence.max(EDITION);
     }
     // A reply, correction or commentary is not the work it responds to,
     // unless the citation says it is citing one.

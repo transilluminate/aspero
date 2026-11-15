@@ -496,14 +496,7 @@ impl Provider for EuropePmc {
                 }
             }
         }
-        if let Some(years) = query.years {
-            let end = |y: Option<i16>| y.map_or("*".to_owned(), |y| y.to_string());
-            clauses.push(format!(
-                "PUB_YEAR:[{} TO {}]",
-                end(years.from),
-                end(years.to)
-            ));
-        }
+        clauses.extend(query.years.map(|y| lucene_years("PUB_YEAR", y)));
         if let Some(oa) = query.open_access {
             clauses.push(format!("OPEN_ACCESS:{}", if oa { "y" } else { "n" }));
         }

@@ -262,14 +262,7 @@ impl Provider for Datacite {
         if !query.text.trim().is_empty() {
             clauses.push(format!("({})", escape_lucene(query.text.trim())));
         }
-        if let Some(years) = query.years {
-            let end = |y: Option<i16>| y.map_or("*".to_owned(), |y| y.to_string());
-            clauses.push(format!(
-                "publicationYear:[{} TO {}]",
-                end(years.from),
-                end(years.to)
-            ));
-        }
+        clauses.extend(query.years.map(|y| lucene_years("publicationYear", y)));
         if let Some(author) = query.field(Filter::Author) {
             clauses.push(format!("creators.name:({})", escape_lucene(author)));
         }

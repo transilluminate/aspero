@@ -378,14 +378,7 @@ impl Provider for OpenLibrary {
         if !query.text.trim().is_empty() {
             clauses.push(format!("({})", escape_lucene(query.text.trim())));
         }
-        if let Some(years) = query.years {
-            let end = |y: Option<i16>| y.map_or("*".to_owned(), |y| y.to_string());
-            clauses.push(format!(
-                "first_publish_year:[{} TO {}]",
-                end(years.from),
-                end(years.to)
-            ));
-        }
+        clauses.extend(query.years.map(|y| lucene_years("first_publish_year", y)));
         let page_number: u32 = match &query.page.cursor {
             None => 1,
             Some(c) => c

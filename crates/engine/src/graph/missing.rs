@@ -3,14 +3,11 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use aspero_core::matching::same_work;
-use aspero_core::{FieldSet, SourceRecord, WorkId};
+use aspero_core::WorkId;
 
 use super::seeds::Group;
-use super::spend::{Spend, TheSet, failed_lookups};
-use super::{
-    Incomplete, IncompleteKind, MAX_FILTER, MIN_CITING, Missing, OddOne, OddReason, Section, Seed,
-};
+use super::spend::{Spend, TheSet, merge_versions};
+use super::{MAX_FILTER, MIN_CITING, Missing, OddOne, OddReason, Section, Seed};
 use crate::{Engine, Entry};
 
 impl Engine {
@@ -48,80 +45,34 @@ impl Engine {
             .map(|(id, _)| (*id).clone())
             .collect();
 
-        let provider = entry.provider.id();
-        let uncached = self
-            .cached_lookups(&provider, &ids, FieldSet::DEFAULT)
-            .iter()
-            .filter(|c| c.is_none())
-            .count();
-        let paid = match uncached {
-            0 | 1 => 0,
-            n => n.div_ceil(MAX_FILTER),
-        };
-        let mut incomplete = None;
-        let mut records: Vec<Option<SourceRecord>> = vec![None; fetch];
-        if spend.estimating {
-            spend.requests += paid as u64;
-        } else if !ids.is_empty() {
-            if spend.allows(paid) {
-                let mut usage = Vec::new();
-                let answers = self
-                    .lookup_at(entry, &ids, FieldSet::DEFAULT, &mut usage)
-                    .await;
-                spend.add(usage, paid);
-                let failed = failed_lookups(&answers, "probably missing works' lookup failed");
-                if failed > 0 {
-                    incomplete = Some(
-                        Incomplete::new(IncompleteKind::ProviderFailed, fetch - failed, fetch)
-                            .from(provider.clone()),
-                    );
-                }
-                records = answers.into_iter().map(|(_, r)| r).collect();
-            } else {
-                incomplete = Some(Incomplete::new(IncompleteKind::Budget, 0, fetch));
-            }
-        }
+        let looked = self
+            .look_up(entry, &ids, spend, "probably missing works' lookup failed")
+            .await;
 
         // Merge: works that are a seed leave (one work, or sharing any
         // identifier with any seed, resolved or not: its input, or any id
         // its record carries); works that are one work join.
         let set = TheSet::new(seeds);
-        let mut found: Vec<(Missing, BTreeSet<usize>)> = Vec::new();
-        for ((id, by), record) in ranked.into_iter().take(fetch).zip(records) {
-            if set.has(id, record.as_ref()) {
-                continue;
-            }
-            let same = record.as_ref().and_then(|r| {
-                found
-                    .iter_mut()
-                    .find(|(m, _)| m.record.as_ref().is_some_and(|other| same_work(other, r)))
-            });
-            match same {
-                Some((missing, by_groups)) => {
-                    missing.ids.push(id.clone());
-                    by_groups.extend(by);
-                }
-                None => found.push((
-                    Missing {
-                        id: id.clone(),
-                        ids: vec![id.clone()],
-                        record,
-                        cited_by: Vec::new(),
-                    },
-                    by.into_iter().collect(),
-                )),
-            }
-        }
+        let kept = ranked
+            .into_iter()
+            .take(fetch)
+            .zip(looked.records)
+            .filter(|((id, _), record)| !set.has(id, record.as_ref()))
+            .map(|((id, by), record)| (id.clone(), record, by.into_iter().collect()))
+            .collect();
+        let found = merge_versions(kept, |a: &mut BTreeSet<usize>, b| a.extend(b));
         let mut items: Vec<Missing> = found
             .into_iter()
-            .map(|(mut m, by)| {
-                m.cited_by = by.into_iter().map(|g| groups[g].members[0]).collect();
-                m
+            .map(|m| Missing {
+                id: m.id,
+                ids: m.ids,
+                record: m.record,
+                cited_by: m.value.into_iter().map(|g| groups[g].members[0]).collect(),
             })
             .collect();
         items.sort_by(|a, b| b.count().cmp(&a.count()).then(a.id.cmp(&b.id)));
         items.truncate(limit);
-        Section::new(items, incomplete)
+        Section::new(items, looked.stop)
     }
 }
 
@@ -152,7 +103,7 @@ pub(super) fn odd_one_out(groups: &[Group]) -> Section<OddOne> {
 
 #[cfg(test)]
 mod tests {
-    use aspero_core::{FieldSet, Person, ProviderId, Raw, Work};
+    use aspero_core::{FieldSet, Person, ProviderId, Raw, SourceRecord, Work};
     use jiff::Timestamp;
 
     use super::super::{OPENALEX, merge_seeds};

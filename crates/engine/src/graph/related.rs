@@ -39,13 +39,12 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use aspero_core::matching::same_work;
-use aspero_core::{Cursor, FieldSet, Page, ProviderId, SearchQuery, SourceRecord, Usage, WorkId};
+use aspero_core::{Cursor, Page, ProviderId, SearchQuery, SourceRecord, Usage, WorkId};
 use aspero_store::{Direction, Edges};
 use futures::StreamExt;
 
 use super::seeds::Group;
-use super::spend::{Spend, TheSet, failed_lookups};
+use super::spend::{Spend, TheSet, merge_versions};
 use super::{
     Incomplete, IncompleteKind, MAX_FILTER, MIN_CITING, Section, Seed, Stage, openalex_id,
 };
@@ -468,83 +467,53 @@ impl Engine {
         let fetch = ranked.len().min(lookups * MAX_FILTER);
         ranked.truncate(fetch);
         let ids: Vec<WorkId> = ranked.iter().map(|(w, _, _)| (*w).clone()).collect();
-        let uncached = self
-            .cached_lookups(&provider, &ids, FieldSet::DEFAULT)
-            .iter()
-            .filter(|c| c.is_none())
-            .count();
-        let paid = match uncached {
-            0 | 1 => 0,
-            n => n.div_ceil(MAX_FILTER),
-        };
-        let mut records: Vec<Option<SourceRecord>> = vec![None; fetch];
-        if !ids.is_empty() {
-            if spend.allows(paid) {
-                let mut usage = Vec::new();
-                let answers = self
-                    .lookup_at(entry, &ids, FieldSet::DEFAULT, &mut usage)
-                    .await;
-                spend.add(usage, paid);
-                let failed = failed_lookups(&answers, "related works' lookup failed");
-                stops.lookup.failed = failed > 0;
-                stops.lookups = ((fetch - failed) as u64, fetch as u64);
-                records = answers.into_iter().map(|(_, r)| r).collect();
-            } else {
-                stops.lookup.budget = true;
-                stops.lookups = (0, fetch as u64);
-            }
+        let looked = self
+            .look_up(entry, &ids, spend, "related works' lookup failed")
+            .await;
+        if let Some(stop) = &looked.stop {
+            stops.lookup.failed = stop.kind == IncompleteKind::ProviderFailed;
+            stops.lookup.budget = stop.kind == IncompleteKind::Budget;
+            stops.lookups = (stop.done, stop.total);
         }
 
         // Works of the set and retracted works drop; versions merge.
         let set = TheSet::new(seeds);
-        let mut merged: Vec<(RelatedWork, Tally)> = Vec::new();
-        for ((id, mut tally, _), record) in ranked.into_iter().zip(records) {
-            if set.has(id, record.as_ref())
-                || record
-                    .as_ref()
-                    .is_some_and(|r| r.work.retraction().is_some())
-            {
-                continue;
-            }
-            if tally.shared.is_empty()
-                && let Some(refs) = record.as_ref().and_then(|r| r.references.as_deref())
-            {
-                tally.couple(refs, &cited);
-            }
-            let same = record.as_ref().and_then(|r| {
-                merged
-                    .iter_mut()
-                    .find(|(m, _)| m.record.as_ref().is_some_and(|other| same_work(other, r)))
-            });
-            match same {
-                Some((work, joined)) => {
-                    work.ids.push(id.clone());
-                    joined.join(tally);
+        let kept = ranked
+            .into_iter()
+            .zip(looked.records)
+            .filter(|((id, _, _), record)| {
+                !set.has(id, record.as_ref())
+                    && record
+                        .as_ref()
+                        .is_none_or(|r| r.work.retraction().is_none())
+            })
+            .map(|((id, mut tally, _), record)| {
+                if tally.shared.is_empty()
+                    && let Some(refs) = record.as_ref().and_then(|r| r.references.as_deref())
+                {
+                    tally.couple(refs, &cited);
                 }
-                None => merged.push((
-                    RelatedWork {
-                        id: id.clone(),
-                        ids: vec![id.clone()],
-                        record,
-                        score: 0.0,
-                        co_cited_with: 0,
-                        shared_references: 0,
-                        seeds: Vec::new(),
-                    },
-                    tally,
-                )),
-            }
-        }
-        let most = highest(merged.iter().map(|(_, t)| t), &weights);
+                (id.clone(), record, tally)
+            })
+            .collect();
+        let merged = merge_versions(kept, Tally::join);
+        let most = highest(merged.iter().map(|m| &m.value), &weights);
         let mut items: Vec<RelatedWork> = merged
             .into_iter()
-            .map(|(mut work, tally)| {
-                work.score = score(&tally, &weights, most);
-                work.co_cited_with = tally.citing.len();
-                work.shared_references = tally.shared.len();
-                work.seeds = tally.groups.iter().map(|&g| groups[g].members[0]).collect();
-                work.seeds.sort_unstable();
-                work
+            .map(|m| {
+                let tally = m.value;
+                let mut seeds: Vec<usize> =
+                    tally.groups.iter().map(|&g| groups[g].members[0]).collect();
+                seeds.sort_unstable();
+                RelatedWork {
+                    id: m.id,
+                    ids: m.ids,
+                    record: m.record,
+                    score: score(&tally, &weights, most),
+                    co_cited_with: tally.citing.len(),
+                    shared_references: tally.shared.len(),
+                    seeds,
+                }
             })
             .filter(|w| w.co_cited_with > 0 || w.shared_references > 0)
             .collect();

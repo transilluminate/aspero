@@ -451,3 +451,18 @@ fn since_is_the_first_index_date_anded_with_text_or_a_tree() {
         pair("query", "TITLE:(sepsis) OR ABSTRACT:(septic shock)")
     );
 }
+
+#[test]
+fn an_expert_query_bounds_all_of_a_tree() {
+    let (epmc, http) = provider([empty_page()]);
+    let mut q = tree_query(QueryNode::Any(vec![
+        QueryNode::term(TermField::Title, "a"),
+        QueryNode::term(TermField::Title, "b"),
+    ]));
+    q.extra.insert("query".into(), "SRC:MED".into());
+    block_on(epmc.search(&q)).unwrap();
+    assert_eq!(
+        query(&http, 0)[0],
+        pair("query", "(TITLE:(a) OR TITLE:(b)) AND (SRC:MED)")
+    );
+}

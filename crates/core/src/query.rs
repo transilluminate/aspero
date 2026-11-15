@@ -834,6 +834,21 @@ pub fn lucene_words(text: &str) -> String {
         .join(" ")
 }
 
+/// A request's clauses ANDed: a rendered tree (bare at its top, `a OR b`)
+/// first, bracketed when anything joins it, so all of it is bounded:
+/// `(a OR b) AND (raw)`. The other clauses stand alone already (`(words)`,
+/// `FIELD:[…]`, `FIELD:"…"`).
+pub fn lucene_and(tree: Option<String>, clauses: Vec<String>) -> String {
+    let tree = tree.map(|t| match clauses.is_empty() {
+        true => t,
+        false => format!("({t})"),
+    });
+    tree.into_iter()
+        .chain(clauses)
+        .collect::<Vec<_>>()
+        .join(" AND ")
+}
+
 /// A year range in Lucene syntax: `FIELD:[2017 TO *]`.
 pub fn lucene_years(field: &str, years: YearRange) -> String {
     let end = |y: Option<i16>| y.map_or("*".to_owned(), |y| y.to_string());
@@ -1099,6 +1114,14 @@ mod tests {
         // ranges): words lose them, and `=`; phrases keep them.
         assert_eq!(lucene_words("a<b >=c d="), "a b c d");
         assert_eq!(lucene_term(None, "a<b", true), r#""a<b""#);
+        // A tree joined by more is bracketed, alone it isn't.
+        let any = || Some("a OR b".to_owned());
+        assert_eq!(
+            lucene_and(any(), vec!["(raw)".into()]),
+            "(a OR b) AND (raw)"
+        );
+        assert_eq!(lucene_and(any(), vec![]), "a OR b");
+        assert_eq!(lucene_and(None, vec!["x".into(), "y".into()]), "x AND y");
         let bad = QueryNode::All(vec![
             title("a"),
             QueryNode::filter(FilterValue::HasAbstract),

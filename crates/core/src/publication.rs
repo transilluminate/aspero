@@ -31,8 +31,10 @@ pub fn same_journal(a: &str, b: &str) -> bool {
 /// named in a way [`same_journal`] doesn't see: neither name, in full or
 /// abbreviated (spelling aside: "Anaesth" for "Anesthesia"), runs inside
 /// the other ("Proc Natl Acad Sci U S A" ↔ "Proceedings of the National
-/// Academy of Sciences", "BMJ" ↔ "BMJ (Clinical research ed.)"), nor is
-/// either the initials of a run of the other's words ("PNAS"). "Environ
+/// Academy of Sciences", "BMJ" ↔ "BMJ (Clinical research ed.)"), nor
+/// abbreviates the other's words in order, leaving some out ("Proc Biol
+/// Sci" ↔ "Proceedings of the Royal Society B: Biological Sciences"), nor
+/// is either the initials of a run of the other's words ("PNAS"). "Environ
 /// Sci Technol" is not "Environment International".
 pub fn other_journal(cited: &str, actual: &str) -> bool {
     let (c, a) = (significant(cited), significant(actual));
@@ -44,13 +46,42 @@ pub fn other_journal(cited: &str, actual: &str) -> bool {
             run.iter()
                 .zip(short)
                 .all(|(f, s)| loosely_abbreviates(s, f) || loosely_abbreviates(f, s))
-        }) || short.iter().any(|w| {
-            (1..=long.len())
-                .flat_map(|n| long.windows(n))
-                .any(|run| run.len() > 1 && is_initials(w, run))
-        })
+        }) || abbreviates_in_order(short, long)
+            || short.iter().any(|w| {
+                (1..=long.len())
+                    .flat_map(|n| long.windows(n))
+                    .any(|run| run.len() > 1 && is_initials(w, run))
+            })
     };
     !(inside(&c, &a) || inside(&a, &c))
+}
+
+/// Whether each of `short`'s words abbreviates one of `full`'s, in order,
+/// with any of `full`'s left out between ("Acta Crystallogr D" for "Acta
+/// Crystallographica Section D") or run together ("Cardiothorac" for
+/// "Cardio-Thoracic"). A long abbreviation may carry a word the full name
+/// doesn't ("Lond" in "Philos Trans R Soc Lond B Biol Sci"): one, among
+/// four or more that agree.
+fn abbreviates_in_order(short: &[String], full: &[String]) -> bool {
+    let mut rest = full;
+    let mut missed = 0;
+    for s in short {
+        let next = (0..rest.len()).find_map(|i| {
+            let joined = rest.get(i + 1).map(|next| format!("{}{next}", rest[i]));
+            if loosely_abbreviates(s, &rest[i]) {
+                Some(i + 1)
+            } else {
+                joined
+                    .is_some_and(|j| loosely_abbreviates(s, &j))
+                    .then_some(i + 2)
+            }
+        });
+        match next {
+            Some(next) => rest = &rest[next..],
+            None => missed += 1,
+        }
+    }
+    missed == 0 || (missed == 1 && short.len() > 4)
 }
 
 /// [`abbreviates_word`], or the same with vowels dropped after the first
@@ -628,6 +659,11 @@ mod tests {
             ),
             ("Lancet", "New England Journal of Medicine"),
             ("N Engl J Med", "Nature Medicine"),
+            ("Ann Intern Med", "Annals of Emergency Medicine"),
+            (
+                "J Am Coll Cardiol",
+                "Journal of the American College of Surgeons",
+            ),
         ] {
             assert!(other_journal(cited, actual), "{cited} ≠ {actual}");
         }
@@ -653,8 +689,27 @@ mod tests {
             ),
             ("Can J Anaesth", "Canadian Journal of Anesthesia"),
             ("Z Gastroenterol", "Zeitschrift für Gastroenterologie"),
+            // NLM abbreviations that leave words out, add one ("Lond") or
+            // run two together.
+            (
+                "Proc Biol Sci",
+                "Proceedings of the Royal Society B: Biological Sciences",
+            ),
+            (
+                "Philos Trans R Soc Lond B Biol Sci",
+                "Philosophical Transactions of the Royal Society B: Biological Sciences",
+            ),
+            (
+                "Acta Crystallogr D Biol Crystallogr",
+                "Acta Crystallographica Section D Biological Crystallography",
+            ),
+            (
+                "Eur J Cardiothorac Surg",
+                "European Journal of Cardio-Thoracic Surgery",
+            ),
             // Possibly a sister journal, possibly the same: not clearly.
             ("Lancet Infect Dis", "The Lancet"),
+            ("Am J Med", "American Journal of Emergency Medicine"),
             ("", "The Lancet"),
         ] {
             assert!(!other_journal(cited, actual), "{cited} ~ {actual}");

@@ -818,6 +818,27 @@ fn a_reference_naming_another_journal_is_not_verified() {
 }
 
 #[test]
+fn journals_abbreviated_with_words_left_out_are_no_mismatch() {
+    let mut article = placed(
+        &[],
+        "Fluid resuscitation in experimental sepsis",
+        &["Jane Doe", "Alan Roe"],
+        2010,
+        (
+            "Proceedings of the Royal Society B: Biological Sciences",
+            "277",
+            "100-110",
+        ),
+    );
+    article.work.work_type = Some(crate::work::WorkType::JournalArticle);
+    let text = "Doe J, Roe A. Fluid resuscitation in experimental sepsis. Proc Biol Sci. \
+                2010;277:100-10.";
+    let a = assess(&Claim::from_text(text), &article);
+    assert_ne!(a.container.agreement, Agreement::Mismatch, "{a:?}");
+    assert!(a.confidence >= VERIFIED, "{a:?}");
+}
+
+#[test]
 fn journals_named_otherwise_or_not_at_all_are_no_mismatch() {
     let mut nejm = peitho();
     nejm.work.work_type = Some(crate::work::WorkType::JournalArticle);

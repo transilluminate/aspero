@@ -2,8 +2,8 @@
   "complete": true,
   "estimate": {
     "exact": false,
-    "requests": 10,
-    "usd": 0.001
+    "requests": 12,
+    "usd": 0.0012000000000000001
   },
   "seeds": [
     {

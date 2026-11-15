@@ -45,6 +45,8 @@ pub struct ClaimInput {
             description = "Your own reference for this claim, echoed back untouched."
         )
     )]
+    // Part of aspero_json's public API; the underscore marks it read only to be dropped.
+    #[allow(clippy::pub_underscore_fields)]
     pub _key: Option<serde::de::IgnoredAny>,
     pub doi: Option<String>,
     pub arxiv: Option<String>,

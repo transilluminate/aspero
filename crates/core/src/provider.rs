@@ -439,6 +439,8 @@ impl SearchQuery {
 }
 
 // Keeps queries without a sort keyed as before in caches.
+// By reference: serde's `skip_serializing_if` passes one.
+#[allow(clippy::trivially_copy_pass_by_ref)]
 fn is_relevance(sort: &Sort) -> bool {
     *sort == Sort::Relevance
 }

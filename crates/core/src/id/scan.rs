@@ -488,6 +488,8 @@ fn next_hit(bytes: &[u8], from: usize) -> Option<usize> {
         .map(|i| at + i)
 }
 
+// The `bytecount` crate would be a dependency for a count on short slices.
+#[allow(clippy::naive_bytecount)]
 fn newlines(bytes: &[u8]) -> usize {
     bytes.iter().filter(|&&b| b == b'\n').count()
 }

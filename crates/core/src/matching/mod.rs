@@ -731,4 +731,6 @@ pub fn find_ids(text: &str) -> Vec<WorkId> {
 }
 
 #[cfg(test)]
+// Exact constants: scores and spends rounded or summed from binary-exact values.
+#[allow(clippy::float_cmp)]
 mod tests;

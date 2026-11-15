@@ -1,6 +1,9 @@
 //! The server end to end, over an in-memory pipe, driven by the SDK's own
 //! client: initialize, list the tools, call one.
 
+// Exact constants: scores and spends rounded or summed from binary-exact values.
+#![allow(clippy::float_cmp)]
+
 mod common;
 
 use std::sync::Arc;

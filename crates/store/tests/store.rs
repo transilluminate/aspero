@@ -1,3 +1,6 @@
+// Exact constants: scores and spends rounded or summed from binary-exact values.
+#![allow(clippy::float_cmp)]
+
 use std::time::Duration;
 
 use aspero_core::{FieldSet, Hit, Page, ProviderId, Raw, SearchQuery, SourceRecord, Work, WorkId};

@@ -1,6 +1,9 @@
 //! The engine tools against a scripted source: arguments, results in the
 //! CLI's JSON shapes, errors, and the session's spend.
 
+// Exact constants: scores and spends rounded or summed from binary-exact values.
+#![allow(clippy::float_cmp)]
+
 mod common;
 
 use aspero_core::{QueryNode, Relation, TermField};

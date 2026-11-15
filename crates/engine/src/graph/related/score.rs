@@ -108,6 +108,8 @@ pub(super) fn highest<'a>(
 }
 
 #[cfg(test)]
+// Exact constants: scores and spends rounded or summed from binary-exact values.
+#[allow(clippy::float_cmp)]
 mod tests {
     use super::*;
 

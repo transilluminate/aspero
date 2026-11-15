@@ -1,6 +1,9 @@
 //! Citation links: references pages and analyses of a set, against a
 //! scripted OpenAlex that charges as the real one does.
 
+// Exact constants: scores and spends rounded or summed from binary-exact values.
+#![allow(clippy::float_cmp)]
+
 use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
 

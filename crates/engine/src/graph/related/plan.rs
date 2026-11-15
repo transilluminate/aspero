@@ -77,7 +77,7 @@ pub(super) fn plan(works: &[(WorkId, u64)], per_work: usize) -> Vec<Cites> {
     let mut alone: Vec<(u64, Cites)> = large
         .into_iter()
         .map(|(work, count)| {
-            let pages = (count.div_ceil(PAGE) as usize).min(per_work);
+            let pages = usize::try_from(count.div_ceil(PAGE)).map_or(per_work, |p| p.min(per_work));
             (
                 count,
                 Cites {

@@ -249,7 +249,7 @@ pub fn engine(providers: Vec<Arc<Scripted>>) -> Engine {
         .into_iter()
         .enumerate()
         .fold(Engine::builder(), |b, (i, p)| {
-            b.provider(p, ResiliencePolicy::default(), i as i32)
+            b.provider(p, ResiliencePolicy::default(), i32::try_from(i).unwrap())
         })
         .build()
 }

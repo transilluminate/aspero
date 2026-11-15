@@ -55,7 +55,7 @@ fn decode_hex(s: &str) -> Option<[u8; 32]> {
     let mut out = [0u8; 32];
     for (i, pair) in bytes.chunks(2).enumerate() {
         let digit = |c: u8| (c as char).to_digit(16);
-        out[i] = (digit(pair[0])? * 16 + digit(pair[1])?) as u8;
+        out[i] = u8::try_from(digit(pair[0])? * 16 + digit(pair[1])?).ok()?;
     }
     Some(out)
 }

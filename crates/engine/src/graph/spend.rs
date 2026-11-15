@@ -34,6 +34,8 @@ impl Spend {
     pub(super) fn affordable(&self) -> usize {
         match self.budget {
             None => usize::MAX,
+            // Floored and non-negative; a float cast saturates past usize::MAX.
+            #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
             Some(b) => ((b - self.spent) / LIST_PRICE + 1e-6).max(0.0).floor() as usize,
         }
     }

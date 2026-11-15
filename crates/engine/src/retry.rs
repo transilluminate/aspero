@@ -56,7 +56,9 @@ where
         }
         tracing::info!(
             target: "aspero::retry",
-            retry = retry + 1, delay_ms = delay.as_millis() as u64, error = %error,
+            retry = retry + 1,
+            delay_ms = u64::try_from(delay.as_millis()).unwrap_or(u64::MAX),
+            error = %error,
             "backing off"
         );
         tokio::time::sleep(delay).await;
@@ -101,10 +103,10 @@ mod tests {
         let calls = std::sync::Arc::new(AtomicU32::new(0));
         let counter = calls.clone();
         let op = move || {
-            let n = counter.fetch_add(1, Ordering::SeqCst) as usize;
-            std::future::ready(match errors.get(n) {
+            let n = counter.fetch_add(1, Ordering::SeqCst);
+            std::future::ready(match errors.get(n as usize) {
                 Some(e) => Err(e.clone()),
-                None => Ok(n as u32),
+                None => Ok(n),
             })
         };
         (op, calls)

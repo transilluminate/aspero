@@ -525,6 +525,7 @@ const CLASSES: [u8; 128] = {
     }
     let mut b = 0;
     while b < 128 {
+        #[allow(clippy::cast_possible_truncation)] // b < 128
         let c = b as u8;
         if c.is_ascii_digit() {
             classes[b] |= DIGIT;

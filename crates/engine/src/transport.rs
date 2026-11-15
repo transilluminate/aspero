@@ -160,7 +160,9 @@ impl HttpClient for Paced {
         let started = Instant::now();
         let url = loggable_url(&request.url);
         let result = self.inner.send(request).await;
-        let ms = |since: Instant, until: Instant| until.duration_since(since).as_millis() as u64;
+        let ms = |since: Instant, until: Instant| {
+            u64::try_from(until.duration_since(since).as_millis()).unwrap_or(u64::MAX)
+        };
         let (waited_ms, took_ms) = (ms(queued, started), ms(started, Instant::now()));
         match &result {
             Ok(resp) => tracing::info!(

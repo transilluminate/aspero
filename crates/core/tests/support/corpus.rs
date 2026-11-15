@@ -69,7 +69,7 @@ impl Rng {
     }
 
     fn pick<'a>(&mut self, items: &[&'a str]) -> &'a str {
-        items[self.below(items.len() as u64) as usize]
+        items[usize::try_from(self.below(items.len() as u64)).unwrap()]
     }
 }
 

@@ -50,7 +50,7 @@ fn mentions_carry_utf16_ranges() {
     let found = aspero(None).scan(text.into());
     let utf16: Vec<u16> = text.encode_utf16().collect();
     for m in &found {
-        let range = m.utf16.start as usize..m.utf16.end as usize;
+        let range = usize::try_from(m.utf16.start).unwrap()..usize::try_from(m.utf16.end).unwrap();
         assert_eq!(String::from_utf16(&utf16[range]).unwrap(), m.text);
     }
     assert_eq!(found.len(), 2);
@@ -62,7 +62,8 @@ fn pasted_lists_split_into_references() {
     let refs = aspero(None).split_references(list.into());
     assert_eq!(refs[0].text, "Smith J. One. 2020.");
     let utf16: Vec<u16> = list.encode_utf16().collect();
-    let second = refs[1].utf16.start as usize..refs[1].utf16.end as usize;
+    let second =
+        usize::try_from(refs[1].utf16.start).unwrap()..usize::try_from(refs[1].utf16.end).unwrap();
     assert_eq!(String::from_utf16(&utf16[second]).unwrap(), refs[1].text);
 }
 

@@ -714,6 +714,8 @@ struct Dependency {
 }
 
 #[derive(Debug, Serialize)]
+// The JSON's names: `dependencies` is a key of the notices file.
+#[allow(clippy::struct_field_names)]
 struct Dependencies<'a> {
     artefact: &'a str,
     version: &'a str,

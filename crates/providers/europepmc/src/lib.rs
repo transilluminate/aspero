@@ -236,6 +236,8 @@ struct AuthorList {
 
 #[derive(Debug, Default, Deserialize)]
 #[serde(default, rename_all = "camelCase")]
+// The wire's names: `authorId` is Europe PMC's.
+#[allow(clippy::struct_field_names)]
 struct Author {
     full_name: Option<String>,
     first_name: Option<String>,

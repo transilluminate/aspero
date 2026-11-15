@@ -1,7 +1,9 @@
 {
   "complete": true,
+  "incomplete": [],
   "odd_one_out": {
     "complete": true,
+    "incomplete": [],
     "items": [
       {
         "reason": "no_reference_data",
@@ -15,6 +17,7 @@
   },
   "probably_missing": {
     "complete": true,
+    "incomplete": [],
     "items": [
       {
         "cited_by": [
@@ -64,6 +67,7 @@
   },
   "related": {
     "complete": true,
+    "incomplete": [],
     "items": [
       {
         "co_cited_with": 2,
@@ -163,6 +167,7 @@
   },
   "retracted_references": {
     "complete": true,
+    "incomplete": [],
     "items": [
       {
         "cites": {

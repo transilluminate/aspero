@@ -10,8 +10,8 @@ use aspero_core::{
     Update, UpdateKind, Usage, Work, WorkId,
 };
 use aspero_engine::{
-    Analysis, AnalysisKind, Cache, Engine, IncompleteKind, OddOne, OddReason, SeedProblem,
-    SqliteCache, Stage,
+    Analysis, AnalysisKind, Cache, Engine, Incomplete, IncompleteKind, OddOne, OddReason,
+    SeedProblem, SqliteCache, Stage,
 };
 use async_trait::async_trait;
 use jiff::Timestamp;
@@ -558,7 +558,7 @@ async fn a_budget_stops_paid_calls_and_says_how_far_it_got() {
     assert!(!analysis.complete());
 
     let missing = analysis.probably_missing.unwrap();
-    let stop = missing.incomplete.unwrap();
+    let stop = only(missing.incomplete);
     assert_eq!(stop.kind, IncompleteKind::Budget);
     assert_eq!((stop.done, stop.total), (0, 6));
     // Ranked all the same, from the seeds' references (free), unlooked-up.
@@ -566,7 +566,7 @@ async fn a_budget_stops_paid_calls_and_says_how_far_it_got() {
     assert!(missing.items.iter().all(|m| m.record.is_none()));
 
     let retracted = analysis.retracted_references.unwrap();
-    let stop = retracted.incomplete.unwrap();
+    let stop = only(retracted.incomplete);
     assert_eq!(stop.kind, IncompleteKind::Budget);
     assert_eq!((stop.done, stop.total), (0, 7));
     assert!(alex.searches().is_empty());
@@ -921,7 +921,7 @@ async fn a_miss_asked_again_past_the_budget_is_over_budget() {
     let problems: Vec<Option<SeedProblem>> = analysis.seeds.iter().map(|s| s.problem).collect();
     assert_eq!(problems, [Some(SeedProblem::OverBudget); 2]);
     assert_eq!(alex.lookups(), [2]);
-    let stop = analysis.incomplete.as_ref().unwrap();
+    let stop = &only(analysis.incomplete.clone());
     assert_eq!(stop.kind, IncompleteKind::Budget);
     assert_eq!((stop.done, stop.total), (0, 2));
     assert!(!analysis.complete());
@@ -982,6 +982,20 @@ fn counted(mut works: Vec<SourceRecord>) -> Vec<SourceRecord> {
 
 fn spent(a: &Analysis) -> f64 {
     a.usage.iter().filter_map(|(_, u)| u.cost).sum()
+}
+
+/// The one thing that stopped an analysis.
+fn only(stops: Vec<Incomplete>) -> Incomplete {
+    assert_eq!(stops.len(), 1, "{stops:?}");
+    stops.into_iter().next().unwrap()
+}
+
+/// Each stop's kind, stage and how far it got, in order.
+fn stops(stops: &[Incomplete]) -> Vec<(IncompleteKind, Option<Stage>, u64, u64)> {
+    stops
+        .iter()
+        .map(|i| (i.kind, i.stage, i.done, i.total))
+        .collect()
 }
 
 /// Three papers (W1–W3), the works citing them (W101–W106) and what those
@@ -1195,7 +1209,7 @@ async fn related_works_are_the_same_every_time_and_reuse_the_cache() {
     // The shared page left out W107 (misdated: its references dropped)
     // from the rows it cached: counted the same, read or cached.
     let stop = |a: &Analysis| a.related.as_ref().unwrap().incomplete.clone();
-    assert_eq!((stop(&first), stop(&again)), (None, None));
+    assert_eq!((stop(&first), stop(&again)), (Vec::new(), Vec::new()));
     // Citing works, coupling's page and the candidates all cached.
     assert_eq!(
         alex.citing_pages().len(),
@@ -1253,7 +1267,7 @@ async fn a_classic_is_sampled_and_says_how_much() {
         .await
         .unwrap();
     let related = analysis.related.as_ref().unwrap();
-    let stop = related.incomplete.clone().unwrap();
+    let stop = only(related.incomplete.clone());
     assert_eq!(stop.kind, IncompleteKind::Capped);
     // The three papers' 8 citing works, and the classic's 1,000 most cited
     // of its 50,000.
@@ -1294,7 +1308,7 @@ async fn a_classic_sample_is_cached_whole() {
     assert_eq!(alex.citing_pages().len(), pages);
     assert_eq!(spent(&again), 0.0);
     assert_eq!(found(&again), found(&first));
-    let stop = again.related.unwrap().incomplete.unwrap();
+    let stop = only(again.related.unwrap().incomplete);
     assert_eq!((stop.kind, stop.done), (IncompleteKind::Capped, 1_008));
 }
 
@@ -1310,9 +1324,16 @@ async fn a_budget_shares_out_pages_and_says_how_far_they_got() {
         .await
         .unwrap();
     let related = analysis.related.as_ref().unwrap();
-    let stop = related.incomplete.clone().unwrap();
-    assert_eq!(stop.kind, IncompleteKind::Budget);
-    assert_eq!((stop.done, stop.total), (208, 50_008));
+    // The budget stopped the citing works and coupling's page; the
+    // classic would have been sampled anyway, and says so too.
+    assert_eq!(
+        stops(&related.incomplete),
+        [
+            (IncompleteKind::Budget, Some(Stage::Citing), 208, 50_008),
+            (IncompleteKind::Budget, Some(Stage::Coupling), 0, 5),
+            (IncompleteKind::Capped, Some(Stage::Citing), 208, 50_008),
+        ]
+    );
     let mut pages = alex.citing_pages();
     pages.sort();
     assert_eq!(pages, ["cites:W1|W2|W3", "cites:W9000"]);
@@ -1344,11 +1365,20 @@ async fn failing_pages_say_so() {
         .await
         .unwrap();
     let related = analysis.related.unwrap();
-    let stop = related.incomplete.unwrap();
-    assert_eq!(stop.kind, IncompleteKind::ProviderFailed);
-    assert_eq!(stop.stage, Some(Stage::Citing));
-    assert_eq!(stop.provider, Some(OPENALEX));
-    assert_eq!((stop.done, stop.total), (0, 8));
+    // Each stage that failed, and no cap: nothing was sampled.
+    assert_eq!(
+        stops(&related.incomplete),
+        [
+            (IncompleteKind::ProviderFailed, Some(Stage::Citing), 0, 8),
+            (IncompleteKind::ProviderFailed, Some(Stage::Coupling), 0, 5),
+        ]
+    );
+    assert!(
+        related
+            .incomplete
+            .iter()
+            .all(|i| i.provider == Some(OPENALEX))
+    );
     assert!(related.items.is_empty());
 }
 
@@ -1370,7 +1400,7 @@ async fn a_failed_lookup_says_it_was_the_lookup() {
         .await
         .unwrap();
     let related = analysis.related.unwrap();
-    let stop = related.incomplete.unwrap();
+    let stop = only(related.incomplete);
     assert_eq!(stop.kind, IncompleteKind::ProviderFailed);
     assert_eq!(stop.stage, Some(Stage::Lookup));
     assert_eq!(stop.provider, Some(OPENALEX));
@@ -1408,7 +1438,7 @@ async fn only_first_pages_are_read_where_only_they_can_be() {
         pages.iter().filter(|p| *p == "cites:W51|W50|W52").count(),
         1
     );
-    let stop = analysis.related.unwrap().incomplete.unwrap();
+    let stop = only(analysis.related.unwrap().incomplete);
     assert_eq!(stop.kind, IncompleteKind::Capped);
     assert_eq!(stop.stage, Some(Stage::Citing));
     assert_eq!((stop.done, stop.total), (208, 50_008));
@@ -1484,7 +1514,7 @@ async fn the_cap_on_pages_holds_for_works_cited_little() {
     // The seeds' two batches, 75 pages and the lookup (a ceiling).
     assert_eq!(estimate.requests, 2 + 75 + 1);
     assert!((spent(&run) - 0.0077).abs() < 1e-12, "{}", spent(&run));
-    let stop = run.related.unwrap().incomplete.unwrap();
+    let stop = only(run.related.unwrap().incomplete);
     assert_eq!(stop.kind, IncompleteKind::Capped);
     assert_eq!((stop.done, stop.total), (75 * 150, 120 * 150));
 }
@@ -1511,7 +1541,7 @@ async fn a_daily_cap_stops_like_a_budget() {
         )
         .await
         .unwrap();
-    let stop = analysis.retracted_references.unwrap().incomplete.unwrap();
+    let stop = only(analysis.retracted_references.unwrap().incomplete);
     assert_eq!(stop.kind, IncompleteKind::Budget);
     assert_eq!(stop.provider, None);
     assert!(alex.searches().is_empty());
@@ -1527,14 +1557,21 @@ async fn a_daily_cap_stops_like_a_budget() {
         )
         .await
         .unwrap();
-    let stop = analysis.related.unwrap().incomplete.unwrap();
-    assert_eq!(stop.kind, IncompleteKind::Budget, "{stop:?}");
-    assert_eq!(stop.stage, Some(Stage::Citing));
+    let incomplete = analysis.related.unwrap().incomplete;
+    assert_eq!(
+        stops(&incomplete),
+        [
+            (IncompleteKind::Budget, Some(Stage::Citing), 208, 50_008),
+            (IncompleteKind::Budget, Some(Stage::Coupling), 0, 5),
+            (IncompleteKind::Capped, Some(Stage::Citing), 208, 50_008),
+        ]
+    );
+    assert!(incomplete.iter().all(|i| i.provider.is_none()));
     assert!(alex.citing_pages().len() < 11, "{:?}", alex.citing_pages());
 }
 
-/// A retraction check failing, then the budget stopping a later one: the
-/// failure is what it says (the budget hid it).
+/// A retraction check failing, then the budget stopping a later one: both
+/// are said, the failure first (the budget once hid it).
 #[tokio::test(start_paused = true)]
 async fn a_failed_retraction_check_is_not_hidden_by_the_budget() {
     let mut works = library();
@@ -1571,10 +1608,16 @@ async fn a_failed_retraction_check_is_not_hidden_by_the_budget() {
         )
         .await
         .unwrap();
-    let stop = analysis.retracted_references.unwrap().incomplete.unwrap();
-    assert_eq!(stop.kind, IncompleteKind::ProviderFailed);
-    assert_eq!(stop.provider, Some(OPENALEX));
-    assert_eq!((stop.done, stop.total), (100, 257));
+    let incomplete = analysis.retracted_references.unwrap().incomplete;
+    assert_eq!(
+        stops(&incomplete),
+        [
+            (IncompleteKind::ProviderFailed, None, 100, 257),
+            (IncompleteKind::Budget, None, 100, 257),
+        ]
+    );
+    assert_eq!(incomplete[0].provider, Some(OPENALEX));
+    assert_eq!(incomplete[1].provider, None);
     assert_eq!(alex.searches().len(), 6);
 }
 
@@ -1687,9 +1730,16 @@ async fn pages_dearer_than_list_price_stop_within_the_budget() {
         .await
         .unwrap();
     assert_eq!(alex.citing_pages().len(), 2, "{:?}", alex.citing_pages());
-    let stop = analysis.related.clone().unwrap().incomplete.unwrap();
-    assert_eq!(stop.kind, IncompleteKind::Budget);
-    assert_eq!(stop.stage, Some(Stage::Citing));
+    // The lookup kept back is refused too: the dearer pages spent it.
+    assert_eq!(
+        stops(&analysis.related.clone().unwrap().incomplete),
+        [
+            (IncompleteKind::Budget, Some(Stage::Citing), 208, 50_008),
+            (IncompleteKind::Budget, Some(Stage::Coupling), 0, 5),
+            (IncompleteKind::Budget, Some(Stage::Lookup), 0, 18),
+            (IncompleteKind::Capped, Some(Stage::Citing), 208, 50_008),
+        ]
+    );
     // Over by what the last page cost past list price, not by three pages.
     assert!(
         (spent(&analysis) - 0.0007).abs() < 1e-12,

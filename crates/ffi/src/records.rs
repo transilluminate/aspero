@@ -2309,8 +2309,9 @@ pub struct RetractedReference {
 #[derive(Debug, Clone, uniffi::Record)]
 pub struct RetractedReferences {
     pub items: Vec<RetractedReference>,
-    /// What stopped the check, if anything.
-    pub incomplete: Option<Incomplete>,
+    /// What stopped the check: a failure, then the budget; empty when
+    /// nothing did.
+    pub incomplete: Vec<Incomplete>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Enum)]
@@ -2343,7 +2344,8 @@ pub struct OddOne {
 #[derive(Debug, Clone, uniffi::Record)]
 pub struct OddOnesOut {
     pub items: Vec<OddOne>,
-    pub incomplete: Option<Incomplete>,
+    /// What stopped it; empty when nothing did.
+    pub incomplete: Vec<Incomplete>,
 }
 
 /// A work several seeds cite that the set lacks.
@@ -2363,7 +2365,8 @@ pub struct MissingWork {
 #[derive(Debug, Clone, uniffi::Record)]
 pub struct ProbablyMissing {
     pub items: Vec<MissingWork>,
-    pub incomplete: Option<Incomplete>,
+    /// What stopped it; empty when nothing did.
+    pub incomplete: Vec<Incomplete>,
 }
 
 /// A work around the set, and why: co-cited with it, sharing its
@@ -2391,9 +2394,11 @@ pub struct RelatedWork {
 #[derive(Debug, Clone, uniffi::Record)]
 pub struct RelatedWorks {
     pub items: Vec<RelatedWork>,
-    /// What stopped it: `capped` when a much cited seed's citing works
-    /// were sampled; `done` of `total` as its `stage` counts them.
-    pub incomplete: Option<Incomplete>,
+    /// Every stop, in order: stages that failed, then those the budget
+    /// stopped, then `capped` when a much cited seed's citing works were
+    /// sampled; `done` of `total` as each one's `stage` counts them. Empty
+    /// when nothing stopped it.
+    pub incomplete: Vec<Incomplete>,
 }
 
 /// What an analysis would cost.
@@ -2425,8 +2430,8 @@ pub struct Analysis {
     pub estimate: Option<Estimate>,
     /// Every seed settled and every analysis run to the end.
     pub complete: bool,
-    /// Resolving the seeds stopped early.
-    pub incomplete: Option<Incomplete>,
+    /// What stopped resolving the seeds early; empty when nothing did.
+    pub incomplete: Vec<Incomplete>,
     /// Why there's no analysis at all (no OpenAlex).
     pub failure: Option<Failure>,
     pub usage: Vec<ProviderUsage>,
@@ -2449,14 +2454,14 @@ impl Analysis {
                     not_yet: Vec::new(),
                     estimate: None,
                     complete: false,
-                    incomplete: None,
+                    incomplete: Vec::new(),
                     failure: Some(Failure::from(&e)),
                     usage: Vec::new(),
                     related: None,
                 };
             }
         };
-        let incomplete = |i: &Option<engine::Incomplete>| i.as_ref().map(Incomplete::from);
+        let incomplete = |i: &[engine::Incomplete]| i.iter().map(Incomplete::from).collect();
         Analysis {
             seeds: a
                 .seeds

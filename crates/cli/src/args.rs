@@ -541,7 +541,7 @@ Analyses (--kinds, comma-separated):
                     hundreds counts for little); `seeds` link it. From the
                     works citing the set, 200 per $0.0001 page: a seed
                     cited more than 1,000 times is sampled (its 1,000 most
-                    cited citing works; `incomplete: {kind: capped}`), at
+                    cited citing works; `incomplete: [{kind: capped}]`), at
                     most 75 pages in all, plus 5 of works citing the set's
                     most shared references. A set of 25 works cited 300
                     times each costs about $0.006. Not run unless asked for
@@ -550,8 +550,9 @@ Costs are fractions of a cent for a set of 50: --estimate says what a run
 would cost without paid requests (seeds are resolved from the cache and
 free lookups, so the run finds them cached). --budget stops before any
 request that could spend more; what was stopped says how far it got:
-`complete: false`, `incomplete: {kind: budget|provider_failed|capped,
-done, total}`. Related works add the `stage` that stopped, which `done`
+`complete: false`, and `incomplete` lists every stop (empty when
+complete), each `{kind: budget|provider_failed|capped, done, total}`.
+Related works add the `stage` that stopped, which `done`
 and `total` then count: `citing` (citing works read), `coupling` (pages
 of works citing the shared references) or `lookup` (works looked up);
 and a failure, the `provider` (its error is logged to stderr). Without

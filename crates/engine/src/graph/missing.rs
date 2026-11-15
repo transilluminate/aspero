@@ -72,7 +72,7 @@ impl Engine {
             .collect();
         items.sort_by(|a, b| b.count().cmp(&a.count()).then(a.id.cmp(&b.id)));
         items.truncate(limit);
-        Section::new(items, looked.stop)
+        Section::new(items, looked.stops)
     }
 }
 
@@ -84,7 +84,7 @@ impl Engine {
 pub(super) fn odd_one_out(groups: &[Group]) -> Section<OddOne> {
     let mut items = Vec::new();
     if groups.len() < 2 {
-        return Section::new(items, None);
+        return Section::new(items, Vec::new());
     }
     for (g, group) in groups.iter().enumerate() {
         let linked = groups.iter().enumerate().any(|(h, other)| {
@@ -105,7 +105,7 @@ pub(super) fn odd_one_out(groups: &[Group]) -> Section<OddOne> {
         items.extend(group.members.iter().map(|&seed| OddOne { seed, reason }));
     }
     items.sort_by_key(|o| o.seed);
-    Section::new(items, None)
+    Section::new(items, Vec::new())
 }
 
 #[cfg(test)]

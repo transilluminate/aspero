@@ -146,10 +146,11 @@ impl<'a> TheSet<'a> {
 }
 
 /// Candidates looked up: a record (or none) for each, and what stopped
-/// the lookup, if anything (`done` of `total` works answered).
+/// the lookup, if anything (`done` of `total` works answered): a failure,
+/// then the budget.
 pub(super) struct Looked {
     pub(super) records: Vec<Option<SourceRecord>>,
-    pub(super) stop: Option<Incomplete>,
+    pub(super) stops: Vec<Incomplete>,
 }
 
 impl Engine {
@@ -172,7 +173,7 @@ impl Engine {
         let paid = paid_batches(uncached, entry);
         let mut looked = Looked {
             records: vec![None; ids.len()],
-            stop: None,
+            stops: Vec::new(),
         };
         if spend.estimating {
             spend.requests += paid as u64;
@@ -182,7 +183,7 @@ impl Engine {
             return looked;
         }
         if !spend.allows(paid) {
-            looked.stop = Some(Incomplete::new(IncompleteKind::Budget, 0, ids.len()));
+            looked.stops = vec![Incomplete::new(IncompleteKind::Budget, 0, ids.len())];
             return looked;
         }
         let mut usage = Vec::new();
@@ -197,13 +198,11 @@ impl Engine {
             .filter(|(a, _)| matches!(&a.outcome, Outcome::Failed(e) if e.kind() == ErrorKind::BudgetCapped))
             .count();
         let done = ids.len() - failed;
-        looked.stop = match (failed > capped, capped > 0) {
-            (true, _) => Some(
-                Incomplete::new(IncompleteKind::ProviderFailed, done, ids.len()).from(provider),
-            ),
-            (false, true) => Some(Incomplete::new(IncompleteKind::Budget, done, ids.len())),
-            (false, false) => None,
-        };
+        let failure = (failed > capped).then(|| {
+            Incomplete::new(IncompleteKind::ProviderFailed, done, ids.len()).from(provider)
+        });
+        let over = (capped > 0).then(|| Incomplete::new(IncompleteKind::Budget, done, ids.len()));
+        looked.stops = failure.into_iter().chain(over).collect();
         looked.records = answers.into_iter().map(|(_, r)| r).collect();
         looked
     }

@@ -2,8 +2,9 @@
 //!
 //! Works are lean (or full) `work` objects; the works of a set are named by
 //! their index in `seeds`. Anything stopped early says so: `complete` is
-//! false, and `incomplete` gives a kind (`capped`, `budget`,
-//! `provider_failed`) and how far it got (`done` of `total`).
+//! false, and `incomplete` lists every stop (empty when there were none),
+//! each a kind (`capped`, `budget`, `provider_failed`) and how far it got
+//! (`done` of `total`).
 
 use aspero_engine::{
     Analysis, Estimate, Incomplete, Missing, OddOne, ReferencesPage, RelatedWork,
@@ -85,9 +86,7 @@ pub fn analysis(a: &Analysis, full: bool) -> Value {
         out.insert("estimate".into(), estimate(e));
     }
     out.insert("complete".into(), json!(a.complete()));
-    if let Some(i) = &a.incomplete {
-        out.insert("incomplete".into(), incomplete(i));
-    }
+    out.insert("incomplete".into(), incompletes(&a.incomplete));
     out.insert("usage".into(), work::usage(&a.usage));
     Value::Object(out)
 }
@@ -199,15 +198,19 @@ pub fn seed(index: usize, s: &Seed, full: bool) -> Value {
     Value::Object(out)
 }
 
-/// An analysis' findings: `complete`, `incomplete` when not, and `items`.
+/// An analysis' findings: `complete`, `incomplete` (what stopped it,
+/// empty when complete), and `items`.
 fn section<T>(s: &Section<T>, item: impl Fn(&T) -> Value) -> Value {
     let mut out = Map::new();
     out.insert("complete".into(), json!(s.complete()));
-    if let Some(i) = &s.incomplete {
-        out.insert("incomplete".into(), incomplete(i));
-    }
+    out.insert("incomplete".into(), incompletes(&s.incomplete));
     out.insert("items".into(), s.items.iter().map(item).collect());
     Value::Object(out)
+}
+
+/// Every stop, in order, each as [`incomplete`] gives it.
+fn incompletes(stops: &[Incomplete]) -> Value {
+    stops.iter().map(incomplete).collect()
 }
 
 /// `{kind, done, total}`: what stopped a step, and how far it got; with
@@ -298,13 +301,14 @@ mod tests {
         let doc = json!({
             "seeds": [{"index": 0, "input": "10.1/a", "status": "resolved"}],
             "with_references": 1,
-            "odd_one_out": {"complete": true, "items": []},
+            "odd_one_out": {"complete": true, "incomplete": [], "items": []},
             "related": {
                 "complete": false,
-                "incomplete": {"kind": "capped", "stage": "citing", "done": 200, "total": 900},
+                "incomplete": [{"kind": "capped", "stage": "citing", "done": 200, "total": 900}],
                 "items": [{"id": "openalex:W1", "score": 1.0}, {"id": "openalex:W2", "score": 0.5}],
             },
             "complete": false,
+            "incomplete": [],
             "usage": {"openalex": {"cost": 0.0002}},
         });
         assert_eq!(
@@ -316,12 +320,13 @@ mod tests {
                 json!({
                     "section": "summary",
                     "with_references": 1,
-                    "odd_one_out": {"complete": true},
+                    "odd_one_out": {"complete": true, "incomplete": []},
                     "related": {
                         "complete": false,
-                        "incomplete": {"kind": "capped", "stage": "citing", "done": 200, "total": 900},
+                        "incomplete": [{"kind": "capped", "stage": "citing", "done": 200, "total": 900}],
                     },
                     "complete": false,
+                    "incomplete": [],
                     "usage": {"openalex": {"cost": 0.0002}},
                 }),
             ]

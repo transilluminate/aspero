@@ -205,17 +205,16 @@ struct Stop {
 }
 
 impl Stops {
-    /// What stopped related works, the first stage that failed first, then
-    /// the first stopped by the budget, then a sample (`done` of `total`
-    /// citing works read, or `sampled`): each with its stage and how far
-    /// that got. Only one is said; the others are logged (a warning each),
-    /// not hidden.
+    /// What stopped related works: the stages that failed, then those
+    /// stopped by the budget, each in stage order, then a sample (`sampled`,
+    /// or `done` of `total` citing works read with nothing else stopping
+    /// them), each with its stage and how far that got.
     fn incomplete(
         &self,
         (done, total): (u64, u64),
         sampled: bool,
         provider: &ProviderId,
-    ) -> Option<Incomplete> {
+    ) -> Vec<Incomplete> {
         let stages = [
             (Stage::Citing, self.citing, (done, total)),
             (Stage::Coupling, self.coupling, self.coupling_pages),
@@ -230,22 +229,12 @@ impl Stops {
         };
         let failed = stages.iter().filter(|(_, s, _)| s.failed);
         let budget = stages.iter().filter(|(_, s, _)| s.budget);
-        let mut all = failed
+        let short = done < total && !self.citing.failed && !self.citing.budget;
+        failed
             .map(|&s| at(IncompleteKind::ProviderFailed, s))
             .chain(budget.map(|&s| at(IncompleteKind::Budget, s)))
-            .chain((done < total || sampled).then(|| at(IncompleteKind::Capped, stages[0])));
-        let first = all.next()?;
-        for also in all {
-            tracing::warn!(
-                target: "aspero::graph",
-                kind = also.kind.as_str(),
-                stage = also.stage.map(Stage::as_str),
-                done = also.done,
-                total = also.total,
-                "related works stopped here too"
-            );
-        }
-        Some(first)
+            .chain((sampled || short).then(|| at(IncompleteKind::Capped, stages[0])))
+            .collect()
     }
 }
 
@@ -329,7 +318,7 @@ impl Engine {
         if spend.estimating {
             spend.requests += (citing_paid + coupling_paid + lookups) as u64;
             spend.ceiling |= coupling_paid + lookups > 0;
-            return Section::new(Vec::new(), None);
+            return Section::new(Vec::new(), Vec::new());
         }
 
         // The budget, less the lookups, is shared out before reading, a
@@ -443,9 +432,10 @@ impl Engine {
 
         // How many of the set's citing works were read.
         let (mut done, mut total) = (0u64, 0u64);
-        // A work of unknown count not read to the end: a sample, of how
-        // many no one knows.
-        let mut sampled = false;
+        // A much cited work's citing works sampled by the plan, whatever
+        // else stopped the reading; or a work of unknown count not read to
+        // the end: a sample, of how many no one knows.
+        let mut sampled = works.iter().zip(&targets).any(|((_, count), t)| t < count);
         for (((work, count), cached), target) in works.iter().zip(cached).zip(&targets) {
             let (read, complete) = match cached {
                 Some((cited, n, complete)) => {
@@ -519,9 +509,9 @@ impl Engine {
         let looked = self
             .look_up(entry, &ids, spend, "related works' lookup failed")
             .await;
-        if let Some(stop) = &looked.stop {
-            stops.lookup.failed = stop.kind == IncompleteKind::ProviderFailed;
-            stops.lookup.budget = stop.kind == IncompleteKind::Budget;
+        for stop in &looked.stops {
+            stops.lookup.failed |= stop.kind == IncompleteKind::ProviderFailed;
+            stops.lookup.budget |= stop.kind == IncompleteKind::Budget;
             stops.lookups = (stop.done, stop.total);
         }
 

@@ -64,22 +64,15 @@ impl Engine {
                 }
             }
         }
-        // A failure first, as related works say it; the budget too, logged.
-        let incomplete = match (failed, budget) {
-            (true, also) => {
-                if also {
-                    tracing::warn!(target: "aspero::graph", done, total = cited.len(), "retraction check stopped at the budget too");
-                }
-                Some(
-                    Incomplete::new(IncompleteKind::ProviderFailed, done, cited.len())
-                        .from(provider.clone()),
-                )
-            }
-            (false, true) => Some(Incomplete::new(IncompleteKind::Budget, done, cited.len())),
-            (false, false) => None,
-        };
+        // A failure first, as related works say it, then the budget.
+        let failure = failed.then(|| {
+            Incomplete::new(IncompleteKind::ProviderFailed, done, cited.len())
+                .from(provider.clone())
+        });
+        let over = budget.then(|| Incomplete::new(IncompleteKind::Budget, done, cited.len()));
+        let incomplete: Vec<Incomplete> = failure.into_iter().chain(over).collect();
         if spend.estimating {
-            return Section::new(Vec::new(), None);
+            return Section::new(Vec::new(), Vec::new());
         }
 
         // Notices aspero already has: cached records' own flags, and the

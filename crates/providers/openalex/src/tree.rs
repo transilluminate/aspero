@@ -156,7 +156,7 @@ fn text_clause(field: TermField, node: &QueryNode, negated: bool) -> Result<Clau
 /// operator.
 fn text_value(value: &str, phrase: bool, grouped: bool) -> String {
     let words: Vec<String> = value
-        .split(|c: char| c.is_whitespace() || "\"(),|!:*?~\\[]{}^".contains(c))
+        .split(|c: char| c.is_whitespace() || "\"(),|!:*?~\\[]{}^<>=".contains(c))
         .map(|w| w.trim_start_matches(['-', '+']))
         .filter(|w| !w.is_empty())
         .map(|w| match w {
@@ -485,6 +485,13 @@ mod tests {
         assert_eq!(plan(tree).unwrap().filters, ["title.search:!(a AND (b c))"]);
         let tree = QueryNode::None(vec![term(TermField::Abstract, "x, y|z")]);
         assert_eq!(plan(tree).unwrap().filters, ["abstract.search:!x y z"]);
+        let tree = QueryNode::All(vec![
+            term(TermField::Title, "a<b"),
+            term(TermField::Keywords, "x >= y"),
+        ]);
+        let p = plan(tree).unwrap();
+        assert_eq!(p.filters, ["title.search:a b"]);
+        assert_eq!(p.search.as_deref(), Some("x y"));
     }
 
     #[test]

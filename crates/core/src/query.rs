@@ -297,6 +297,20 @@ impl QueryNode {
                 })
             }
             QueryNode::Term(t) if t.field == TermField::Identifier => t.work_id().map(|_| ()),
+            // Punctuation alone is no words: sources find nothing, or fail,
+            // and dropping the term would widen the search.
+            QueryNode::Term(t) if !t.value.chars().any(char::is_alphanumeric) => {
+                let have = if t.field == TermField::Keywords {
+                    "have"
+                } else {
+                    "has"
+                };
+                Err(format!(
+                    "the {} {:?} {have} no letters or digits to search for",
+                    t.field.name(),
+                    t.value
+                ))
+            }
             QueryNode::Term(_) => Ok(()),
             QueryNode::Filter(FilterValue::Language(code)) => language(code)
                 .map(|_| ())
@@ -806,9 +820,11 @@ pub fn lucene_term(prefix: Option<&str>, value: &str, phrase: bool) -> String {
 
 /// User text as words, never syntax: special characters escaped, and the
 /// operators `AND`, `OR` and `NOT` (as words) quoted, so they are searched
-/// for rather than obeyed.
+/// for rather than obeyed. `<`, `>` and `=` are dropped: Elasticsearch
+/// reads `<` and `>` as ranges and can't escape them (in a phrase they
+/// are only text).
 pub fn lucene_words(text: &str) -> String {
-    escape_lucene(text)
+    escape_lucene(&text.replace(['<', '>', '='], " "))
         .split_whitespace()
         .map(|word| match word {
             "AND" | "OR" | "NOT" => format!("\"{}\"", word.to_lowercase()),
@@ -921,6 +937,24 @@ mod tests {
         }
         for good in ["book", "peer-review", "posted-content", "Reference-Entry"] {
             assert_eq!(types(good).validate(), Ok(()), "{good}");
+        }
+        // Words are letters or digits: punctuation alone finds nothing (or
+        // fails), and leaving it out would widen the search.
+        assert_eq!(
+            QueryNode::All(vec![
+                title("x"),
+                QueryNode::term(TermField::Keywords, "***")
+            ])
+            .validate()
+            .unwrap_err(),
+            r#"the keywords "***" have no letters or digits to search for"#
+        );
+        assert_eq!(
+            title("?!").validate().unwrap_err(),
+            r#"the title "?!" has no letters or digits to search for"#
+        );
+        for good in ["C++", "β-lactam", "3", "細胞"] {
+            assert_eq!(title(good).validate(), Ok(()), "{good}");
         }
         let lang = QueryNode::filter(FilterValue::Language("eng".into()));
         assert!(lang.validate().unwrap_err().contains("ISO 639-1"));
@@ -1061,6 +1095,10 @@ mod tests {
         );
         let top = QueryNode::None(vec![title("a")]);
         assert_eq!(render_lucene(&top, &mut leaf).unwrap(), "(NOT TITLE:(a))");
+        // `<` and `>` can't be escaped (Elasticsearch takes them for
+        // ranges): words lose them, and `=`; phrases keep them.
+        assert_eq!(lucene_words("a<b >=c d="), "a b c d");
+        assert_eq!(lucene_term(None, "a<b", true), r#""a<b""#);
         let bad = QueryNode::All(vec![
             title("a"),
             QueryNode::filter(FilterValue::HasAbstract),

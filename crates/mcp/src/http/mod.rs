@@ -326,6 +326,13 @@ impl Shared {
         });
     }
 
+    /// Initialized sessions whose clients are still connected.
+    fn listening(&self) -> usize {
+        let mut listeners = self.listeners.lock().unwrap_or_else(|e| e.into_inner());
+        listeners.retain(|l| !l.peer.is_transport_closed());
+        listeners.len()
+    }
+
     /// Sends `notifications/tools/list_changed`, on `runtime`, to the open
     /// sessions `which` picks (by key id and hash), without waiting: a slow
     /// or gone client holds up no one, and its errors are ignored.
@@ -772,9 +779,12 @@ impl HttpServer {
     pub fn status(&self) -> Status {
         let state = &self.state;
         let usage = state.usage.lock().unwrap_or_else(|e| e.into_inner());
+        // Without waiting: while a session opens or closes, the sessions
+        // whose clients are connected. (The owners on record can include
+        // sessions ended idle.)
         let sessions = match state.manager.sessions.try_read() {
             Ok(live) => live.len(),
-            Err(_) => state.owners.lock().unwrap_or_else(|e| e.into_inner()).len(),
+            Err(_) => state.shared.listening(),
         };
         Status {
             running: self.running.load(Ordering::Relaxed),
@@ -902,6 +912,33 @@ mod tests {
         assert!(!server.status().running);
         std::net::TcpListener::bind(("127.0.0.1", port)).expect("the port is free");
         // And again: nothing left to do.
+        server.stop().await;
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn status_counts_no_ended_sessions_while_sessions_change() {
+        let tools = Arc::new(Tools::new(aspero_engine::Engine::builder().build()));
+        let config = HttpConfig {
+            port: 0,
+            ..HttpConfig::default()
+        };
+        let ledger = Arc::new(MemoryLedger::default());
+        let server = HttpServer::start(tools, config, None, ledger)
+            .await
+            .unwrap();
+        // A session that ended idle, its owner still on record.
+        server.state.owners.lock().unwrap().insert(
+            "gone".into(),
+            Owner {
+                key_id: "k".into(),
+                digest: [0; 32],
+            },
+        );
+        {
+            // A session opening or closing meanwhile.
+            let _busy = server.state.manager.sessions.write().await;
+            assert_eq!(server.status().sessions, 0);
+        }
         server.stop().await;
     }
 

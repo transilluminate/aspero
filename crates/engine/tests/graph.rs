@@ -1693,3 +1693,29 @@ async fn pages_dearer_than_list_price_stop_within_the_budget() {
         spent(&analysis)
     );
 }
+
+/// A work of the set whose `cited_by_count` OpenAlex doesn't give is read
+/// (a page of its own), not taken for uncited: the same works are found as
+/// with its count known.
+#[tokio::test(start_paused = true)]
+async fn a_work_cited_an_unknown_number_of_times_is_read() {
+    let kinds = [AnalysisKind::Related { limit: 20 }];
+    let seeds = inputs(&AROUND[..3]);
+    let (engine_known, _) = around_engine(None);
+    let known = engine_known
+        .analyse(&seeds, &kinds, None, false)
+        .await
+        .unwrap();
+
+    let mut works = around();
+    works[0].work.cited_by_count = None;
+    let alex = Arc::new(Alex::new(works));
+    let analysis = engine(alex.clone(), None)
+        .analyse(&seeds, &kinds, None, false)
+        .await
+        .unwrap();
+    assert_eq!(alex.citing_pages()[..2], ["cites:W1", "cites:W2|W3"]);
+    let related = analysis.related.as_ref().unwrap();
+    assert!(related.complete(), "{:?}", related.incomplete);
+    assert_eq!(found(&analysis), found(&known));
+}

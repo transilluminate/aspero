@@ -207,9 +207,15 @@ struct Stop {
 impl Stops {
     /// What stopped related works, the first stage that failed first, then
     /// the first stopped by the budget, then a sample (`done` of `total`
-    /// citing works read): each with its stage and how far that got. Only
-    /// one is said; the others are logged (a warning each), not hidden.
-    fn incomplete(&self, (done, total): (u64, u64), provider: &ProviderId) -> Option<Incomplete> {
+    /// citing works read, or `sampled`): each with its stage and how far
+    /// that got. Only one is said; the others are logged (a warning each),
+    /// not hidden.
+    fn incomplete(
+        &self,
+        (done, total): (u64, u64),
+        sampled: bool,
+        provider: &ProviderId,
+    ) -> Option<Incomplete> {
         let stages = [
             (Stage::Citing, self.citing, (done, total)),
             (Stage::Coupling, self.coupling, self.coupling_pages),
@@ -227,7 +233,7 @@ impl Stops {
         let mut all = failed
             .map(|&s| at(IncompleteKind::ProviderFailed, s))
             .chain(budget.map(|&s| at(IncompleteKind::Budget, s)))
-            .chain((done < total).then(|| at(IncompleteKind::Capped, stages[0])));
+            .chain((done < total || sampled).then(|| at(IncompleteKind::Capped, stages[0])));
         let first = all.next()?;
         for also in all {
             tracing::warn!(
@@ -264,13 +270,20 @@ impl Engine {
             n => n,
         };
         // The set's works, each once, with how often each is cited.
+        // A work whose count OpenAlex doesn't give is read as if cited a
+        // page's worth (a page of its own), and counted by what's read.
         let mut counts: BTreeMap<WorkId, u64> = BTreeMap::new();
+        let mut unknown: BTreeSet<WorkId> = BTreeSet::new();
         for group in groups {
             for &m in &group.members {
                 if let Some(record) = &seeds[m].record
                     && let Some(work) = openalex_id(record)
                 {
-                    counts.insert(work.clone(), record.work.cited_by_count.unwrap_or(0));
+                    let count = record.work.cited_by_count.unwrap_or_else(|| {
+                        unknown.insert(work.clone());
+                        PAGE
+                    });
+                    counts.insert(work.clone(), count);
                 }
             }
         }
@@ -430,8 +443,10 @@ impl Engine {
 
         // How many of the set's citing works were read.
         let (mut done, mut total) = (0u64, 0u64);
+        // A work of unknown count not read to the end: a sample, of how
+        // many no one knows.
+        let mut sampled = false;
         for (((work, count), cached), target) in works.iter().zip(cached).zip(&targets) {
-            total += count;
             let (read, complete) = match cached {
                 Some((cited, n, complete)) => {
                     for (id, refs) in cited {
@@ -444,6 +459,12 @@ impl Engine {
                     None => (0, *target == 0 && *count == 0),
                 },
             };
+            if unknown.contains(work) {
+                (done, total) = (done + read, total + read);
+                sampled |= !complete;
+                continue;
+            }
+            total += count;
             done += if complete { *count } else { read.min(*count) };
         }
 
@@ -548,7 +569,7 @@ impl Engine {
         items.sort_by(|a, b| b.score.total_cmp(&a.score).then(a.id.cmp(&b.id)));
         items.truncate(limit as usize);
 
-        Section::new(items, stops.incomplete((done, total), &provider))
+        Section::new(items, stops.incomplete((done, total), sampled, &provider))
     }
 
     /// Reads a job's pages, each if the `purse` has it; `years` are the

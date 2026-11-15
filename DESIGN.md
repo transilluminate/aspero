@@ -376,6 +376,9 @@ from `cites:` pages); G3 OpenCitations as a free source of citing works.
     before reading, a page at a time (each filter's first page, then
     second pages, …; coupling's last), keeping back the lookup; filters
     are read four at a time. 25 works cited 300 times each: 50 pages.
+    A work without a `cited_by_count` gets a page of its own, and counts
+    as many citing works as it read (`capped` if that page wasn't its
+    last): before, it was taken for uncited and never read.
   - *Co-citation:* the citing works read that cite a work and at least
     one work of the set, once each however many of the set they cite
     (a review citing ten seeds counts once). A seed citing another seed

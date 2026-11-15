@@ -348,8 +348,10 @@ from `cites:` pages); G3 OpenCitations as a free source of citing works.
 - **Identity.** Seeds, and works found, are one work when they share a
   DOI, PMID or arXiv ID (published records list their preprint's arXiv
   copy), else on the same title (similarity ≥ 0.9, a reply or erratum
-  never the work it answers), first author and years ±1. Merged ids are
-  kept; counts are over merged seeds ("cited by k of n").
+  never the work it answers), first author and years ±1; or one work
+  through another (a record carrying one's DOI and the other's arXiv
+  ID: every pair is compared). Merged ids are kept; counts are over
+  merged seeds ("cited by k of n").
 - **Retracted references:** the union of the seeds' references checked
   with `openalex:A|B|…,is_retracted:true`, 100 per request ($0.0001; the
   same as a lookup batch), plus, without calls, notices already cached:
@@ -357,8 +359,9 @@ from `cites:` pages); G3 OpenCitations as a free source of citing works.
   their DOIs.
 - **Odd one out:** a seed citing no other seed, cited by none, sharing no
   references, is `no_links`; with unknown references it's
-  `no_reference_data`, unless another seed cites it (then it isn't odd).
-  Free. Nothing is odd in a set of fewer than two works.
+  `no_reference_data`, unless another seed cites it (then it isn't odd);
+  so is one a seed of unknown references may cite (one not dated more
+  than a year before it): whether it's linked can't be told. Free. Nothing is odd in a set of fewer than two works.
 - **Probably missing:** references counted over merged seeds, works of the
   set left out (and, after the lookup, any work sharing an identifier with
   any seed, resolved or not), at least two citing, most cited first (ties
@@ -380,6 +383,9 @@ from `cites:` pages); G3 OpenCitations as a free source of citing works.
     before reading, a page at a time (each filter's first page, then
     second pages, …; coupling's last), keeping back the lookup; filters
     are read four at a time. 25 works cited 300 times each: 50 pages.
+    A work without a `cited_by_count` gets a page of its own, and counts
+    as many citing works as it read (`capped` if that page wasn't its
+    last): before, it was taken for uncited and never read.
   - *Co-citation:* the citing works read that cite a work and at least
     one work of the set, once each however many of the set they cite
     (a review citing ten seeds counts once). A seed citing another seed
@@ -428,9 +434,11 @@ from `cites:` pages); G3 OpenCitations as a free source of citing works.
     set's `cited_by_count`s promise (`capped` when a work was sampled);
     `coupling`, pages read of coupling's sample; `lookup`, works answered
     of those asked about. A failure (`provider_failed`, with the
-    `provider`) comes first, then `budget`, then `capped`, and is logged
-    at warn (the CLI shows warnings without `-v`, but not each failed
-    request). Before, a failed lookup or coupling page said
+    `provider`) comes first, then `budget` (the caller's daily cap on
+    OpenAlex too: it is theirs, not a failing provider), then `capped`,
+    and is logged at warn (the CLI shows warnings without `-v`, but not
+    each failed request); stops not said (one per section) are logged at
+    warn too. A retraction check failing likewise outranks the budget. Before, a failed lookup or coupling page said
     `provider_failed` with every citing work read (done = total), and
     nothing said why.
   - *Without a key* (seen 2026-11-14) OpenAlex refuses a cursor past the

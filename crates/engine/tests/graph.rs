@@ -32,6 +32,12 @@ struct Alex {
     searches: Mutex<Vec<String>>,
     /// Identifiers its lookups don't find works by.
     blind: Vec<WorkId>,
+    /// Identifiers whose lookups fail, with a server error.
+    broken: Vec<WorkId>,
+    /// The day's use, when it reports it (out of $1), as a key does.
+    day: Mutex<Option<f64>>,
+    /// What a page of citing works costs.
+    page_cost: f64,
 }
 
 impl Alex {
@@ -39,6 +45,7 @@ impl Alex {
         let mut caps = Capabilities::default();
         caps.lookup_kinds = vec![IdKind::Doi, IdKind::Arxiv, IdKind::Pmid, IdKind::OpenAlex];
         caps.max_batch = 100;
+        caps.max_free_batch = 1;
         caps.fields = FieldSet::ALL;
         caps.search = true;
         Alex {
@@ -49,13 +56,39 @@ impl Alex {
             lookups: Mutex::default(),
             searches: Mutex::default(),
             blind: Vec::new(),
+            broken: Vec::new(),
+            day: Mutex::default(),
+            page_cost: 0.0001,
         }
+    }
+
+    /// Reports the day's use (out of $1) with each answer.
+    fn metered(self) -> Self {
+        *self.day.lock().unwrap() = Some(0.0);
+        self
+    }
+
+    /// What a call costs, and the day's use after it when metered.
+    fn charge(&self, cost: f64) -> Usage {
+        let mut usage = usage(cost);
+        if let Some(used) = self.day.lock().unwrap().as_mut() {
+            *used += cost;
+            usage.limit = Some(1.0);
+            usage.remaining = Some(1.0 - *used);
+        }
+        usage
     }
 
     /// Finds no work by `ids`, as OpenAlex's batch filter finds none by
     /// a DOI it doesn't index.
     fn blind(mut self, ids: &[&str]) -> Self {
         self.blind = ids.iter().map(|i| i.parse().unwrap()).collect();
+        self
+    }
+
+    /// Fails every lookup asking about any of `ids`.
+    fn broken(mut self, ids: &[&str]) -> Self {
+        self.broken = ids.iter().map(|i| i.parse().unwrap()).collect();
         self
     }
 
@@ -161,6 +194,12 @@ impl Provider for Alex {
             });
         }
         drop(failing);
+        if ids.iter().any(|id| self.broken.contains(id)) {
+            return Err(Error::Server {
+                status: 503,
+                message: None,
+            });
+        }
         let lookups = ids
             .iter()
             .map(|id| Lookup {
@@ -173,7 +212,7 @@ impl Provider for Alex {
             })
             .collect();
         let cost = if ids.len() > 1 { 0.0001 } else { 0.0 };
-        Ok(Response::with_usage(lookups, usage(cost)))
+        Ok(Response::with_usage(lookups, self.charge(cost)))
     }
 
     async fn search(&self, query: &SearchQuery) -> Result<Response<Page>> {
@@ -185,7 +224,7 @@ impl Provider for Alex {
         if let Some(cited) = filter.strip_prefix("cites:") {
             return Ok(Response::with_usage(
                 self.citing(cited, query),
-                usage(0.0001),
+                self.charge(self.page_cost),
             ));
         }
         let ids = filter
@@ -201,7 +240,7 @@ impl Provider for Alex {
             .collect();
         Ok(Response::with_usage(
             Page::new(hits, None, None),
-            usage(0.0001),
+            self.charge(0.0001),
         ))
     }
 }
@@ -665,6 +704,8 @@ struct Doiorg {
     caps: Capabilities,
     works: Vec<SourceRecord>,
     lookups: Mutex<Vec<Vec<WorkId>>>,
+    /// Every lookup fails, with a server error.
+    down: bool,
 }
 
 impl Doiorg {
@@ -676,6 +717,7 @@ impl Doiorg {
             caps,
             works,
             lookups: Mutex::default(),
+            down: false,
         }
     }
 }
@@ -692,6 +734,12 @@ impl Provider for Doiorg {
 
     async fn lookup(&self, ids: &[WorkId], _: FieldSet) -> Result<Response<Vec<Lookup>>> {
         self.lookups.lock().unwrap().push(ids.to_vec());
+        if self.down {
+            return Err(Error::Server {
+                status: 503,
+                message: None,
+            });
+        }
         let lookups = ids
             .iter()
             .map(|id| Lookup {
@@ -801,6 +849,82 @@ async fn seeds_missed_by_their_doi_resolve_as_lookup_finds_them() {
     assert!(!missing.contains(&"openalex:W90".into()), "{missing:?}");
     assert!(!missing.contains(&"openalex:W91".into()), "{missing:?}");
     assert!(missing.contains(&"openalex:W11".into()));
+}
+
+/// A seed OpenAlex misses by its DOI is `not_found` only once settled:
+/// the lookup elsewhere failing, or OpenAlex failing when asked again,
+/// leaves it unresolved by a failure, and the analysis incomplete.
+#[tokio::test(start_paused = true)]
+async fn a_miss_is_not_found_only_once_settled() {
+    let (works, registered) = moved();
+    let seeds = inputs(&["10.1000/b", "10.2000/old"]);
+    let kinds = [AnalysisKind::OddOneOut];
+    // The registry fails.
+    let alex = Arc::new(Alex::new(works.clone()));
+    let mut doiorg = Doiorg::new(registered.clone());
+    doiorg.down = true;
+    let engine = Engine::builder()
+        .provider(alex, policy(), 10)
+        .provider(Arc::new(doiorg), policy(), 20)
+        .build();
+    let analysis = engine.analyse(&seeds, &kinds, None, false).await.unwrap();
+    assert_eq!(analysis.seeds[1].problem, Some(SeedProblem::ProviderFailed));
+    assert!(!analysis.complete());
+
+    // The registry finds it, but OpenAlex fails asked by its PMID.
+    let alex = Arc::new(Alex::new(works).broken(&["pmid:777"]));
+    let engine = Engine::builder()
+        .provider(alex, policy(), 10)
+        .provider(Arc::new(Doiorg::new(registered)), policy(), 20)
+        .build();
+    let analysis = engine.analyse(&seeds, &kinds, None, false).await.unwrap();
+    assert_eq!(analysis.seeds[1].problem, Some(SeedProblem::ProviderFailed));
+    assert!(!analysis.complete());
+}
+
+/// Two seeds missed by their old DOIs, asked again by their PMIDs in a
+/// paid batch the budget doesn't cover: over budget, not `not_found`.
+#[tokio::test(start_paused = true)]
+async fn a_miss_asked_again_past_the_budget_is_over_budget() {
+    let (mut works, mut registered) = moved();
+    works.push(work(
+        &["W92", "10.2000/new2", "pmid:778"],
+        "Fluids in the emergency department",
+        "Lu Park",
+        2006,
+        None,
+    ));
+    let mut old2 = work(
+        &["10.2000/old2", "pmid:778"],
+        "Fluids in the emergency department",
+        "Lu Park",
+        2006,
+        None,
+    );
+    old2.source = CROSSREF;
+    registered.push(old2);
+    let alex = Arc::new(Alex::new(works));
+    let engine = Engine::builder()
+        .provider(alex.clone(), policy(), 10)
+        .provider(Arc::new(Doiorg::new(registered)), policy(), 20)
+        .build();
+    // Enough for the DOIs' batch only.
+    let analysis = engine
+        .analyse(
+            &inputs(&["10.2000/old", "10.2000/old2"]),
+            &[AnalysisKind::OddOneOut],
+            Some(0.0001),
+            false,
+        )
+        .await
+        .unwrap();
+    let problems: Vec<Option<SeedProblem>> = analysis.seeds.iter().map(|s| s.problem).collect();
+    assert_eq!(problems, [Some(SeedProblem::OverBudget); 2]);
+    assert_eq!(alex.lookups(), [2]);
+    let stop = analysis.incomplete.as_ref().unwrap();
+    assert_eq!(stop.kind, IncompleteKind::Budget);
+    assert_eq!((stop.done, stop.total), (0, 2));
+    assert!(!analysis.complete());
 }
 
 /// What `estimate_only` counts is what the run then spends, with a cache
@@ -1068,6 +1192,10 @@ async fn related_works_are_the_same_every_time_and_reuse_the_cache() {
 
     let again = engine.analyse(&seeds, &kinds, None, false).await.unwrap();
     assert_eq!(found(&again), found(&first));
+    // The shared page left out W107 (misdated: its references dropped)
+    // from the rows it cached: counted the same, read or cached.
+    let stop = |a: &Analysis| a.related.as_ref().unwrap().incomplete.clone();
+    assert_eq!((stop(&first), stop(&again)), (None, None));
     // Citing works, coupling's page and the candidates all cached.
     assert_eq!(
         alex.citing_pages().len(),
@@ -1321,4 +1449,277 @@ async fn related_estimates_agree_with_spend_on_a_mixed_set() {
         let expected = if cached { 13 } else { 14 };
         assert_eq!(estimate.requests, expected, "cached: {cached}");
     }
+}
+
+/// 120 papers cited 150 times each: no two share a page, so 120 pages are
+/// wanted, and the set's cap (75) holds, the estimate agreeing. Before, the
+/// papers the plan left out were read anyway.
+#[tokio::test(start_paused = true)]
+async fn the_cap_on_pages_holds_for_works_cited_little() {
+    let works: Vec<SourceRecord> = (1..=120)
+        .map(|n| {
+            let mut w = work(
+                &[&format!("W{n}"), &format!("10.5555/{n}")],
+                &format!("{n}"),
+                &format!("Author Q{n}"),
+                2020,
+                None,
+            );
+            w.work.cited_by_count = Some(150);
+            w
+        })
+        .collect();
+    let seeds: Vec<String> = (1..=120).map(|n| format!("10.5555/{n}")).collect();
+    let alex = Arc::new(Alex::new(works));
+    let engine = engine(alex.clone(), None);
+    let kinds = [AnalysisKind::Related { limit: 20 }];
+    let estimate = engine
+        .analyse(&seeds, &kinds, None, true)
+        .await
+        .unwrap()
+        .estimate
+        .unwrap();
+    let run = engine.analyse(&seeds, &kinds, None, false).await.unwrap();
+    assert_eq!(alex.citing_pages().len(), 75);
+    // The seeds' two batches, 75 pages and the lookup (a ceiling).
+    assert_eq!(estimate.requests, 2 + 75 + 1);
+    assert!((spent(&run) - 0.0077).abs() < 1e-12, "{}", spent(&run));
+    let stop = run.related.unwrap().incomplete.unwrap();
+    assert_eq!(stop.kind, IncompleteKind::Capped);
+    assert_eq!((stop.done, stop.total), (75 * 150, 120 * 150));
+}
+
+fn capped_engine(alex: Arc<Alex>, cap: f64) -> Engine {
+    Engine::builder()
+        .provider(alex, policy(), 10)
+        .daily_cap(OPENALEX, cap)
+        .build()
+}
+
+/// The caller's own daily cap on OpenAlex stopping related works' pages,
+/// or the retraction check, is the budget, not a failing provider.
+#[tokio::test(start_paused = true)]
+async fn a_daily_cap_stops_like_a_budget() {
+    // The day reaches the cap with the seeds' batch: the check is refused.
+    let alex = Arc::new(Alex::new(library()).metered());
+    let analysis = capped_engine(alex.clone(), 0.0001)
+        .analyse(
+            &inputs(&SEEDS),
+            &[AnalysisKind::RetractedReferences],
+            None,
+            false,
+        )
+        .await
+        .unwrap();
+    let stop = analysis.retracted_references.unwrap().incomplete.unwrap();
+    assert_eq!(stop.kind, IncompleteKind::Budget);
+    assert_eq!(stop.provider, None);
+    assert!(alex.searches().is_empty());
+
+    // It reaches the cap with the first pages: the classic's next stop.
+    let alex = Arc::new(Alex::new(with_classic()).metered());
+    let analysis = capped_engine(alex.clone(), 0.0003)
+        .analyse(
+            &inputs(&CLASSIC),
+            &[AnalysisKind::Related { limit: 5 }],
+            None,
+            false,
+        )
+        .await
+        .unwrap();
+    let stop = analysis.related.unwrap().incomplete.unwrap();
+    assert_eq!(stop.kind, IncompleteKind::Budget, "{stop:?}");
+    assert_eq!(stop.stage, Some(Stage::Citing));
+    assert!(alex.citing_pages().len() < 11, "{:?}", alex.citing_pages());
+}
+
+/// A retraction check failing, then the budget stopping a later one: the
+/// failure is what it says (the budget hid it).
+#[tokio::test(start_paused = true)]
+async fn a_failed_retraction_check_is_not_hidden_by_the_budget() {
+    let mut works = library();
+    // 250 more references: three checks.
+    works[3]
+        .references
+        .as_mut()
+        .unwrap()
+        .extend((1000..1250).map(|n| format!("W{n}").parse::<WorkId>().unwrap()));
+    let alex = Arc::new(Alex::new(works));
+    let cache = Arc::new(SqliteCache::open_in_memory().unwrap());
+    let engine = engine(alex.clone(), Some(cache));
+    let kinds = [AnalysisKind::OddOneOut];
+    engine
+        .analyse(&inputs(&SEEDS), &kinds, None, false)
+        .await
+        .unwrap();
+    // The first check fails, retries and all (four).
+    alex.failures.lock().unwrap().extend(
+        std::iter::repeat_with(|| Error::Server {
+            status: 503,
+            message: None,
+        })
+        .take(5),
+    );
+    // Seeds cached; the first check fails, the second is paid, the third
+    // refused.
+    let analysis = engine
+        .analyse(
+            &inputs(&SEEDS),
+            &[AnalysisKind::RetractedReferences],
+            Some(0.0001),
+            false,
+        )
+        .await
+        .unwrap();
+    let stop = analysis.retracted_references.unwrap().incomplete.unwrap();
+    assert_eq!(stop.kind, IncompleteKind::ProviderFailed);
+    assert_eq!(stop.provider, Some(OPENALEX));
+    assert_eq!((stop.done, stop.total), (100, 257));
+    assert_eq!(alex.searches().len(), 6);
+}
+
+/// OpenAlex failing, a record cached a year ago is served (stale): it
+/// resolves the seed, and pages its references, but its references aren't
+/// cached as if just read (a new 30-day lease on year-old data).
+#[tokio::test(start_paused = true)]
+async fn stale_records_give_their_references_no_new_lease() {
+    let works = library();
+    let w4 = works[3].clone();
+    let cache = Arc::new(SqliteCache::open_in_memory().unwrap());
+    let year_ago = Timestamp::now() - jiff::SignedDuration::from_hours(365 * 24);
+    let (doi, id): (WorkId, WorkId) = ("10.1000/c".parse().unwrap(), "W4".parse().unwrap());
+    cache
+        .put_lookups(&OPENALEX, &[(&doi, Some(&w4)), (&id, Some(&w4))], year_ago)
+        .unwrap();
+    let alex = Arc::new(Alex::new(works).broken(&["10.1000/c", "W4"]));
+    let engine = engine(alex, Some(cache.clone()));
+    let edges = || {
+        cache
+            .get_edges(
+                aspero_engine::Direction::References,
+                std::slice::from_ref(&id),
+            )
+            .unwrap()
+            .pop()
+            .unwrap()
+    };
+
+    let analysis = engine
+        .analyse(
+            &inputs(&["10.1000/c"]),
+            &[AnalysisKind::OddOneOut],
+            None,
+            false,
+        )
+        .await
+        .unwrap();
+    assert_eq!(analysis.seeds[0].work(), Some(&id));
+    assert!(edges().is_none());
+
+    let page = engine.references("W4", None, 2).await.unwrap();
+    assert_eq!(page.total, Some(6));
+    assert!(edges().is_none());
+}
+
+/// 101 works both seeds cite: a batch of 100 (paid) and one asked alone
+/// (free), so one paid request, estimated and spent.
+#[tokio::test(start_paused = true)]
+async fn a_lookup_of_a_hundred_and_one_pays_once() {
+    let cited: Vec<String> = (1000..1101).map(|n| format!("W{n}")).collect();
+    let cited: Vec<&str> = cited.iter().map(String::as_str).collect();
+    let works = vec![
+        work(
+            &["W1", "10.1000/one"],
+            "One",
+            "Ann Smith",
+            2020,
+            Some(&cited),
+        ),
+        work(&["W2", "10.1000/two"], "Two", "Bo Chen", 2021, Some(&cited)),
+    ];
+    let alex = Arc::new(Alex::new(works));
+    let cache = Arc::new(SqliteCache::open_in_memory().unwrap());
+    let engine = engine(alex.clone(), Some(cache));
+    let seeds = inputs(&["10.1000/one", "10.1000/two"]);
+    let kinds = [AnalysisKind::ProbablyMissing { limit: 200 }];
+    let estimate = engine
+        .analyse(&seeds, &kinds, None, true)
+        .await
+        .unwrap()
+        .estimate
+        .unwrap();
+    assert_eq!(estimate.requests, 1);
+    // Exactly the budget for it: not refused.
+    let run = engine
+        .analyse(&seeds, &kinds, Some(0.0001), false)
+        .await
+        .unwrap();
+    assert!(
+        run.complete(),
+        "{:?}",
+        run.probably_missing.unwrap().incomplete
+    );
+    assert!(
+        (spent(&run) - estimate.usd).abs() < 1e-12,
+        "{}",
+        spent(&run)
+    );
+    assert_eq!(alex.lookups()[2..], [100, 1]);
+}
+
+/// Pages costing three times list price: the budget shares out four at
+/// list price, but each page is asked only if what's left (by what pages
+/// cost) has it, so two are read, not four.
+#[tokio::test(start_paused = true)]
+async fn pages_dearer_than_list_price_stop_within_the_budget() {
+    let mut alex = Alex::new(with_classic());
+    alex.page_cost = 0.0003;
+    let alex = Arc::new(alex);
+    let engine = engine(alex.clone(), None);
+    // The seeds' batch, the lookup kept back, four pages at list price.
+    let analysis = engine
+        .analyse(
+            &inputs(&CLASSIC),
+            &[AnalysisKind::Related { limit: 5 }],
+            Some(0.0006),
+            false,
+        )
+        .await
+        .unwrap();
+    assert_eq!(alex.citing_pages().len(), 2, "{:?}", alex.citing_pages());
+    let stop = analysis.related.clone().unwrap().incomplete.unwrap();
+    assert_eq!(stop.kind, IncompleteKind::Budget);
+    assert_eq!(stop.stage, Some(Stage::Citing));
+    // Over by what the last page cost past list price, not by three pages.
+    assert!(
+        (spent(&analysis) - 0.0007).abs() < 1e-12,
+        "{}",
+        spent(&analysis)
+    );
+}
+
+/// A work of the set whose `cited_by_count` OpenAlex doesn't give is read
+/// (a page of its own), not taken for uncited: the same works are found as
+/// with its count known.
+#[tokio::test(start_paused = true)]
+async fn a_work_cited_an_unknown_number_of_times_is_read() {
+    let kinds = [AnalysisKind::Related { limit: 20 }];
+    let seeds = inputs(&AROUND[..3]);
+    let (engine_known, _) = around_engine(None);
+    let known = engine_known
+        .analyse(&seeds, &kinds, None, false)
+        .await
+        .unwrap();
+
+    let mut works = around();
+    works[0].work.cited_by_count = None;
+    let alex = Arc::new(Alex::new(works));
+    let analysis = engine(alex.clone(), None)
+        .analyse(&seeds, &kinds, None, false)
+        .await
+        .unwrap();
+    assert_eq!(alex.citing_pages()[..2], ["cites:W1", "cites:W2|W3"]);
+    let related = analysis.related.as_ref().unwrap();
+    assert!(related.complete(), "{:?}", related.incomplete);
+    assert_eq!(found(&analysis), found(&known));
 }

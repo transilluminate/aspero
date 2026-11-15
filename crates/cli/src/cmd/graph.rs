@@ -5,7 +5,8 @@ use std::io::IsTerminal;
 use aspero_bib::BibEntry;
 use aspero_core::{Cursor, IdKind, SourceRecord, WorkId};
 use aspero_engine::{
-    Analysis, AnalysisKind, Engine, Incomplete, IncompleteKind, ReferencesPage, SeedProblem, Stage,
+    Analysis, AnalysisKind, Coverage, Engine, Incomplete, IncompleteKind, ReferencesPage,
+    SeedProblem, Stage,
 };
 use serde_json::Value;
 
@@ -383,9 +384,16 @@ fn analysis_text(a: &Analysis, doc: &Value, related: bool) -> String {
             out.push_str("  none: every work is linked to another\n");
         }
         for o in &found.items {
-            let why = match o.reason.as_str() {
-                "no_links" => "cites no other work of the set, none cites it, shares no references",
-                _ => "its references are unknown, and no other work of the set cites it",
+            let own_unknown = a.seeds[o.seed].coverage() != Some(Coverage::Known);
+            let why = match (o.reason.as_str(), own_unknown) {
+                ("no_links", _) => {
+                    "cites no other work of the set, none cites it, shares no references"
+                }
+                (_, true) => "its references are unknown, and no other work of the set cites it",
+                (_, false) => {
+                    "linked to no other work of the set, but one whose references are unknown \
+                     may cite it"
+                }
             };
             out.push_str(&format!("  [{}] {}: {why}\n", o.seed, label(o.seed)));
         }

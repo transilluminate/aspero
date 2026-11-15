@@ -30,6 +30,8 @@ requests=(
   "works_search_since      /works?query=sepsis&filter=from-created-date:2026-11-01&sort=score&order=desc&rows=3&cursor=*"
   "bad_filter              /works?filter=no-such-filter:1"
   "work_retracted          /works/10.1016/S0140-6736(97)11096-0"
+  "works_by_pii            /works?filter=alternative-id:S2772940026000032&rows=2"
+  "works_batch_pii         /works?filter=alternative-id:S0140673620301835,alternative-id:S0092867420302294,alternative-id:S0140673699999990&rows=6"
 )
 
 for entry in "${requests[@]}"; do

@@ -375,7 +375,66 @@ fn null_reads_as_an_absent_field() {
 }
 
 #[test]
-fn only_dois_are_supported() {
+fn a_pii_is_found_among_alternative_ids() {
+    let (cr, http) = provider([recorded("works_by_pii")]);
+    let pii = id("https://www.sciencedirect.com/science/article/pii/S2772940026000032");
+    let resp = block_on(cr.lookup(std::slice::from_ref(&pii), FieldSet::DEFAULT)).unwrap();
+
+    assert_eq!(
+        query(&http, 0),
+        [
+            pair("filter", "alternative-id:S2772940026000032"),
+            pair("rows", "2"),
+            pair("mailto", "test@example.org"),
+        ]
+    );
+    assert_eq!(resp.value[0].id, pii);
+    let record = resp.value[0].record.as_ref().unwrap();
+    // The DOI first, as a DOI lookup's record, then the PII it was found by.
+    assert_eq!(record.ids, [id("10.1016/j.solcom.2026.100158"), pii]);
+    assert!(
+        record
+            .work
+            .title
+            .as_deref()
+            .unwrap()
+            .starts_with("Feasibility of combined solar cookers")
+    );
+}
+
+#[test]
+fn piis_are_looked_up_together_and_unknown_ones_are_absent() {
+    let (cr, http) = provider([recorded("works_batch_pii")]);
+    let requested = [
+        id("https://www.thelancet.com/journals/lancet/article/PIIS0140-6736(20)30183-5/fulltext"),
+        id("https://www.cell.com/cell/fulltext/S0092-8674(20)30229-4"),
+        id("pii:S0140673699999990"),
+    ];
+    let resp = block_on(cr.lookup(&requested, FieldSet::DEFAULT)).unwrap();
+
+    assert_eq!(http.requests().len(), 1);
+    assert!(query(&http, 0).contains(&pair(
+        "filter",
+        "alternative-id:S0140673620301835,alternative-id:S0092867420302294,\
+         alternative-id:S0140673699999990"
+    )));
+    let dois: Vec<_> = resp
+        .value
+        .iter()
+        .map(|l| l.record.as_ref().map(|r| r.ids[0].to_string()))
+        .collect();
+    assert_eq!(
+        dois,
+        [
+            Some("doi:10.1016/s0140-6736(20)30183-5".into()),
+            Some("doi:10.1016/j.cell.2020.02.052".into()),
+            None,
+        ]
+    );
+}
+
+#[test]
+fn only_dois_and_piis_are_supported() {
     let (cr, http) = provider([]);
     let err = block_on(cr.lookup(&[id("arXiv:1706.03762")], FieldSet::DEFAULT)).unwrap_err();
     assert!(matches!(err, Error::Unsupported(_)));

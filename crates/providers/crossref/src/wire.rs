@@ -5,7 +5,7 @@
 //! full item is kept in `Raw`).
 
 use aspero_core::csl::{CslDate, CslItem, null_default};
-use aspero_core::{Doi, FieldSet, Raw, SourceRecord, Work, WorkId, WorkType};
+use aspero_core::{Doi, FieldSet, Pii, Raw, SourceRecord, Work, WorkId, WorkType};
 use jiff::Timestamp;
 use serde::Deserialize;
 
@@ -76,6 +76,18 @@ impl WireExtras {
         work.other_years = other;
         work
     }
+}
+
+/// The Elsevier PIIs among a work's `alternative-id`s, which also hold
+/// publishers' other numbers (article numbers, internal ids).
+pub(crate) fn piis(value: &serde_json::Value) -> Vec<Pii> {
+    value
+        .get("alternative-id")
+        .and_then(serde_json::Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|id| id.as_str()?.parse().ok())
+        .collect()
 }
 
 /// The Crossref type to filter on for a [`WorkType`], if there is one.

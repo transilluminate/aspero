@@ -6,7 +6,9 @@
 //! [`SearchMode::Citation`].
 //!
 //! It only knows Crossref DOIs: arXiv's DOIs are registered with DataCite,
-//! so preprints such as arXiv:1706.03762 are absent here.
+//! so preprints such as arXiv:1706.03762 are absent here. Elsevier's PIIs
+//! are among works' `alternative-id`s, so it looks those up too (the only
+//! source that can), answering with the DOI's record.
 //!
 //! Free to use. Requests carry a `mailto`, which puts them in the "polite"
 //! pool (observed 2026-11: 10 req/s for single works, 3 req/s for lists, 3
@@ -22,9 +24,9 @@ use aspero_core::http::path_segment;
 use aspero_core::query::check_supported;
 use aspero_core::{
     AuthorId, Capabilities, Cursor, Doi, Error, Field, FieldSet, Filter, FilterValue, Hit,
-    HttpClient, HttpRequest, HttpResponse, IdKind, Lookup, Page, Provider, ProviderId, QueryNode,
-    ResiliencePolicy, Response, Result, SearchMode, SearchQuery, Sort, SourceRecord, Term,
-    TermField, WorkId, YearRange,
+    HttpClient, HttpRequest, HttpResponse, IdKind, Lookup, Page, Pii, Provider, ProviderId,
+    QueryNode, ResiliencePolicy, Response, Result, SearchMode, SearchQuery, Sort, SourceRecord,
+    Term, TermField, WorkId, YearRange,
 };
 use async_trait::async_trait;
 
@@ -71,7 +73,7 @@ pub struct Crossref {
 impl Crossref {
     pub fn new(config: CrossrefConfig, http: Arc<dyn HttpClient>) -> Self {
         let mut capabilities = Capabilities::default();
-        capabilities.lookup_kinds = vec![IdKind::Doi];
+        capabilities.lookup_kinds = vec![IdKind::Doi, IdKind::Pii];
         capabilities.max_batch = MAX_BATCH;
         // Records say nothing about free copies.
         capabilities.fields = FieldSet::ALL.difference(FieldSet::of(&[Field::OpenAccess]));
@@ -150,6 +152,34 @@ impl Crossref {
             .map_err(Error::decode)
     }
 
+    /// The works carrying `piis` among their `alternative-id`s (in the
+    /// compact form, upper case: the punctuated one finds nothing, checked
+    /// 2026-11-15), each with the PII it was found by. Repeated filters OR,
+    /// so one call answers them all.
+    async fn lookup_piis(&self, piis: &[&Pii]) -> Result<Vec<SourceRecord>> {
+        let filter = piis
+            .iter()
+            .map(|p| format!("alternative-id:{p}"))
+            .collect::<Vec<_>>()
+            .join(",");
+        // Room for a PII deposited twice.
+        let params = [("filter", filter), ("rows", (2 * piis.len()).to_string())];
+        let resp = self.get(self.url("", &params)?).await?;
+        let envelope: Envelope<WireList> =
+            serde_json::from_slice(&resp.body).map_err(Error::decode)?;
+        Ok(envelope
+            .message
+            .items
+            .iter()
+            .filter_map(|v| {
+                let mut record = or_skip(wire::to_record(v, resp.received_at))?;
+                let found = wire::piis(v).into_iter().filter(|p| piis.contains(&p));
+                record.ids.extend(found.map(WorkId::Pii));
+                Some(record)
+            })
+            .collect())
+    }
+
     async fn list(&self, params: &[(&str, String)]) -> Result<(Vec<Hit>, WireList)> {
         let resp = self.get(self.url("", params)?).await?;
         let envelope: Envelope<WireList> =
@@ -191,15 +221,20 @@ impl Provider for Crossref {
     }
 
     async fn lookup(&self, ids: &[WorkId], _fields: FieldSet) -> Result<Response<Vec<Lookup>>> {
-        let dois = ids
-            .iter()
-            .map(|id| match id {
-                WorkId::Doi(doi) => Ok(doi),
-                _ => Err(Error::Unsupported("Crossref lookup of non-DOI identifiers")),
-            })
-            .collect::<Result<Vec<_>>>()?;
+        let (mut dois, mut piis) = (Vec::new(), Vec::new());
+        for id in ids {
+            match id {
+                WorkId::Doi(doi) => dois.push(doi),
+                WorkId::Pii(pii) => piis.push(pii),
+                _ => {
+                    return Err(Error::Unsupported(
+                        "Crossref lookup of identifiers other than DOIs and PIIs",
+                    ));
+                }
+            }
+        }
 
-        if let [doi] = dois.as_slice() {
+        if let ([doi], []) = (dois.as_slice(), piis.as_slice()) {
             let record = self.lookup_one(doi).await?;
             return Ok(Response::new(vec![Lookup {
                 id: ids[0].clone(),
@@ -223,6 +258,9 @@ impl Provider for Crossref {
         }
         for doi in singles {
             found.extend(self.lookup_one(doi).await?);
+        }
+        for chunk in piis.chunks(MAX_BATCH) {
+            found.extend(self.lookup_piis(chunk).await?);
         }
 
         let lookups = ids

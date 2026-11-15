@@ -14,12 +14,13 @@ use crate::{CallOptions, Engine, Entry, LookupResult, Outcome, Served};
 /// Lookups of seeds at once when estimating (each free, one id each).
 const ESTIMATE_LOOKUPS: usize = 4;
 
-/// Seeds counted as one work: merged seeds, their OpenAlex ids and their
-/// references (the union of the known ones).
+/// Seeds counted as one work: merged seeds, their OpenAlex ids, their
+/// references (the union of the known ones) and the years they're dated.
 pub(super) struct Group {
     pub(super) members: Vec<usize>,
     pub(super) works: BTreeSet<WorkId>,
     pub(super) references: Option<BTreeSet<WorkId>>,
+    pub(super) years: BTreeSet<i16>,
 }
 
 impl Group {
@@ -27,6 +28,17 @@ impl Group {
         self.references
             .as_ref()
             .is_some_and(|r| other.works.iter().any(|w| r.contains(w)))
+    }
+
+    /// Whether it may cite `other` for all anyone knows: its references
+    /// unknown, and not dated more than a year before `other` (a work
+    /// can't cite later ones; a year's slack, as for citing works).
+    pub(super) fn may_cite(&self, other: &Group) -> bool {
+        let dated = match (self.years.last(), other.years.first()) {
+            (Some(latest), Some(earliest)) => latest + 1 >= *earliest,
+            _ => true,
+        };
+        self.references.is_none() && dated
     }
 
     pub(super) fn shares_references(&self, other: &Group) -> bool {
@@ -374,10 +386,12 @@ pub(super) fn merge_seeds(seeds: &mut [Seed]) -> Vec<Group> {
             members: class.iter().map(|&k| resolved[k]).collect(),
             works: BTreeSet::new(),
             references: None,
+            years: BTreeSet::new(),
         };
         for &k in &class {
             let record = records[k];
             group.works.extend(openalex_id(record).cloned());
+            group.years.extend(record.work.issued.map(|d| d.year()));
             if let Some(cited) = &record.references {
                 group
                     .references

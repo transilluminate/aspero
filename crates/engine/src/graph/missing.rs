@@ -77,8 +77,10 @@ impl Engine {
 }
 
 /// Seeds linked to no other: coverage-aware, so unknown references are
-/// `no_reference_data` unless another seed cites the work. Nothing is odd
-/// in a set of fewer than two works.
+/// `no_reference_data` unless another seed cites the work, and so is a
+/// work with known references that a seed of unknown references may cite
+/// (see [`Group::may_cite`]): whether it's linked can't be told. Nothing
+/// is odd in a set of fewer than two works.
 pub(super) fn odd_one_out(groups: &[Group]) -> Section<OddOne> {
     let mut items = Vec::new();
     if groups.len() < 2 {
@@ -91,9 +93,14 @@ pub(super) fn odd_one_out(groups: &[Group]) -> Section<OddOne> {
         if linked {
             continue;
         }
-        let reason = match group.references {
-            Some(_) => OddReason::NoLinks,
-            None => OddReason::NoReferenceData,
+        let unknown = group.references.is_none()
+            || groups
+                .iter()
+                .enumerate()
+                .any(|(h, other)| h != g && other.may_cite(group));
+        let reason = match unknown {
+            false => OddReason::NoLinks,
+            true => OddReason::NoReferenceData,
         };
         items.extend(group.members.iter().map(|&seed| OddOne { seed, reason }));
     }
@@ -144,10 +151,11 @@ mod tests {
             seed(record(&["W3"], "Three", Some(&["W100"]))),
             // Cites nothing of the set.
             seed(record(&["W4"], "Four", Some(&["W200"]))),
-            // Unknown references, cited by none.
-            seed(record(&["W5"], "Five", None)),
+            // Unknown references, cited by none (older than W4: it can't
+            // cite it).
+            seed(issued(record(&["W5"], "Five", None), 2001)),
             // Unknown references, but W6 cites it: not odd.
-            seed(record(&["W7"], "Seven", None)),
+            seed(issued(record(&["W7"], "Seven", None), 2001)),
             seed(record(&["W6"], "Six", Some(&["W7"]))),
         ];
         let groups = merge_seeds(&mut seeds);
@@ -163,6 +171,43 @@ mod tests {
                     seed: 4,
                     reason: OddReason::NoReferenceData
                 },
+            ]
+        );
+    }
+
+    /// A seed linked to none isn't said to have no links when a seed with
+    /// unknown references could cite it (one not dated more than a year
+    /// before it); one that can't (a 2001 book, a 2020 paper) doesn't count.
+    #[test]
+    fn no_links_only_where_no_unknown_could_cite_it() {
+        let odd = |seeds: Vec<SourceRecord>| {
+            let mut seeds: Vec<Seed> = seeds.into_iter().map(seed).collect();
+            odd_one_out(&merge_seeds(&mut seeds)).items
+        };
+        let paper = || record(&["W1"], "Paper", Some(&["W100"]));
+        let other = || record(&["W2"], "Other", Some(&["W200"]));
+        assert_eq!(
+            odd(vec![paper(), other()]),
+            [
+                OddOne::new(0, OddReason::NoLinks),
+                OddOne::new(1, OddReason::NoLinks)
+            ]
+        );
+        // A book of 2021, references unknown, may cite the 2020 paper.
+        let book = |year| issued(record(&["W3"], "Book", None), year);
+        assert_eq!(
+            odd(vec![paper(), book(2021)]),
+            [
+                OddOne::new(0, OddReason::NoReferenceData),
+                OddOne::new(1, OddReason::NoReferenceData)
+            ]
+        );
+        // One of 2001 can't.
+        assert_eq!(
+            odd(vec![paper(), book(2001)]),
+            [
+                OddOne::new(0, OddReason::NoLinks),
+                OddOne::new(1, OddReason::NoReferenceData)
             ]
         );
     }

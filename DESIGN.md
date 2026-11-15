@@ -353,8 +353,9 @@ from `cites:` pages); G3 OpenCitations as a free source of citing works.
   their DOIs.
 - **Odd one out:** a seed citing no other seed, cited by none, sharing no
   references, is `no_links`; with unknown references it's
-  `no_reference_data`, unless another seed cites it (then it isn't odd).
-  Free. Nothing is odd in a set of fewer than two works.
+  `no_reference_data`, unless another seed cites it (then it isn't odd);
+  so is one a seed of unknown references may cite (one not dated more
+  than a year before it): whether it's linked can't be told. Free. Nothing is odd in a set of fewer than two works.
 - **Probably missing:** references counted over merged seeds, works of the
   set left out (and, after the lookup, any work sharing an identifier with
   any seed, resolved or not), at least two citing, most cited first (ties

@@ -306,8 +306,9 @@ pub enum OddReason {
     /// It cites no other seed, none cites it, and it shares no
     /// references with any.
     NoLinks,
-    /// Its references are unknown and no other seed cites it, so whether
-    /// it belongs can't be told.
+    /// Its references are unknown and no other seed cites it, or another
+    /// seed whose references are unknown may cite it: whether it belongs
+    /// can't be told.
     NoReferenceData,
 }
 

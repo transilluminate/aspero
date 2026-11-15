@@ -527,7 +527,8 @@ Analyses (--kinds, comma-separated):
   odd-one-out       seeds linked to no other seed: citing none, cited by
                     none, sharing no references. `no_links`, or
                     `no_reference_data` when its references are unknown
-                    (unless another seed cites it: then it isn't odd)
+                    (unless another seed cites it: then it isn't odd), or
+                    a seed whose references are unknown may cite it
   probably-missing  works at least two seeds cite that the set lacks, most
                     cited first, the best --limit looked up in one request:
                     `cited_by` (seed indexes) and `count`

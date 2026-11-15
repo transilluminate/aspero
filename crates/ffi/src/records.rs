@@ -2458,8 +2458,6 @@ pub struct Analysis {
     pub retracted_references: Option<RetractedReferences>,
     pub odd_one_out: Option<OddOnesOut>,
     pub probably_missing: Option<ProbablyMissing>,
-    /// Always empty; kept for compatibility (every kind is built).
-    pub not_yet: Vec<AnalysisKind>,
     /// With `estimateOnly`: the cost of running it, in place of findings.
     pub estimate: Option<Estimate>,
     /// Every seed settled and every analysis run to the end.
@@ -2485,7 +2483,6 @@ impl Analysis {
                     retracted_references: None,
                     odd_one_out: None,
                     probably_missing: None,
-                    not_yet: Vec::new(),
                     estimate: None,
                     complete: false,
                     incomplete: Vec::new(),
@@ -2544,7 +2541,6 @@ impl Analysis {
                     .collect(),
                 incomplete: incomplete(&s.incomplete),
             }),
-            not_yet: Vec::new(),
             estimate: a.estimate.map(|e| Estimate {
                 requests: e.requests,
                 usd: e.usd,

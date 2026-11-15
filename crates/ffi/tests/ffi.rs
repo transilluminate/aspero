@@ -428,7 +428,6 @@ fn analyses_say_why_each_seed_is_unresolved() {
             Some(SeedProblem::InvalidId)
         ]
     );
-    assert!(analysis.not_yet.is_empty());
     // Nothing to read about: no seed resolved.
     let related = analysis.related.unwrap();
     assert!(related.items.is_empty() && related.incomplete.is_empty());

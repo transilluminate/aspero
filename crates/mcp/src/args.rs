@@ -74,8 +74,9 @@ pub struct SupportsArgs {
 #[serde(deny_unknown_fields)]
 pub struct LookupArgs {
     /// Identifiers, bare, prefixed or as URLs: DOIs, arXiv IDs, PMIDs,
-    /// PMCIDs, NCBI Bookshelf IDs, ISBNs, OpenAlex IDs. Bare digits are
-    /// ambiguous: prefix them (pmid:).
+    /// PMCIDs, NCBI Bookshelf IDs, ISBNs, OpenAlex IDs, Elsevier PIIs
+    /// (pii:), and publishers' article pages. Bare digits are ambiguous:
+    /// prefix them (pmid:).
     #[schemars(length(min = 1, max = MAX_IDS))]
     pub ids: Vec<String>,
     /// Every known field, plus notices (retractions, corrections) from the

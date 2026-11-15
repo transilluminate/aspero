@@ -66,8 +66,10 @@ aspero verify --format ris - < citations.txt
 aspero search --format csl-json "sepsis fluid resuscitation" > zotero.json
 aspero verify --style vancouver - < citations.txt   # `aspero styles` lists them
 
-# Look up identifiers: DOIs, arXiv IDs, PMIDs, PMCIDs, NBK IDs, ISBNs, URLs
+# Look up identifiers: DOIs, arXiv IDs, PMIDs, PMCIDs, NBK IDs, ISBNs,
+# Elsevier PIIs, and their URLs, publishers' article pages included
 aspero lookup 10.1038/nature14539 arXiv:1706.03762 "ISBN 978-0-262-03561-3"
+aspero verify https://www.sciencedirect.com/science/article/pii/S2772940026000032
 
 # Which paper is this PDF? From its first page's text and title
 pdftotext -l 1 paper.pdf - | aspero identify --title "Deep learning"

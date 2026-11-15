@@ -983,6 +983,56 @@ async fn calls_at_once_pass_a_keys_budget_by_one_call_at_most() {
     assert!(spent <= 8.0 * SEARCH_COST, "{spent}");
 }
 
+/// A ledger that can't write while `failing`.
+#[derive(Default)]
+struct FlakyLedger {
+    kept: MemoryLedger,
+    failing: std::sync::atomic::AtomicBool,
+}
+
+impl Ledger for FlakyLedger {
+    fn spent(&self, key_id: &str, day: &str) -> Result<f64, String> {
+        self.kept.spent(key_id, day)
+    }
+
+    fn add(&self, key_id: &str, day: &str, usd: f64) -> Result<(), String> {
+        if self.failing.load(std::sync::atomic::Ordering::Relaxed) {
+            return Err("database is locked".into());
+        }
+        self.kept.add(key_id, day, usd)
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn spend_the_ledger_cant_record_still_counts_and_is_written_later() {
+    let ledger = Arc::new(FlakyLedger::default());
+    ledger
+        .failing
+        .store(true, std::sync::atomic::Ordering::Relaxed);
+    let mut config = config(free_port());
+    config.keys = vec![key("full", FULL, &[Sources], SEARCH_COST)];
+    let server = start_with(config, None, ledger.clone()).await.unwrap();
+    let mut agent = Agent::new(server.port(), FULL);
+    agent.initialize().await;
+    let search = json!({"text": "Deep learning"});
+    assert!(!is_error(&agent.call("search", search.clone()).await));
+    assert_eq!(ledger.spent("full", &today()).unwrap(), 0.0);
+    // Not on record, but spent: the budget is.
+    let result = agent.call("search", search.clone()).await;
+    assert!(is_error(&result), "{result}");
+    assert!(
+        text(&result).starts_with("Error (budget_spent): this key's daily budget is spent"),
+        "{result}"
+    );
+    // Written once the ledger can.
+    ledger
+        .failing
+        .store(false, std::sync::atomic::Ordering::Relaxed);
+    assert!(is_error(&agent.call("search", search).await));
+    assert_eq!(ledger.spent("full", &today()).unwrap(), SEARCH_COST);
+    server.stop().await;
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn a_failed_call_spends_from_the_keys_budget_too() {
     let ledger = Arc::new(MemoryLedger::default());

@@ -13,9 +13,9 @@ use rmcp::service::RequestContext;
 use rmcp::{ErrorData, RoleServer, ServerHandler};
 use serde_json::{Map, Value};
 
+use super::Shared;
 use super::auth::Credential;
 use super::host::{Activity, HostError};
-use super::{Shared, today};
 use crate::server::{INSTRUCTIONS, engine_result, server_info};
 use crate::session::usd;
 use crate::{Caller, Scope, Session, ToolError, ToolErrorKind, tools};
@@ -118,7 +118,7 @@ impl Handler {
     /// spent (or its spend can't be read).
     fn daily_left(&self, key: &Credential) -> Result<f64, ToolError> {
         let k = &key.key;
-        match self.shared.ledger.spent(&k.id, &today()) {
+        match self.shared.key_spent(&k.id) {
             Ok(spent) if spent < k.daily_budget_usd => Ok(k.daily_budget_usd - spent),
             Ok(spent) => Err(ToolError::new(
                 ToolErrorKind::BudgetSpent,

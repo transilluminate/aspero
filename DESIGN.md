@@ -791,7 +791,8 @@ CLI builds without it and serves stdio only) and, over it, the FFI's
   versioned schema like the pacing slots: rebuilds, `clear` and eviction
   keep it; days over a month old are pruned), so restarts don't reset it;
   in memory without a cache. A spend that can't be read refuses the
-  key's paid calls.
+  key's paid calls; one that can't be written is kept in memory, counted,
+  and written with the key's next spend or check.
 - **Activity.** After every tool call (engine or app, success, error or
   refusal), the app's `activity` gets the key's name, the tool, a few
   words ("searched ‘lactate clearance’", "looked up 3 works", "verified 2

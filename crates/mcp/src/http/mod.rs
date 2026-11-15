@@ -243,6 +243,9 @@ pub(crate) struct Shared {
     ledger: Arc<dyn Ledger>,
     /// Each key's paid calls in flight, by key id.
     paid: Mutex<HashMap<String, Arc<Reservations>>>,
+    /// Spend the ledger couldn't record, by key id and day: counted
+    /// against the key's budget, and written with its next spend or check.
+    unrecorded: Mutex<HashMap<(String, String), f64>>,
     session_budget_usd: f64,
     host_timeout: Duration,
     activity: Mutex<Option<std::sync::mpsc::SyncSender<Activity>>>,
@@ -274,10 +277,42 @@ impl Shared {
             .clone()
     }
 
+    /// Adds to what the key `key_id` spent today, in the ledger or, if it
+    /// can't write, here until it can.
     fn ledger_add(&self, key_id: &str, usd: f64) {
-        if let Err(e) = self.ledger.add(key_id, &today(), usd) {
-            tracing::warn!(target: "aspero::mcp", key = key_id, error = %e, "could not record a key's spend");
-        }
+        let mut unrecorded = self.unrecorded.lock().unwrap_or_else(|e| e.into_inner());
+        *unrecorded.entry((key_id.to_owned(), today())).or_default() += usd;
+        self.record(&mut unrecorded, key_id);
+    }
+
+    /// What the key `key_id` has spent today: the ledger's figure, and what
+    /// it couldn't record yet (tried again first).
+    fn key_spent(&self, key_id: &str) -> Result<f64, String> {
+        let day = today();
+        let mut unrecorded = self.unrecorded.lock().unwrap_or_else(|e| e.into_inner());
+        self.record(&mut unrecorded, key_id);
+        let owed = unrecorded
+            .get(&(key_id.to_owned(), day.clone()))
+            .copied()
+            .unwrap_or(0.0);
+        Ok(self.ledger.spent(key_id, &day)? + owed)
+    }
+
+    /// Writes the key `key_id`'s unrecorded spend to the ledger, keeping
+    /// what it still can't.
+    fn record(&self, unrecorded: &mut HashMap<(String, String), f64>, key_id: &str) {
+        unrecorded.retain(|(key, day), usd| {
+            if key != key_id {
+                return true;
+            }
+            match self.ledger.add(key, day, *usd) {
+                Ok(()) => false,
+                Err(e) => {
+                    tracing::warn!(target: "aspero::mcp", key = key_id, error = %e, "could not record a key's spend; kept to try again");
+                    true
+                }
+            }
+        });
     }
 
     /// Keeps a session's client, to tell it when its tools change.
@@ -600,6 +635,7 @@ impl HttpServer {
             catalog: RwLock::new(Arc::new(catalog)),
             ledger,
             paid: Mutex::default(),
+            unrecorded: Mutex::default(),
             session_budget_usd: budget,
             host_timeout: config.host_timeout,
             activity: Mutex::new(activity),

@@ -401,7 +401,8 @@ Verdicts:
   verified      a matching work exists (and so do its claimed identifiers)
   plausible     a work partly matches; check the details          (exit 9)
   mismatch      the claimed DOI/arXiv ID doesn't exist or is another
-                work's; `reason` names the work the citation matches (exit 9)
+                work's; `reason_text` names the work the citation matches
+                                                                   (exit 9)
   not_found     no matching work                                   (exit 3)
   unverifiable  providers failed                                   (exit 4)
 
@@ -416,10 +417,11 @@ reference, or a JSON object of what you know (more reliable than text):
   {\"key\": \"pe.md:7\", \"title\": \"...\", \"authors\": [\"Meyer G\"], \"year\": 2014,
    \"journal\": \"N Engl J Med\", \"volume\": 370, \"page\": \"1402-11\", \"doi\": \"...\"}
   keys: text, title, authors, year, journal (or container), volume, page,
-        doi, arxiv, id, ids, and key: anything, echoed back untouched
+        doi, arxiv, id, ids, and key: anything, echoed back untouched as
+        claim_key
 Unknown keys are refused. To paste a reference list as it is (numbered,
 one per paragraph, wrapped), use --split instead. With --format jsonl, one result per line as
-each finishes, in any order: match them up by `input` or your `key`. Each
+each finishes, in any order: match them up by `input` or `claim_key`. Each
 also carries the `claim` as understood. Other formats keep input order.
 
 The journal, volume and first page are checked too, from fields or from

@@ -756,7 +756,7 @@ impl From<&engine::Difference> for Difference {
     }
 }
 
-/// Why a verdict was reached. "The work" is the verification's `best`;
+/// Why a verdict was reached. "The work" is the verification's `bestMatch`;
 /// "the identifiers" are those the claim gave.
 // Records cross the boundary by value; UniFFI can't box them.
 #[allow(clippy::large_enum_variant)]
@@ -906,13 +906,15 @@ pub struct Verification {
     /// The claim's text, or its fields on one line.
     pub input: String,
     /// The claim's `key`.
-    pub key: Option<String>,
+    pub claim_key: Option<String>,
     pub verdict: Verdict,
-    pub why: Reason,
-    /// One sentence in English: `why` and `notes`.
-    pub reason: String,
-    /// About `best`, whatever the verdict: its retraction or withdrawal,
-    /// and its newer version.
+    /// Why, as data, for the app to word.
+    pub reason: Reason,
+    /// One sentence in English, `reason` and `notes`: for logs and agents,
+    /// not for display in an app UI.
+    pub reason_text: String,
+    /// About `bestMatch`, whatever the verdict: its retraction or
+    /// withdrawal, and its newer version.
     pub notes: Vec<Notice>,
     /// The claim as read: identifiers as written (with the other readings
     /// tried in `alternativeIds`), and from free text the year, journal
@@ -920,12 +922,12 @@ pub struct Verification {
     /// for an invalid claim.
     pub read: Option<Claim>,
     /// The work the verdict is about: the match, or the best guess.
-    pub best: Option<Candidate>,
+    pub best_match: Option<Candidate>,
     /// With `full`: every candidate, most confident first.
     pub candidates: Vec<Candidate>,
     /// Providers that failed, searching or looking up the claim's
     /// identifiers; what they'd have found is unknown.
-    pub failures: Vec<Failure>,
+    pub errors: Vec<Failure>,
 }
 
 impl Verification {
@@ -938,19 +940,21 @@ impl Verification {
         Verification {
             index: count(index),
             input: claim.input.clone(),
-            key: key(claim),
+            claim_key: key(claim),
             verdict: v.verdict.into(),
-            why: Reason::new(&v.why, &v.report.candidates),
-            reason: v.reason.clone(),
+            reason: Reason::new(&v.reason, &v.report.candidates),
+            reason_text: v.reason_text.clone(),
             notes: v.notes.iter().map(Notice::from).collect(),
             read: Some(Claim::read(&v.read, key(claim))),
-            best: v.best.map(|i| Candidate::from(&v.report.candidates[i])),
+            best_match: v
+                .best_match
+                .map(|i| Candidate::from(&v.report.candidates[i])),
             candidates: if full {
                 v.report.candidates.iter().map(Candidate::from).collect()
             } else {
                 Vec::new()
             },
-            failures: v.report.failures().iter().map(Failure::from).collect(),
+            errors: v.report.failures().iter().map(Failure::from).collect(),
         }
     }
 
@@ -958,17 +962,17 @@ impl Verification {
         Verification {
             index: count(index),
             input: claim.input.clone(),
-            key: key(claim),
+            claim_key: key(claim),
             verdict: Verdict::Invalid,
-            why: Reason::InvalidClaim {
+            reason: Reason::InvalidClaim {
                 why: why.to_owned(),
             },
-            reason: why.to_owned(),
+            reason_text: why.to_owned(),
             notes: Vec::new(),
             read: None,
-            best: None,
+            best_match: None,
             candidates: Vec::new(),
-            failures: Vec::new(),
+            errors: Vec::new(),
         }
     }
 }

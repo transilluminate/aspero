@@ -174,11 +174,11 @@ impl InputClaim {
     }
 
     /// What every result for this claim starts with: the input, the
-    /// caller's key, and the claim as understood.
+    /// caller's key (as `claim_key`), and the claim as understood.
     pub fn echo(&self) -> Value {
         let mut echo = json!({ "input": self.input });
         if let Some(key) = &self.key {
-            echo["key"] = key.clone();
+            echo["claim_key"] = key.clone();
         }
         if let Ok(claim) = &self.claim {
             echo["claim"] = json!(claim);
@@ -226,14 +226,14 @@ mod tests {
     #[test]
     fn keys_are_echoed_even_for_invalid_claims() {
         let ok = InputClaim::from_line(r#"{"key": {"note": "pe.md", "line": 7}, "title": "X"}"#);
-        assert_eq!(ok.echo()["key"], json!({"note": "pe.md", "line": 7}));
+        assert_eq!(ok.echo()["claim_key"], json!({"note": "pe.md", "line": 7}));
         assert_eq!(ok.echo()["claim"], json!({"title": "X"}));
         for blank in ["", "   ", r#"{"text": "  ", "key": 1}"#] {
             assert!(claim(blank).is_err(), "{blank:?}");
         }
         let bad = InputClaim::from_line(r#"{"key": "ref-12", "titel": "typo"}"#);
         assert!(bad.claim.is_err());
-        assert_eq!(bad.echo()["key"], "ref-12");
+        assert_eq!(bad.echo()["claim_key"], "ref-12");
         assert!(bad.echo().get("claim").is_none());
     }
 }

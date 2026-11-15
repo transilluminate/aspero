@@ -468,8 +468,8 @@ fn unreadable_claims_answer_at_once() {
     .unwrap();
     let v = &checked.results[0];
     assert_eq!(v.verdict, Verdict::Invalid);
-    assert!(matches!(v.why, Reason::InvalidClaim { .. }));
-    assert_eq!(v.key.as_deref(), Some("7"));
+    assert!(matches!(v.reason, Reason::InvalidClaim { .. }));
+    assert_eq!(v.claim_key.as_deref(), Some("7"));
 }
 
 #[test]
@@ -484,7 +484,7 @@ fn claims_can_be_fields() {
         block_on(aspero(None).verify(vec![claim], false, Patience::Offline, None)).unwrap();
     let v = &checked.results[0];
     assert_eq!(v.input, "Deep learning. 2015. 10.1234/never-seen");
-    assert_eq!(v.verdict, Verdict::Unverifiable, "{}", v.reason);
+    assert_eq!(v.verdict, Verdict::Unverifiable, "{}", v.reason_text);
 }
 
 #[test]
@@ -498,10 +498,10 @@ fn failures_say_what_kind() {
     .unwrap();
     let v = &checked.results[1];
     assert_eq!(v.index, 1);
-    assert_eq!(v.verdict, Verdict::Unverifiable, "{}", v.reason);
-    assert!(matches!(v.why, Reason::ProvidersFailed));
-    assert!(!v.failures.is_empty());
-    assert!(v.failures.iter().all(|f| f.kind == ErrorKind::NotCached));
+    assert_eq!(v.verdict, Verdict::Unverifiable, "{}", v.reason_text);
+    assert!(matches!(v.reason, Reason::ProvidersFailed));
+    assert!(!v.errors.is_empty());
+    assert!(v.errors.iter().all(|f| f.kind == ErrorKind::NotCached));
 }
 
 #[test]
@@ -1202,7 +1202,7 @@ fn alternative_timing() {
                 "{run} {name}: {:.1}s {:?} {}",
                 start.elapsed().as_secs_f64(),
                 v.results[0].verdict,
-                v.results[0].reason
+                v.results[0].reason_text
             );
         }
     }

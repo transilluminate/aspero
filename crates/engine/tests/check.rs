@@ -159,9 +159,9 @@ async fn retractions_are_errors_with_the_detailed_notice() {
         "the marker doesn't hide the title"
     );
     assert!(
-        c.verification.reason.contains("note: RETRACTED"),
+        c.verification.reason_text.contains("note: RETRACTED"),
         "{}",
-        c.verification.reason
+        c.verification.reason_text
     );
     assert!(c.verification.notes[0].kind.is_retraction());
     let notices: Vec<_> = c
@@ -210,10 +210,10 @@ async fn a_bare_retraction_flag_is_detailed_from_another_provider() {
     let c = &engine.check(&claims, 5, |_| {}).await.checked[0];
     assert!(
         c.verification
-            .reason
+            .reason_text
             .contains("notice doi:10.1016/s0140-6736(10)60175-4, via retraction-watch"),
         "{}",
-        c.verification.reason
+        c.verification.reason_text
     );
 }
 

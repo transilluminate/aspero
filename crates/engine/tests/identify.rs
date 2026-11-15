@@ -56,7 +56,7 @@ async fn the_title_given_picks_the_documents_own_identifier() {
     assert_eq!(found.decided_by, Decision::IdentifierAndTitle);
     let v = &found.verification;
     assert_eq!(v.verdict, Verdict::Verified);
-    let best = &v.report.candidates[v.best.unwrap()];
+    let best = &v.report.candidates[v.best_match.unwrap()];
     assert!(
         best.ids
             .contains(&"doi:10.1038/nature14539".parse().unwrap())
@@ -74,7 +74,7 @@ async fn without_a_title_the_page_confirms_its_own_identifier() {
         .expect("identified");
     assert_eq!(found.decided_by, Decision::IdentifierAndPage);
     let v = &found.verification;
-    let best = &v.report.candidates[v.best.unwrap()];
+    let best = &v.report.candidates[v.best_match.unwrap()];
     assert!(
         best.ids
             .contains(&"doi:10.1038/nature14539".parse().unwrap())
@@ -99,7 +99,7 @@ async fn with_no_identifier_confirmed_the_title_is_searched() {
         .expect("identified");
     assert_eq!(found.decided_by, Decision::TitleSearch);
     let v = &found.verification;
-    let best = &v.report.candidates[v.best.unwrap()];
+    let best = &v.report.candidates[v.best_match.unwrap()];
     assert!(
         best.ids
             .contains(&"doi:10.1038/nature14539".parse().unwrap())
@@ -160,7 +160,7 @@ async fn on_a_title_tie_the_header_identifier_wins() {
         .expect("identified");
     assert_eq!(found.decided_by, Decision::IdentifierAndTitle);
     let v = &found.verification;
-    let best = &v.report.candidates[v.best.unwrap()];
+    let best = &v.report.candidates[v.best_match.unwrap()];
     assert!(
         best.ids
             .contains(&"doi:10.1101/2015.01.01.000001".parse().unwrap()),

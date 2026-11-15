@@ -4,8 +4,8 @@
 //!
 //! Fields are omitted when unknown rather than `null`; the lean default set
 //! is enough to identify and cite, and `full` adds everything known. Every
-//! result echoes what it answers (`input`, a claim's `key`), so results can
-//! arrive in any order.
+//! result echoes what it answers (`input`, a claim's key as `claim_key`),
+//! so results can arrive in any order.
 
 pub mod check;
 mod claim;

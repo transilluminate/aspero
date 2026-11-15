@@ -51,13 +51,13 @@ pub async fn run(engine: &Engine, args: ClaimArgs, out: Out) -> Result<Exit, Fai
         if out.format.is_export() {
             // The work the citation refers to, when that's known: verified,
             // or found under other identifiers than those cited.
-            let best = v.best.map(|i| &v.report.candidates[i]);
+            let best = v.best_match.map(|i| &v.report.candidates[i]);
             let text = match best {
                 Some(c) if matches!(v.verdict, Verdict::Verified | Verdict::Mismatch) => {
                     export.entry_at(i, &c.record.work, &c.ids)
                 }
                 _ => {
-                    eprintln!("skipped {}: {}", claim.input, v.reason);
+                    eprintln!("skipped {}: {}", claim.input, v.reason_text);
                     String::new()
                 }
             };
@@ -73,13 +73,13 @@ pub async fn run(engine: &Engine, args: ClaimArgs, out: Out) -> Result<Exit, Fai
         }
         let mut text = verdict_text(&claim.input, &v);
         if out.abstracts
-            && let Some(best) = v.best.map(|i| &v.report.candidates[i])
+            && let Some(best) = v.best_match.map(|i| &v.report.candidates[i])
         {
             // Search under every identifier merged into the match.
             let fetched = engine.abstracts(&[&best.merged_record()]).await;
             verified.add_usage(&fetched.usage);
             let found = fetched.found.into_iter().next().flatten();
-            aspero_json::set_abstract(&mut item["match"]["work"], found.as_ref());
+            aspero_json::set_abstract(&mut item["best_match"]["work"], found.as_ref());
             text.push_str(&output::abstract_text(found.as_ref(), "  "));
             text.push('\n');
         }
@@ -214,7 +214,7 @@ fn row(item: &Value, verdict: Option<Verdict>) -> Vec<comfy_table::Cell> {
         _ => Level::Error,
     };
     let verdict = item["verdict"].as_str().unwrap_or("?");
-    let confidence = item["match"]["confidence"]
+    let confidence = item["best_match"]["confidence"]
         .as_f64()
         .map(|c| format!("{c:.2}"))
         .unwrap_or_default();
@@ -222,7 +222,7 @@ fn row(item: &Value, verdict: Option<Verdict>) -> Vec<comfy_table::Cell> {
         output::status_cell(&verdict.replace('_', " ").to_uppercase(), level),
         Cell::new(confidence),
         Cell::new(item["input"].as_str().unwrap_or("")),
-        Cell::new(item["reason"].as_str().unwrap_or("")),
+        Cell::new(item["reason_text"].as_str().unwrap_or("")),
     ]
 }
 
@@ -241,9 +241,9 @@ pub(super) fn verdict_text(input: &str, v: &Verification) -> String {
             "{}  {input}",
             v.verdict.as_str().to_uppercase().replace('_', " ")
         ),
-        format!("  {}", v.reason),
+        format!("  {}", v.reason_text),
     ];
-    if let Some(best) = v.best {
+    if let Some(best) = v.best_match {
         lines.push(output::candidate_text(&v.report.candidates[best], "  "));
     }
     for e in &v.report.errors {

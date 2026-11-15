@@ -144,7 +144,7 @@ pub struct Checked {
 impl Checked {
     pub fn matched(&self) -> Option<&Candidate> {
         let v = &self.verification;
-        v.best.map(|i| &v.report.candidates[i])
+        v.best_match.map(|i| &v.report.candidates[i])
     }
 
     /// The most severe finding, if any.
@@ -296,7 +296,7 @@ impl CheckedEntry {
 
     pub fn matched(&self) -> Option<&Candidate> {
         let v = self.verification.as_ref()?;
-        v.best.map(|i| &v.report.candidates[i])
+        v.best_match.map(|i| &v.report.candidates[i])
     }
 
     /// The most severe finding, if any.
@@ -325,10 +325,10 @@ pub fn findings(claim: &Claim, v: &Verification) -> Vec<Finding> {
     if v.verdict != Verdict::Verified {
         out.push(Finding::Verdict {
             verdict: v.verdict,
-            reason: v.reason.clone(),
+            reason: v.reason_text.clone(),
         });
     }
-    let Some(best) = v.best.map(|i| &v.report.candidates[i]) else {
+    let Some(best) = v.best_match.map(|i| &v.report.candidates[i]) else {
         return out;
     };
     let suggested = preferred_doi(&best.ids);

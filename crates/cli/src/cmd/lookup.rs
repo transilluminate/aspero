@@ -224,25 +224,24 @@ pub fn text(item: &Value, looked: Option<&Looked>) -> String {
             output::work_text(record, "  ")
         );
     }
-    let why = item["error"]
-        .as_str()
-        .map(str::to_owned)
-        .unwrap_or_else(|| {
-            item["attempts"]
-                .as_array()
-                .into_iter()
-                .flatten()
-                .map(|a| {
-                    let detail = a["error"]
-                        .as_str()
-                        .or(a["outcome"].as_str())
-                        .unwrap_or("?")
-                        .replace('_', " ");
-                    format!("{}: {detail}", a["provider"].as_str().unwrap_or("?"))
-                })
-                .collect::<Vec<_>>()
-                .join("; ")
-        });
+    let why = if let Some(error) = item["error"].as_str() {
+        error.to_owned()
+    } else {
+        item["attempts"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .map(|a| {
+                let detail = a["error"]
+                    .as_str()
+                    .or(a["outcome"].as_str())
+                    .unwrap_or("?")
+                    .replace('_', " ");
+                format!("{}: {detail}", a["provider"].as_str().unwrap_or("?"))
+            })
+            .collect::<Vec<_>>()
+            .join("; ")
+    };
     let status = item["status"].as_str().unwrap_or("?").replace('_', " ");
     format!("{label}  {status} ({why})\n")
 }

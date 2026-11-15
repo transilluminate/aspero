@@ -409,8 +409,7 @@ pub(crate) fn engine_summary(name: &str, arguments: &Map<String, Value>) -> Stri
         arguments
             .get("id")
             .and_then(Value::as_str)
-            .map(quoted)
-            .unwrap_or_else(|| "a work".into())
+            .map_or_else(|| "a work".into(), quoted)
     };
     match name {
         "search" => {

@@ -79,8 +79,7 @@ async fn main() -> std::process::ExitCode {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
     let path = std::env::args()
         .nth(1)
-        .map(PathBuf::from)
-        .unwrap_or_else(|| root.join("bench/citations.jsonl"));
+        .map_or_else(|| root.join("bench/citations.jsonl"), PathBuf::from);
     let text = std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
     let cases: Vec<Case> = text
         .lines()
@@ -109,10 +108,10 @@ async fn main() -> std::process::ExitCode {
             .iter()
             .filter_map(|(_, u)| u.cost)
             .sum::<f64>();
-        let confidence = v
-            .best
-            .map(|i| format!("{:.2}", v.report.candidates[i].assessment.confidence))
-            .unwrap_or_else(|| "  - ".into());
+        let confidence = v.best.map_or_else(
+            || "  - ".into(),
+            |i| format!("{:.2}", v.report.candidates[i].assessment.confidence),
+        );
         match judge(case, &v) {
             None => {
                 passed += 1;

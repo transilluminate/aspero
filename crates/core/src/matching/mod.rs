@@ -70,8 +70,8 @@ const SHORT_TITLE_WORDS: usize = 3;
 const DERIVATIVE_PENALTY: f64 = 0.5;
 /// Confidence ceiling when the claimed volume or first page differs.
 const LOCATION_MISMATCH_CAP: f64 = 0.8;
-/// Multiplier when the claim names a different journal (by
-/// [`same_journal`]'s rule, which misses some pairs): lowers the ranking.
+/// Multiplier when the claim names a journal clearly another
+/// ([`other_journal`]): lowers the ranking.
 const JOURNAL_MISMATCH_PENALTY: f64 = 0.9;
 /// Confidence ceiling when a journal article is cited in a journal that is
 /// clearly another ([`other_journal`]): a citation error, as a wrong volume
@@ -327,8 +327,8 @@ pub struct Assessment {
     pub authors: FieldCheck,
     pub year: FieldCheck,
     /// The journal: `Match` when the claim names it (or an abbreviation),
-    /// `Mismatch` when a structured claim names another, or a journal
-    /// article's reference clearly cites another
+    /// `Mismatch` when a structured claim names one clearly another, or a
+    /// journal article's reference cites one
     /// ([`Claim::cited_container`], [`other_journal`]).
     pub container: FieldCheck,
     pub volume: FieldCheck,
@@ -434,22 +434,26 @@ pub fn assess(claim: &Claim, record: &SourceRecord) -> Assessment {
         && cited_journal.is_some()
         && cited_place.volume.is_some()
         && cited_place.page.is_some();
-    let container = match (&claim.container, &work.container_title, &text) {
-        (Some(claimed), Some(actual), _) => FieldCheck::exact(same_journal(claimed, actual)),
-        // The journal read where the reference gives it decides, not words
-        // elsewhere in it (an author's initials "SR" for Scientific Reports).
-        (None, Some(actual), Some(text)) => match cited_journal.as_deref() {
-            Some(cited) if same_journal(cited, actual) || journal_in(&words(cited), actual) => {
-                FieldCheck::exact(true)
-            }
-            // Another journal, clearly named where the journal goes.
-            Some(cited) if article && other_journal(cited, actual) => FieldCheck::exact(false),
-            Some(_) => FieldCheck::UNKNOWN,
-            None => match journal_in(&text.words, actual) {
-                true => FieldCheck::exact(true),
-                false => FieldCheck::UNKNOWN,
-            },
-        },
+    // The journal the claim names, or reads where its reference gives one,
+    // decides, not words elsewhere in a reference (an author's initials
+    // "SR" for Scientific Reports). Names compare by rule, which misses
+    // some pairs, so only one clearly another is a mismatch: any work's
+    // when claimed, a journal article's when read from text (where a
+    // book's publisher may stand).
+    let container = match (cited_journal.as_deref(), &work.container_title, &text) {
+        (Some(cited), Some(actual), _)
+            if same_journal(cited, actual) || journal_in(&words(cited), actual) =>
+        {
+            FieldCheck::exact(true)
+        }
+        (Some(cited), Some(actual), _)
+            if (article || claim.container.is_some()) && other_journal(cited, actual) =>
+        {
+            FieldCheck::exact(false)
+        }
+        (None, Some(actual), Some(text)) if journal_in(&text.words, actual) => {
+            FieldCheck::exact(true)
+        }
         _ => FieldCheck::UNKNOWN,
     };
     let container = match preprint_of_cited && container.agreement != Agreement::Match {
@@ -582,10 +586,9 @@ pub fn assess(claim: &Claim, record: &SourceRecord) -> Assessment {
     {
         confidence = confidence.min(LOCATION_MISMATCH_CAP);
     }
-    // Journal names compare by rule, which misses some pairs, so a journal
-    // that may only be named otherwise lowers the ranking; one clearly
-    // another (the wrong journal, a common error in real and invented
-    // references) is an error in the citation, as a wrong volume is.
+    // Another journal lowers the ranking; for a journal article (the wrong
+    // journal, a common error in real and invented references) it is an
+    // error in the citation, as a wrong volume is.
     if container.agreement == Agreement::Mismatch {
         confidence *= JOURNAL_MISMATCH_PENALTY;
     }

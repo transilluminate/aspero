@@ -878,6 +878,37 @@ fn a_journal_read_from_the_reference_outweighs_words_elsewhere_in_it() {
 }
 
 #[test]
+fn structured_and_free_text_journals_compare_alike() {
+    let pnas = placed(
+        &[],
+        "Mitochondrial dysfunction in experimental sepsis",
+        &["Jane Doe", "Alan Roe"],
+        2011,
+        (
+            "Proceedings of the National Academy of Sciences",
+            "108",
+            "1000-1005",
+        ),
+    );
+    let journal = "Proc Natl Acad Sci U S A";
+    let structured = Claim {
+        title: Some("Mitochondrial dysfunction in experimental sepsis".into()),
+        authors: vec!["Doe J".into(), "Roe A".into()],
+        year: Some(2010),
+        container: Some(journal.into()),
+        ..Claim::default()
+    };
+    let text = Claim::from_text(format!(
+        "Doe J, Roe A. Mitochondrial dysfunction in experimental sepsis. {journal}. 2010."
+    ));
+    for claim in [structured, text] {
+        let a = assess(&claim, &pnas);
+        assert_ne!(a.container.agreement, Agreement::Mismatch, "{claim:?}");
+        assert!(a.confidence >= VERIFIED, "{claim:?}: {a:?}");
+    }
+}
+
+#[test]
 fn journals_named_otherwise_or_not_at_all_are_no_mismatch() {
     let mut nejm = peitho();
     nejm.work.work_type = Some(crate::work::WorkType::JournalArticle);

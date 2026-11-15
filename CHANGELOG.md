@@ -1,5 +1,23 @@
 # Changelog
 
+## Unreleased
+
+Added:
+
+- A claim from a publisher's article page, for addresses that don't say
+  which work they show (JAMA Network, Oxford Academic): `claimFromPage`
+  (Swift) and `aspero verify --html FILE --url URL [--title TEXT]` read
+  the page's markup, as a browser rendered it, offline: Highwire
+  `citation_*` tags, PRISM, Dublin Core and schema.org JSON-LD, each field
+  from the first that gives it, then `og:title` or `<title>` without the
+  site's name (" | JAMA | JAMA Network"), then the title a browser gave it
+  unless that's link text ("Full Text", "PDF"), and the address's
+  identifiers. Every identifier found is claimed, so `verify` checks it,
+  or `lookup` takes it. Without the markup, the address and the title
+  alone. Swift's `PageClaim` holds the identifiers (`Mention`s), the
+  `Claim` to verify and the `PageSource` that answered; JSON echoes
+  `page_source`.
+
 ## 0.23.0
 
 Added:

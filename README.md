@@ -71,6 +71,10 @@ aspero verify --style vancouver - < citations.txt   # `aspero styles` lists them
 aspero lookup 10.1038/nature14539 arXiv:1706.03762 "ISBN 978-0-262-03561-3"
 aspero verify https://www.sciencedirect.com/science/article/pii/S2772940026000032
 
+# An article page whose address doesn't say (JAMA, Oxford Academic): its
+# saved markup's citation_*, PRISM, Dublin Core or JSON-LD metadata (offline)
+aspero verify --html page.html --url https://jamanetwork.com/journals/jama/fullarticle/2856706
+
 # Which paper is this PDF? From its first page's text and title
 pdftotext -l 1 paper.pdf - | aspero identify --title "Deep learning"
 

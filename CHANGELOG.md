@@ -1,5 +1,27 @@
 # Changelog
 
+## 0.22.1
+
+Changed (the CLI's tables and text; JSON and the other formats are as
+they were):
+
+- Tables fit the terminal: identifiers are never broken, titles get the
+  width left, low-value columns drop or move under the title when narrow,
+  and rows of several lines are ruled apart. Search tables no longer show
+  the provider's raw score.
+- Text wraps to the terminal with hanging indents (unwrapped when piped).
+  Numbers have thousands separators, work types read in words ("journal
+  article"), and `analyse` numbers its works from 1 and leads each line
+  with the work.
+- `verify` text gives the verdict, why (unless it simply matches) and each
+  field's check as ✓/~/✗, without repeating the work; its table shows the
+  work matched.
+- `verify` and `resolve` with no citation read one per line from stdin
+  when piped, as `lookup` does; on a terminal they say how to give one.
+- Batch progress overwrites itself on stderr, only on a terminal. Colour
+  is kept to verdicts and secondary lines; `NO_COLOR` turns it off.
+- `lookup` says why an input wasn't looked up below the table.
+
 ## 0.22.0
 
 Breaking: names now agree between Swift and JSON, and money says its

@@ -1570,3 +1570,46 @@ async fn a_failed_retraction_check_is_not_hidden_by_the_budget() {
     assert_eq!((stop.done, stop.total), (100, 257));
     assert_eq!(alex.searches().len(), 6);
 }
+
+/// OpenAlex failing, a record cached a year ago is served (stale): it
+/// resolves the seed, and pages its references, but its references aren't
+/// cached as if just read (a new 30-day lease on year-old data).
+#[tokio::test(start_paused = true)]
+async fn stale_records_give_their_references_no_new_lease() {
+    let works = library();
+    let w4 = works[3].clone();
+    let cache = Arc::new(SqliteCache::open_in_memory().unwrap());
+    let year_ago = Timestamp::now() - jiff::SignedDuration::from_hours(365 * 24);
+    let (doi, id): (WorkId, WorkId) = ("10.1000/c".parse().unwrap(), "W4".parse().unwrap());
+    cache
+        .put_lookups(&OPENALEX, &[(&doi, Some(&w4)), (&id, Some(&w4))], year_ago)
+        .unwrap();
+    let alex = Arc::new(Alex::new(works).broken(&["10.1000/c", "W4"]));
+    let engine = engine(alex, Some(cache.clone()));
+    let edges = || {
+        cache
+            .get_edges(
+                aspero_engine::Direction::References,
+                std::slice::from_ref(&id),
+            )
+            .unwrap()
+            .pop()
+            .unwrap()
+    };
+
+    let analysis = engine
+        .analyse(
+            &inputs(&["10.1000/c"]),
+            &[AnalysisKind::OddOneOut],
+            None,
+            false,
+        )
+        .await
+        .unwrap();
+    assert_eq!(analysis.seeds[0].work(), Some(&id));
+    assert!(edges().is_none());
+
+    let page = engine.references("W4", None, 2).await.unwrap();
+    assert_eq!(page.total, Some(6));
+    assert!(edges().is_none());
+}

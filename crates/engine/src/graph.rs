@@ -113,11 +113,15 @@ impl Engine {
             ceiling: false,
             usage: Vec::new(),
         };
-        let (mut seeds, incomplete) = self.resolve_seeds(entry, seeds, &mut spend).await;
+        let (mut seeds, incomplete, current) = self.resolve_seeds(entry, seeds, &mut spend).await;
         let groups = merge_seeds(&mut seeds);
+        // Not stale records (served when OpenAlex failed): their references
+        // would get a new lease.
         let links: Vec<(&WorkId, &[WorkId])> = seeds
             .iter()
-            .filter_map(|s| Some((s.work()?, s.references()?)))
+            .zip(current)
+            .filter(|(_, current)| *current)
+            .filter_map(|(s, _)| Some((s.work()?, s.references()?)))
             .collect();
         self.remember_references(&links);
         let with_references = groups.iter().filter(|g| g.references.is_some()).count();

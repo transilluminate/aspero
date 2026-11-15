@@ -9,7 +9,7 @@ use futures::StreamExt;
 
 use super::spend::classes;
 use super::{Incomplete, IncompleteKind, MAX_FILTER, Seed, SeedProblem, Spend, openalex_id};
-use crate::{CallOptions, Engine, Entry, LookupResult, Outcome};
+use crate::{CallOptions, Engine, Entry, LookupResult, Outcome, Served};
 
 /// Lookups of seeds at once when estimating (each free, one id each).
 const ESTIMATE_LOOKUPS: usize = 4;
@@ -37,15 +37,20 @@ impl Group {
     }
 }
 
+/// OpenAlex's answer about a seed: found or not (or failed), and where it
+/// was served from.
+type Answer = (Outcome, Option<SourceRecord>, Served);
+
 impl Engine {
-    /// Each seed's OpenAlex record, or why there's none; and whether
-    /// resolving stopped early.
+    /// Each seed's OpenAlex record, or why there's none; whether resolving
+    /// stopped early; and which seeds' records are current (fetched, or
+    /// fresh in the cache; not stale, served when OpenAlex failed).
     pub(super) async fn resolve_seeds(
         &self,
         entry: &Entry,
         inputs: &[String],
         spend: &mut Spend,
-    ) -> (Vec<Seed>, Option<Incomplete>) {
+    ) -> (Vec<Seed>, Option<Incomplete>, Vec<bool>) {
         // Many seeds are expected not to resolve: ask once, never retry.
         let quick = self.with_options(CallOptions {
             max_retries: Some(0),
@@ -110,7 +115,7 @@ impl Engine {
         // by an identifier the record found carries: an OpenAlex id, or
         // another DOI or PMID.
         let missed: Vec<usize> = (0..asks.len())
-            .filter(|&k| matches!(answers[k], Some((Outcome::NotFound, None))))
+            .filter(|&k| matches!(answers[k], Some((Outcome::NotFound, None, _))))
             .collect();
         if !missed.is_empty() {
             let ids: Vec<WorkId> = missed.iter().map(|&k| asks[k].1.clone()).collect();
@@ -129,7 +134,7 @@ impl Engine {
                             _ => None,
                         })
                     {
-                        answers[k] = Some((Outcome::Failed(e), None));
+                        answers[k] = Some((Outcome::Failed(e), None, Served::Live));
                     }
                     continue;
                 };
@@ -155,31 +160,35 @@ impl Engine {
             };
             for ((k, _), answer) in again.iter().zip(found) {
                 match answer {
-                    Some((Outcome::NotFound, None)) => {}
+                    Some((Outcome::NotFound, None, _)) => {}
                     answer => answers[*k] = answer,
                 }
             }
         }
 
+        let mut current = vec![false; inputs.len()];
         for ((i, id), answer) in asks.iter().zip(answers) {
             let input = &inputs[*i];
             seeds[*i] = Some(match answer {
-                Some((_, Some(record))) => Seed {
-                    input: input.clone(),
-                    record: Some(record),
-                    problem: None,
-                    message: None,
-                    same_as: None,
-                },
+                Some((_, Some(record), served)) => {
+                    current[*i] = served != Served::Stale;
+                    Seed {
+                        input: input.clone(),
+                        record: Some(record),
+                        problem: None,
+                        message: None,
+                        same_as: None,
+                    }
+                }
                 // The caller's daily cap on OpenAlex is the budget.
-                Some((Outcome::Failed(e), None)) if e.kind() == ErrorKind::BudgetCapped => {
+                Some((Outcome::Failed(e), None, _)) if e.kind() == ErrorKind::BudgetCapped => {
                     Seed::unresolved(
                         input,
                         SeedProblem::OverBudget,
                         format!("not looked up: {e}"),
                     )
                 }
-                Some((Outcome::Failed(e), None)) => Seed::unresolved(
+                Some((Outcome::Failed(e), None, _)) => Seed::unresolved(
                     input,
                     SeedProblem::ProviderFailed,
                     format!("the lookup failed: {e}"),
@@ -200,10 +209,11 @@ impl Engine {
             .into_iter()
             .map(|s| s.expect("every seed resolved or settled"))
             .collect();
-        (seeds, stopped)
+        (seeds, stopped, current)
     }
 
-    /// OpenAlex's answer for each of `asks` (seed, identifier); `None`
+    /// OpenAlex's answer for each of `asks` (seed, identifier), and where
+    /// it was served from; `None`
     /// where the budget stopped it, saying so in `stopped`. Fresh cached
     /// answers first, then the rest in batches of one kind each (a batch of
     /// one is a free lookup), asked once. Estimating, the rest are asked
@@ -216,16 +226,16 @@ impl Engine {
         asks: &[(usize, WorkId)],
         spend: &mut Spend,
         stopped: &mut Option<Incomplete>,
-    ) -> Vec<Option<(Outcome, Option<SourceRecord>)>> {
+    ) -> Vec<Option<Answer>> {
         let provider = entry.provider.id();
         let ids: Vec<WorkId> = asks.iter().map(|(_, id)| id.clone()).collect();
         let cached = self.cached_lookups(&provider, &ids, FieldSet::DEFAULT);
-        let mut answers: Vec<Option<(Outcome, Option<SourceRecord>)>> = cached
+        let mut answers: Vec<Option<Answer>> = cached
             .into_iter()
             .map(|c| {
                 c.map(|record| match record {
-                    Some(r) => (Outcome::Found, Some(r)),
-                    None => (Outcome::NotFound, None),
+                    Some(r) => (Outcome::Found, Some(r), Served::Cache),
+                    None => (Outcome::NotFound, None, Served::Cache),
                 })
             })
             .collect();
@@ -258,7 +268,7 @@ impl Engine {
             .await;
             for (k, (attempt, record), usage) in lookups {
                 spend.add(usage, 0);
-                answers[k] = Some((attempt.outcome, record));
+                answers[k] = Some((attempt.outcome, record, attempt.served));
             }
             return answers;
         }
@@ -276,7 +286,7 @@ impl Engine {
                 .await;
             spend.add(usage, paid);
             for (&k, (attempt, record)) in chunk.iter().zip(found) {
-                answers[k] = Some((attempt.outcome, record));
+                answers[k] = Some((attempt.outcome, record, attempt.served));
             }
             done += chunk.len();
         }

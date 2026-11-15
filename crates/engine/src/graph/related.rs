@@ -135,6 +135,8 @@ struct Read {
     /// Each citing work read, with its references; `None` when OpenAlex
     /// lists none, or ones it can't have (see [`Read::take`]).
     works: Vec<(WorkId, Option<Vec<WorkId>>)>,
+    /// Of `works`, how many came from pages cached.
+    cached: usize,
     /// Pages paid for.
     paid: usize,
     /// The last page was read.
@@ -345,7 +347,8 @@ impl Engine {
         // Each work's citing works, and how many of them were read.
         let mut found: BTreeMap<&WorkId, (Vec<WorkId>, bool)> = BTreeMap::new();
         let mut to_cache: Vec<(WorkId, Edges)> = Vec::new();
-        let mut links: Vec<(WorkId, Vec<WorkId>)> = Vec::new();
+        // Citing works read live (their references to remember).
+        let mut fresh: BTreeSet<WorkId> = BTreeSet::new();
         for (c, n) in filters.iter().zip(&allotted) {
             let mut read = reads.next().expect("a read per filter");
             spend.add(std::mem::take(&mut read.usage), read.paid);
@@ -369,7 +372,7 @@ impl Engine {
             }
             for (id, cited) in read.works {
                 if let Some(cited) = cited {
-                    links.push((id.clone(), cited.clone()));
+                    fresh.insert(id.clone());
                     citing.insert(id, cited);
                 }
             }
@@ -384,13 +387,22 @@ impl Engine {
                 (coupling_cached + read.paid) as u64,
                 (coupling_cached + coupling_paid) as u64,
             );
-            for (id, cited) in read.works {
+            for (k, (id, cited)) in read.works.into_iter().enumerate() {
                 if let Some(cited) = cited {
-                    links.push((id.clone(), cited.clone()));
+                    if k >= read.cached {
+                        fresh.insert(id.clone());
+                    }
                     citing.entry(id).or_insert(cited);
                 }
             }
         }
+        // The references read live, not those of pages cached (which got
+        // their lease when read).
+        let links: Vec<(&WorkId, &[WorkId])> = citing
+            .iter()
+            .filter(|(id, _)| fresh.contains(*id))
+            .map(|(id, refs)| (id, refs.as_slice()))
+            .collect();
         self.remember_citing(&to_cache, &links);
 
         // How many of the set's citing works were read.
@@ -533,6 +545,7 @@ impl Engine {
         let mut cursor = None;
         for page in cached {
             cursor = read.take(page, years);
+            read.cached = read.works.len();
             if cursor.is_none() {
                 return read;
             }
@@ -665,15 +678,13 @@ impl Engine {
 
     /// Caches the citing works read of each work of the set, and each
     /// citing work's references.
-    fn remember_citing(&self, citing: &[(WorkId, Edges)], links: &[(WorkId, Vec<WorkId>)]) {
+    fn remember_citing(&self, citing: &[(WorkId, Edges)], links: &[(&WorkId, &[WorkId])]) {
         let Some(cache) = &self.cache else {
             return;
         };
         let now = (self.clock)();
         let rows: Vec<(&WorkId, &Edges)> = citing.iter().map(|(w, e)| (w, e)).collect();
         let _ = cache.put_edges(Direction::CitedBy, &rows, now);
-        let links: Vec<(&WorkId, &[WorkId])> =
-            links.iter().map(|(w, r)| (w, r.as_slice())).collect();
-        self.remember_references(&links);
+        self.remember_references(links);
     }
 }

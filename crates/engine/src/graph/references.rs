@@ -5,7 +5,7 @@ use aspero_core::{Cursor, FieldSet, IdKind, WorkId};
 use aspero_store::{Direction, Edges};
 
 use super::{Coverage, ReferencesPage};
-use crate::{Engine, EngineError, LookupResult, Outcome};
+use crate::{Engine, EngineError, LookupResult, Outcome, Served};
 
 impl Engine {
     /// A page of the works `id` cites: `limit` from `cursor` (from a
@@ -68,8 +68,12 @@ impl Engine {
                         kind,
                     });
                 };
+                // Not a stale record (served when OpenAlex failed): its
+                // references would get a new lease.
                 let references = record.references.clone();
-                if let Some(cited) = &references {
+                if let Some(cited) = &references
+                    && attempt.served != Served::Stale
+                {
                     self.remember_references(&[(&work, cited)]);
                 }
                 (work, Some(record), references)

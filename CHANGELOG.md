@@ -20,7 +20,8 @@ unit. Only names change; values and shapes stay as they were.
   `openalexDailyCapUsd` (Swift), `StandardConfig::openalex_daily_cap` →
   `openalex_daily_cap_usd` (Rust), `--openalex-cap` → `--openalex-cap-usd`
   (the old flag still works) and `ASPERO_OPENALEX_CAP` →
-  `ASPERO_OPENALEX_CAP_USD` (the old variable is no longer read).
+  `ASPERO_OPENALEX_CAP_USD` (the old variable is still read when the new
+  one isn't set).
 - A search's cursor for the next page: `SearchResults.next` →
   `nextCursor` (JSON already `next_cursor`).
 - How a result was served: `SearchResults.freshness` and

@@ -24,7 +24,7 @@ Environment:
   OPENALEX_API_KEY  OpenAlex key ($1/day free budget; $0.10/day without)
   ASPERO_MAILTO     contact address for polite API pools (Crossref)
   ASPERO_CACHE_DIR  where to keep the answer cache (default: platform cache dir)
-  ASPERO_OPENALEX_CAP_USD  --openalex-cap-usd
+  ASPERO_OPENALEX_CAP_USD  --openalex-cap-usd; ASPERO_OPENALEX_CAP still read
   ASPERO_DISABLED_SOURCES  --without
   ASPERO_CACHE_FOUND_DAYS, ASPERO_CACHE_NOT_FOUND_DAYS, ASPERO_CACHE_MAX_MB
                     --cache-found-days, --cache-not-found-days, --cache-max-mb
@@ -225,6 +225,29 @@ impl Global {
     /// The cache's size limit in bytes.
     pub fn cache_max_bytes(&self) -> Option<u64> {
         self.cache_max_mb.map(aspero_engine::megabytes)
+    }
+
+    /// The OpenAlex daily cap: `--openalex-cap-usd` or
+    /// `ASPERO_OPENALEX_CAP_USD`, else the old `ASPERO_OPENALEX_CAP`, still
+    /// read so a cap set under that name isn't lost.
+    pub fn openalex_daily_cap_usd(&self) -> Result<Option<f64>, String> {
+        or_old_cap(
+            self.openalex_cap_usd,
+            std::env::var(OLD_CAP).ok().as_deref(),
+        )
+    }
+}
+
+/// The OpenAlex daily cap's environment variable before it said USD.
+const OLD_CAP: &str = "ASPERO_OPENALEX_CAP";
+
+/// The cap given under its new name, else `old` (blank is unset), read as
+/// `--openalex-cap-usd` reads it.
+fn or_old_cap(given: Option<f64>, old: Option<&str>) -> Result<Option<f64>, String> {
+    match (given, old.filter(|v| !v.trim().is_empty())) {
+        (Some(usd), _) => Ok(Some(usd)),
+        (None, Some(old)) => cap(old).map(Some).map_err(|e| format!("{OLD_CAP}: {e}")),
+        (None, None) => Ok(None),
     }
 }
 
@@ -916,6 +939,18 @@ mod tests {
             let error = parse(&["--openalex-cap-usd", bad, "search", "x"]).expect_err(bad);
             assert_eq!(error.exit_code(), 2);
         }
+    }
+
+    #[test]
+    fn the_old_cap_variable_is_read_when_the_new_name_is_not_set() {
+        assert_eq!(or_old_cap(None, None), Ok(None));
+        assert_eq!(or_old_cap(None, Some("0.5")), Ok(Some(0.5)));
+        assert_eq!(or_old_cap(None, Some(" ")), Ok(None));
+        // The new name wins, even over an old value that isn't an amount.
+        assert_eq!(or_old_cap(Some(0.25), Some("0.5")), Ok(Some(0.25)));
+        assert_eq!(or_old_cap(Some(0.25), Some("half")), Ok(Some(0.25)));
+        let error = or_old_cap(None, Some("half")).unwrap_err();
+        assert!(error.starts_with("ASPERO_OPENALEX_CAP: "), "{error}");
     }
 
     #[test]

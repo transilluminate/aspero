@@ -143,7 +143,7 @@ fn freshness_is_judged_from_stored_at() {
         .put_lookups(&OA, &[(&id("W1"), Some(&record(&["W1"], "x")))], at(0))
         .unwrap();
     let entry = get(&cache, &OA, "W1").unwrap();
-    let day = Duration::from_secs(86_400);
+    let day = Duration::from_hours(24);
     assert!(entry.is_fresh(at(3600), day));
     assert!(!entry.is_fresh(at(2 * 86_400), day));
 }

@@ -22,7 +22,7 @@ use crate::lock;
 const UNKNOWN_RESET: Duration = Duration::from_secs(3600);
 
 /// Stands in for a cooldown too long to add to an `Instant`: about 30 years.
-const FAR_FUTURE: Duration = Duration::from_secs(30 * 365 * 86_400);
+const FAR_FUTURE: Duration = Duration::from_hours(30 * 365 * 24);
 
 #[derive(Default)]
 pub(crate) struct Health {

@@ -10,9 +10,10 @@
 //! 3. **Title searches** on keyword providers (OpenAlex, $0.001 each): the
 //!    claim's title, or the title the reference cites as located via the
 //!    matchers' hits ([`matching::shared_title`]). Bare titles rank far
-//!    better there than whole references (DESIGN §9), and locating the
-//!    title in the reference keeps derivative hits ("Faculty Opinions
-//!    recommendation of …") from steering the search.
+//!    better there than whole references (DESIGN "Provider notes and
+//!    gotchas"), and locating the title in the reference keeps derivative
+//!    hits ("Faculty Opinions recommendation of …") from steering the
+//!    search.
 //!
 //! Candidates sharing an identifier are merged; each is scored against the
 //! claim with [`assess`]. `verify` stops as soon as a candidate verifies, so

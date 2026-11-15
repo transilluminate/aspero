@@ -139,9 +139,9 @@ pub const SEARCH_LIMIT: u32 = 5;
 /// A clock, injectable so cache expiry is testable.
 pub type Clock = fn() -> Timestamp;
 
-/// How long cached answers are trusted (DESIGN §5). Past these, a provider
-/// is asked again; if it then fails, the old answer is served as stale.
-/// Provider failures and verdicts are never cached.
+/// How long cached answers are trusted (DESIGN "Storage"). Past these, a
+/// provider is asked again; if it then fails, the old answer is served as
+/// stale. Provider failures and verdicts are never cached.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct CachePolicy {

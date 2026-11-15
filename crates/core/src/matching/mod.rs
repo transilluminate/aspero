@@ -5,7 +5,8 @@
 //! one candidate record against it, field by field, and combines the fields
 //! into a confidence in `0.0..=1.0`.
 //!
-//! Lessons from real data shape the rules (see DESIGN §9):
+//! Lessons from real data shape the rules (see DESIGN "Provider notes and
+//! gotchas"):
 //! - **Lookalikes exist**: re-deposits with the real title, authors and
 //!   abstract under a different year and publisher. A wrong year is a strong
 //!   penalty, never a detail.

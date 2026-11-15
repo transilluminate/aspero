@@ -10,7 +10,7 @@
 //!
 //! Durable data that is costly to recompute (history; derived data such as
 //! embeddings or extracted text) will live in a separate store in the data
-//! directory, with real migrations (DESIGN §5).
+//! directory, with real migrations (DESIGN "Storage").
 //!
 //! The cache keeps entries and when they were stored; it applies no policy.
 //! Freshness, field coverage and stale-on-error are the engine's decisions.

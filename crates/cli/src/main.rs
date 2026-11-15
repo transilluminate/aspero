@@ -152,8 +152,9 @@ fn open_cache(max_bytes: Option<u64>) -> Option<Arc<SqliteCache>> {
     }
 }
 
-/// Credentials and contact details come from the environment for now; the
-/// config file and keyring (DESIGN §7) come later.
+/// Credentials and contact details come from the environment, not a
+/// keyring: agents run headless, where a Keychain prompt would hang them
+/// (DESIGN "Apps (FFI)"). A config file may come later (DESIGN "Future").
 /// `file` paces requests across processes (parallel agents), and caches
 /// answers unless `no_cache`.
 fn engine(

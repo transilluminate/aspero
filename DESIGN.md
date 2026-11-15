@@ -849,12 +849,18 @@ Next (#58, P3): progress notifications and resources.
 ## Apps (FFI)
 
 `aspero-ffi` (UniFFI) gives apps one `Aspero` handle: `lookup`, `verify`,
-`verify_each` (a callback per result as it finishes), `search` (with
+`verify_each` (a callback per result as it finishes), `identify` (which
+work a PDF's first page is), `search` (with
 `searchCapabilities` saying what each source can search by, and
 `searchSupports` whether it can search a query tree, and optionally
 `since` a day), offline
 `scan`, `split_references` and `split_lines` (laid-out lines with
-indents, from PDFKit), `references` and `analyse` (citation links), and
+indents, from PDFKit), `read_references` (BibTeX, RIS or CSL-JSON) and
+`read_docx` (a Word document's Zotero or Mendeley citations), `export`
+(BibTeX, RIS, CSL-JSON) and `cite` (a reference list in a bundled or
+given CSL style, with `citation_styles`, `style_project` and
+`style_credits` to list and credit them), `references` and `analyse`
+(citation links, related works among them), and
 for settings `budgets` (as last
 reported: free), `refresh_budgets` (OpenAlex's `/rate-limit` with a key,
 free; nothing asked without one), `check_openalex_key` (one free lookup), `cache_stats`,
@@ -937,11 +943,9 @@ its container; different schema versions would rebuild each other's).
 - **Configuration**: TOML config (enable/order providers, per-provider
   resilience overrides); `auth status` distinguishing rejected from
   rate-limited.
-- **Discovery**: related works (co-citation, coupling: citation links
-  G2), OpenCitations (G3), watches ("new since last run"), history and
-  sessions.
-- **Integration**: CSL-JSON export, DOI-as-citekey builds, Zotero
-  interop.
+- **Discovery**: OpenCitations (G3), watches ("new since last run"),
+  history and sessions.
+- **Integration**: DOI-as-citekey builds, Zotero interop.
 - **hayagriva workarounds** in `bib/src/cite.rs` (a default `<name/>`;
   spaces before punctuation tidied): drop them once a release includes
   typst/hayagriva#520 and fixes empty date-part delimiters.

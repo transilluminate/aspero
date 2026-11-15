@@ -1,6 +1,7 @@
 //! `resolve` and `verify` against scripted providers that replay the
-//! situations seen live (DESIGN §9): lookalike re-deposits, citation
-//! matchers that lack DataCite DOIs, invented and misattached DOIs.
+//! situations seen live (DESIGN "Provider notes and gotchas"): lookalike
+//! re-deposits, citation matchers that lack DataCite DOIs, invented and
+//! misattached DOIs.
 
 mod common;
 

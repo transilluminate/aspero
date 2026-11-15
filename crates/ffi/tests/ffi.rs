@@ -41,6 +41,27 @@ fn scans_offline() {
     let found = aspero(None).scan("see PMID 40536112".into());
     assert_eq!(found[0].id, "pmid:40536112");
     assert_eq!(found[0].kind, "pmid");
+    assert!(!found[0].from_url);
+}
+
+#[test]
+fn publishers_pages_scan_as_identifiers_from_their_address() {
+    let found = aspero(None).scan(
+        "https://www.sciencedirect.com/science/article/pii/S2772940026000032 \
+         https://www.nature.com/articles/nature14539"
+            .into(),
+    );
+    let read: Vec<_> = found
+        .iter()
+        .map(|m| (m.id.as_str(), m.kind.as_str(), m.from_url))
+        .collect();
+    assert_eq!(
+        read,
+        [
+            ("pii:S2772940026000032", "pii", true),
+            ("doi:10.1038/nature14539", "doi", true),
+        ]
+    );
 }
 
 #[test]

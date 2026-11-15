@@ -1006,7 +1006,7 @@ pub struct Utf16Range {
 pub struct Mention {
     /// With its prefix.
     pub id: String,
-    /// The prefix alone: `doi`, `pmid`, `arxiv`, ….
+    /// The prefix alone: `doi`, `pmid`, `arxiv`, `pii` (an Elsevier PII), ….
     pub kind: String,
     /// As written, label included (`PMID: 123`).
     pub text: String,
@@ -1018,6 +1018,13 @@ pub struct Mention {
     /// For a DOI broken across lines at a hyphen, the DOI without it: look
     /// it up if `id` isn't found.
     pub alternative_id: Option<String>,
+    /// Read from a web address: a publisher's article page
+    /// (`nature.com/articles/…`, a ScienceDirect page's PII) or an
+    /// identifier's link (`doi.org/…`, PubMed, arXiv), so the app can say
+    /// it was found from the address. False when written out (`doi:…`,
+    /// `PMID: …`).
+    #[uniffi(default = false)]
+    pub from_url: bool,
 }
 
 impl Mention {
@@ -1030,6 +1037,7 @@ impl Mention {
             column: m.column as u64,
             utf16: utf16.range(&m.span),
             alternative_id: m.alternative(text).map(|id| id.to_string()),
+            from_url: m.from_url,
         }
     }
 }

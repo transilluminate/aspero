@@ -2230,14 +2230,46 @@ impl From<engine::IncompleteKind> for IncompleteKind {
     }
 }
 
+/// A stage of related works, and what its `Incomplete`'s `done` and
+/// `total` count.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Enum)]
+pub enum AnalysisStage {
+    /// Reading the works citing the set: citing works read, of those the
+    /// seeds' citation counts promise.
+    Citing,
+    /// Reading the works citing the set's most shared references (the
+    /// coupling sample): pages read, of those meant to be.
+    Coupling,
+    /// Looking the best up: works answered, of those asked about.
+    Lookup,
+}
+
+impl From<engine::Stage> for AnalysisStage {
+    fn from(s: engine::Stage) -> Self {
+        match s {
+            engine::Stage::Citing => AnalysisStage::Citing,
+            engine::Stage::Coupling => AnalysisStage::Coupling,
+            engine::Stage::Lookup => AnalysisStage::Lookup,
+            _ => AnalysisStage::Lookup,
+        }
+    }
+}
+
 /// How far a stopped step got: `done` of `total` (seeds looked up,
-/// references checked, works looked up, citing works read), to word as
-/// "checked 1,200 of 4,300".
-#[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Record)]
+/// references checked, works looked up; for related works, as its `stage`
+/// counts), to word as "checked 1,200 of 4,300".
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
 pub struct Incomplete {
     pub kind: IncompleteKind,
     pub done: u64,
     pub total: u64,
+    /// Which stage of related works stopped; `nil` for the other
+    /// analyses.
+    #[uniffi(default = None)]
+    pub stage: Option<AnalysisStage>,
+    /// The provider that failed, for `providerFailed`.
+    #[uniffi(default = None)]
+    pub provider: Option<String>,
 }
 
 impl From<&engine::Incomplete> for Incomplete {
@@ -2246,6 +2278,8 @@ impl From<&engine::Incomplete> for Incomplete {
             kind: i.kind.into(),
             done: i.done,
             total: i.total,
+            stage: i.stage.map(Into::into),
+            provider: i.provider.as_ref().map(ToString::to_string),
         }
     }
 }
@@ -2272,7 +2306,9 @@ pub enum OddReason {
     /// It cites no other seed, none cites it, and it shares no
     /// references with any.
     NoLinks,
-    /// Its references are unknown and no other seed cites it.
+    /// Its references are unknown and no other seed cites it, or a seed
+    /// whose references are unknown may cite it: whether it belongs can't
+    /// be told.
     NoReferenceData,
 }
 
@@ -2344,7 +2380,7 @@ pub struct RelatedWork {
 pub struct RelatedWorks {
     pub items: Vec<RelatedWork>,
     /// What stopped it: `capped` when a much cited seed's citing works
-    /// were sampled; `done` of `total` citing works read.
+    /// were sampled; `done` of `total` as its `stage` counts them.
     pub incomplete: Option<Incomplete>,
 }
 
@@ -2588,6 +2624,9 @@ mod tests {
         for r in engine::OddReason::ALL {
             assert_eq!(name(OddReason::from(*r)), r.as_str());
         }
+        for s in engine::Stage::ALL {
+            assert_eq!(name(AnalysisStage::from(*s)), s.as_str());
+        }
         // Failures.
         for k in aspero_core::ErrorKind::ALL {
             assert_eq!(name(ErrorKind::from(*k)), k.as_str());
@@ -2615,6 +2654,20 @@ mod tests {
         for r in engine::Reason::ALL {
             assert_eq!(name(Reason::new(r, &candidates)), r.as_str());
         }
+    }
+
+    #[test]
+    fn a_stop_says_its_stage_and_provider() {
+        let stopped = engine::Incomplete::new(engine::IncompleteKind::ProviderFailed, 3, 8)
+            .at(engine::Stage::Coupling)
+            .from(ProviderId::from_static("openalex"));
+        let i = Incomplete::from(&stopped);
+        assert_eq!((i.done, i.total), (3, 8));
+        assert_eq!(i.stage, Some(AnalysisStage::Coupling));
+        assert_eq!(i.provider.as_deref(), Some("openalex"));
+        let budget = engine::Incomplete::new(engine::IncompleteKind::Budget, 1, 2);
+        let i = Incomplete::from(&budget);
+        assert_eq!((i.stage, i.provider), (None, None));
     }
 
     #[test]

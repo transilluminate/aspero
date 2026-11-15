@@ -69,12 +69,6 @@ impl ReplayClient {
         }
     }
 
-    /// Queues a transport failure as the next answer.
-    pub fn then_fail(self, error: Error) -> Self {
-        self.responses.lock().unwrap().push_back(Err(error));
-        self
-    }
-
     /// Requests sent so far, in order.
     pub fn requests(&self) -> Vec<HttpRequest> {
         self.requests.lock().unwrap().clone()

@@ -177,10 +177,9 @@ fn text_value(value: &str, phrase: bool, grouped: bool) -> String {
 /// journals, whose sources are then joined with OR.
 fn any_of_values(node: &QueryNode, nodes: &[QueryNode]) -> Result<Clause, String> {
     let refuse = || match identifier_kinds(nodes) {
-        Some(kinds) => format!(
-            "{NAME} can't combine {} with any, only identifiers of one kind",
-            kinds
-        ),
+        Some(kinds) => {
+            format!("{NAME} can't combine {kinds} with any, only identifiers of one kind")
+        }
         None => format!("{NAME} can't combine {} with any", node.leaf_names()),
     };
     let journals: Option<Vec<(String, bool)>> = nodes

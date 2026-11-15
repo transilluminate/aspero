@@ -24,19 +24,19 @@ pub type Source = Arc<dyn std::error::Error + Send + Sync>;
 #[non_exhaustive]
 pub enum Error {
     /// Too many requests right now; back off and retry.
-    #[error("rate limited{}", retry_hint(.retry_after))]
+    #[error("rate limited{}", retry_hint(.retry_after.as_ref()))]
     RateLimited { retry_after: Option<Duration> },
 
     /// The provider's usage budget (e.g. OpenAlex daily credits) is spent.
     /// Not retryable until `resets_at`; fall back to other providers.
-    #[error("usage quota exhausted{}", reset_hint(.resets_at))]
+    #[error("usage quota exhausted{}", reset_hint(.resets_at.as_ref()))]
     QuotaExhausted { resets_at: Option<Timestamp> },
 
     /// The caller's own daily cap on the provider's spend is reached: `used`
     /// (the day's use as the provider reports it, shared by everything
     /// using the key) is at least `cap`, so its paid calls stop until
     /// `resets_at`. Free calls go on; fall back to other providers.
-    #[error("stopped at the daily cap of ${cap:.4} (${used:.4} used today){}", reset_hint(.resets_at))]
+    #[error("stopped at the daily cap of ${cap:.4} (${used:.4} used today){}", reset_hint(.resets_at.as_ref()))]
     BudgetCapped {
         cap: f64,
         used: f64,
@@ -49,7 +49,7 @@ pub enum Error {
     #[error("request timed out")]
     Timeout,
 
-    #[error("server error (HTTP {status}){}", message_hint(.message))]
+    #[error("server error (HTTP {status}){}", message_hint(.message.as_deref()))]
     Server {
         status: u16,
         message: Option<String>,
@@ -64,7 +64,7 @@ pub enum Error {
     CircuitOpen { until: Option<Timestamp> },
 
     /// Credentials missing, invalid or not yet activated. Retrying won't help.
-    #[error("authentication rejected{}", message_hint(.message))]
+    #[error("authentication rejected{}", message_hint(.message.as_deref()))]
     AuthRejected { message: Option<String> },
 
     /// The addressed entity doesn't exist at this provider. Batch lookups
@@ -263,17 +263,17 @@ impl Error {
     }
 }
 
-fn retry_hint(d: &Option<Duration>) -> String {
+fn retry_hint(d: Option<&Duration>) -> String {
     d.map(|d| format!(" (retry after {}s)", d.as_secs()))
         .unwrap_or_default()
 }
 
-fn reset_hint(t: &Option<Timestamp>) -> String {
+fn reset_hint(t: Option<&Timestamp>) -> String {
     t.map(|t| format!(" (resets at {t})")).unwrap_or_default()
 }
 
-fn message_hint(m: &Option<String>) -> String {
-    m.as_ref().map(|m| format!(": {m}")).unwrap_or_default()
+fn message_hint(m: Option<&str>) -> String {
+    m.map(|m| format!(": {m}")).unwrap_or_default()
 }
 
 #[cfg(test)]

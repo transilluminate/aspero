@@ -164,7 +164,7 @@ fn absorb(
 ///     (2021 and 2021-01-05) the more precise. The other date's year stays
 ///     in `other_years`, where verification's year matching finds it.
 fn merged_values(a: &mut SourceRecord, b: &mut SourceRecord, counts: (bool, bool)) -> (bool, bool) {
-    let oa = best_open_access(&a.work.open_access, &b.work.open_access).clone();
+    let oa = best_open_access(a.work.open_access.as_ref(), b.work.open_access.as_ref()).cloned();
     a.work.open_access.clone_from(&oa);
     b.work.open_access = oa;
 
@@ -191,11 +191,11 @@ fn merged_values(a: &mut SourceRecord, b: &mut SourceRecord, counts: (bool, bool
 
 /// The more informative of two open-access records; on a tie, the first.
 fn best_open_access<'a>(
-    a: &'a Option<OpenAccess>,
-    b: &'a Option<OpenAccess>,
-) -> &'a Option<OpenAccess> {
-    let rank = |oa: &Option<OpenAccess>| {
-        oa.as_ref().map(|oa| {
+    a: Option<&'a OpenAccess>,
+    b: Option<&'a OpenAccess>,
+) -> Option<&'a OpenAccess> {
+    let rank = |oa: Option<&OpenAccess>| {
+        oa.map(|oa| {
             (
                 oa.is_oa,
                 oa.pdf_url.is_some(),
@@ -1001,11 +1001,11 @@ mod tests {
         let free = Some(open_access(true, None, None));
         let licensed = Some(open_access(false, None, Some("cc-by")));
         let closed = Some(open_access(false, None, None));
-        let ladder = [&free_pdf, &free, &licensed, &closed, &None];
-        for (i, better) in ladder.iter().enumerate() {
-            for worse in &ladder[i..] {
-                assert_eq!(best_open_access(better, worse), *better);
-                assert_eq!(best_open_access(worse, better), *better);
+        let ladder = [&free_pdf, &free, &licensed, &closed, &None].map(Option::as_ref);
+        for (i, &better) in ladder.iter().enumerate() {
+            for &worse in &ladder[i..] {
+                assert_eq!(best_open_access(better, worse), better);
+                assert_eq!(best_open_access(worse, better), better);
             }
         }
     }

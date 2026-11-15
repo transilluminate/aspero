@@ -414,9 +414,8 @@ impl SqliteCache {
 
     /// Holds the cache to its limit after a write, which stands whether or
     /// not evicting worked (a busy file is evicted from next time).
-    fn after_write(&self) -> Result<()> {
+    fn after_write(&self) {
         let _ = self.enforce_limit();
-        Ok(())
     }
 
     /// Bumps the `used_at` of rows read (`(rowid, used_at)`), under a limit
@@ -802,7 +801,8 @@ impl Cache for SqliteCache {
         }
         tx.commit()?;
         drop(conn);
-        self.after_write()
+        self.after_write();
+        Ok(())
     }
 
     fn get_search(
@@ -848,7 +848,8 @@ impl Cache for SqliteCache {
                 at.as_second()
             ],
         )?;
-        self.after_write()
+        self.after_write();
+        Ok(())
     }
 
     fn get_edges(
@@ -925,6 +926,7 @@ impl Cache for SqliteCache {
         }
         tx.commit()?;
         drop(conn);
-        self.after_write()
+        self.after_write();
+        Ok(())
     }
 }

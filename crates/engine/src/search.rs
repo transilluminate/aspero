@@ -81,7 +81,7 @@ impl Engine {
     ) -> Option<String> {
         let can = |entry: &Entry| {
             check_since(entry, since)?;
-            self.prepare_tree(entry, tree.clone(), None)
+            Self::prepare_tree(entry, tree.clone(), None)
         };
         let result = match source {
             Some(name) => self.named_entry(name).and_then(can),
@@ -328,7 +328,7 @@ impl Engine {
             ];
             let mut all = vec![tree];
             all.extend(filters.into_iter().flatten().map(QueryNode::Filter));
-            match self.prepare_tree(entry, QueryNode::All(all), cap)? {
+            match Self::prepare_tree(entry, QueryNode::All(all), cap)? {
                 Some(tree) => sent.tree = Some(tree),
                 None if sent.extra.is_empty() => return Err(EngineError::NothingToSearch),
                 None => {}
@@ -349,7 +349,6 @@ impl Engine {
     /// decision behind both [`search`](Self::search) and
     /// [`search_supports`](Self::search_supports).
     fn prepare_tree(
-        &self,
         entry: &Entry,
         tree: QueryNode,
         newest_cap: Option<i16>,

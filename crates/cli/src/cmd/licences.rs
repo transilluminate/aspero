@@ -5,7 +5,7 @@
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 
-use super::{Failure, Out, print, print_line};
+use super::{Out, print, print_line};
 use crate::args::Format;
 use crate::exit::Exit;
 use crate::output;
@@ -26,13 +26,13 @@ struct Dependencies {
     dependencies: Vec<Dependency>,
 }
 
-pub fn run(out: Out) -> Result<Exit, Failure> {
+pub fn run(out: Out) -> Exit {
     if out.full {
         match out.format {
             Format::Json | Format::Jsonl => print(&json!({"notices": NOTICES})),
             _ => print!("{NOTICES}"),
         }
-        return Ok(Exit::Ok);
+        return Exit::Ok;
     }
     let file: Dependencies =
         serde_json::from_str(DEPENDENCIES).expect("notices/dependencies.json is valid");
@@ -51,5 +51,5 @@ pub fn run(out: Out) -> Result<Exit, Failure> {
             println!("{table}");
         }
     }
-    Ok(Exit::Ok)
+    Exit::Ok
 }

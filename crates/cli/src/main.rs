@@ -182,8 +182,8 @@ async fn run(cli: Cli, out: Out) -> Result<Exit, Failure> {
             return cmd::cache::run(cache_path()?, action, cli.global.cache_max_bytes(), out);
         }
         Command::Scan { files } => return cmd::scan::run(files, out),
-        Command::Styles { credits } => return cmd::styles::run(credits, out),
-        Command::Licences => return cmd::licences::run(out),
+        Command::Styles { credits } => return Ok(cmd::styles::run(credits, out)),
+        Command::Licences => return Ok(cmd::licences::run(out)),
         _ => {}
     }
     let file = open_cache(cli.global.cache_max_bytes());

@@ -626,7 +626,7 @@ impl Aspero {
         Ok(cite::cite(&pairs, &style, locale.as_deref(), markup)
             .into_iter()
             .map(|c| CitedEntry {
-                index: c.index as u32,
+                index: records::count(c.index),
                 label: c.label,
                 text: c.text,
                 in_text: c.in_text,

@@ -23,6 +23,11 @@ fn time(t: Timestamp) -> SystemTime {
     SystemTime::from(t)
 }
 
+/// A count or index as the app's `u32`, saturating (no list is that long).
+pub(crate) fn count(n: usize) -> u32 {
+    u32::try_from(n).unwrap_or(u32::MAX)
+}
+
 #[derive(Debug, Clone, uniffi::Record)]
 pub struct Author {
     pub name: String,
@@ -911,7 +916,7 @@ impl Verification {
         full: bool,
     ) -> Self {
         Verification {
-            index: index as u32,
+            index: count(index),
             input: claim.input.clone(),
             key: key(claim),
             verdict: v.verdict.into(),
@@ -930,7 +935,7 @@ impl Verification {
 
     pub(crate) fn invalid(index: usize, claim: &InputClaim, why: &str) -> Self {
         Verification {
-            index: index as u32,
+            index: count(index),
             input: claim.input.clone(),
             key: key(claim),
             verdict: Verdict::Invalid,
@@ -1960,7 +1965,7 @@ impl From<aspero_bib::docx::DocxReferences> for DocxReferences {
         DocxReferences {
             entries: d.entries.into_iter().map(Into::into).collect(),
             manager: d.manager.map(Into::into),
-            citations: d.citations as u32,
+            citations: count(d.citations),
             text: d.text,
         }
     }
@@ -2180,7 +2185,7 @@ pub struct Seed {
 impl Seed {
     fn new(index: usize, s: &engine::Seed) -> Self {
         Seed {
-            index: index as u32,
+            index: count(index),
             input: s.input.clone(),
             id: s.work().map(ToString::to_string),
             work: s.record.as_ref().map(Work::from_record),
@@ -2188,7 +2193,7 @@ impl Seed {
             references: s.references().map(|r| r.len() as u64),
             problem: s.problem.map(Into::into),
             message: s.message.clone(),
-            same_as: s.same_as.map(|i| i as u32),
+            same_as: s.same_as.map(count),
         }
     }
 }
@@ -2401,7 +2406,7 @@ impl Analysis {
                 .enumerate()
                 .map(|(i, s)| Seed::new(i, s))
                 .collect(),
-            with_references: a.with_references as u32,
+            with_references: count(a.with_references),
             retracted_references: a
                 .retracted_references
                 .as_ref()
@@ -2410,7 +2415,7 @@ impl Analysis {
                         .items
                         .iter()
                         .map(|r| RetractedReference {
-                            seed: r.seed as u32,
+                            seed: count(r.seed),
                             cites: Work::from_record(&r.cites),
                             source: r.source.clone(),
                         })
@@ -2422,7 +2427,7 @@ impl Analysis {
                     .items
                     .iter()
                     .map(|o| OddOne {
-                        seed: o.seed as u32,
+                        seed: count(o.seed),
                         reason: o.reason.into(),
                     })
                     .collect(),
@@ -2436,8 +2441,8 @@ impl Analysis {
                         id: m.id.to_string(),
                         ids: m.ids.iter().map(ToString::to_string).collect(),
                         work: m.record.as_ref().map(Work::from_record),
-                        cited_by: m.cited_by.iter().map(|&i| i as u32).collect(),
-                        count: m.count() as u32,
+                        cited_by: m.cited_by.iter().copied().map(count).collect(),
+                        count: count(m.count()),
                     })
                     .collect(),
                 incomplete: incomplete(&s.incomplete),
@@ -2461,9 +2466,9 @@ impl Analysis {
                         ids: r.ids.iter().map(ToString::to_string).collect(),
                         work: r.record.as_ref().map(Work::from_record),
                         score: r.score,
-                        co_cited_with: r.co_cited_with as u32,
-                        shared_references: r.shared_references as u32,
-                        seeds: r.seeds.iter().map(|&i| i as u32).collect(),
+                        co_cited_with: count(r.co_cited_with),
+                        shared_references: count(r.shared_references),
+                        seeds: r.seeds.iter().copied().map(count).collect(),
                     })
                     .collect(),
                 incomplete: incomplete(&s.incomplete),

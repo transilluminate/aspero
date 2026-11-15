@@ -203,8 +203,8 @@ impl Edges {
 /// cached "not found".
 pub type CachedLookup = Entry<Option<SourceRecord>>;
 
-/// One ID's stored rows: its record (JSON, stored_at) and its miss
-/// (stored_at).
+/// One ID's stored rows: its record (JSON, `stored_at`) and its miss
+/// (`stored_at`).
 type LookupRow = (Option<(String, i64)>, Option<i64>);
 
 /// A row read, for tracking use: its rowid, and when it was last used.

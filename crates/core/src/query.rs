@@ -846,7 +846,7 @@ pub fn lucene_words(text: &str) -> String {
         .join(" ")
 }
 
-/// A request's clauses ANDed: a rendered tree (bare at its top, `a OR b`)
+/// A request's clauses joined with AND: a rendered tree (bare at its top, `a OR b`)
 /// first, bracketed when anything joins it, so all of it is bounded:
 /// `(a OR b) AND (raw)`. The other clauses stand alone already (`(words)`,
 /// `FIELD:[…]`, `FIELD:"…"`).

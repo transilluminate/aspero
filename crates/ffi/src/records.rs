@@ -1236,7 +1236,7 @@ pub struct SearchRequest {
     /// or skip such works.
     #[uniffi(default = None)]
     pub cursor: Option<String>,
-    /// An author's name. Fields are ANDed with `text`, which may then be
+    /// An author's name. Fields are joined with AND to `text`, which may then be
     /// empty; a source that can't search one fails (`unsupported`), as
     /// `searchCapabilities` tells.
     #[uniffi(default = None)]

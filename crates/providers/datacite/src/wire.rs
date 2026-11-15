@@ -63,7 +63,7 @@ struct Attributes {
 #[serde(default, rename_all = "camelCase")]
 struct Title {
     title: Option<String>,
-    /// Absent for the main title; "Subtitle", "TranslatedTitle", …
+    /// Absent for the main title; `Subtitle`, `TranslatedTitle`, …
     title_type: Option<String>,
 }
 

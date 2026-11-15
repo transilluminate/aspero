@@ -388,7 +388,7 @@ struct Tree {
 /// notices), nor for language.
 ///
 /// Works are named by DOI alone (`doi:`), so an any of DOIs is its one
-/// any: repeated `doi:` filters OR, ANDed with the rest (checked live
+/// any: repeated `doi:` filters OR, joined with AND to the rest (checked live
 /// 2026-11-14). It holds no arXiv works (their DOIs are DataCite's), and
 /// its filters can't leave anything out.
 fn express(tree: &QueryNode, caps: &Capabilities) -> std::result::Result<Tree, String> {

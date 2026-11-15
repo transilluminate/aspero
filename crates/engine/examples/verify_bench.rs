@@ -8,7 +8,7 @@
 //! the matched work must carry one of them; if `retracted` is given, the
 //! matched work must (not) be flagged as retracted.
 //!
-//! Runs live (OPENALEX_API_KEY, ASPERO_MAILTO from the environment) through a
+//! Runs live (`OPENALEX_API_KEY`, `ASPERO_MAILTO` from the environment) through a
 //! dedicated cache in `target/bench-cache`, so the first run costs a few cents
 //! of OpenAlex budget and re-runs within the cache TTLs are free. That makes
 //! it cheap to change scoring and re-measure. Exits non-zero if any case fails.

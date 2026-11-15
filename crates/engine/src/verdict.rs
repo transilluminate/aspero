@@ -78,7 +78,7 @@ pub enum Reason {
     /// The closest work shares the title, but other details differ.
     /// (Mismatch) `differs` is never empty.
     Closest { differs: Vec<Difference> },
-    /// No matching work. (NotFound)
+    /// No matching work. (`NotFound`)
     NoMatch,
     /// The identifiers exist; the claim gives nothing else to compare.
     /// (Verified)
@@ -99,7 +99,7 @@ pub enum Reason {
     /// (Mismatch)
     IdMissingElsewhere,
     /// The identifiers don't exist, and no matching work was found.
-    /// (NotFound)
+    /// (`NotFound`)
     IdMissing,
     /// Providers failed, so nothing conclusive can be said. (Unverifiable)
     ProvidersFailed,

@@ -537,7 +537,7 @@ fn relation_ids<'a>(tree: &'a mut QueryNode, out: &mut Vec<&'a mut String>) {
 /// how far: a years filter that always applies (the tree itself, or one of
 /// its top-level all) with an upper year leaves the tree as it is; one
 /// with only a first year gains `year` as its last; otherwise the tree is
-/// ANDed with "up to `year`". Years under any or none don't count: they
+/// joined with AND to "up to `year`". Years under any or none don't count: they
 /// don't bound every hit.
 pub(crate) fn cap_years(tree: QueryNode, year: i16) -> QueryNode {
     let mut all = match tree {

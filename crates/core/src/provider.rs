@@ -338,7 +338,7 @@ pub struct SearchQuery {
     /// given.
     pub text: String,
     pub mode: SearchMode,
-    /// An author's name, ANDed with the rest.
+    /// An author's name, joined with AND to the rest.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub author: Option<String>,
     /// Words of the title.

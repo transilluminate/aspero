@@ -57,7 +57,7 @@ const MAX_FILTER: usize = 100;
 /// Seeds that must cite a work for it to be probably missing.
 const MIN_CITING: usize = 2;
 
-/// Works ORed in an OpenAlex filter: `W1|W2|…` (OpenAlex ids bare).
+/// Works joined with OR in an OpenAlex filter: `W1|W2|…` (OpenAlex ids bare).
 fn any_of<'a>(works: impl IntoIterator<Item = &'a WorkId>) -> String {
     let values: Vec<String> = works
         .into_iter()

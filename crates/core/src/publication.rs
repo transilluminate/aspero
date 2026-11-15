@@ -56,17 +56,29 @@ pub fn other_journal(cited: &str, actual: &str) -> bool {
     !(inside(&c, &a) || inside(&a, &c))
 }
 
+/// Words of a full name an abbreviation may leave out, besides stopwords
+/// and series letters: its structure, not its subject ("Am J Med" is not
+/// the American Journal of Emergency Medicine).
+const STRUCTURAL_WORDS: &[&str] = &["section", "part", "series", "royal", "society"];
+
 /// Whether each of `short`'s words abbreviates one of `full`'s, in order,
-/// with any of `full`'s left out between ("Acta Crystallogr D" for "Acta
-/// Crystallographica Section D") or run together ("Cardiothorac" for
-/// "Cardio-Thoracic"). A long abbreviation may carry a word the full name
-/// doesn't ("Lond" in "Philos Trans R Soc Lond B Biol Sci"): one, among
-/// four or more that agree.
+/// with structural words of `full`'s left out between ("Acta Crystallogr
+/// D" for "Acta Crystallographica Section D", "Proc Biol Sci" for
+/// "Proceedings of the Royal Society B: Biological Sciences") or two run
+/// together ("Cardiothorac" for "Cardio-Thoracic"). A long abbreviation
+/// may carry a word the full name doesn't ("Lond" in "Philos Trans R Soc
+/// Lond B Biol Sci"): one, among four or more that agree.
 fn abbreviates_in_order(short: &[String], full: &[String]) -> bool {
+    let structural = |w: &String| w.chars().count() == 1 || STRUCTURAL_WORDS.contains(&w.as_str());
     let mut rest = full;
     let mut missed = 0;
     for s in short {
-        let next = (0..rest.len()).find_map(|i| {
+        // As far as the first word that can't be left out.
+        let reach = rest
+            .iter()
+            .position(|f| !structural(f))
+            .map_or(rest.len(), |k| k + 1);
+        let next = (0..reach).find_map(|i| {
             let joined = rest.get(i + 1).map(|next| format!("{}{next}", rest[i]));
             if loosely_abbreviates(s, &rest[i]) {
                 Some(i + 1)
@@ -678,6 +690,10 @@ mod tests {
             ("Lancet", "New England Journal of Medicine"),
             ("N Engl J Med", "Nature Medicine"),
             ("Ann Intern Med", "Annals of Emergency Medicine"),
+            // Sister journals: the full name has a subject word the
+            // abbreviation lacks.
+            ("Am J Med", "American Journal of Emergency Medicine"),
+            ("Ann Surg", "Annals of Thoracic Surgery"),
             (
                 "J Am Coll Cardiol",
                 "Journal of the American College of Surgeons",
@@ -727,7 +743,6 @@ mod tests {
             ),
             // Possibly a sister journal, possibly the same: not clearly.
             ("Lancet Infect Dis", "The Lancet"),
-            ("Am J Med", "American Journal of Emergency Medicine"),
             ("", "The Lancet"),
         ] {
             assert!(!other_journal(cited, actual), "{cited} ~ {actual}");

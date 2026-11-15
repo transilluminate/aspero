@@ -445,8 +445,8 @@ what you know (more reliable than text):
   {\"key\": \"pe.md:7\", \"title\": \"...\", \"authors\": [\"Meyer G\"], \"year\": 2014,
    \"journal\": \"N Engl J Med\", \"volume\": 370, \"page\": \"1402-11\", \"doi\": \"...\"}
   keys: text, title, authors, year, journal (or container), volume, page,
-        doi, arxiv, id, ids, and key: anything, echoed back untouched as
-        claim_key
+        doi, arxiv, id, ids, site (see below), and key: anything, echoed
+        back untouched as claim_key
 Unknown keys are refused. To paste a reference list as it is (numbered,
 one per paragraph, wrapped), use --split instead. With --format jsonl, one result per line as
 each finishes, in any order: match them up by `input` or `claim_key`. Each
@@ -467,6 +467,12 @@ too short; and the address's identifiers. The identifiers found are
 claimed. JSON gives `page_source`, what answered: highwire, prism,
 dublin_core, json_ld, title, title_hint or url. Exits 3 when the page
 doesn't say which work it is.
+
+The page's site (--site for other claims, `site` in JSON) is a hint of
+its publisher, never the journal: for a claim without identifiers, its
+publisher's own works are searched for the title too (Crossref, free),
+and between works that match about as well the publisher's is chosen
+(JSON: `chosen_by_site`). It never makes a match verified on its own.
 
 Examples:
   aspero verify \"Vaswani et al. 2017. Attention is all you need. arXiv:1706.03762\"
@@ -870,13 +876,17 @@ pub struct ClaimArgs {
     /// Claimed identifier (repeatable): DOI, arXiv ID, PMID, URL...
     #[arg(long = "id")]
     pub ids: Vec<String>,
+    /// The site the citation was found on ("jamanetwork.com", or a page's
+    /// address): a hint of the publisher, for a claim without identifiers.
+    #[arg(long, value_name = "HOST")]
+    pub site: Option<String>,
     /// Results per provider search.
     #[arg(long, default_value_t = aspero_engine::SEARCH_LIMIT)]
     pub limit: u32,
     /// Split the text (or stdin, with `-`) into references, as pasted from
     /// a reference list: numbered, bulleted, one per paragraph or line,
     /// wrapped lines rejoined.
-    #[arg(long, conflicts_with_all = ["title", "authors", "year", "journal", "volume", "page", "ids"])]
+    #[arg(long, conflicts_with_all = ["title", "authors", "year", "journal", "volume", "page", "ids", "site"])]
     pub split: bool,
 }
 
@@ -892,7 +902,7 @@ pub struct PageArgs {
     /// browser gave the page.
     #[arg(
         long,
-        conflicts_with_all = ["text", "authors", "year", "journal", "volume", "page", "ids", "split"]
+        conflicts_with_all = ["text", "authors", "year", "journal", "volume", "page", "ids", "split", "site"]
     )]
     pub url: Option<String>,
 }

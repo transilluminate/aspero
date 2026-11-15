@@ -582,6 +582,12 @@ pub struct Claim {
     /// if the claimed one doesn't exist.
     #[uniffi(default = [])]
     pub alternative_ids: Vec<IdAlternative>,
+    /// The site the claim was read from: an article page's host
+    /// ("jamanetwork.com", as `claimFromPage` fills it) or address. A hint
+    /// of the publisher for a claim without identifiers, never compared
+    /// as the journal; `Verification.chosenBySite` says when it decided.
+    #[uniffi(default = None)]
+    pub site: Option<String>,
 }
 
 /// Another reading of a claimed identifier: a DOI broken across lines at
@@ -615,6 +621,7 @@ impl Claim {
             ids: c.ids.iter().map(ToString::to_string).collect(),
             key,
             alternative_ids: c.alternatives.iter().map(Into::into).collect(),
+            site: c.site.clone(),
         }
     }
 
@@ -628,6 +635,7 @@ impl Claim {
             volume: self.volume,
             page: self.page,
             ids: self.ids,
+            site: self.site,
             ..Default::default()
         };
         let input = fields.text.clone().unwrap_or_else(|| fields.describe());
@@ -929,6 +937,11 @@ pub struct Verification {
     /// Providers that failed, searching or looking up the claim's
     /// identifiers; what they'd have found is unknown.
     pub errors: Vec<Failure>,
+    /// Whether the claim's `site` decided which work `bestMatch` is: of
+    /// works matching about as well, the page's publisher's ("chosen as
+    /// the page's publisher's"). It never changes the verdict.
+    #[uniffi(default = false)]
+    pub chosen_by_site: bool,
 }
 
 impl Verification {
@@ -956,6 +969,7 @@ impl Verification {
                 Vec::new()
             },
             errors: v.report.failures().iter().map(Failure::from).collect(),
+            chosen_by_site: v.chosen_by_site,
         }
     }
 
@@ -974,6 +988,7 @@ impl Verification {
             best_match: None,
             candidates: Vec::new(),
             errors: Vec::new(),
+            chosen_by_site: false,
         }
     }
 }
@@ -1804,6 +1819,7 @@ impl From<aspero_bib::BibEntry> for BibEntry {
                 ids: c.ids.iter().map(ToString::to_string).collect(),
                 key: Some(e.key),
                 alternative_ids: Vec::new(),
+                site: None,
             },
             entry_type: e.entry_type,
             notes: e.notes.iter().map(Into::into).collect(),

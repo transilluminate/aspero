@@ -418,13 +418,14 @@ fn express(tree: &QueryNode, caps: &Capabilities) -> std::result::Result<Tree, S
                 .filter_map(identifier)
                 .map(|t| doi(&t))
                 .collect::<std::result::Result<Vec<_>, _>>()?,
-            node => match identifier(node) {
-                Some(t) => vec![doi(&t)?],
-                None => {
+            node => {
+                if let Some(t) = identifier(node) {
+                    vec![doi(&t)?]
+                } else {
                     rest.push(node.clone());
                     continue;
                 }
-            },
+            }
         };
         if dois.replace(found).is_some() {
             return Err(format!(

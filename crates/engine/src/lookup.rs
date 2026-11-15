@@ -173,15 +173,12 @@ impl Engine {
             .into_iter()
             .enumerate()
         {
-            answers[i] = match cached.answer() {
-                Some((outcome, record)) => {
-                    from_cache += 1;
-                    Some((attempt(outcome, Served::Cache), record))
-                }
-                None => {
-                    pending.push(i);
-                    None
-                }
+            answers[i] = if let Some((outcome, record)) = cached.answer() {
+                from_cache += 1;
+                Some((attempt(outcome, Served::Cache), record))
+            } else {
+                pending.push(i);
+                None
             };
         }
 

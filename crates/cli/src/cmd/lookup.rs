@@ -142,44 +142,41 @@ fn row(item: &Value, result: Option<&LookupResult>) -> Vec<comfy_table::Cell> {
         .or(item["input"].as_str())
         .unwrap_or("?");
     let status = item["status"].as_str().unwrap_or("?").replace('_', " ");
-    match result.and_then(|r| r.record.as_ref()) {
-        Some(record) => {
-            let w = &record.work;
-            let via = match item["served"].as_str() {
-                Some(served) => format!("{} ({served})", record.source),
-                None => record.source.to_string(),
-            };
-            let (status_text, level) = match (w.retraction(), w.newer_version()) {
-                (Some(r), _) => (format!("found\n{}", describe_update(r)), Level::Error),
-                (None, Some(newer)) => (format!("found\nsuperseded by {newer}"), Level::Warning),
-                (None, None) => (status, Level::Good),
-            };
-            vec![
-                Cell::new(label),
-                output::status_cell(&status_text, level),
-                Cell::new(output::year(w)),
-                Cell::new(output::first_author(w)),
-                Cell::new(w.title.as_deref().unwrap_or("")),
-                Cell::new(output::free_copy(w)),
-                Cell::new(via),
-            ]
-        }
-        None => {
-            let level = match item["status"].as_str() {
-                Some("not_found" | "invalid") => Level::Error,
-                _ => Level::Warning,
-            };
-            let why = item["error"].as_str().unwrap_or("");
-            vec![
-                Cell::new(label),
-                output::status_cell(&status, level),
-                Cell::new(""),
-                Cell::new(""),
-                Cell::new(why),
-                Cell::new(""),
-                Cell::new(""),
-            ]
-        }
+    if let Some(record) = result.and_then(|r| r.record.as_ref()) {
+        let w = &record.work;
+        let via = match item["served"].as_str() {
+            Some(served) => format!("{} ({served})", record.source),
+            None => record.source.to_string(),
+        };
+        let (status_text, level) = match (w.retraction(), w.newer_version()) {
+            (Some(r), _) => (format!("found\n{}", describe_update(r)), Level::Error),
+            (None, Some(newer)) => (format!("found\nsuperseded by {newer}"), Level::Warning),
+            (None, None) => (status, Level::Good),
+        };
+        vec![
+            Cell::new(label),
+            output::status_cell(&status_text, level),
+            Cell::new(output::year(w)),
+            Cell::new(output::first_author(w)),
+            Cell::new(w.title.as_deref().unwrap_or("")),
+            Cell::new(output::free_copy(w)),
+            Cell::new(via),
+        ]
+    } else {
+        let level = match item["status"].as_str() {
+            Some("not_found" | "invalid") => Level::Error,
+            _ => Level::Warning,
+        };
+        let why = item["error"].as_str().unwrap_or("");
+        vec![
+            Cell::new(label),
+            output::status_cell(&status, level),
+            Cell::new(""),
+            Cell::new(""),
+            Cell::new(why),
+            Cell::new(""),
+            Cell::new(""),
+        ]
     }
 }
 

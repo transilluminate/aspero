@@ -158,13 +158,12 @@ impl Provider for Scripted {
             tokio::time::sleep(delay).await;
         }
         let mut records = Vec::new();
-        match &query.tree {
-            Some(tree) => self.found(tree, &mut records),
-            None => {
-                records.extend(self.titled(&query.text));
-                if let Some(title) = &query.title {
-                    records.extend(self.titled(title));
-                }
+        if let Some(tree) = &query.tree {
+            self.found(tree, &mut records);
+        } else {
+            records.extend(self.titled(&query.text));
+            if let Some(title) = &query.title {
+                records.extend(self.titled(title));
             }
         }
         let hits = records

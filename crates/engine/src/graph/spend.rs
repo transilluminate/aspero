@@ -294,12 +294,11 @@ pub(super) fn classes(n: usize, same: impl Fn(usize, usize) -> bool) -> Vec<Vec<
     let mut at: Vec<Option<usize>> = vec![None; n];
     for i in 0..n {
         let r = root(&mut parent, i);
-        match at[r] {
-            Some(c) => classes[c].push(i),
-            None => {
-                at[r] = Some(classes.len());
-                classes.push(vec![i]);
-            }
+        if let Some(c) = at[r] {
+            classes[c].push(i);
+        } else {
+            at[r] = Some(classes.len());
+            classes.push(vec![i]);
         }
     }
     classes

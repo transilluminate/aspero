@@ -273,12 +273,11 @@ fn parse_years(s: &str) -> Result<YearRange, Failure> {
             .map(Some)
             .map_err(|_| Failure::usage(format!("invalid year {t:?} in --year {s:?}")))
     };
-    let (from, to) = match s.split_once("..") {
-        Some((from, to)) => (year(from)?, year(to)?),
-        None => {
-            let y = year(s)?;
-            (y, y)
-        }
+    let (from, to) = if let Some((from, to)) = s.split_once("..") {
+        (year(from)?, year(to)?)
+    } else {
+        let y = year(s)?;
+        (y, y)
     };
     if from.is_none() && to.is_none() {
         return Err(Failure::usage(format!("--year {s:?} names no year")));

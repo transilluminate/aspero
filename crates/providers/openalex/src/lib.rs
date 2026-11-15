@@ -410,28 +410,25 @@ impl Provider for OpenAlex {
             return Err(Error::UnsupportedQuery(self.since_unsupported()));
         }
         let mut filters = Vec::new();
-        let (search, containers) = match &query.tree {
-            Some(tree) => {
-                let plan =
-                    tree::translate(tree, &self.capabilities).map_err(Error::UnsupportedQuery)?;
-                if let Some(id) = unresolved_relation(tree) {
-                    return Err(Error::BadRequest(format!(
-                        "OpenAlex searches relations by OpenAlex work id, not {id:?}"
-                    )));
-                }
-                filters = plan.filters;
-                (plan.search, plan.containers)
+        let (search, containers) = if let Some(tree) = &query.tree {
+            let plan =
+                tree::translate(tree, &self.capabilities).map_err(Error::UnsupportedQuery)?;
+            if let Some(id) = unresolved_relation(tree) {
+                return Err(Error::BadRequest(format!(
+                    "OpenAlex searches relations by OpenAlex work id, not {id:?}"
+                )));
             }
-            None => {
-                flat_filters(query, &mut filters)?;
-                let container = query.field(Filter::Container).map(|name| tree::Container {
-                    names: vec![(name.to_owned(), false)],
-                    negated: false,
-                });
-                let text = query.text.trim();
-                let search = (!text.is_empty()).then(|| text.to_owned());
-                (search, container.into_iter().collect())
-            }
+            filters = plan.filters;
+            (plan.search, plan.containers)
+        } else {
+            flat_filters(query, &mut filters)?;
+            let container = query.field(Filter::Container).map(|name| tree::Container {
+                names: vec![(name.to_owned(), false)],
+                negated: false,
+            });
+            let text = query.text.trim();
+            let search = (!text.is_empty()).then(|| text.to_owned());
+            (search, container.into_iter().collect())
         };
         let mut usage = None;
         for container in containers {

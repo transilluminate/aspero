@@ -571,33 +571,30 @@ impl Accumulator<'_> {
         let shares = |c: &Candidate, ids: &[WorkId]| {
             c.ids.iter().any(|a| ids.iter().any(|b| same_work_id(a, b)))
         };
-        let mut at = match candidates.iter().position(|c| shares(c, &record.ids)) {
-            Some(i) => {
-                let counts = (self.counted[i], from_counts(&record));
-                self.counted[i] = absorb(
-                    claim,
-                    &mut candidates[i],
-                    counts,
-                    &[],
-                    &[],
-                    vec![sighting],
-                    record,
-                );
-                i
-            }
-            None => {
-                self.counted.push(from_counts(&record));
-                let mut updates = Vec::new();
-                merge_updates(&mut updates, &record.work.updates);
-                candidates.push(Candidate {
-                    ids: record.ids.clone(),
-                    updates,
-                    sightings: vec![sighting],
-                    assessment: matching::assess(claim, &record),
-                    record,
-                });
-                candidates.len() - 1
-            }
+        let mut at = if let Some(i) = candidates.iter().position(|c| shares(c, &record.ids)) {
+            let counts = (self.counted[i], from_counts(&record));
+            self.counted[i] = absorb(
+                claim,
+                &mut candidates[i],
+                counts,
+                &[],
+                &[],
+                vec![sighting],
+                record,
+            );
+            i
+        } else {
+            self.counted.push(from_counts(&record));
+            let mut updates = Vec::new();
+            merge_updates(&mut updates, &record.work.updates);
+            candidates.push(Candidate {
+                ids: record.ids.clone(),
+                updates,
+                sightings: vec![sighting],
+                assessment: matching::assess(claim, &record),
+                record,
+            });
+            candidates.len() - 1
         };
         // A record carrying two candidates' identifiers (a DOI one source
         // knows, a PMID another does) makes them one work.

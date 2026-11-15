@@ -260,29 +260,21 @@ pub fn strip_markup(text: &str) -> String {
         out.push_str(&rest[..at]);
         rest = &rest[at..];
         if rest.starts_with('<') {
-            match tag(rest) {
-                Some((len, inline)) => {
-                    if !inline {
-                        out.push(' ');
-                    }
-                    rest = &rest[len..];
+            if let Some((len, inline)) = tag(rest) {
+                if !inline {
+                    out.push(' ');
                 }
-                None => {
-                    out.push('<');
-                    rest = &rest[1..];
-                }
+                rest = &rest[len..];
+            } else {
+                out.push('<');
+                rest = &rest[1..];
             }
+        } else if let Some((len, c)) = entity(rest) {
+            out.push(c);
+            rest = &rest[len..];
         } else {
-            match entity(rest) {
-                Some((len, c)) => {
-                    out.push(c);
-                    rest = &rest[len..];
-                }
-                None => {
-                    out.push('&');
-                    rest = &rest[1..];
-                }
-            }
+            out.push('&');
+            rest = &rest[1..];
         }
     }
     out.push_str(rest);

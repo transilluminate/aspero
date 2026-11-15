@@ -32,58 +32,56 @@ impl Engine {
             .as_ref()
             .filter(|w| w.kind() == IdKind::OpenAlex)
             .and_then(|w| Some((w.clone(), self.cached_references(w)?)));
-        let (work, record, references) = match cached {
-            Some((work, references)) => (work, None, Some(references)),
-            None => {
-                let w = self.openalex_work(id, &mut usage).await?;
-                let work: WorkId =
-                    WorkId::OpenAlex(w.parse().map_err(|e: aspero_core::IdError| {
-                        EngineError::Unresolved {
-                            id: id.to_owned(),
-                            reason: e.to_string(),
-                            kind: aspero_core::ErrorKind::Decode,
-                            provider: None,
-                            error: None,
-                        }
-                    })?);
-                let (attempt, record) = self
-                    .lookup_at(
-                        entry,
-                        std::slice::from_ref(&work),
-                        FieldSet::DEFAULT,
-                        &mut usage,
-                    )
-                    .await
-                    .pop()
-                    .expect("one answer per id");
-                let Some(record) = record else {
-                    return Err(match attempt.outcome {
-                        Outcome::Failed(e) => EngineError::Unresolved {
-                            id: id.to_owned(),
-                            reason: format!("the lookup failed: {e}"),
-                            kind: e.kind(),
-                            provider: Some(attempt.provider),
-                            error: Some(Box::new(e)),
-                        },
-                        _ => EngineError::Unresolved {
-                            id: id.to_owned(),
-                            reason: "OpenAlex has no record of it".into(),
-                            kind: aspero_core::ErrorKind::NotFound,
-                            provider: None,
-                            error: None,
-                        },
-                    });
-                };
-                // Not a stale record (served when OpenAlex failed): its
-                // references would get a new lease.
-                let references = record.references.clone();
-                if let Some(cited) = &references
-                    && attempt.served != Served::Stale
-                {
-                    self.remember_references(&[(&work, cited)]);
+        let (work, record, references) = if let Some((work, references)) = cached {
+            (work, None, Some(references))
+        } else {
+            let w = self.openalex_work(id, &mut usage).await?;
+            let work: WorkId = WorkId::OpenAlex(w.parse().map_err(|e: aspero_core::IdError| {
+                EngineError::Unresolved {
+                    id: id.to_owned(),
+                    reason: e.to_string(),
+                    kind: aspero_core::ErrorKind::Decode,
+                    provider: None,
+                    error: None,
                 }
-                (work, Some(record), references)
+            })?);
+            let (attempt, record) = self
+                .lookup_at(
+                    entry,
+                    std::slice::from_ref(&work),
+                    FieldSet::DEFAULT,
+                    &mut usage,
+                )
+                .await
+                .pop()
+                .expect("one answer per id");
+            let Some(record) = record else {
+                return Err(match attempt.outcome {
+                    Outcome::Failed(e) => EngineError::Unresolved {
+                        id: id.to_owned(),
+                        reason: format!("the lookup failed: {e}"),
+                        kind: e.kind(),
+                        provider: Some(attempt.provider),
+                        error: Some(Box::new(e)),
+                    },
+                    _ => EngineError::Unresolved {
+                        id: id.to_owned(),
+                        reason: "OpenAlex has no record of it".into(),
+                        kind: aspero_core::ErrorKind::NotFound,
+                        provider: None,
+                        error: None,
+                    },
+                });
+            };
+            // Not a stale record (served when OpenAlex failed): its
+            // references would get a new lease.
+            let references = record.references.clone();
+            if let Some(cited) = &references
+                && attempt.served != Served::Stale
+            {
+                self.remember_references(&[(&work, cited)]);
             }
+            (work, Some(record), references)
         };
 
         let total = references.as_ref().map(Vec::len);

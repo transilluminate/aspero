@@ -32,6 +32,7 @@ requests=(
   "work_retracted          /works/10.1016/S0140-6736(97)11096-0"
   "works_by_pii            /works?filter=alternative-id:S2772940026000032&rows=2"
   "works_batch_pii         /works?filter=alternative-id:S0140673620301835,alternative-id:S0092867420302294,alternative-id:S0140673699999990&rows=6"
+  "works_title_prefix      /works?query.title=Treatment%20of%20Acute%20Ischemic%20Stroke%3A%20A%20Review&filter=prefix:10.1001&sort=score&order=desc&rows=5&cursor=*"
 )
 
 for entry in "${requests[@]}"; do

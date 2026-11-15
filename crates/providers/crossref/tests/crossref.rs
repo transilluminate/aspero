@@ -219,6 +219,43 @@ fn query_extras_pass_through_and_unknown_extras_are_rejected() {
     assert_eq!(http.requests().len(), 1);
 }
 
+/// A page's publisher's works with its title, as `verify` asks for a
+/// claim's site (#98): the title, and the publisher's DOI prefix.
+#[test]
+fn a_title_among_a_prefixs_works() {
+    let (cr, http) = provider([recorded("works_title_prefix")]);
+    let mut q = SearchQuery::new("");
+    q.title = Some("Treatment of Acute Ischemic Stroke: A Review".into());
+    q.extra.insert("filter".into(), "prefix:10.1001".into());
+    q.page.limit = 5;
+    let page = block_on(cr.search(&q)).unwrap().value;
+    assert_eq!(
+        query(&http, 0),
+        [
+            pair(
+                "query.title",
+                "Treatment of Acute Ischemic Stroke: A Review"
+            ),
+            pair("filter", "prefix:10.1001"),
+            pair("sort", "score"),
+            pair("order", "desc"),
+            pair("rows", "5"),
+            pair("cursor", "*"),
+            pair("mailto", "test@example.org"),
+        ]
+    );
+    let dois: Vec<String> = page
+        .hits
+        .iter()
+        .map(|h| h.record.ids[0].to_string())
+        .collect();
+    assert_eq!(dois.len(), 5);
+    assert!(dois.iter().all(|d| d.starts_with("doi:10.1001/")));
+    // The review first, and a namesake of 1986 (its subtitle another).
+    assert_eq!(dois[0], "doi:10.1001/jama.2026.19482");
+    assert_eq!(dois[1], "doi:10.1001/archneur.1986.00520040066022");
+}
+
 fn empty_page() -> HttpResponse {
     response(
         200,

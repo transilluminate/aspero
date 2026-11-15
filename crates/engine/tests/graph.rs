@@ -1613,3 +1613,49 @@ async fn stale_records_give_their_references_no_new_lease() {
     assert_eq!(page.total, Some(6));
     assert!(edges().is_none());
 }
+
+/// 101 works both seeds cite: a batch of 100 (paid) and one asked alone
+/// (free), so one paid request, estimated and spent.
+#[tokio::test(start_paused = true)]
+async fn a_lookup_of_a_hundred_and_one_pays_once() {
+    let cited: Vec<String> = (1000..1101).map(|n| format!("W{n}")).collect();
+    let cited: Vec<&str> = cited.iter().map(String::as_str).collect();
+    let works = vec![
+        work(
+            &["W1", "10.1000/one"],
+            "One",
+            "Ann Smith",
+            2020,
+            Some(&cited),
+        ),
+        work(&["W2", "10.1000/two"], "Two", "Bo Chen", 2021, Some(&cited)),
+    ];
+    let alex = Arc::new(Alex::new(works));
+    let cache = Arc::new(SqliteCache::open_in_memory().unwrap());
+    let engine = engine(alex.clone(), Some(cache));
+    let seeds = inputs(&["10.1000/one", "10.1000/two"]);
+    let kinds = [AnalysisKind::ProbablyMissing { limit: 200 }];
+    let estimate = engine
+        .analyse(&seeds, &kinds, None, true)
+        .await
+        .unwrap()
+        .estimate
+        .unwrap();
+    assert_eq!(estimate.requests, 1);
+    // Exactly the budget for it: not refused.
+    let run = engine
+        .analyse(&seeds, &kinds, Some(0.0001), false)
+        .await
+        .unwrap();
+    assert!(
+        run.complete(),
+        "{:?}",
+        run.probably_missing.unwrap().incomplete
+    );
+    assert!(
+        (spent(&run) - estimate.usd).abs() < 1e-12,
+        "{}",
+        spent(&run)
+    );
+    assert_eq!(alex.lookups()[2..], [100, 1]);
+}

@@ -4,7 +4,7 @@
 use aspero_core::matching::{same_work, same_work_id};
 use aspero_core::{ErrorKind, FieldSet, ProviderId, SourceRecord, Usage, WorkId};
 
-use super::{Incomplete, IncompleteKind, LIST_PRICE, MAX_FILTER, Seed};
+use super::{Incomplete, IncompleteKind, LIST_PRICE, Seed};
 use crate::{Engine, Entry, Outcome, add_usage};
 
 /// What an analysis has spent and may spend.
@@ -127,10 +127,7 @@ impl Engine {
             .iter()
             .filter(|c| c.is_none())
             .count();
-        let paid = match uncached {
-            0 | 1 => 0,
-            n => n.div_ceil(MAX_FILTER),
-        };
+        let paid = paid_batches(uncached, entry);
         let mut looked = Looked {
             records: vec![None; ids.len()],
             stop: None,
@@ -168,6 +165,16 @@ impl Engine {
         looked.records = answers.into_iter().map(|(_, r)| r).collect();
         looked
     }
+}
+
+/// The paid requests looking `n` ids up at `entry` takes, as `lookup_at`
+/// asks them: batches of the most it takes (100 at OpenAlex), each paid,
+/// but one no bigger than a free batch (OpenAlex asks a lone id free).
+fn paid_batches(n: usize, entry: &Entry) -> usize {
+    let caps = entry.provider.capabilities();
+    let (size, free) = (caps.max_batch.max(1), caps.max_free_batch);
+    let paid = |len: usize| usize::from(len > free);
+    (n / size) * paid(size) + paid(n % size)
 }
 
 /// A work found, its versions (a preprint and its published version)

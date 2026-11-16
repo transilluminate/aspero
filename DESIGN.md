@@ -1139,4 +1139,7 @@ its container; different schema versions would rebuild each other's).
 - Conventional commits; small, focused changes; clippy and rustfmt clean.
 - Tests: unit tests beside code, property tests for identifiers, fixture
   replay for providers, paused-time tests for retries, pacing and
-  concurrency, the live benchmark for scoring.
+  concurrency, the live benchmark for scoring. Fuzz targets (`fuzz/`, its
+  own workspace, nightly: `just fuzz <target>`) for the readers of
+  untrusted input: pages, identifiers, reference files and lists, .docx,
+  claims and query trees.

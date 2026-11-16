@@ -40,11 +40,14 @@ pub(crate) fn parse<T: IdSyntax>(input: &str) -> Result<T, IdError> {
     finish(bare, input)
 }
 
+/// Parses the bare value with look-alikes cleaned (a Unicode hyphen, a
+/// zero-width space), as [`WorkId`](super::WorkId)'s `FromStr` and `scan`
+/// clean them, so every way in gives the same canonical identifier.
 pub(crate) fn finish<T: IdSyntax>(
     bare: Result<Cow<'_, str>, &'static str>,
     input: &str,
 ) -> Result<T, IdError> {
-    bare.and_then(|b| T::parse_bare(&b))
+    bare.and_then(|b| T::parse_bare(&crate::fold::Folded::new(&b).text))
         .map_err(|reason| IdError::Invalid {
             kind: T::KIND,
             input: input.to_owned(),

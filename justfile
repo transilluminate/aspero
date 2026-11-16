@@ -29,6 +29,11 @@ scan-bench filter="":
 record provider name="":
     ONLY={{name}} scripts/record-{{provider}}.sh
 
+# Fuzz a target (fuzz/README.md) for some seconds, default 600; needs nightly
+# and cargo-fuzz: `just fuzz webpage 1800 -jobs=4 -workers=4`.
+fuzz target seconds="600" *args:
+    scripts/fuzz.sh {{target}} {{seconds}} {{args}}
+
 # Write the FFI's and CLI's third-party notices (crates/{ffi,cli}/notices);
 # `just notices --check` fails if they're out of date.
 notices *args:

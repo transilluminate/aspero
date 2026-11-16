@@ -1,0 +1,9 @@
+[
+  {"id": "lecun2015", "type": "article-journal", "title": "Deep learning",
+   "author": [{"family": "LeCun", "given": "Yann"}, {"literal": "WHO"},
+              {"literal": "Geoffrey Hinton"}],
+   "container-title": "Nature", "volume": 521, "page": "436-444",
+   "issued": {"date-parts": [["2015", 5]]}, "DOI": "10.1038/nature14539",
+   "PMID": 26017442, "URL": "https://arxiv.org/abs/1706.03762"},
+  {"type": "book", "title": "Deep Learning", "ISBN": "9780262035613"}
+]

@@ -1,5 +1,20 @@
 # Changelog
 
+## Unreleased
+
+Fixed (found by fuzzing, `fuzz/`):
+
+- An `author_id` like an ORCID with extra hyphens (`0000-0002-18-5-0097`)
+  panicked instead of being refused, in a query tree from the CLI, the
+  MCP tools or the FFI.
+- A .docx file inflating to gigabytes was read whole: parts are read up
+  to 64 MB, a larger body unreadable.
+- Each identifier kind's own parser (`WorkId::parse_as`, as a page's
+  `citation_doi` is read) now cleans look-alikes (Unicode dashes,
+  zero-width spaces) as `WorkId` parsing and `scan` do.
+- A soft hyphen ending a DOI's line, the next not continuing it, is no
+  longer read as a `-` ending the DOI.
+
 ## 0.26.0
 
 Added:

@@ -478,3 +478,14 @@ fn sources_have_json_names() {
         assert_eq!(serde_json::to_value(s).unwrap(), s.as_str());
     }
 }
+
+/// Found by fuzzing: a tag's DOI with an entity for a dash kept the dash,
+/// so the DOI looked up wasn't the one the page meant.
+#[test]
+fn look_alikes_in_tags_are_folded() {
+    let p = page(&meta(
+        "citation_doi",
+        "10.1038/s41586&#x2013;020&#8203;-2649-2",
+    ));
+    assert_eq!(ids(&p), ["doi:10.1038/s41586-020-2649-2"]);
+}

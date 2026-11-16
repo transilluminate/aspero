@@ -1,0 +1,1 @@
+{"query": {"all": [{"any": [{"id": "10.1038/nature14539"}, {"id": "pmid:31452104"}]}, {"keywords": "protein folding"}, {"any": [{"title": "alphafold"}, {"title": "structure prediction", "phrase": true}]}, {"none": [{"author_id": "0000-0002-1825-0097"}]}, {"years": {"from": 2020}}, {"not_retracted": true}, {"cites": "10.1038/nature14539"}]}, "source": "crossref"}

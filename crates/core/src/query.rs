@@ -499,6 +499,10 @@ fn is_orcid(s: &str) -> bool {
         return false;
     }
     let chars: Vec<u8> = b.iter().copied().filter(|&c| c != b'-').collect();
+    // More hyphens than the three (`0000-0002-18-5-0097`) leave too few.
+    if chars.len() != 16 {
+        return false;
+    }
     let (body, check) = chars.split_at(15);
     if !body.iter().all(u8::is_ascii_digit) {
         return false;
@@ -968,6 +972,15 @@ mod tests {
         assert_eq!(AuthorId::parse("W2919115771"), None);
         assert_eq!(AuthorId::parse("LeCun"), None);
         assert_eq!(AuthorId::parse("A"), None);
+    }
+
+    /// Found by fuzzing: hyphens beyond the three, in an ORCID's length,
+    /// left no check digit and panicked.
+    #[test]
+    fn orcids_with_extra_hyphens_are_not_author_ids() {
+        assert_eq!(AuthorId::parse("0000-0002-18-5-0097"), None);
+        assert_eq!(AuthorId::parse("0000-0002-1---0097"), None);
+        assert_eq!(AuthorId::parse("-------------------"), None);
     }
 
     #[test]

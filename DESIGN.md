@@ -870,6 +870,11 @@ fixture recorded with different parameters once hid a ranking bug.
   alone, past the cache (free; limit $0.10, checked 2026-11-14), and
   reads the budget from its headers. Its body echoes the key's first and
   last three characters, masked in the fixture.
+  A failing response is a spent budget (`QuotaExhausted`, which stops
+  OpenAlex until the reset) when its body says `not_enough_credits`, or
+  `-remaining-usd` is 0 with no `-prepaid-remaining-usd` left: credit is
+  spent once the allowance is used up, so with credit left a failure is
+  what its status says (a 429 rate limit, a server fault).
   404s are HTML. Lists take up to 200 a page (`per-page`); filters OR up to
   100 values; `select` trims works to the fields named (citing works:
   `id,publication_year,referenced_works`, about 3 KB a work). Batch

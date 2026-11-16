@@ -3,8 +3,8 @@
 
 use std::sync::Arc;
 
-use aspero_core::testing::{FIXTURE_TIME, ReplayClient, fixture};
-use aspero_core::{FieldSet, HttpResponse, ResiliencePolicy, WorkId};
+use aspero_core::testing::{FIXTURE_TIME, ReplayClient, fixture, response};
+use aspero_core::{Error, FieldSet, HttpResponse, ResiliencePolicy, SearchQuery, WorkId};
 use aspero_engine::{Engine, OpenAlexConfig, SecretString};
 use aspero_openalex::OpenAlex;
 
@@ -79,4 +79,60 @@ async fn offline_refreshing_sends_nothing() {
     let offline = engine.with_options(aspero_engine::CallOptions::offline());
     assert!(offline.refresh_budgets().await.is_empty());
     assert!(http.requests().is_empty());
+}
+
+/// A failing search, as OpenAlex might answer once the day's allowance is
+/// used up, with `prepaid` USD of credit left.
+fn failing_at_no_allowance(prepaid: &str) -> HttpResponse {
+    response(
+        503,
+        &[
+            ("x-ratelimit-limit-usd", "1"),
+            ("x-ratelimit-remaining-usd", "0"),
+            ("x-ratelimit-prepaid-remaining-usd", prepaid),
+            ("x-ratelimit-reset", "3600"),
+        ],
+        "",
+    )
+}
+
+/// OpenAlex spends credit once the allowance is used up: a failure then,
+/// with credit left, isn't a spent budget, and OpenAlex isn't stopped
+/// until the reset; with no credit left either, it is.
+#[tokio::test]
+async fn the_allowance_used_up_with_credit_left_doesnt_stop_openalex() {
+    let search = || SearchQuery::new("deep learning");
+    let (credit, http) = engine(
+        Some("test-key"),
+        vec![failing_at_no_allowance("9.8851"), recorded("works_search")],
+    );
+    let failed = credit.search(Some("openalex"), &search()).await;
+    assert!(failed.is_err(), "the fault itself fails");
+    assert!(
+        credit.unavailable().is_empty(),
+        "{:?}",
+        credit.unavailable()
+    );
+    assert!(
+        credit.search(Some("openalex"), &search()).await.is_ok(),
+        "asked again"
+    );
+    assert_eq!(http.requests().len(), 2);
+
+    let (spent, http) = engine(
+        Some("test-key"),
+        vec![failing_at_no_allowance("0"), recorded("works_search")],
+    );
+    let failed = spent.search(Some("openalex"), &search()).await;
+    assert!(failed.is_err());
+    let unavailable = spent.unavailable();
+    assert!(
+        matches!(unavailable.as_slice(), [(_, Error::QuotaExhausted { .. })]),
+        "{unavailable:?}"
+    );
+    assert!(
+        spent.search(Some("openalex"), &search()).await.is_err(),
+        "not asked"
+    );
+    assert_eq!(http.requests().len(), 1);
 }

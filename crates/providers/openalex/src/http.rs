@@ -98,15 +98,18 @@ pub(crate) fn check(resp: &HttpResponse, keyed: bool) -> Result<(), Error> {
 }
 
 /// A failure means "budget spent" (rather than "slow down" or a server
-/// fault) when OpenAlex says so in the body, or the remaining budget header
-/// is zero.
+/// fault) when OpenAlex says so in the body, or the remaining allowance
+/// header is zero with no prepaid credit left beside it. OpenAlex spends
+/// credit once the allowance is used up, so a failure with the allowance
+/// at zero but credit left (a per-second 429, a server fault) is that
+/// failure, not a spent budget, which would stop every call until the
+/// reset.
 fn quota_exhausted(resp: &HttpResponse) -> bool {
+    let num = |name: &str| resp.header(name).and_then(|v| v.trim().parse::<f64>().ok());
     let body_says = resp.text().contains("not_enough_credits");
-    let budget_spent = resp
-        .header("x-ratelimit-remaining-usd")
-        .and_then(|v| v.trim().parse::<f64>().ok())
-        .is_some_and(|r| r <= 0.0);
-    body_says || budget_spent
+    let allowance_spent = num("x-ratelimit-remaining-usd").is_some_and(|r| r <= 0.0);
+    let credit_left = num("x-ratelimit-prepaid-remaining-usd").is_some_and(|p| p > 0.0);
+    body_says || (allowance_spent && !credit_left)
 }
 
 /// The JSON `message` (or `error`) from an error body; nothing for HTML.

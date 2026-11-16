@@ -9,6 +9,14 @@ Added:
   and `scripts/redteam.py`: each distinct request is paid for once and
   replayed free after, offline if asked (DESIGN "HTTP tape").
 
+Fixed:
+
+- OpenAlex is no longer stopped until the reset ("usage quota
+  exhausted") by a failing call (a per-second 429, a server fault) made
+  once the day's allowance is used up while prepaid credit is left:
+  OpenAlex spends the credit then, so only no credit left either (or its
+  `not_enough_credits`) is a spent budget.
+
 ## 0.27.0
 
 Added:

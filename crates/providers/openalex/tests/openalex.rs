@@ -553,6 +553,56 @@ fn the_request_crossing_the_budget_is_quota_exhausted_whatever_its_status() {
     }
 }
 
+/// Credit is spent once the allowance is used up: a failure with the
+/// allowance at zero but credit left is the failure it says, not a spent
+/// budget (which would stop OpenAlex until the reset); with neither left,
+/// it's spent.
+#[test]
+fn the_allowance_used_up_with_credit_left_is_not_quota_exhausted() {
+    let failing = |status, prepaid: &'static str| {
+        response(
+            status,
+            &[
+                ("retry-after", "1"),
+                ("x-ratelimit-remaining-usd", "0"),
+                ("x-ratelimit-prepaid-remaining-usd", prepaid),
+                ("x-ratelimit-reset", "3600"),
+            ],
+            r#"{"error":"Rate limit exceeded"}"#,
+        )
+    };
+    let (oa, _) = provider([
+        failing(429, "9.8851"),
+        failing(503, "9.8851"),
+        failing(429, "0"),
+        failing(503, "0"),
+    ]);
+    let err = block_on(oa.search(&SearchQuery::new("x"))).unwrap_err();
+    assert!(matches!(err, Error::RateLimited { .. }), "{err:?}");
+    let err = block_on(oa.search(&SearchQuery::new("x"))).unwrap_err();
+    assert!(matches!(err, Error::Server { status: 503, .. }), "{err:?}");
+    for _ in 0..2 {
+        let err = block_on(oa.search(&SearchQuery::new("x"))).unwrap_err();
+        assert!(matches!(err, Error::QuotaExhausted { .. }), "{err:?}");
+    }
+}
+
+/// Credit spent too: OpenAlex's own word still decides.
+#[test]
+fn not_enough_credits_is_quota_exhausted_even_with_credit_said_left() {
+    let worded = response(
+        402,
+        &[
+            ("x-ratelimit-remaining-usd", "0"),
+            ("x-ratelimit-prepaid-remaining-usd", "0.0001"),
+        ],
+        r#"{"error":"not_enough_credits"}"#,
+    );
+    let (oa, _) = provider([worded]);
+    let err = block_on(oa.search(&SearchQuery::new("x"))).unwrap_err();
+    assert!(matches!(err, Error::QuotaExhausted { .. }), "{err:?}");
+}
+
 #[test]
 fn a_server_error_with_budget_left_is_a_server_error() {
     let fault = response(503, &[("x-ratelimit-remaining-usd", "0.5")], "");

@@ -10,16 +10,19 @@ of 152 to none, with real ones accepted 152 of 155, from 147):
   Not for consortia, bylines cut short, or books.
 - A title with words added ("Deep learning for medical image analysis"
   for "Deep learning"), a subtitle the work lacks or another one, or a
-  word replaced ("Hydroxychloroquine in …" for "Dexamethasone in …") is
+  word replaced ("Hydroxychloroquine in …" for "Dexamethasone in …") or
+  words inserted ("… Septic Shock in Adults and Children (Sepsis-3)") is
   plausible at most. A dropped subtitle still matches, as does a subtitle
   added to a book's title (book records often leave it out).
 - A year inside a title ("Cancer statistics, 2020") no longer stands in
-  for the year cited.
+  for the year cited, and is part of the title: the 2020 report cited as
+  of 2018 with its volume and pages is plausible, the year named, not the
+  2018 report.
 - The cited journal is read in more styles: before the year ending a
   Vancouver reference ("… JAMA. 2020."), before its DOI link, IEEE's
   "vol." and "no.", Harvard's "'…', Chest." and "pp.", BibTeX's
-  fields, after a title ending in a capitalised word ("… Wuhan, China.
-  Lancet."). A wrong journal there, alone or with the year one off, is
+  fields, prose ("… reported in Gastroenterology (1984)"), after a title
+  ending in a capitalised word ("… Wuhan, China. Lancet."). A wrong journal there, alone or with the year one off, is
   plausible, not verified.
 - Nature's single page ("Nature 530, 484 (2016)"), Harvard's pages and
   BibTeX's volume and pages are read, so wrong ones are caught.

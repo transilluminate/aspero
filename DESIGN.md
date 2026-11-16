@@ -362,12 +362,18 @@ citation styles. The rules, each from a real failure:
   most** (#102): the work's title carried on in the same sentence ("Deep
   learning for medical image analysis": a joining or lowercase word, not
   the journal and year), given a subtitle it lacks or another one, a word
-  before it, or a word put in place of one of its own that isn't a
+  before it, a word put in place of one of its own that isn't a
   misspelling ("Hydroxychloroquine in …" at the place of "Dexamethasone
-  in …"). A subtitle added to a book's whole title is no more words: book
+  in …"), or words inserted among its own in one sentence ("… Septic Shock
+  in Adults and Children (Sepsis-3)"); words dropped still match. A year
+  put in place of the title's own is another title of a series ("Cancer
+  statistics, 2018" isn't cited by "Cancer statistics, 2020"): a
+  mismatch. A subtitle added to a book's whole title is no more words: book
   records often leave theirs out.
 - **A year inside the title is not the year cited** ("Cancer statistics,
-  2020 … 2018" cites 2018).
+  2020 … 2018" cites 2018). With the whole title, authors, volume and
+  first page agreeing, a year two or more off is plausible, the year
+  named.
 - **Replies, errata and comments are not the original.** Their titles
   repeat the original's; confidence halves unless the claim cites one.
 - **Online and print years both count**, so either year of an
@@ -391,7 +397,8 @@ citation styles. The rules, each from a real failure:
   or a closing quote): before the year ending the reference (`… JAMA.
   2020.`), its links, a labelled locator (IEEE `"…," Journal, vol. 8`,
   `no. 10223`), or ending it after a quoted title (Harvard `'…',
-  Chest.`); a BibTeX entry's `journal`. A publisher (`Springer;
+  Chest.`); a BibTeX entry's `journal`; in prose, between a verb's "in"
+  and a bracketed year (`reported in The Lancet (2020)`). A publisher (`Springer;
   2010:12-30`, `MIT Press; 2016.`), a lowercase word, a run of dotted
   abbreviations that may have begun earlier, or the work's own title in
   title case gives none. Different means clearly another: not the
@@ -409,7 +416,9 @@ citation styles. The rules, each from a real failure:
   cited: plausible at most, unless a claimed identifier is its; and of
   equally confident candidates, the one confirming more of journal,
   volume and page ranks first. Candidates are scored with every
-  identifier known for the work, whichever record of it is kept. The
+  identifier known for the work, whichever record of it is kept, and a
+  record giving none of journal, volume and page (not a preprint) takes
+  those of another record of the work merged with it. The
   journal read is in `read`, and a `journal` difference's `cited`.
   Matching volume and page corroborate like authors; with journal and
   volume agreeing, a title missing from a short reference doesn't count

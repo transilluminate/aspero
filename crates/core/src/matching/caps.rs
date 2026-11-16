@@ -1,4 +1,4 @@
-//! The policy numbers [`super::assess`] applies: field weights, penalties
+//! The policy numbers [`super::assess()`] applies: field weights, penalties
 //! (multipliers), confidence caps (ceilings) and floors, and the verdict
 //! thresholds; and [`combine`], which weighs the fields into a confidence.
 
@@ -34,7 +34,7 @@ pub(super) const PLACED_YEAR_OFF: f64 = 0.8;
 /// that the work confirming more of the citation ranks first.
 pub(super) const PLACED_YEAR_WRONG: f64 = PLACED_YEAR_OFF;
 /// Title score, a mismatch, for another title of a series: the title's
-/// own year replaced ([`text::Normalised::substitutes_in`]).
+/// own year replaced ([`super::text::Normalised::substitutes_in`]).
 pub(super) const OTHER_IN_SERIES: f64 = 0.3;
 /// Confidence ceiling, below plausible, without evidence of which work is
 /// cited: only a year or journal agreeing, or a short title found inside
@@ -56,17 +56,17 @@ pub(super) const DERIVATIVE_CITED_CAP: f64 = LOCATION_MISMATCH_CAP;
 /// Confidence ceiling when the claimed volume or first page differs.
 pub(super) const LOCATION_MISMATCH_CAP: f64 = 0.8;
 /// Multiplier when the claim names a journal clearly another
-/// ([`other_journal`]): lowers the ranking.
+/// ([`crate::publication::other_journal`]): lowers the ranking.
 pub(super) const JOURNAL_MISMATCH_PENALTY: f64 = 0.9;
 /// Confidence ceiling when a journal article is cited in a journal that is
-/// clearly another ([`other_journal`]): a citation error, as a wrong volume
+/// clearly another ([`crate::publication::other_journal`]): a citation error, as a wrong volume
 /// is, and a tell of invented references.
 pub(super) const JOURNAL_MISMATCH_CAP: f64 = LOCATION_MISMATCH_CAP;
 /// Confidence ceiling when the claim names an author the record's complete
 /// byline lacks: invented co-authors beside a real first author.
 pub(super) const STRANGERS_CAP: f64 = LOCATION_MISMATCH_CAP;
 /// Title score, partial, when the claim's title is the record's with words
-/// added ([`text::extends`]).
+/// added ([`super::titles::extends`]).
 pub(super) const EXTENDED_TITLE: f64 = 0.75;
 /// Confidence ceiling then: the claim may cite another work whose title
 /// contains this one's, or this one with a subtitle its record lacks.

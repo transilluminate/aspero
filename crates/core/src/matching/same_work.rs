@@ -4,12 +4,12 @@
 use super::Agreement;
 use super::authors::{family_name, same_family};
 use super::derivative::derivative_work_kind;
-use super::text::title_similarity;
+use super::titles::title_similarity;
 use crate::id::{IdKind, WorkId};
 use crate::record::SourceRecord;
 
 /// Whether claimed identifiers are among a work's identifiers (see
-/// [`Assessment::ids`]).
+/// [`super::Assessment::ids`]).
 pub fn id_agreement(claimed: &[WorkId], actual: &[WorkId]) -> Agreement {
     if claimed.is_empty() {
         return Agreement::Unknown;

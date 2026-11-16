@@ -15,7 +15,8 @@ use super::claim::{byline, cited_venue, cites_chapter, cites_edited_book};
 use super::derivative::{self, WorkKind, record_derivative_kind};
 use super::preprint::{names_preprint, preprint_server, preprint_version_claimed};
 use super::same_work::{id_agreement, same_work_id};
-use super::text::{self, Normalised, content_words, title_similarity, unmarked, words};
+use super::text::{Normalised, content_words, words};
+use super::titles::{self, title_similarity, unmarked};
 use super::{Agreement, Assessment, Claim, FieldCheck};
 use crate::id::{IdKind, is_digits, starts_with_ci};
 use crate::publication::{self, first_page, journal_in, other_journal, same_journal};
@@ -137,9 +138,9 @@ pub fn assess(claim: &Claim, record: &SourceRecord) -> Assessment {
     let subtitle_ok = work.work_type == Some(crate::work::WorkType::Book)
         && work_title
             .as_deref()
-            .is_some_and(|t| text::main_title(unmarked(t)) == unmarked(t));
+            .is_some_and(|t| titles::main_title(unmarked(t)) == unmarked(t));
     let extended = match (&claimed_title, &work_title, &text, &title_span) {
-        (Some(claimed), Some(actual), _, _) => text::extends(claimed, actual, subtitle_ok),
+        (Some(claimed), Some(actual), _, _) => titles::extends(claimed, actual, subtitle_ok),
         (None, Some(_), Some(text), Some(span)) => {
             let journal = work
                 .container_title
@@ -175,7 +176,7 @@ pub fn assess(claim: &Claim, record: &SourceRecord) -> Assessment {
         (Some(actual), _) if found => claim
             .title
             .as_deref()
-            .is_some_and(|claimed| text::replaces(claimed, actual))
+            .is_some_and(|claimed| titles::replaces(claimed, actual))
             .then_some(false),
         _ => None,
     };
@@ -567,7 +568,7 @@ pub fn assess(claim: &Claim, record: &SourceRecord) -> Assessment {
     // of entanglement,” Phys. Rev. A, vol. 63").
     let titled = text.as_ref().is_some_and(|t| {
         t.title_run(&families, work.container_title.as_deref()) >= SHORT_TITLE_WORDS
-            || text::given_title(&t.raw).is_some()
+            || titles::given_title(&t.raw).is_some()
     });
     let title =
         if placed && claim.title.is_none() && title.agreement == Agreement::Mismatch && !titled {

@@ -3227,7 +3227,7 @@ fn a_title_reworded_with_synonyms_is_not_the_records() {
              cross-sectional survey.",
         ),
     ] {
-        assert!(text::replaces(claimed, actual), "{claimed}");
+        assert!(titles::replaces(claimed, actual), "{claimed}");
     }
     // The same title written otherwise is not reworded: respelt, misspelt,
     // abbreviated, a number or Greek letter spelt out, a word broken at a
@@ -3261,7 +3261,7 @@ fn a_title_reworded_with_synonyms_is_not_the_records() {
             "Role of Insulin Resistance in Human Disease",
         ),
     ] {
-        assert!(!text::replaces(claimed, actual), "{claimed}");
+        assert!(!titles::replaces(claimed, actual), "{claimed}");
     }
 }
 

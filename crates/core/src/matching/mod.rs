@@ -1,7 +1,7 @@
 //! Does a record match what a citation claims? Pure scoring, no I/O.
 //!
 //! A [`Claim`] is what someone (often an agent) asserted: a free-text
-//! reference, structured fields, identifiers, or a mix. [`assess`] compares
+//! reference, structured fields, identifiers, or a mix. [`assess()`] compares
 //! one candidate record against it, field by field, and combines the fields
 //! into a confidence in `0.0..=1.0`.
 //!
@@ -17,18 +17,18 @@
 //!   family names, its year. This is robust to citation styles.
 //!
 //! Where the rules live:
-//! - [`claim`]: reading a claim: its identifiers, year, journal, place,
+//! - `claim.rs`: reading a claim: its identifiers, year, journal, place,
 //!   byline and venue.
-//! - [`assess`]: scoring one candidate record against a claim, field by
+//! - `assess.rs`: scoring one candidate record against a claim, field by
 //!   field.
-//! - [`caps`]: the policy numbers: field weights, penalties, confidence
+//! - `caps.rs`: the policy numbers: field weights, penalties, confidence
 //!   caps and floors, and the verdict thresholds.
-//! - [`authors`]: author names; [`text`]: words and titles, and finding a
-//!   record's fields inside free text.
-//! - [`preprint`]: preprint servers, and a preprint's DOI cited for a
+//! - `authors.rs`: author names; `titles.rs`: comparing titles; `text.rs`:
+//!   words, and finding a record's fields inside free text.
+//! - `preprint.rs`: preprint servers, and a preprint's DOI cited for a
 //!   journal's article.
-//! - [`derivative`]: replies, corrections and notices about a work.
-//! - [`same_work`]: identifier agreement, and whether two records are one
+//! - `derivative.rs`: replies, corrections and notices about a work.
+//! - `same_work.rs`: identifier agreement, and whether two records are one
 //!   work.
 
 mod assess;
@@ -39,6 +39,7 @@ mod derivative;
 mod preprint;
 mod same_work;
 mod text;
+mod titles;
 
 use serde::{Deserialize, Serialize};
 
@@ -51,8 +52,9 @@ pub use derivative::{
 };
 pub use preprint::preprint_version_claimed;
 pub use same_work::{id_agreement, same_work, same_work_id};
-pub use text::{
-    given_title, normalise, probable_title, search_terms, shared_title, title_similarity, unmarked,
+pub use text::normalise;
+pub use titles::{
+    given_title, probable_title, search_terms, shared_title, title_similarity, unmarked,
     whole_title_similarity,
 };
 
@@ -107,7 +109,7 @@ pub struct Assessment {
     /// The journal: `Match` when the claim names it (or an abbreviation),
     /// `Mismatch` when a structured claim names one clearly another, or a
     /// journal article's reference cites one
-    /// ([`Claim::cited_container`], [`other_journal`]).
+    /// ([`Claim::cited_container`], [`crate::publication::other_journal`]).
     pub container: FieldCheck,
     pub volume: FieldCheck,
     /// The first page.

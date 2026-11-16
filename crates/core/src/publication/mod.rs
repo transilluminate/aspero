@@ -10,12 +10,13 @@
 //! cited in place of another. Volume and page are numbers and compare
 //! exactly.
 //!
-//! - [`journal`]: comparing journal names: abbreviations, initials, sister
+//! Where the rules live:
+//! - `journal.rs`: comparing journal names: abbreviations, initials, sister
 //!   journals and sections.
-//! - [`cited_journal`]: reading the journal a free-text reference cites.
-//! - [`locator`]: reading a reference's volume and first page, by style.
-//! - [`conference`]: conferences and meetings' proceedings as venues.
-//! - [`bibtex`]: a BibTeX entry's fields and accents.
+//! - `cited_journal.rs`: reading the journal a free-text reference cites.
+//! - `locator.rs`: reading a reference's volume and first page, by style.
+//! - `conference.rs`: conferences and meetings' proceedings as venues.
+//! - `bibtex.rs`: a BibTeX entry's fields and accents.
 
 mod bibtex;
 mod cited_journal;

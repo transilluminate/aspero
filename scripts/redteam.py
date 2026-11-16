@@ -35,6 +35,7 @@ anything. Exits 1 if any fabricated or wrong citation verified.
 import argparse
 import json
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -92,9 +93,22 @@ def retraction_flagged(result):
     return any(u.get("kind") == "retraction" for u in work.get("updates", []))
 
 
+def id_form(work_id):
+    """One spelling of an identifier: an ISBN-10 as its ISBN-13, a DOI
+    without a version suffix (PsyArXiv's `osf.io/f8hqa_v1`)."""
+    i = work_id.lower().replace("-", "") if work_id.lower().startswith("isbn:") else work_id.lower()
+    if i.startswith("isbn:") and len(i) == 15:
+        core = "978" + i[5:14]
+        check = (10 - sum(int(d) * (1 if k % 2 == 0 else 3) for k, d in enumerate(core)) % 10) % 10
+        return f"isbn:{core}{check}"
+    if i.startswith("doi:"):
+        return re.sub(r"_v\d+$", "", i)
+    return i
+
+
 def matched_ids(result):
     work = (result.get("best_match") or {}).get("work") or {}
-    return {i.lower() for i in work.get("ids", [])}
+    return {id_form(i) for i in work.get("ids", [])}
 
 
 def judge(case, result):
@@ -121,7 +135,7 @@ def judge(case, result):
         "names_field": bool((result.get("reason") or {}).get("differs")),
     }
     if case.get("ids") and verdict in ("verified", "plausible") and real:
-        row["wrong_work"] = not ({i.lower() for i in case["ids"]} & matched_ids(result))
+        row["wrong_work"] = not ({id_form(i) for i in case["ids"]} & matched_ids(result))
     return row
 
 

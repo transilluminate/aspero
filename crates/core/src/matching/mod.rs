@@ -40,7 +40,7 @@ pub use derivative::{
 };
 use text::{Normalised, content_words, words};
 pub use text::{
-    normalise, probable_title, search_terms, shared_title, title_similarity, unmarked,
+    given_title, normalise, probable_title, search_terms, shared_title, title_similarity, unmarked,
     whole_title_similarity,
 };
 

@@ -506,16 +506,30 @@ impl Engine {
         // cleaned-up keywords) on every keyword provider. Results are added
         // in provider-then-title order, so merging stays deterministic.
         titles = distinct(titles);
-        titles.truncate(MAX_TITLE_SEARCHES);
         // No hit pointed to the title (a conference paper without a DOI, a
         // book Crossref lacks): the title the reference's shape suggests,
-        // else the cleaned-up keywords (a bare title ranks far better).
-        if titles.is_empty()
-            && claim.title.is_none()
-            && let Some(title) = claim.text.as_deref().and_then(matching::probable_title)
+        // else the cleaned-up keywords (a bare title ranks far better). So
+        // too, first, when the hits point only to part of it ("graph
+        // convolutional networks" of "Semi-Supervised Classification with
+        // Graph Convolutional Networks") or past it, to other words the
+        // reference shares with them (a publisher's: "addison wesley
+        // longman").
+        // A part only of a title the reference marks as one (BibTeX's, a
+        // quoted one): a title guessed from its sentences may be the part.
+        if claim.title.is_none()
+            && let Some(text) = claim.text.as_deref()
+            && let Some(title) = matching::probable_title(text)
         {
-            titles.push(title);
+            let given = matching::given_title(text).is_some();
+            if titles.iter().all(|t| match beside_title(t, &title) {
+                Beside::Part => given,
+                Beside::Apart => true,
+                Beside::Same => false,
+            }) {
+                titles.insert(0, title);
+            }
         }
+        titles.truncate(MAX_TITLE_SEARCHES);
         let keywords = titles.is_empty();
         let mut jobs: Vec<(ProviderId, SearchQuery, Via)> = Vec::new();
         for provider in self.searchers(false) {
@@ -1005,6 +1019,42 @@ fn add_years(record: &mut SourceRecord, pooled: &[i16]) {
     record.work.other_years.sort_unstable();
 }
 
+/// How a title a matcher's hit shares with the reference stands to the
+/// title the reference's shape suggests.
+#[derive(Debug, PartialEq, Eq)]
+enum Beside {
+    /// A part of it, shorter.
+    Part,
+    /// None of it: no word of four letters or more in common.
+    Apart,
+    /// It, or overlapping it otherwise: the title found.
+    Same,
+}
+
+/// How `shared`, a title a matcher's hit shares with the reference,
+/// stands to `probable`, the title the reference's shape suggests.
+fn beside_title(shared: &str, probable: &str) -> Beside {
+    let (shared, probable) = (matching::normalise(shared), matching::normalise(probable));
+    if shared == probable {
+        return Beside::Same;
+    }
+    if probable.len() > shared.len() && format!(" {probable} ").contains(&format!(" {shared} ")) {
+        return Beside::Part;
+    }
+    let long = |s: &str| -> Vec<String> {
+        s.split(' ')
+            .filter(|w| w.chars().count() >= 4)
+            .map(str::to_owned)
+            .collect()
+    };
+    let p = long(&probable);
+    if long(&shared).iter().any(|w| p.contains(w)) {
+        Beside::Same
+    } else {
+        Beside::Apart
+    }
+}
+
 /// Titles with duplicates (by normalised form) removed, order kept.
 fn distinct(titles: Vec<String>) -> Vec<String> {
     let mut seen = Vec::new();
@@ -1480,6 +1530,37 @@ mod tests {
         moved.work.page = Some("101".into());
         add_place(&mut elsewhere, &moved);
         assert_eq!(elsewhere.work.container_title, None);
+    }
+
+    #[test]
+    fn the_references_own_title_is_searched_beside_a_hits_part_of_it() {
+        // wild-1 #337: Crossref's hits shared only "Graph Convolutional
+        // Networks" of a BibTeX title; holdout-3's books, a publisher's
+        // words.
+        let probable = "Semi-Supervised Classification with Graph Convolutional Networks";
+        assert_eq!(
+            beside_title("graph convolutional networks", probable),
+            Beside::Part
+        );
+        assert_eq!(
+            beside_title("addison wesley longman", "The Mythical Man-Month"),
+            Beside::Apart
+        );
+        // The title found, or one overlapping it otherwise: the hits'.
+        assert_eq!(
+            beside_title(
+                "semi supervised classification with graph convolutional networks",
+                probable
+            ),
+            Beside::Same
+        );
+        assert_eq!(
+            beside_title(
+                "Graph Convolutional Networks for Text Classification",
+                probable
+            ),
+            Beside::Same
+        );
     }
 
     #[test]

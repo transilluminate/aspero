@@ -931,7 +931,7 @@ fn title_like(s: &str) -> Option<String> {
 /// The title a reference marks as one: a BibTeX entry's title, else the
 /// longest quoted span (Harvard's 'An image is worth 16x16 words', IEEE's
 /// "…,").
-pub(super) fn given_title(text: &str) -> Option<String> {
+pub fn given_title(text: &str) -> Option<String> {
     let title = title_like;
     if let Some(t) = crate::publication::bibtex_field(text, "title") {
         return title(&t);

@@ -927,17 +927,35 @@ fn prefer_site(candidates: &mut [Candidate], claim: &Claim) -> bool {
 /// The journal, volume and page of another record of the work, for a
 /// record that gives none of them and isn't a preprint (arXiv's DataCite
 /// record of a paper published in Physical Review Letters): the work
-/// appeared there, whichever record of it is kept.
+/// appeared there, whichever record of it is kept. And the volume or page
+/// a record in the same journal leaves out (Crossref's BMC records give no
+/// article number; Europe PMC's do), so a wrong one cited is seen.
 fn add_place(record: &mut SourceRecord, other: &SourceRecord) {
     let (w, o) = (&mut record.work, &other.work);
-    if w.work_type != Some(WorkType::Preprint)
-        && w.container_title.is_none()
-        && w.volume.is_none()
-        && w.page.is_none()
-    {
+    if w.work_type == Some(WorkType::Preprint) {
+        return;
+    }
+    if w.container_title.is_none() && w.volume.is_none() && w.page.is_none() {
         w.container_title.clone_from(&o.container_title);
         w.volume.clone_from(&o.volume);
         w.page.clone_from(&o.page);
+        return;
+    }
+    let same_journal = match (&w.container_title, &o.container_title) {
+        (Some(a), Some(b)) => aspero_core::publication::same_journal(a, b),
+        _ => false,
+    };
+    let same_volume = match (&w.volume, &o.volume) {
+        (Some(a), Some(b)) => a.trim().eq_ignore_ascii_case(b.trim()),
+        _ => true,
+    };
+    if same_journal && same_volume {
+        if w.volume.is_none() {
+            w.volume.clone_from(&o.volume);
+        }
+        if w.page.is_none() {
+            w.page.clone_from(&o.page);
+        }
     }
 }
 
@@ -1395,6 +1413,23 @@ mod tests {
         // A preprint is another version, still in no journal.
         add_place(&mut preprint, &openalex);
         assert_eq!(preprint.work.container_title, None);
+        // Crossref's BMC record without its article number, Europe PMC's
+        // with it (holdout-1 #508: cited at another page, verified).
+        let title = "Views of health care professionals and policy-makers on the use of \
+                     surveillance data to combat antimicrobial resistance";
+        let mut crossref = titled("10.1186/s12889-020-8383-8", title, &[], 2020);
+        crossref.work.container_title = Some("BMC Public Health".into());
+        crossref.work.volume = Some("20".into());
+        let mut europepmc = crossref.clone();
+        europepmc.work.container_title = Some("BMC public health".into());
+        europepmc.work.page = Some("279".into());
+        let mut elsewhere = europepmc.clone();
+        elsewhere.work.container_title = Some("Public Health Reviews".into());
+        let mut kept = crossref.clone();
+        add_place(&mut kept, &elsewhere);
+        assert_eq!(kept.work.page, None, "another journal's page");
+        add_place(&mut crossref, &europepmc);
+        assert_eq!(crossref.work.page.as_deref(), Some("279"));
     }
 
     #[test]

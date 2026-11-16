@@ -2444,6 +2444,38 @@ fn held_out_red_team_failures_stay_fixed() {
             goldman.clone(),
         ),
         (
+            "h1-738",
+            Claim::from_text(
+                "C. Brukner, M. Zukowski, and A. Zeilinger, “The essence of entanglement,” Phys. \
+                 Rev. A, vol. 63, no. 10, pp. 644-661, 2001.",
+            ),
+            article(
+                "Conceptual inadequacy of the Shannon information in quantum measurements",
+                &["Časlav Brukner", "Anton Zeilinger"],
+                2001,
+                ("Physical Review A", "63", "644"),
+            ),
+        ),
+        (
+            "h1-694",
+            Claim::from_text(
+                "@inproceedings{k2022, author = {Kingsley-Odhiambo, Henrik and Merriweather-Sung, \
+                 Ilse}, title = {Federated contrastive pretraining for clinical note \
+                 de-identification}, booktitle = {Findings of the Association for Computational \
+                 Linguistics: EMNLP 2022}, year = {2022}, pages = {3321--3334}}",
+            ),
+            {
+                let mut r = record(
+                    &["isbn:9781959429432"],
+                    "Findings of the Association for Computational Linguistics",
+                    &["Association for Computational Linguistics"],
+                    2022,
+                );
+                r.work.work_type = Some(crate::work::WorkType::Book);
+                r
+            },
+        ),
+        (
             "h1-491",
             Claim::from_text(
                 "Berry, Christopher J. “Adam Smith's Considerations on Language.” Revue \

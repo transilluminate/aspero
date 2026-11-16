@@ -500,7 +500,13 @@ pub fn assess(claim: &Claim, record: &SourceRecord) -> Assessment {
             .as_ref()
             .is_some_and(|t| t.untitled(&families, work.container_title.as_deref()));
 
-    let title = match (&claim.title, &work_title, &text) {
+    // A BibTeX entry's title is the title cited, not words elsewhere in it
+    // (a booktitle that is a proceedings' title).
+    let claimed_title = claim.title.clone().or_else(|| {
+        text.as_ref()
+            .and_then(|t| publication::bibtex_field(&t.raw, "title"))
+    });
+    let title = match (&claimed_title, &work_title, &text) {
         (Some(claimed), Some(actual), _) => FieldCheck::scored(title_similarity(claimed, actual)),
         (None, Some(actual), Some(text)) if !untitled => {
             FieldCheck::scored(text.title_coverage(actual))
@@ -566,7 +572,7 @@ pub fn assess(claim: &Claim, record: &SourceRecord) -> Assessment {
         && work_title
             .as_deref()
             .is_some_and(|t| text::main_title(unmarked(t)) == unmarked(t));
-    let extended = match (&claim.title, &work_title, &text, &title_span) {
+    let extended = match (&claimed_title, &work_title, &text, &title_span) {
         (Some(claimed), Some(actual), _, _) => text::extends(claimed, actual, subtitle_ok),
         (None, Some(_), Some(text), Some(span)) => {
             let journal = work
@@ -739,8 +745,11 @@ pub fn assess(claim: &Claim, record: &SourceRecord) -> Assessment {
     // journal, numbers or furniture ("Niwa T. Transfection of plasmid DNA
     // by nanocarriers. J Microbiol Methods. 2005;61:251" isn't titleless).
     let placed = container.agreement == Agreement::Match && volume.agreement == Agreement::Match;
+    // A title quoted, or BibTeX's, is given however short ("“The essence
+    // of entanglement,” Phys. Rev. A, vol. 63").
     let titled = text.as_ref().is_some_and(|t| {
         t.title_run(&families, work.container_title.as_deref()) >= SHORT_TITLE_WORDS
+            || text::given_title(&t.raw).is_some()
     });
     let title =
         if placed && claim.title.is_none() && title.agreement == Agreement::Mismatch && !titled {

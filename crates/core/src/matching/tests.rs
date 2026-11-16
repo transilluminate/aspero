@@ -2186,6 +2186,10 @@ fn held_out_red_team_failures_stay_fixed() {
     // Minimised false VERIFIEDs from bench/redteam/holdout-1.jsonl (round
     // 2), against the records they verified: none may verify now. Each
     // with its line there.
+    let ids = |mut r: SourceRecord, id: &str| {
+        r.ids = vec![id.parse().unwrap()];
+        r
+    };
     let jcp = article(
         "Anisotropic Rayleigh scattering investigations in smectic A liquid crystal phases",
         &["O. Mondain-Monval", "H. J. Coles", "T. Claverie"],
@@ -2252,6 +2256,16 @@ fn held_out_red_team_failures_stay_fixed() {
     tpami.work.work_type = Some(crate::work::WorkType::JournalArticle);
     tpami.work.container_title =
         Some("IEEE Transactions on Pattern Analysis and Machine Intelligence".into());
+    let goldman = ids(
+        article(
+            "Cellular specificity of serotonin storage and axonal transport in identified \
+             neurones of Aplysia californica",
+            &["James E. Goldman", "James H. Schwartz"],
+            1974,
+            ("The Journal of Physiology", "242", "61-76"),
+        ),
+        "10.1113/jphysiol.1974.sp010694",
+    );
     let cases: Vec<(&str, Claim, SourceRecord)> = vec![
         (
             "h1-475",
@@ -2333,6 +2347,27 @@ fn held_out_red_team_failures_stay_fixed() {
             ),
             jcp.clone(),
         ),
+        (
+            "h1-469",
+            Claim::from_text(
+                "Goldman, J. E., & Schwartz, J. H. (1972). Cellular specificity of serotonin \
+                 storage and axonal transport in identified neurones of Aplysia californica. \
+                 The Journal of Physiology, 242(1), 61-76. \
+                 https://doi.org/10.1113/jphysiol.1974.sp010694",
+            ),
+            goldman.clone(),
+        ),
+        (
+            "h1-458",
+            Claim::from_text(
+                "@article{goldman1972, author = {Goldman, J. E. and Schwartz, J. H.}, title = \
+                 {Cellular specificity of serotonin storage and axonal transport in identified \
+                 neurones of Aplysia californica}, journal = {The Journal of Physiology}, year = \
+                 {1972}, volume = {242}, pages = {61--76}, doi = \
+                 {10.1113/jphysiol.1974.sp010694}}",
+            ),
+            goldman.clone(),
+        ),
     ];
     for (id, claim, record) in &cases {
         let a = assess(claim, record);
@@ -2366,6 +2401,12 @@ fn held_out_red_team_failures_stay_fixed() {
             "Laris, P. On the problems and promises of savanna fire regime change. Nat Commun \
              12, 4891 (2021).",
             laris,
+        ),
+        (
+            "Goldman, J. E., & Schwartz, J. H. (1974). Cellular specificity of serotonin \
+             storage and axonal transport in identified neurones of Aplysia californica. The \
+             Journal of Physiology, 242(1), 61-76. https://doi.org/10.1113/jphysiol.1974.sp010694",
+            goldman,
         ),
     ] {
         let a = assess(&Claim::from_text(claim), &record);

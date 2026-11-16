@@ -537,7 +537,9 @@ impl Normalised {
             self.words
                 .iter()
                 .enumerate()
-                .filter(|(i, w)| w.len() == 4 && !span.contains(i) && !skip.contains(i))
+                .filter(|(i, w)| {
+                    w.len() == 4 && !span.contains(i) && !skip.contains(i) && !self.linked[*i]
+                })
                 .filter_map(|(_, w)| w.parse::<i16>().ok())
                 .filter(|y| PLAUSIBLE_YEARS.contains(y))
                 .collect()

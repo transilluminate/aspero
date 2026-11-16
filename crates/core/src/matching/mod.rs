@@ -250,6 +250,17 @@ impl Claim {
             .or_else(|| publication::cited_journal(self.text.as_deref()?))
     }
 
+    /// The journals the claim may cite: its `container`, else those its
+    /// text may name where the title's end is unclear, one of which it
+    /// does ([`publication::cited_journals`]).
+    fn cited_containers(&self) -> Vec<String> {
+        match (&self.container, &self.text) {
+            (Some(container), _) => vec![container.clone()],
+            (None, Some(text)) => publication::cited_journals(text),
+            (None, None) => Vec::new(),
+        }
+    }
+
     /// The claim as read: as given, with what its text says of the year
     /// (when it gives one), journal, volume and first page filled in where
     /// not given. Free text's title and authors aren't parsed out: they're
@@ -609,31 +620,40 @@ pub fn assess(claim: &Claim, record: &SourceRecord) -> Assessment {
         FieldCheck::scored(0.5f64.powi(i32::from(delta.min(30))))
     };
 
+    let preprint = work.work_type == Some(WorkType::Preprint)
+        || work.container_title.as_deref().is_some_and(preprint_server);
     // Only a journal article's journal is held against a citation: books'
-    // series, proceedings and repositories go by many names.
-    let article = work.work_type == Some(crate::work::WorkType::JournalArticle);
+    // series, proceedings and repositories go by many names. A record in a
+    // journal whose type isn't given (Europe PMC's editorials, letters,
+    // news) is in one too.
+    let article = work.work_type == Some(WorkType::JournalArticle)
+        || (work.work_type.is_none() && work.container_title.is_some() && !preprint);
     // A journal read from text that is the work's own title, in title case
     // ("… Hooper D. Hot Gravitons From Kerr Black Holes. 2020."), is none.
     let title_words = work_title.as_deref().map(words).unwrap_or_default();
-    let cited_journal = claim.cited_container().filter(|cited| {
-        claim.container.is_some()
-            || !publication::significant(cited)
-                .iter()
-                .all(|w| title_words.contains(w))
-    });
+    let journals: Vec<String> = claim
+        .cited_containers()
+        .into_iter()
+        .filter(|cited| {
+            claim.container.is_some()
+                || !publication::significant(cited)
+                    .iter()
+                    .all(|w| title_words.contains(w))
+        })
+        .collect();
+    let cites_journal = !journals.is_empty();
+    // Read with confidence, or one of a few readings.
+    let sure = claim.cited_container().is_some();
     let cited_place = claim.locator();
     // A reference giving a journal, volume and page cites the published
     // article; a preprint of it (in no journal, at no volume) is another
     // version, not the one cited.
     // So is one cited in a journal by name alone ("Science Robotics.
     // 2024."), unless its identifier is the one claimed.
-    let preprint = work.work_type == Some(WorkType::Preprint)
-        || work.container_title.as_deref().is_some_and(preprint_server);
     let preprint_of_cited = preprint
         && work.volume.is_none()
-        && cited_journal
-            .as_deref()
-            .is_some_and(|j| !preprint_server(j))
+        && cites_journal
+        && journals.iter().all(|j| !preprint_server(j))
         && ((cited_place.volume.is_some() && cited_place.page.is_some())
             || id_agreement(&claim.ids, &record.ids) != Agreement::Match);
     // A journal's article cited as a preprint ("medRxiv preprint, 2019"),
@@ -650,19 +670,30 @@ pub fn assess(claim: &Claim, record: &SourceRecord) -> Assessment {
     // "SR" for Scientific Reports). Names compare by rule, which misses
     // some pairs, so only one clearly another is a mismatch: any work's
     // when claimed, a journal article's when read from text (where a
-    // book's publisher may stand).
-    let container = match (cited_journal.as_deref(), &work.container_title, &text) {
-        (Some(cited), Some(actual), _)
-            if same_journal(cited, actual) || journal_in(&words(cited), actual) =>
+    // book's publisher may stand); of the readings a reference allows,
+    // every one.
+    let container = match &work.container_title {
+        Some(actual)
+            if journals
+                .iter()
+                .any(|cited| same_journal(cited, actual) || journal_in(&words(cited), actual)) =>
         {
             FieldCheck::exact(true)
         }
-        (Some(cited), Some(actual), _)
-            if (article || claim.container.is_some()) && other_journal(cited, actual) =>
+        Some(actual)
+            if cites_journal
+                && (article || claim.container.is_some())
+                && journals.iter().all(|cited| other_journal(cited, actual)) =>
         {
             FieldCheck::exact(false)
         }
-        (None, Some(actual), Some(text)) if journal_in(&text.words, actual) => {
+        // Not inside its links: "doi:10.1093/brain/…" names no journal.
+        Some(actual)
+            if !(cites_journal && sure)
+                && text
+                    .as_ref()
+                    .is_some_and(|t| journal_in(&t.words_outside_links(), actual)) =>
+        {
             FieldCheck::exact(true)
         }
         _ => FieldCheck::UNKNOWN,
@@ -846,7 +877,7 @@ pub fn assess(claim: &Claim, record: &SourceRecord) -> Assessment {
     ) && work.container_title.is_none()
         && work.volume.is_none()
         && work.page.is_none();
-    if (journal_less || unconfirmable) && cited_journal.is_some() && ids != Agreement::Match {
+    if (journal_less || unconfirmable) && cites_journal && ids != Agreement::Match {
         confidence = confidence.min(UNPLACED_CAP);
     }
     // Another edition of a book: the same title and authors, another year

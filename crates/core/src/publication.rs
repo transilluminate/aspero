@@ -269,9 +269,16 @@ pub(crate) fn locator(text: &str) -> Locator {
     }
     let compact = compact(text);
     let tokens: Vec<&str> = compact.split_whitespace().collect();
-    match styled(&tokens) {
-        Some((_, found)) => found,
-        None => labelled(&tokens),
+    if let Some((_, found)) = styled(&tokens) {
+        return found;
+    }
+    // Chicago without pages: "Journal 94, no. 2 (2004)."
+    let found = labelled(&tokens);
+    Locator {
+        volume: found
+            .volume
+            .or_else(|| dated_end(&tokens).and_then(|(_, volume)| volume)),
+        ..found
     }
 }
 
@@ -320,6 +327,17 @@ fn styled(tokens: &[&str]) -> Option<(usize, Locator)> {
         // Harvard labels the pages: "Cell, 144(5), pp. 646-674".
         let labelled_page = is_page_label(tokens.get(i + 1).copied().unwrap_or(""));
         let page_at = if labelled_page { i + 2 } else { i + 1 };
+        // Chicago: "Journal 94, no. 2 (2004): 317-321", the issue labelled,
+        // the year bracketed before the pages.
+        if tokens[i].ends_with(',')
+            && let Some(volume) = volume_number(token)
+            && tokens.get(i + 1).is_some_and(|t| is_label(t, &["no"]))
+            && let Some((head, pages)) = tokens.get(i + 2).and_then(|t| t.split_once(':'))
+            && head.split_once('(').is_some_and(|(_, y)| bracketed_year(y))
+            && let Some(page) = page_number(pages)
+        {
+            return Some((i, at(volume, page)));
+        }
         // APA: volume(issue), page[–end]
         if tokens[i].ends_with(',')
             && token.contains('(')
@@ -341,12 +359,14 @@ fn styled(tokens: &[&str]) -> Option<(usize, Locator)> {
             return Some((i, at(volume, page)));
         }
         // Nature's single page, "Nature 530, 484 (2016)", only right after
-        // the journal's word.
+        // the journal's word, abbreviated or not ("J. Org. Chem. 101, 6301
+        // (1994)").
         if tokens[i].ends_with(',')
             && let Some(volume) = volume_number(token)
             && let Some((pages, year)) = next_page.and_then(|p| p.split_once('('))
             && bracketed_year(year)
-            && (ranged(pages) || (i > 0 && name_word(tokens[i - 1])))
+            && (ranged(pages)
+                || (i > 0 && name_word(tokens[i - 1].strip_suffix('.').unwrap_or(tokens[i - 1]))))
             && let Some(page) = page_number(pages)
         {
             return Some((i, at(volume, page)));
@@ -423,14 +443,44 @@ const JOURNAL_WORDS: usize = 16;
 /// Injured 47 (2016)"). A journal misread would be called another journal,
 /// so better none.
 pub(crate) fn cited_journal(text: &str) -> Option<String> {
+    match read_cited_journal(text)? {
+        Reading::Sure(journal) => Some(journal),
+        Reading::Maybe(_) => None,
+    }
+}
+
+/// The journals a free-text reference may cite: the one
+/// [`cited_journal`] reads, else, where a run of dotted abbreviations
+/// follows a title ending in a capitalised word ("… by Nanoparticles. J.
+/// Am. Chem. Soc. 113, 3391", "… Sri Lanka. Cad. Saúde Pública.
+/// 2005;2:e185"), each reading starting after a stop in it, longest first:
+/// one of them is the journal, so it is clearly another only when every
+/// one is.
+pub(crate) fn cited_journals(text: &str) -> Vec<String> {
+    match read_cited_journal(text) {
+        Some(Reading::Sure(journal)) => vec![journal],
+        Some(Reading::Maybe(readings)) => readings,
+        None => Vec::new(),
+    }
+}
+
+/// A journal read from a reference.
+enum Reading {
+    /// Told with confidence.
+    Sure(String),
+    /// One of these, where the title ends unclear.
+    Maybe(Vec<String>),
+}
+
+fn read_cited_journal(text: &str) -> Option<Reading> {
     if text.trim_start().starts_with('@') {
         // BibTeX: its journal field.
-        return bibtex_field(text, "journal");
+        return bibtex_field(text, "journal").map(Reading::Sure);
     }
     let compact = compact(text);
     let tokens: Vec<&str> = compact.split_whitespace().collect();
     if let Some(journal) = prose_journal(&tokens) {
-        return Some(journal);
+        return Some(Reading::Sure(journal));
     }
     let (at, after) = match styled(&tokens) {
         Some((at, found)) => {
@@ -452,14 +502,14 @@ pub(crate) fn cited_journal(text: &str) -> Option<String> {
     while end > 0 && is_date_word(tokens[end - 1]) {
         end -= 1;
     }
-    let last = *tokens[..end].last()?;
+    let last = without_comma_after_stop(tokens[..end].last()?);
     // The journal's last word, with the stop or comma ending it (always,
-    // without a styled locator).
+    // after a title and before a year, a link or a label).
     let ending = last.strip_suffix(['.', ',']);
     let last_word = ending.unwrap_or(last);
     if !name_word(last_word)
         || is_stopword(last_word)
-        || (after != After::Anything && ending.is_none())
+        || (matches!(after, After::Title | After::Quoted) && ending.is_none())
     {
         return None;
     }
@@ -476,6 +526,50 @@ pub(crate) fn cited_journal(text: &str) -> Option<String> {
         .then(|| read_journal(&tokens, end, true, after))
         .flatten()
         .or_else(|| read_journal(&tokens, end, false, after))
+        .map(Reading::Sure)
+        .or_else(|| readings(&tokens, end, after))
+}
+
+/// The journal whose last word is `tokens[end - 1]` where the title's end
+/// is unclear: back through the name's words, stopped or not, each stop a
+/// place the title may have ended and the journal begun. The reading
+/// after a closing quote is sure (IEEE's "“…,” IEEE Trans. Pattern Anal.
+/// Mach. Intell., vol. 56").
+fn readings(tokens: &[&str], end: usize, after: After) -> Option<Reading> {
+    let mut words = vec![without_comma_after_stop(tokens[end - 1])];
+    let reading = |words: &[&str]| -> Option<String> {
+        let first = *words.last()?;
+        (first != "&" && !is_stopword(first))
+            .then(|| spaced_colons(&words.iter().rev().copied().collect::<Vec<_>>().join(" ")))
+    };
+    let mut found: Vec<String> = Vec::new();
+    let mut k = end - 1;
+    while k > 0 && words.len() <= JOURNAL_WORDS {
+        let t = tokens[k - 1];
+        if closes_quote(t) {
+            return reading(&words).map(Reading::Sure);
+        }
+        if sentence_end(t) {
+            found.extend(reading(&words));
+        }
+        let name = t == "&"
+            || is_stopword(t)
+            || name_word(t.strip_suffix('.').unwrap_or(t))
+            || colon_name(t);
+        if !name {
+            break;
+        }
+        words.push(t);
+        k -= 1;
+    }
+    if k == 0 && after == After::Anything {
+        found.extend(reading(&words));
+    }
+    if after == After::Quoted || found.is_empty() {
+        return None;
+    }
+    found.reverse();
+    Some(Reading::Maybe(found))
 }
 
 /// The journal prose names: "… reported in The Lancet (2020) — …", its
@@ -511,6 +605,9 @@ enum After {
     Anything,
     /// The title, ended by a stop or a closing quote.
     Title,
+    /// The title, the journal itself ended by a bracketed year (Chicago's
+    /// "“…” Journal (2010)", "… Druck. `ApJ` (1939)"), not a stop.
+    Dated,
     /// A quoted title (Harvard's "'…', Chest.").
     Quoted,
 }
@@ -518,14 +615,19 @@ enum After {
 /// Where the journal ends in a reference without a styled locator, and
 /// what it must follow ([`cited_journal`]).
 fn unstyled_end(tokens: &[&str]) -> Option<(usize, After)> {
-    // Labelled: "Journal of Clinical Investigation, vol. 8, p. 109".
-    let label = |t: &&str| {
-        matches!(
-            t.trim_end_matches(['.', ',']).to_ascii_lowercase().as_str(),
-            "vol" | "volume" | "no" | "pp" | "p"
-        )
+    // Chicago: "“Title.” Journal 94, no. 2 (2004).", "… Journal (2010)."
+    if let Some((at, _)) = dated_end(tokens) {
+        return Some((at, After::Dated));
+    }
+    // Labelled: "Journal of Clinical Investigation, vol. 8, p. 109"; a
+    // label before a number ("J. P. (1982)" has an initial, not a page).
+    let label = |i: usize| {
+        is_label(tokens[i], &["vol", "volume", "no", "pp", "p"])
+            && tokens
+                .get(i + 1)
+                .is_some_and(|n| n.starts_with(|c: char| c.is_ascii_digit()))
     };
-    if let Some(i) = tokens.iter().position(label) {
+    if let Some(i) = (0..tokens.len()).find(|&i| label(i)) {
         return (i > 0 && tokens[i - 1].ends_with(',')).then_some((i, After::Title));
     }
     // The links ending it, then the year: "JAMA. 2020. doi:10.1001/…".
@@ -551,10 +653,50 @@ fn unstyled_end(tokens: &[&str]) -> Option<(usize, After)> {
 
 /// "pp." or "p.", before a page.
 fn is_page_label(t: &str) -> bool {
-    matches!(
-        t.trim_end_matches(['.', ',']).to_ascii_lowercase().as_str(),
-        "pp" | "p"
-    )
+    is_label(t, &["pp", "p"])
+}
+
+/// A label, one of `labels`, as written: "no.", "Vol.", "pp.,".
+fn is_label(t: &str, labels: &[&str]) -> bool {
+    let t = t.trim_end_matches(['.', ',']);
+    labels.iter().any(|l| l.eq_ignore_ascii_case(t))
+}
+
+/// Chicago's end, a bracketed year after the journal (and its volume and
+/// issue), its links aside: "Journal 94, no. 2 (2004).", "Mind 133
+/// (2024).", "eClinicalMedicine (2010).". Where the journal ends, and the
+/// volume given.
+fn dated_end(tokens: &[&str]) -> Option<(usize, Option<String>)> {
+    let mut end = tokens.len();
+    while end > 0 && is_link(tokens[end - 1]) {
+        end -= 1;
+    }
+    let (number, year) = tokens[..end]
+        .last()?
+        .trim_end_matches(['.', ','])
+        .split_once('(')?;
+    if !bracketed_year(year) {
+        return None;
+    }
+    if number.is_empty() {
+        return Some((end - 1, None));
+    }
+    // The volume before a labelled issue: "94, no. 2 (2004)".
+    if end >= 3 && is_label(tokens[end - 2], &["no"]) {
+        let volume = tokens[end - 3].strip_suffix(',').and_then(volume_number)?;
+        return Some((end - 3, Some(volume)));
+    }
+    // Right after the journal's word: "Psychological Science 5 (1994)".
+    let journal = end >= 2 && name_word(tokens[end - 2].trim_end_matches('.'));
+    journal.then(|| (end - 1, volume_number(number)))
+}
+
+/// A stop and the comma after it, as IEEE ends a dotted journal ("Mach.
+/// Intell., vol. 56"): the stop only.
+fn without_comma_after_stop(t: &str) -> &str {
+    t.strip_suffix(',')
+        .filter(|w| w.ends_with('.'))
+        .unwrap_or(t)
 }
 
 /// A link or identifier ending a reference: a DOI, URL, PMID or arXiv ID.
@@ -575,7 +717,7 @@ fn closes_quote(t: &str) -> bool {
 /// `dotted`: abbreviated with stops, the name kept as printed, stops and
 /// all.
 fn read_journal(tokens: &[&str], end: usize, dotted: bool, after: After) -> Option<String> {
-    let last = tokens[end - 1];
+    let last = without_comma_after_stop(tokens[end - 1]);
     let mut k = end - 1;
     let mut words = vec![if dotted {
         last
@@ -601,7 +743,7 @@ fn read_journal(tokens: &[&str], end: usize, dotted: bool, after: After) -> Opti
             } else {
                 return None;
             }
-        } else if name_word(t) {
+        } else if name_word(t) || colon_name(t) {
             words.push(t);
         } else if sentence_end(t) {
             // "Int. J. Care Injured": a stop inside a dotted name.
@@ -623,7 +765,7 @@ fn read_journal(tokens: &[&str], end: usize, dotted: bool, after: After) -> Opti
     }
     let follows = match after {
         After::Anything => true,
-        After::Title => ended.is_some(),
+        After::Title | After::Dated => ended.is_some(),
         After::Quoted => ended == Some(true),
     };
     if !follows {
@@ -634,7 +776,24 @@ fn read_journal(tokens: &[&str], end: usize, dotted: bool, after: After) -> Opti
     if words[0] == "&" || is_stopword(words[0]) {
         return None;
     }
-    Some(words.join(" "))
+    Some(spaced_colons(&words.join(" ")))
+}
+
+/// Name words around a colon inside a name, the space after it dropped
+/// ([`compact`]): "JAMA:The" in "JAMA: The Journal of the American Medical
+/// Association".
+fn colon_name(t: &str) -> bool {
+    t.contains(':')
+        && t.split(':').all(|w| w.is_empty() || name_word(w))
+        && t.split(':').any(|w| !w.is_empty())
+}
+
+/// A name with its colons spaced as written: "JAMA: The Journal …".
+fn spaced_colons(name: &str) -> String {
+    name.split(':')
+        .map(str::trim)
+        .collect::<Vec<_>>()
+        .join(": ")
 }
 
 /// A word of a journal's name as references print it: letters (and
@@ -655,8 +814,10 @@ fn capitalised(w: &str) -> bool {
     w.chars().next().is_some_and(char::is_uppercase)
 }
 
+/// A journal name's joining word, accents aside ("für").
 fn is_stopword(w: &str) -> bool {
     JOURNAL_STOPWORDS.contains(&w)
+        || (w.starts_with(char::is_lowercase) && JOURNAL_STOPWORDS.contains(&normalise(w).as_str()))
 }
 
 /// A word ending a sentence: "placenta.", "al.", "Need?", "(2021).".
@@ -969,6 +1130,164 @@ mod tests {
         ] {
             assert_eq!(cited_journal(text).as_deref(), Some(journal), "{text}");
         }
+    }
+
+    #[test]
+    fn journals_and_places_are_read_in_more_styles() {
+        // Red team, held-out round (holdout-1): Nature's single page after
+        // a dotted name, IEEE's comma after one, Chicago's issue and
+        // bracketed year, a colon inside a name, an initial "P." that
+        // isn't a page.
+        let loc = |v: &str, p: &str| Locator {
+            volume: Some(v.into()),
+            page: Some(p.into()),
+        };
+        for (text, journal, place) in [
+            (
+                "Mondain-Monval, O. et al. Anisotropic Rayleigh scattering investigations in \
+                 smectic A liquid crystal phases. J. Org. Chem. 101, 6301 (1994).",
+                "J. Org. Chem.",
+                Some(loc("101", "6301")),
+            ),
+            (
+                "R. Khandekar, S. Rao, and U. Vazirani, “Graph partitioning using single \
+                 commodity flows,” IEEE Trans. Pattern Anal. Mach. Intell., vol. 56, no. 4, pp. \
+                 1-15, 2009.",
+                "IEEE Trans. Pattern Anal. Mach. Intell.",
+                Some(loc("56", "1")),
+            ),
+            (
+                "V. V. Kiselev, “Genesis of spiral galaxies,” Mon. Not. R. Astron. Soc., vol. \
+                 428, no. 5, pp. 674-684, 2013.",
+                "Mon. Not. R. Astron. Soc.",
+                Some(loc("428", "674")),
+            ),
+            (
+                "Antonovics, Kate, and Robert Town. “Are All the Good Men Married? Uncovering \
+                 the Sources of the Marital Wage Premium.” American Economic Review 94, no. 2 \
+                 (2004): 317-321.",
+                "American Economic Review",
+                Some(loc("94", "317")),
+            ),
+            (
+                "v. Koczkás, Julius. “die ultraviolette absorption.” Zeitschrift für Physik 59, \
+                 no. 3-4 (1930): 274-288.",
+                "Zeitschrift für Physik",
+                Some(loc("59", "274")),
+            ),
+            (
+                "Alonso-González, Rafael. “Ventrículo derecho y cardiopatías congénitas en el \
+                 adulto.” eClinicalMedicine (2010).",
+                "eClinicalMedicine",
+                None,
+            ),
+            (
+                "Park, Robin. “Sex-bias in COVID-19-associated illness severity.” American \
+                 Journal of Epidemiology (2020). https://doi.org/10.1016/j.eclinm.2020.100519",
+                "American Journal of Epidemiology",
+                None,
+            ),
+            (
+                "Ramachandran, V. S. “Perception of Shape from Shading.” Psychological Science 5 \
+                 (1994).",
+                "Psychological Science",
+                Some(Locator {
+                    volume: Some("5".into()),
+                    page: None,
+                }),
+            ),
+            (
+                "Montgomery, James D. “A Formalization.” American Sociological Review 68, no. 5 \
+                 (2003).",
+                "American Sociological Review",
+                Some(Locator {
+                    volume: Some("68".into()),
+                    page: None,
+                }),
+            ),
+            (
+                "Füchtbauer & von Heesen, W. Verbreiterung und Verschiebung von Kaliumserienlinien \
+                 durch Helium von hohem Druck. ApJ (1939). https://doi.org/10.1007/bf01340112",
+                "ApJ",
+                None,
+            ),
+            (
+                "Watson ZT, Ru W, et al. Differential selectivity of microglia and astrocytes. \
+                 JAMA: The Journal of the American Medical Association. 2026. \
+                 doi:10.1093/brain/awaf429",
+                "JAMA: The Journal of the American Medical Association",
+                None,
+            ),
+            (
+                "Boucher, R. E., & Noonan, J. P. (1982). Adaptive Detection and Removal of \
+                 Non-Gaussian Spikes from Gaussian Data. Proceedings of the AAAI Symposium \
+                 Series. https://doi.org/10.1109/tpami.1982.4767218",
+                "Proceedings of the AAAI Symposium Series",
+                None,
+            ),
+        ] {
+            assert_eq!(cited_journal(text).as_deref(), Some(journal), "{text}");
+            if let Some(place) = place {
+                assert_eq!(locator(text), place, "{text}");
+            }
+        }
+        // Bare numbers and years elsewhere are still no place.
+        for text in [
+            "Smith J. Title. Publisher, 2010.",
+            "Smith J. (2010). Some Title. Oxford University Press.",
+            "We saw 12 (2010) patients.",
+        ] {
+            assert_eq!(locator(text), Locator::default(), "{text}");
+        }
+    }
+
+    #[test]
+    fn a_dotted_journal_after_a_title_in_title_case_is_one_of_its_readings() {
+        // Held-out round: the title's last word and the journal's first
+        // both end with a stop, so either may begin the journal.
+        for (text, journal) in [
+            (
+                "Perera C. After the Tsunami: Legal Implications of Mass Burials of Unidentified \
+                 Victims in Sri Lanka. Cad. Saúde Pública. 2005;2(6):e185.",
+                "Cad. Saúde Pública",
+            ),
+            (
+                "D'Aniell, F. 1,3-Stereocontrol with Bromoallenes. Synthesis of N-Boc-ADDA in \
+                 Serine/Threonine Phosphatases. Chem. Rev. (1996).",
+                "Chem. Rev.",
+            ),
+            (
+                "Rauch, J. Big Signals from Small Particles: Regulation of Cell Signaling \
+                 Pathways by Nanoparticles. J. Am. Chem. Soc. 113, 3391 (2013).",
+                "J. Am. Chem. Soc.",
+            ),
+            (
+                "Licht, A. L. Gravitational Waves on Conductors. Class. Quantum Grav. 22, 505 \
+                 (2005).",
+                "Class. Quantum Grav.",
+            ),
+            (
+                "Doe J. Water in New York City. J. Am. Chem. Soc. 2001;123:45-50.",
+                "J. Am. Chem. Soc.",
+            ),
+        ] {
+            assert_eq!(cited_journal(text), None, "{text}");
+            let readings = cited_journals(text);
+            assert!(
+                readings
+                    .iter()
+                    .any(|r| r.trim_end_matches('.') == journal.trim_end_matches('.')),
+                "{text}: {readings:?}"
+            );
+        }
+        // A sure reading is the only one.
+        assert_eq!(
+            cited_journals("Smith J. Is it safe? eLife. 2020;9:e1234."),
+            ["eLife"]
+        );
+        assert!(
+            cited_journals("Smith J. Title. Journal of clinical medicine. 2020;9:12").is_empty()
+        );
     }
 
     #[test]

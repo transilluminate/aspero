@@ -281,9 +281,11 @@ fn journal_volume_and_page_are_checked_in_text_and_fields() {
     assert_eq!(a.page.agreement, Agreement::Mismatch);
     assert!((PLAUSIBLE..VERIFIED).contains(&a.confidence), "{a:?}");
 
-    // Structured: the journal is compared by abbreviation rules; for a
-    // work not known to be a journal article, a different one lowers the
-    // ranking without settling the verdict.
+    // Structured: the journal is compared by abbreviation rules. A record
+    // in a journal, its type not given (Europe PMC's editorials and
+    // letters; holdout-1 #478, #492), is held to it as an article is: the
+    // wrong journal is plausible. For a work in proceedings, a different
+    // name lowers the ranking without settling the verdict.
     let claim = Claim {
         title: Some("Fibrinolysis for patients with intermediate-risk pulmonary embolism".into()),
         authors: vec!["Meyer G".into()],
@@ -292,6 +294,11 @@ fn journal_volume_and_page_are_checked_in_text_and_fields() {
         ..Claim::default()
     };
     let a = assess(&claim, &peitho());
+    assert_eq!(a.container.agreement, Agreement::Mismatch);
+    assert!((PLAUSIBLE..VERIFIED).contains(&a.confidence), "{a:?}");
+    let mut proceedings = peitho();
+    proceedings.work.work_type = Some(crate::work::WorkType::ConferencePaper);
+    let a = assess(&claim, &proceedings);
     assert_eq!(a.container.agreement, Agreement::Mismatch);
     assert!(a.confidence >= VERIFIED && a.confidence < 1.0, "{a:?}");
 }
@@ -2171,5 +2178,197 @@ fn red_team_minimised_failures_stay_fixed() {
     ] {
         let a = assess(&Claim::from_text(text), &record);
         assert!(a.confidence >= VERIFIED, "{text}: {a:?}");
+    }
+}
+
+#[test]
+fn held_out_red_team_failures_stay_fixed() {
+    // Minimised false VERIFIEDs from bench/redteam/holdout-1.jsonl (round
+    // 2), against the records they verified: none may verify now. Each
+    // with its line there.
+    let jcp = article(
+        "Anisotropic Rayleigh scattering investigations in smectic A liquid crystal phases",
+        &["O. Mondain-Monval", "H. J. Coles", "T. Claverie"],
+        1994,
+        ("The Journal of Chemical Physics", "101", "6301"),
+    );
+    let tsunami = article(
+        "After the Tsunami: Legal Implications of Mass Burials of Unidentified Victims in Sri \
+         Lanka",
+        &["Clifford Perera"],
+        2005,
+        ("PLoS Medicine", "2", "e185"),
+    );
+    let khandekar = article(
+        "Graph partitioning using single commodity flows",
+        &["Rohit Khandekar", "Satish Rao", "Umesh Vazirani"],
+        2009,
+        ("Journal of the ACM", "56", "1-15"),
+    );
+    let mut eclinm = record(
+        &["10.1016/j.eclinm.2020.100519"],
+        "Sex-bias in COVID-19-associated illness severity and mortality in cancer patients: A \
+         systematic review and meta-analysis",
+        &["Robin Park", "Anusha Chidharla", "Kathan Mehta"],
+        2020,
+    );
+    eclinm.work.work_type = Some(crate::work::WorkType::JournalArticle);
+    eclinm.work.container_title = Some("EClinicalMedicine".into());
+    // Europe PMC's record, its type not given.
+    let mut nursing = record(
+        &["10.1016/j.ijnurstu.2011.09.008"],
+        "Addressing the complexity conundrum in and of nursing",
+        &["David R Thompson", "Alexander M Clark"],
+        2011,
+    );
+    nursing.work.container_title = Some("International journal of nursing studies".into());
+    nursing.work.other_years = vec![2012];
+    let laris = placed(
+        &["10.1038/s41467-021-25141-1"],
+        "On the problems and promises of savanna fire regime change",
+        &["Paul Laris"],
+        2021,
+        ("Nature communications", "12", "4891"),
+    );
+    let mut brain = record(
+        &["10.1093/brain/awaf429"],
+        "Differential selectivity of microglia and astrocytes in HIV-1 gp120-induced synaptic \
+         pruning",
+        &[
+            "Zachary T Watson",
+            "Silvana Valdebenito-Silva",
+            "Michael S. Spurgat",
+        ],
+        2025,
+    );
+    brain.work.work_type = Some(crate::work::WorkType::JournalArticle);
+    brain.work.container_title = Some("Brain".into());
+    let mut tpami = record(
+        &["10.1109/tpami.1982.4767218"],
+        "Adaptive Detection and Removal of Non-Gaussian Spikes from Gaussian Data",
+        &["Rachel Boucher", "J.P. Noonan"],
+        1982,
+    );
+    tpami.work.work_type = Some(crate::work::WorkType::JournalArticle);
+    tpami.work.container_title =
+        Some("IEEE Transactions on Pattern Analysis and Machine Intelligence".into());
+    let cases: Vec<(&str, Claim, SourceRecord)> = vec![
+        (
+            "h1-475",
+            Claim::from_text(
+                "Mondain-Monval, O. et al. Anisotropic Rayleigh scattering investigations in \
+                 smectic A liquid crystal phases. J. Org. Chem. 101, 6301 (1994).",
+            ),
+            jcp.clone(),
+        ),
+        (
+            "h1-478",
+            Claim {
+                title: Some("Addressing the complexity conundrum in and of nursing".into()),
+                authors: vec!["Thompson, D.R.".into(), "Clark, A.M.".into()],
+                year: Some(2012),
+                container: Some("Annals of Internal Medicine".into()),
+                ..Claim::default()
+            },
+            nursing,
+        ),
+        (
+            "h1-483",
+            Claim::from_text(
+                "Perera C. After the Tsunami: Legal Implications of Mass Burials of Unidentified \
+                 Victims in Sri Lanka. Cad. Saúde Pública. 2005;2(6):e185.",
+            ),
+            tsunami.clone(),
+        ),
+        (
+            "h1-493",
+            Claim::from_text(
+                "R. Khandekar, S. Rao, and U. Vazirani, “Graph partitioning using single \
+                 commodity flows,” IEEE Trans. Pattern Anal. Mach. Intell., vol. 56, no. 4, pp. \
+                 1-15, 2009.",
+            ),
+            khandekar.clone(),
+        ),
+        (
+            "h1-494",
+            Claim::from_text(
+                "Park, Robin, Anusha Chidharla, and Kathan Mehta. “Sex-bias in \
+                 COVID-19-associated illness severity and mortality in cancer patients: A \
+                 systematic review and meta-analysis.” American Journal of Epidemiology (2020). \
+                 https://doi.org/10.1016/j.eclinm.2020.100519",
+            ),
+            eclinm.clone(),
+        ),
+        (
+            "h1-503",
+            Claim::from_text(
+                "Laris, P. On the problems and promises of savanna fire regime change. Sci Rep \
+                 12, 4891 (2021).",
+            ),
+            laris.clone(),
+        ),
+        (
+            "h1-476",
+            Claim::from_text(
+                "Watson ZT, Valdebenito-Silva S, Spurgat M, et al. Differential selectivity of \
+                 microglia and astrocytes in HIV-1 gp120-induced synaptic pruning. JAMA: The \
+                 Journal of the American Medical Association. 2025. doi:10.1093/brain/awaf429",
+            ),
+            brain,
+        ),
+        (
+            "h1-484",
+            Claim::from_text(
+                "Boucher, R. E., & Noonan, J. P. (1982). Adaptive Detection and Removal of \
+                 Non-Gaussian Spikes from Gaussian Data. Proceedings of the AAAI Symposium \
+                 Series. https://doi.org/10.1109/tpami.1982.4767218",
+            ),
+            tpami,
+        ),
+        (
+            "h1-505",
+            Claim::from_text(
+                "Mondain-Monval, O. et al. Anisotropic Rayleigh scattering investigations in \
+                 smectic A liquid crystal phases. J. Chem. Phys. 102, 6301 (1994).",
+            ),
+            jcp.clone(),
+        ),
+    ];
+    for (id, claim, record) in &cases {
+        let a = assess(claim, record);
+        assert!(a.confidence < VERIFIED, "{id}: {a:?}");
+    }
+    // The same works cited right still verify.
+    for (claim, record) in [
+        (
+            "Mondain-Monval, O. et al. Anisotropic Rayleigh scattering investigations in smectic \
+             A liquid crystal phases. J. Chem. Phys. 101, 6301 (1994).",
+            jcp,
+        ),
+        (
+            "Perera C. After the Tsunami: Legal Implications of Mass Burials of Unidentified \
+             Victims in Sri Lanka. PLoS Med. 2005;2(6):e185.",
+            tsunami,
+        ),
+        (
+            "R. Khandekar, S. Rao, and U. Vazirani, “Graph partitioning using single commodity \
+             flows,” J. ACM, vol. 56, no. 4, pp. 1-15, 2009.",
+            khandekar,
+        ),
+        (
+            "Park, Robin, Anusha Chidharla, and Kathan Mehta. “Sex-bias in COVID-19-associated \
+             illness severity and mortality in cancer patients: A systematic review and \
+             meta-analysis.” EClinicalMedicine (2020). \
+             https://doi.org/10.1016/j.eclinm.2020.100519",
+            eclinm,
+        ),
+        (
+            "Laris, P. On the problems and promises of savanna fire regime change. Nat Commun \
+             12, 4891 (2021).",
+            laris,
+        ),
+    ] {
+        let a = assess(&Claim::from_text(claim), &record);
+        assert!(a.confidence >= VERIFIED, "{claim}: {a:?}");
     }
 }

@@ -195,18 +195,61 @@ pub(super) struct Normalised {
     pub(super) words: Vec<String>,
     /// Where each word stands in `raw`.
     pub(super) spans: Vec<Range<usize>>,
+    /// Which words are inside a link or identifier ("10.1113/jphysiol.
+    /// 1974.sp010694"): no year, journal or name is cited there.
+    linked: Vec<bool>,
+}
+
+/// Where a reference's links and identifiers stand: its tokens that are a
+/// URL or a DOI, PMID or arXiv ID, written out or labelled.
+fn link_spans(raw: &str) -> Vec<Range<usize>> {
+    let mut spans = Vec::new();
+    let mut at = 0;
+    for token in raw.split_whitespace() {
+        let start = at + raw[at..].find(token).unwrap_or(0);
+        at = start + token.len();
+        let t = token
+            .trim_start_matches(['(', '[', '{', '<', '"', '\''])
+            .to_ascii_lowercase();
+        let link = [
+            "http", "www.", "doi:", "doi.org", "dx.doi", "arxiv:", "pmid:", "pmcid:",
+        ]
+        .iter()
+        .any(|p| t.starts_with(p))
+            || (t.starts_with("10.") && t.contains('/'));
+        if link {
+            spans.push(start..at);
+        }
+    }
+    spans
 }
 
 impl Normalised {
     pub(super) fn new(text: &str) -> Self {
         let (words, spans): (Vec<String>, Vec<Range<usize>>) =
             spanned_words(text).into_iter().unzip();
+        let links = link_spans(text);
+        let linked = spans
+            .iter()
+            .map(|w| links.iter().any(|l| l.start <= w.start && w.end <= l.end))
+            .collect();
         Normalised {
             raw: text.to_owned(),
             padded: format!(" {} ", words.join(" ")),
             words,
             spans,
+            linked,
         }
+    }
+
+    /// The words outside the reference's links and identifiers.
+    pub(super) fn words_outside_links(&self) -> Vec<String> {
+        self.words
+            .iter()
+            .zip(&self.linked)
+            .filter(|(_, linked)| !**linked)
+            .map(|(w, _)| w.clone())
+            .collect()
     }
 
     /// The words (as indices into `words`) where `title` (or its main

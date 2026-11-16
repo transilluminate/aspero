@@ -2,3 +2,12 @@
 .env*
 !.env.example
 /.claude/
+__pycache__/
+.DS_Store
+*.orig
+*.rej
+*.profraw
+*.profdata
+perf.data*
+flamegraph.svg
+profile.json

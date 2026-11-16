@@ -1,6 +1,7 @@
 //! Lookups by identifier: routing across providers, the cache, and
 //! sharing calls in flight.
 
+use aspero_core::matching::same_work_id;
 use aspero_core::{
     Error, ErrorCategory, FieldSet, IdKind, ProviderId, SourceRecord, Usage, WorkId,
 };
@@ -188,9 +189,17 @@ impl Engine {
                 .collect();
             let ids: Vec<WorkId> = eligible.iter().map(|&i| results[i].id.clone()).collect();
             let answers = self.lookup_at(entry, &ids, fields, &mut usage).await;
-            for (&i, (attempt, record)) in eligible.iter().zip(answers) {
+            for (&i, (attempt, mut record)) in eligible.iter().zip(answers) {
                 settled[i] = matches!(attempt.outcome, Outcome::NotFound)
                     && caps.final_misses.contains(&results[i].id.kind());
+                // A record found for an identifier it doesn't list (OpenAlex
+                // answers a Zenodo version's DOI with the concept's record)
+                // is that identifier's: it carries it.
+                if let Some(r) = &mut record
+                    && !r.ids.iter().any(|id| same_work_id(id, &results[i].id))
+                {
+                    r.ids.push(results[i].id.clone());
+                }
                 results[i].record = record;
                 results[i].attempts.push(attempt);
             }

@@ -12,7 +12,10 @@ Each corpus line is a bench case (`claim`, `expect`, `why`, optional `ids`,
 one batch (`aspero verify - --format json`), through an HTTP tape
 (`ASPERO_HTTP_TAPE`, `target/redteam-tape.sqlite` unless `--tape`), so each
 distinct request is paid for once, ever, and re-runs replay it, with
-today's OpenAlex spend capped (`ASPERO_OPENALEX_CAP_USD`, 0.75 unless set).
+today's OpenAlex spend capped (`ASPERO_OPENALEX_CAP_USD`, 0.75 unless set)
+and, once the allowance is used up, prepaid credit spent up to $5 a day
+(`ASPERO_OPENALEX_CREDIT_CAP_USD`, 5 unless set; aspero's own default,
+$0.25, would stop a run part-way).
 With the tape each run starts from an empty answer cache, so it asks what a
 first run asks and its results depend only on the tape and the code;
 `--replay-only` runs offline (a request not on the tape fails, unsent).
@@ -55,6 +58,7 @@ def claim_line(claim):
 def run(cases, binary, cache_dir, tape, replay_only):
     env = dict(os.environ)
     env.setdefault("ASPERO_OPENALEX_CAP_USD", "0.75")
+    env.setdefault("ASPERO_OPENALEX_CREDIT_CAP_USD", "5")
     env.pop("ASPERO_HTTP_TAPE_MODE", None)
     stdin = "\n".join(claim_line(c["claim"]) for c in cases) + "\n"
     with tempfile.TemporaryDirectory(prefix="aspero-redteam-") as fresh:

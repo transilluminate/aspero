@@ -166,7 +166,9 @@ scripts/redteam.py --rescore --failures   # re-score saved results, offline
 
 - **Cost.** Title searches on OpenAlex are paid ($0.001 each, from a free
   key's $1 daily allowance). The script caps the day's OpenAlex spend at
-  $0.75 unless `ASPERO_OPENALEX_CAP_USD` says otherwise; a first run of
+  $0.75 unless `ASPERO_OPENALEX_CAP_USD` says otherwise, and prepaid
+  credit, once the allowance is used up, at $5 a day unless
+  `ASPERO_OPENALEX_CREDIT_CAP_USD` says otherwise; a first run of
   the corpus cost about $0.30, and re-runs within the cache's lifetime
   (its own cache, `target/redteam-cache`) are free.
 - **Contact address.** The sources ask callers for one, for their polite

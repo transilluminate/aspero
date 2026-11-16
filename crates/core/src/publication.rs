@@ -502,6 +502,9 @@ fn read_cited_journal(text: &str) -> Option<Reading> {
     while end > 0 && is_date_word(tokens[end - 1]) {
         end -= 1;
     }
+    if let Some(journal) = quoted_journal(&tokens, end) {
+        return Some(Reading::Sure(journal));
+    }
     let last = without_comma_after_stop(tokens[..end].last()?);
     // The journal's last word, with the stop or comma ending it (always,
     // after a title and before a year, a link or a label).
@@ -528,6 +531,46 @@ fn read_cited_journal(text: &str) -> Option<Reading> {
         .or_else(|| read_journal(&tokens, end, false, after))
         .map(Reading::Sure)
         .or_else(|| readings(&tokens, end, after))
+}
+
+/// The journal between a quoted title and `end`, as written, in sentence
+/// case too ("“…” Revue historique 35, no. 1 (1974): 130", "'…', Journal
+/// of Molecular Biology, 215(3)"): words without digits, stops only
+/// abbreviating, back to the closing quote.
+fn quoted_journal(tokens: &[&str], end: usize) -> Option<String> {
+    let mut k = end;
+    while k > 0 && end - k <= JOURNAL_WORDS {
+        let t = without_comma_after_stop(tokens[k - 1]);
+        if closes_quote(t) {
+            let words = &tokens[k..end];
+            let first = *words.first()?;
+            // The last word's stop kept in a dotted name ("Mach. Intell.").
+            let last = without_comma_after_stop(words[words.len() - 1]);
+            let dotted = words.len() > 1 && words[words.len() - 2].ends_with('.');
+            let last = match last.strip_suffix(['.', ',']) {
+                Some(word) if !(dotted && last.ends_with('.')) => word,
+                _ => last,
+            };
+            let mut words = words[..words.len() - 1].to_vec();
+            words.push(last);
+            return (first != "&" && !is_stopword(first) && capitalised(first))
+                .then(|| spaced_colons(&words.join(" ")));
+        }
+        let word = t.strip_suffix(['.', ',']).unwrap_or(t);
+        let inner = k < end && t.ends_with(',');
+        let abbreviation = !t.ends_with('.') || capitalised(word);
+        if inner
+            || !abbreviation
+            || word.is_empty()
+            || !word
+                .chars()
+                .all(|c| c.is_alphabetic() || matches!(c, '-' | '\'' | '’' | '&' | ':'))
+        {
+            return None;
+        }
+        k -= 1;
+    }
+    None
 }
 
 /// The journal whose last word is `tokens[end - 1]` where the title's end
@@ -1186,6 +1229,20 @@ mod tests {
                  Journal of Epidemiology (2020). https://doi.org/10.1016/j.eclinm.2020.100519",
                 "American Journal of Epidemiology",
                 None,
+            ),
+            // After a quoted title, the journal as written, in sentence case
+            // too.
+            (
+                "Berry, Christopher J. “Adam Smith's Considerations on Language.” Revue \
+                 historique 35, no. 1 (1974): 130.",
+                "Revue historique",
+                Some(loc("35", "130")),
+            ),
+            (
+                "Doe, J. 'Ventrículo derecho', Revista española de cardiología, 63(9), pp. \
+                 1070-1080.",
+                "Revista española de cardiología",
+                Some(loc("63", "1070")),
             ),
             (
                 "Ramachandran, V. S. “Perception of Shape from Shading.” Psychological Science 5 \

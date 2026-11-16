@@ -2358,6 +2358,19 @@ fn held_out_red_team_failures_stay_fixed() {
             goldman.clone(),
         ),
         (
+            "h1-491",
+            Claim::from_text(
+                "Berry, Christopher J. “Adam Smith's Considerations on Language.” Revue \
+                 historique 35, no. 1 (1974): 130.",
+            ),
+            article(
+                "Adam Smith's Considerations on Language",
+                &["Christopher J. Berry"],
+                1974,
+                ("Journal of the History of Ideas", "35", "130-138"),
+            ),
+        ),
+        (
             "h1-458",
             Claim::from_text(
                 "@article{goldman1972, author = {Goldman, J. E. and Schwartz, J. H.}, title = \

@@ -1,5 +1,37 @@
 # Changelog
 
+## Unreleased
+
+Added:
+
+- Pages that aren't scholarly works (#119): `claimFromPage` tells a
+  scholarly work's page (an identifier, citation tags, scholarly JSON-LD,
+  a publisher's site, or no markup to tell) from a web page (a Wikipedia
+  article, a news story, guidance), and a web page has no claim to
+  verify. `PageClaim.kind` (`PageKind`: `work`, `webPage`) and
+  `PageClaim.webPage` (`WebPage`: title, site, canonical address
+  normalised, people as authors, published, updated, language, and its
+  key, `url:` and the address), read for every page with a title.
+  `webPageWork(page, accessed)` makes it a `Work` of type `webpage` that
+  `export` writes as BibTeX `@misc` (`howpublished`, `note` with the
+  site and access date), RIS `ELEC` (`Y2`, `LA`) and CSL-JSON `webpage`
+  (`accessed`, `language`: a Zotero Web Page), and `cite` formats in any
+  style. `Work.accessed` and `Work.language`; core `WorkType::WebPage`,
+  `Work::accessed`, `Work::language`, `webpage::{PageKind, WebPage,
+  normalise_url}`. `aspero verify --html FILE --url URL` shows a web
+  page's record (exit 0) rather than verifying it, and writes it out
+  with `--format bibtex|ris|csl-json|cite`, read on `--accessed DATE`
+  (today by default).
+
+Fixed:
+
+- `claimFromPage` titled a page by its JSON-LD `headline` before its
+  `name` (#118): Wikipedia's `headline` is the article's short
+  description ("American actor and novelist (1930–2025)"). `name` comes
+  first now, unless it isn't a title. A page title's suffix also goes
+  when it is the name the page gives its own site (`og:site_name`,
+  JSON-LD's website or publisher), even one holding a separator.
+
 ## 0.28.2
 
 Added:

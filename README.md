@@ -78,6 +78,9 @@ aspero verify --html page.html --url https://jamanetwork.com/journals/jama/fulla
 # (JAMA's 10.1001) decides between works of the same title
 aspero verify --url https://jamanetwork.com/journals/jama/article-abstract/2856706 \
   --title "Treatment of Acute Ischemic Stroke: A Review | JAMA | JAMA Network"
+# A page that isn't a scholarly work (Wikipedia, news, guidance) is a web
+# page: its record, or a web citation of it, read today
+aspero verify --html page.html --url https://en.wikipedia.org/wiki/Gene_Hackman --format bibtex
 
 # Which paper is this PDF? From its first page's text and title
 pdftotext -l 1 paper.pdf - | aspero identify --title "Deep learning"

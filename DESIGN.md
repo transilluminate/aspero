@@ -228,8 +228,11 @@ scripts/       fixture recorders, one per provider
   the journal only when it reads as a name), then schema.org JSON-LD (the
   first `ScholarlyArticle`, `MedicalScholarlyArticle` or `Article` at a
   block's top, in its `@graph` or a page's `mainEntity`, never one nested
-  deeper such as a citation: identifier, `sameAs`, `@id`, headline or
-  name, authors, `datePublished`, pagination, and up `isPartOf` only a
+  deeper such as a citation: identifier, `sameAs`, `@id`, `name`, else
+  `headline` (it names the thing; pages fill `headline` with a
+  description, Wikipedia's with the article's short description, #118;
+  a `name` that isn't a title, an address or "Article", passed over),
+  authors, `datePublished`, pagination, and up `isPartOf` only a
   `PublicationVolume`'s number and a `Periodical`'s name, not a
   `WebSite`'s). For a title only: then `og:title`, else `<title>`, then
   the title given. Every identifier any of them gives (each value parsed
@@ -261,7 +264,11 @@ scripts/       fixture recorders, one per provider
     ` — `, ` · `: a known site or browser name (`JAMA Network`,
     `ScienceDirect`, `Oxford Academic`, `Wiley Online Library`, `Google
     Chrome`, `Mozilla Firefox`, …), the host's name (`The Lancet` on
-    `thelancet.com`), a year or names ending in one (Wiley's and Sage's
+    `thelancet.com`), a name the page gives its own site (`og:site_name`,
+    JSON-LD's website or publisher), exactly but for case and
+    punctuation, and whole even when it holds a separator (`- Mozilla
+    Hacks – the Web developer blog`), a year or names ending in one
+    (Wiley's and Sage's
     bylines), `Proceedings of …`, or a short title-cased segment (five
     words, 40 characters) after a title of three words or more (`| Brain
     |`). Prefixes go when they're a known site or the host before ` | `
@@ -273,7 +280,72 @@ scripts/       fixture recorders, one per provider
     "Download PDF", "View Article", "here", "doi"), a challenge or error
     page ("Just a moment...", "Page not found"), a site's name alone, an
     address or identifier; and a given title (a dragged link's name) at
-    least three words and 15 characters, a page's own two words.
+    least three words and 15 characters, a page's own two words. The
+    title is as the page gives it, minus its site's own name: only
+    evidence takes a segment off (no site-by-site rules are added for
+    web pages), and when unsure it stays, since nothing downstream edits
+    it (a web page's goes to Zotero as read).
+  - *Scholarly work or web page* (#119). A page is a scholarly work's
+    (`PageKind::Work`, FFI `kind` `work`) when it gives an identifier
+    (in its tags, JSON-LD or address; an ISBN too, so a bookshop's page
+    tagged with one cites the book), citation tags (Highwire's with a
+    title, journal or identifier; PRISM's or Dublin Core's with a
+    journal or identifier: Dublin Core's title and creator alone are any
+    page's), or a `ScholarlyArticle` or `MedicalScholarlyArticle` in
+    JSON-LD; when it's on a publisher's site (Sites' table: an article
+    page giving only its title); or when no markup was given, so nothing
+    tells. Any other page with a title is a web page (`WebPage`): it has
+    no claim, so an app doesn't verify it as a work and report "not
+    found"; it is cited as itself. A work's page with a title gets the
+    record too, so the page can be cited when its work isn't found.
+  - *The web page record* (`webpage::WebPage`, FFI `WebPage`), each field
+    from the first that gives it. Title: a JSON-LD article's (any
+    article, news article, post or report) `name`, else `headline`;
+    `og:title`; `<title>`; a JSON-LD page's `name` (less sure: WHO names
+    its pages "Detail", the template's); the title given; each as above.
+    Site: `og:site_name`, JSON-LD's `WebSite` (the article's `isPartOf`,
+    else any), the site's name as the title writes it when that names
+    the host ("Wikipedia" of "Gene Hackman - Wikipedia" on
+    `en.wikipedia.org`), JSON-LD's publisher, else the host. Address:
+    `<link rel="canonical">`, `og:url`, JSON-LD's `url`, else the one
+    given, resolved against it (relative, `//host/…`) and normalised:
+    scheme and host lower case, default port, fragment and tracking
+    parameters (`utm_*`, `fbclid`, `gclid`, `msclkid`, …) dropped, the
+    rest of the query kept in order. Authors: people only, in page
+    order: JSON-LD's `Person` authors, else `author` meta tags, else
+    `article:author` ones that aren't addresses; never an organisation
+    (JSON-LD's, the publisher, the site), a byline holding one's name
+    ("Guardian staff reporter", then the page's `article:author`), or
+    "Contributors to …". Published: `datePublished`,
+    `article:published_time`, `citation_publication_date`,
+    `citation_date`; updated: `dateModified`, `article:modified_time`,
+    `og:updated_time`; as written (`2001-09-13T05:19:30Z`, `23 Oct 2017,
+    5:31 p.m.`), else the year. Language: `<html lang>`, JSON-LD's
+    `inLanguage`, `Content-Language`, `og:locale` (an app sending the
+    `<head>` alone has no `<html>` tag), tidied (`en_us` is `en-US`).
+    Key: `url:` and the normalised address, so a page shared twice is one
+    record (a string, not an identifier kind: addresses are still
+    scanned for identifiers first, and a page with one is a work).
+    Checked on modelled pages and 19 real pages' heads (news in three
+    languages, guidance, docs, blogs, a code repository: fixtures in
+    `tests/fixtures/pages/web`). Two fall short: a title whose site
+    nothing names stays whole ("Announcing Rust 1.0 | Rust Blog"), and
+    MDN's `&lt;meta&gt;` decodes to what reads as a tag and is taken out.
+  - *Exported and cited* as a `Work` of type `webpage`
+    (`WorkType::WebPage`; `WebPage::to_work(accessed)`, FFI
+    `webPageWork(page, accessed)`): the site as container, published as
+    issued, the caller's access date (`Work::accessed`: when the page was
+    read; core has no clock) and language. BibTeX `@misc` (as plain and
+    natbib print it) with `howpublished = {\url{…}}` (`%` and `#`
+    escaped) and `note = {Site. Accessed 2026-11-16}`; RIS `TY - ELEC`
+    with `T2` the site, `UR`, `Y2` accessed, `LA`; CSL-JSON `webpage`
+    with `container-title`, `URL`, `issued`, `accessed`, `language`,
+    which Zotero imports as a Web Page (its Website Title, Accessed). The
+    styles get `accessed` too: APA cites "Shah, P. (2026, November 13).
+    Title. Site. URL", Harvard adds "(Accessed: …)". `verify --html FILE
+    --url URL` shows a web page's record instead of verifying it (exit
+    0), and with `--format bibtex|ris|csl-json|cite` writes it out, read
+    on `--accessed DATE` or today.
 - **Scanning** (`id::scan`, `aspero scan`) finds every identifier
   mentioned in a document, with its position and text as written; which
   mentions matter is the caller's call. Shapes that prose imitates (bare
@@ -293,7 +365,8 @@ scripts/       fixture recorders, one per provider
   DOI, so `lookup` retries not-found ones with the punctuation kept.
 - **ISBNs** canonicalise to ISBN-13 (ISBN-10s converted, checksums checked).
 - **Work** is CSL-shaped and all-optional: title, authors, issued, type,
-  container, publication details, abstract, URL, cited-by count, plus:
+  container, publication details, abstract, URL, cited-by count, access
+  date and language (a web page's, see Pages), plus:
   - `updates`: retractions, withdrawals, expressions of concern,
     corrections, and newer versions (Crossref `new_version` notices, which
     Cochrane deposits per `.pubN`, and `is-replaced-by`/`is-preprint-of`

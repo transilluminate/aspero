@@ -722,17 +722,30 @@ pub fn assess(claim: &Claim, record: &SourceRecord) -> Assessment {
     // series, proceedings and repositories go by many names. A record in a
     // journal whose type isn't given (Europe PMC's editorials, letters,
     // news) is in one too.
+    // So is a conference's abstract, or a notice, printed in a journal's
+    // volume (a supplement's: "AB0300 …" in the Annals of the Rheumatic
+    // Diseases).
     let article = work.work_type == Some(WorkType::JournalArticle)
         || indexed_article
-        || (work.work_type.is_none() && work.container_title.is_some() && !preprint);
+        || (work.work_type.is_none() && work.container_title.is_some() && !preprint)
+        || (matches!(work.work_type, Some(WorkType::Other(_)))
+            && work.container_title.is_some()
+            && work.volume.is_some()
+            && !preprint);
     // A journal read from text that is the work's own title, in title case
     // ("… Hooper D. Hot Gravitons From Kerr Black Holes. 2020."), is none.
+    // A BibTeX entry's `journal` is one, whatever its words ("Diabetes"
+    // beside a title about diabetes).
     let title_words = work_title.as_deref().map(words).unwrap_or_default();
+    let bibtex = text
+        .as_ref()
+        .is_some_and(|t| t.raw.trim_start().starts_with('@'));
     let journals: Vec<String> = claim
         .cited_containers()
         .into_iter()
         .filter(|cited| {
             claim.container.is_some()
+                || bibtex
                 || !publication::significant(cited)
                     .iter()
                     .all(|w| title_words.contains(w))
@@ -767,11 +780,15 @@ pub fn assess(claim: &Claim, record: &SourceRecord) -> Assessment {
     // when claimed, a journal article's when read from text (where a
     // book's publisher may stand); of the readings a reference allows,
     // every one.
+    // A sister journal's name holds the record's ("JAMA Intern Med" for
+    // JAMA) but is another journal.
+    let read = claim.container.is_none() && !bibtex;
     let container = match &work.container_title {
         Some(actual)
-            if journals
-                .iter()
-                .any(|cited| same_journal(cited, actual) || journal_in(&words(cited), actual)) =>
+            if journals.iter().any(|cited| {
+                (same_journal(cited, actual) || journal_in(&words(cited), actual))
+                    && !publication::sister_journal_as(cited, actual, read)
+            }) =>
         {
             FieldCheck::exact(true)
         }
@@ -782,10 +799,13 @@ pub fn assess(claim: &Claim, record: &SourceRecord) -> Assessment {
             if cites_journal
                 && (article || claim.container.is_some())
                 && journals.iter().all(|cited| {
-                    other_journal(cited, actual)
-                        || (journals.len() > 1
-                            && publication::significant(cited).len() == 1
-                            && !same_journal(cited, actual))
+                    (if read {
+                        publication::other_journal_read(cited, actual)
+                    } else {
+                        other_journal(cited, actual)
+                    }) || (journals.len() > 1
+                        && publication::significant(cited).len() == 1
+                        && !same_journal(cited, actual))
                 }) =>
         {
             FieldCheck::exact(false)

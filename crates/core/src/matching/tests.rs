@@ -3793,3 +3793,148 @@ fn third_held_out_red_team_failures_stay_fixed() {
         assert!(a.confidence >= VERIFIED, "{claim}: {a:?}");
     }
 }
+
+#[test]
+fn a_sister_journal_cited_is_another_journal() {
+    // holdout-4's `w:sister-journal`: the family's parent cited for a
+    // sister's article, or a sister for the parent's.
+    let oncology = article(
+        "Cognitive Impairment Among Older Patients With Hematologic Cancers",
+        &["Tetsuya Tanimoto", "Takahiro Morita", "Kenzo Tsuda"],
+        2018,
+        ("JAMA Oncology", "4", "1783"),
+    );
+    let jama = article(
+        "Study: Exercise May Match Medication in Reducing Mortality Associated With \
+         Cardiovascular Disease, Diabetes",
+        &["Mike Mitka"],
+        2013,
+        ("JAMA", "310", "2026"),
+    );
+    let cell = article(
+        "GPAT2 is required for root cap cuticle formation in young Arabidopsis seedlings",
+        &["Alice Berhin", "Aurore Guerault", "Damien De Bellis"],
+        2025,
+        ("Cell Reports", "44", "116686"),
+    );
+    for (claim, record) in [
+        (
+            "Tanimoto T, Morita T, Tsuda K. Cognitive Impairment Among Older Patients With \
+             Hematologic Cancers. JAMA. 2018;4(12):1783.",
+            &oncology,
+        ),
+        (
+            "Mitka, M. Study: Exercise May Match Medication in Reducing Mortality Associated \
+             With Cardiovascular Disease, Diabetes. JAMA Intern Med 310, 2026 (2013).",
+            &jama,
+        ),
+        (
+            "Berhin A, Guerault A, De Bellis D. GPAT2 is required for root cap cuticle \
+             formation in young Arabidopsis seedlings. Cell. 2025;44:116686.",
+            &cell,
+        ),
+    ] {
+        let a = assess(&Claim::from_text(claim), record);
+        assert_eq!(a.container.agreement, Agreement::Mismatch, "{claim}");
+        assert!(
+            (PLAUSIBLE..VERIFIED).contains(&a.confidence),
+            "{claim}: {a:?}"
+        );
+    }
+    // Structured, the parent for its sister.
+    let claim = Claim {
+        title: Some("Cognitive Impairment Among Older Patients With Hematologic Cancers".into()),
+        authors: vec!["Tanimoto, T.".into()],
+        year: Some(2018),
+        container: Some("JAMA".into()),
+        ..Claim::default()
+    };
+    let a = assess(&claim, &oncology);
+    assert_eq!(a.container.agreement, Agreement::Mismatch);
+    assert!(a.confidence < VERIFIED, "{a:?}");
+    // Its own abbreviation, or its name with its subtitle, verifies.
+    for (claim, record) in [
+        (
+            "Tanimoto T, Morita T, Tsuda K. Cognitive Impairment Among Older Patients With \
+             Hematologic Cancers. JAMA Oncol. 2018;4(12):1783.",
+            &oncology,
+        ),
+        (
+            "Mitka, M. Study: Exercise May Match Medication in Reducing Mortality Associated \
+             With Cardiovascular Disease, Diabetes. JAMA: The Journal of the American Medical \
+             Association 310, 2026 (2013).",
+            &jama,
+        ),
+    ] {
+        let a = assess(&Claim::from_text(claim), record);
+        assert!(a.confidence >= VERIFIED, "{claim}: {a:?}");
+    }
+}
+
+#[test]
+fn fourth_held_out_red_team_failures_stay_fixed() {
+    // Minimised false VERIFIEDs from bench/redteam/holdout-4.jsonl (round
+    // 5) not covered by a test of their own, against the records they
+    // verified: none may verify now.
+    let diabetes_care = article(
+        "Nutritional Risk of High-Carbohydrate, Guar Gum Dietary Supplementation in \
+         Non-Insulin-Dependent Diabetes Mellitus",
+        &["M. A. S. Van Duyn", "T. A. Leo", "M. E. McIvor"],
+        1986,
+        ("Diabetes Care", "9", "497-503"),
+    );
+    // A conference's abstract printed in a journal's supplement.
+    let mut abstract_ = placed(
+        &["doi:10.1136/annrheumdis-2018-eular.6693"],
+        "AB0300 Ultrasound evaluation of ankle and foot joints in rheumatoid arthritis",
+        &["Safaa Fellous", "Hanan Rkain", "Saloua Afilal"],
+        2018,
+        ("Annals of the Rheumatic Diseases", "77", "1328"),
+    );
+    abstract_.work.work_type = Some(crate::work::WorkType::Other("conference-abstract".into()));
+    let cases: Vec<(&str, &str, &SourceRecord)> = vec![
+        // A BibTeX `journal` naming the parent, though the title has its
+        // word.
+        (
+            "h4-715",
+            "@article{vanduyn1986, author = {Van Duyn, M A S and Leo, T A and McIvor, M E}, \
+             title = {Nutritional Risk of High-Carbohydrate, Guar Gum Dietary Supplementation \
+             in Non-Insulin-Dependent Diabetes Mellitus}, journal = {Diabetes}, year = {1986}, \
+             volume = {9}, pages = {497--503}}",
+            &diabetes_care,
+        ),
+        (
+            "h4-695",
+            "Fellous, S., Rkain, H., & Afilal, S. (2018). AB0300 Ultrasound evaluation of ankle \
+             and foot joints in rheumatoid arthritis. RMD Open, 77, 1328.",
+            &abstract_,
+        ),
+    ];
+    let failing: Vec<String> = cases
+        .iter()
+        .filter_map(|(id, claim, record)| {
+            let a = assess(&Claim::from_text(*claim), record);
+            (a.confidence >= VERIFIED).then(|| format!("{id}: {a:?}"))
+        })
+        .collect();
+    assert!(failing.is_empty(), "{failing:#?}");
+
+    // The same works cited right still verify.
+    for (claim, record) in [
+        (
+            "@article{vanduyn1986, author = {Van Duyn, M A S and Leo, T A and McIvor, M E}, \
+             title = {Nutritional Risk of High-Carbohydrate, Guar Gum Dietary Supplementation \
+             in Non-Insulin-Dependent Diabetes Mellitus}, journal = {Diabetes Care}, year = \
+             {1986}, volume = {9}, pages = {497--503}}",
+            &diabetes_care,
+        ),
+        (
+            "Fellous, S., Rkain, H., & Afilal, S. (2018). AB0300 Ultrasound evaluation of ankle \
+             and foot joints in rheumatoid arthritis. Annals of the Rheumatic Diseases, 77, 1328.",
+            &abstract_,
+        ),
+    ] {
+        let a = assess(&Claim::from_text(claim), record);
+        assert!(a.confidence >= VERIFIED, "{claim}: {a:?}");
+    }
+}

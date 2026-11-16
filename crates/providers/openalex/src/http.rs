@@ -5,7 +5,10 @@
 //! daily allowance: 1 with a key, 0.1 without), `x-ratelimit-remaining-usd`
 //! (left of it today), `x-ratelimit-prepaid-remaining-usd` and
 //! `x-ratelimit-reset` (seconds to midnight UTC). 404s are an HTML page;
-//! 400s are JSON `{error, message}`.
+//! 400s are JSON `{error, message}`. The prepaid balance in headers comes
+//! from whichever server answered, some minutes behind: requests made
+//! together said 9.84 and 9.66 within a second (2026-11-16), so it's
+//! never taken alone as the balance (see the engine's `PrepaidDay`).
 //!
 //! `GET /rate-limit` (key required, as a Bearer header or `api_key`; 401
 //! "Authentication required" without) says the same as JSON, costs
@@ -49,6 +52,7 @@ pub(crate) fn rate_limit(resp: &HttpResponse) -> Result<Usage, Error> {
         daily_used_usd: Option<f64>,
         daily_remaining_usd: Option<f64>,
         prepaid_remaining_usd: Option<f64>,
+        prepaid_balance_usd: Option<f64>,
         /// A string or whatever else; never failing the rest.
         prepaid_expires_at: Option<serde_json::Value>,
         resets_at: Option<String>,
@@ -63,6 +67,8 @@ pub(crate) fn rate_limit(resp: &HttpResponse) -> Result<Usage, Error> {
         .daily_remaining_usd
         .or_else(|| Some(r.daily_budget_usd? - r.daily_used_usd?));
     usage.prepaid_remaining = r.prepaid_remaining_usd;
+    // The credit bought, so this balance is OpenAlex's own word.
+    usage.prepaid_bought = r.prepaid_balance_usd;
     usage.prepaid_expires_at = r.prepaid_expires_at.as_ref().and_then(|v| match v {
         serde_json::Value::String(s) => date(s),
         // Unix milliseconds, as a JavaScript Date's value.

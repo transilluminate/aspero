@@ -32,6 +32,11 @@ struct Metered {
     /// Prepaid credit, spent once the allowance is used up; without any,
     /// the allowance's remaining goes below 0.
     prepaid: Mutex<Option<f64>>,
+    /// Credit bought, as `/rate-limit` says.
+    bought: Mutex<Option<f64>>,
+    /// How much lower than the truth responses' headers say the balance
+    /// (OpenAlex's servers disagree); `/rate-limit` says the truth.
+    skew: Mutex<f64>,
     calls: Mutex<Vec<&'static str>>,
 }
 
@@ -49,6 +54,8 @@ impl Metered {
             works,
             remaining: Mutex::new(1.0 - used),
             prepaid: Mutex::default(),
+            bought: Mutex::default(),
+            skew: Mutex::default(),
             calls: Mutex::default(),
         })
     }
@@ -57,6 +64,7 @@ impl Metered {
     fn with_credit(used: f64, keyed: bool, usd: f64) -> Arc<Self> {
         let metered = Metered::new(used, keyed, vec![openalex_work("10.1234/a", "Alpha")]);
         *metered.prepaid.lock().unwrap() = Some(usd);
+        *metered.bought.lock().unwrap() = Some(usd);
         metered
     }
 
@@ -78,6 +86,12 @@ impl Metered {
         usage.limit = Some(1.0);
         usage.remaining = Some(*remaining);
         usage.prepaid_remaining = *prepaid;
+        if call == "budget" {
+            usage.prepaid_bought = *self.bought.lock().unwrap();
+        } else {
+            let skew = *self.skew.lock().unwrap();
+            usage.prepaid_remaining = prepaid.map(|p| p - skew);
+        }
         usage.resets_at = Some(Timestamp::from_second(MIDNIGHT).unwrap());
         usage
     }
@@ -478,4 +492,29 @@ async fn single_lookups_are_never_refused() {
     ));
     // Free, so no refresh was needed to decide.
     assert_eq!(openalex.calls(), ["single"]);
+}
+
+/// Responses' headers can say a stale balance (OpenAlex's servers
+/// disagree): before stopping at the credit cap, `/rate-limit` is asked,
+/// at most once a minute, and its word decides.
+#[tokio::test(start_paused = true)]
+async fn a_stop_at_the_credit_cap_is_checked_with_the_providers_own_word() {
+    let openalex = Metered::with_credit(1.0, true, 10.0);
+    // Headers say $0.01 less than the truth.
+    *openalex.skew.lock().unwrap() = 0.01;
+    let engine = credit_engine(openalex.clone(), None, Some(0.005), None);
+    // The refresh says the truth; the search's headers then look like
+    // $0.011 spent, past the cap; just refreshed, so it stops.
+    search(&engine).await.unwrap();
+    let error = search(&engine).await.unwrap_err();
+    assert_eq!(credit_capped(&error), (0.005, 0.011));
+    assert_eq!(openalex.calls(), ["budget", "search"]);
+
+    // A minute on, the stop is checked: $0.001 spent, so the search goes.
+    tokio::time::advance(std::time::Duration::from_secs(61)).await;
+    search(&engine).await.unwrap();
+    assert_eq!(openalex.calls(), ["budget", "search", "budget", "search"]);
+    // Then the headers' word again, and not asked again within the minute.
+    search(&engine).await.unwrap_err();
+    assert_eq!(openalex.count("budget"), 2);
 }

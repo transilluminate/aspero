@@ -235,6 +235,8 @@ pub struct Engine {
     refreshing: Arc<tokio::sync::Mutex<()>>,
     /// When a refresh last failed to say the day's use.
     refreshed: Arc<std::sync::Mutex<Option<tokio::time::Instant>>>,
+    /// When a stop at a credit cap was last checked with a refresh.
+    confirmed: Arc<std::sync::Mutex<Option<tokio::time::Instant>>>,
 }
 
 #[derive(Clone)]
@@ -348,6 +350,7 @@ impl EngineBuilder {
             disabled: Arc::new(self.disabled),
             refreshing: Arc::default(),
             refreshed: Arc::default(),
+            confirmed: Arc::default(),
         }
     }
 }

@@ -508,6 +508,13 @@ pub struct Usage {
     /// When the prepaid balance expires, where the provider says.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub prepaid_expires_at: Option<Timestamp>,
+    /// The prepaid credit bought (and not expired), where the provider says
+    /// it along with its budget (OpenAlex's `/rate-limit`, not its
+    /// headers): a top-up raises it. Said, it marks `prepaid_remaining` as
+    /// the provider's own word, not a response's header, which may be
+    /// minutes stale.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub prepaid_bought: Option<f64>,
 }
 
 impl Usage {
@@ -524,6 +531,11 @@ impl Usage {
             limit: later.limit.or(self.limit),
             prepaid_remaining: later.prepaid_remaining.or(self.prepaid_remaining),
             prepaid_expires_at: later.prepaid_expires_at.or(self.prepaid_expires_at),
+            // Only beside the balance it vouches for.
+            prepaid_bought: match later.prepaid_remaining {
+                Some(_) => later.prepaid_bought,
+                None => later.prepaid_bought.or(self.prepaid_bought),
+            },
         }
     }
 }

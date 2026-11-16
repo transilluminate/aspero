@@ -131,25 +131,33 @@ impl Engine {
             let _one = self.refreshing.lock().await;
             let due = lock(&self.refreshed).is_none_or(|at| at.elapsed() >= REFRESH_AGAIN);
             if self.today(&provider).is_none() && due {
-                let quick = CallOptions {
-                    deadline: Some(Duration::from_secs(5)),
-                    max_retries: Some(0),
-                    ..self.options
-                };
-                self.with_options(quick).refresh_budget(entry).await;
-                if self.today(&provider).is_none() {
-                    *lock(&self.refreshed) = Some(tokio::time::Instant::now());
+                self.quick_refresh(entry).await;
+                let now = Some(tokio::time::Instant::now());
+                match self.today(&provider) {
+                    None => *lock(&self.refreshed) = now,
+                    // Just asked: no need to ask again to confirm a stop.
+                    Some(_) => *lock(&self.confirmed) = now,
                 }
             }
         }
-        let Some(budget) = self.today(&provider) else {
-            return Ok(());
-        };
-        let (Some(used), Some(used_up)) = (budget.used(), budget.allowance_used_up()) else {
-            return Ok(());
-        };
-        match reached(caps, used, used_up, budget.prepaid_spent_today) {
-            Some((which, cap, used)) => {
+        let mut stop = self.reached_today(&provider, caps);
+        // Credit spent today is told mostly from responses' headers, whose
+        // balances may be stale: before stopping at the credit cap, ask
+        // the provider's own word (free; once a minute at most).
+        if matches!(stop, Some((CapKind::Credit, _, _, _)))
+            && entry.provider.capabilities().budget_status
+            && !self.options.offline
+        {
+            let _one = self.refreshing.lock().await;
+            let due = lock(&self.confirmed).is_none_or(|at| at.elapsed() >= REFRESH_AGAIN);
+            if due {
+                self.quick_refresh(entry).await;
+                *lock(&self.confirmed) = Some(tokio::time::Instant::now());
+            }
+            stop = self.reached_today(&provider, caps);
+        }
+        match stop {
+            Some((which, cap, used, resets_at)) => {
                 tracing::info!(
                     target: "aspero::budget",
                     provider = %provider, cap, used, which = which.as_str(),
@@ -158,12 +166,35 @@ impl Engine {
                 Err(Error::BudgetCapped {
                     cap,
                     used,
-                    resets_at: budget.resets_at,
+                    resets_at,
                     which,
                 })
             }
             None => Ok(()),
         }
+    }
+
+    /// The cap the provider's day has reached, if any, with the cap,
+    /// what's spent against it, and when the day resets.
+    fn reached_today(
+        &self,
+        provider: &ProviderId,
+        caps: Caps,
+    ) -> Option<(CapKind, f64, f64, Option<jiff::Timestamp>)> {
+        let budget = self.today(provider)?;
+        let (used, used_up) = (budget.used()?, budget.allowance_used_up()?);
+        let (which, cap, used) = reached(caps, used, used_up, budget.prepaid_spent_today)?;
+        Some((which, cap, used, budget.resets_at))
+    }
+
+    /// Asks the provider's budget, quickly: 5 s, no retries.
+    async fn quick_refresh(&self, entry: &Entry) {
+        let quick = CallOptions {
+            deadline: Some(Duration::from_secs(5)),
+            max_retries: Some(0),
+            ..self.options
+        };
+        self.with_options(quick).refresh_budget(entry).await;
     }
 
     /// The provider's budget as last reported, if its use today is known;

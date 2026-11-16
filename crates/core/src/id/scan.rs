@@ -115,8 +115,21 @@ pub fn scan(text: &str) -> Vec<Mention> {
     let folded = crate::fold::Folded::new(text);
     located(&folded.text)
         .into_iter()
-        .map(|(m, line_start)| {
-            let span = folded.original(&m.span);
+        .map(|(mut m, line_start)| {
+            let mut span = folded.original(&m.span);
+            // A soft hyphen ending its line is cleaned to `-` to mend a
+            // word broken there; ending a mention not continued on the next
+            // line, it marks no hyphen in it (`10.1097/HJH.0b013e\u{AD}`).
+            if text[..span.end].ends_with('\u{AD}')
+                && folded.text[..m.span.end].ends_with('-')
+                && let Some(id) = scan_clean(&folded.text[m.span.start..m.span.end - 1])
+                    .into_iter()
+                    .find(|n| n.span.start == 0)
+                    .map(|n| n.id)
+            {
+                m.id = id;
+                span.end -= '\u{AD}'.len_utf8();
+            }
             // After the line break as written, which cleaning may have
             // made `\n` from another.
             let line_start = match line_start {
@@ -906,6 +919,25 @@ mod tests {
         // Not broken at a hyphen, or not broken at all: none.
         let text = "doi:10.1016/j.cell.\n2020.01.001 doi:10.1038/s41586-020-2649-2";
         assert!(scan(text).iter().all(|m| m.alternative(text).is_none()));
+    }
+
+    /// Found by fuzzing: a soft hyphen ending a DOI's line, the next not
+    /// continuing it, was read as a hyphen ending the DOI.
+    #[test]
+    fn soft_hyphens_ending_a_mention_are_not_part_of_it() {
+        let text = "doi:10.1097/HJH.0b013e\u{AD}\n18. Smith A";
+        assert_eq!(
+            found(text),
+            [("doi:10.1097/hjh.0b013e".into(), "doi:10.1097/HJH.0b013e")]
+        );
+        // Continued on the next line, the DOI is mended as before.
+        let text = "doi:10.1097/HJH.0b013e\u{AD}\n3282f35c67";
+        let m = &scan(text)[0];
+        assert_eq!(m.id.to_string(), "doi:10.1097/hjh.0b013e-3282f35c67");
+        assert_eq!(
+            m.alternative(text).map(|id| id.to_string()).as_deref(),
+            Some("doi:10.1097/hjh.0b013e3282f35c67")
+        );
     }
 
     #[test]

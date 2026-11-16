@@ -28,7 +28,7 @@
 use aspero_core::matching::{self, PLAUSIBLE, VERIFIED, id_agreement, same_work_id};
 use aspero_core::{
     Agreement, Assessment, Claim, FieldSet, Filter, IdKind, OpenAccess, PartialDate, ProviderId,
-    SearchQuery, SourceRecord, Update, Usage, WorkId, YearRange, site,
+    SearchQuery, SourceRecord, Update, Usage, WorkId, WorkType, YearRange, site,
 };
 
 use futures::future::{Either, join_all, select};
@@ -173,6 +173,8 @@ fn absorb(
     let counts = merged_values(&mut c.record, &mut record, counts);
     add_years(&mut c.record, &pooled);
     add_years(&mut record, &pooled);
+    add_place(&mut c.record, &record);
+    add_place(&mut record, &c.record);
     c.assessment = assess(claim, &c.record, &c.ids);
     let assessment = assess(claim, &record, &c.ids);
     if assessment.confidence > c.assessment.confidence {
@@ -922,6 +924,23 @@ fn prefer_site(candidates: &mut [Candidate], claim: &Claim) -> bool {
     }
 }
 
+/// The journal, volume and page of another record of the work, for a
+/// record that gives none of them and isn't a preprint (arXiv's DataCite
+/// record of a paper published in Physical Review Letters): the work
+/// appeared there, whichever record of it is kept.
+fn add_place(record: &mut SourceRecord, other: &SourceRecord) {
+    let (w, o) = (&mut record.work, &other.work);
+    if w.work_type != Some(WorkType::Preprint)
+        && w.container_title.is_none()
+        && w.volume.is_none()
+        && w.page.is_none()
+    {
+        w.container_title.clone_from(&o.container_title);
+        w.volume.clone_from(&o.volume);
+        w.page.clone_from(&o.page);
+    }
+}
+
 /// Every year a record reports: issued, then other editions or versions.
 fn years(record: &SourceRecord) -> impl Iterator<Item = i16> + '_ {
     let w = &record.work;
@@ -959,7 +978,7 @@ fn distinct(titles: Vec<String>) -> Vec<String> {
 
 #[cfg(test)]
 mod tests {
-    use aspero_core::{Raw, UpdateKind, Work, WorkType};
+    use aspero_core::{Raw, UpdateKind, Work};
     use jiff::Timestamp;
 
     use super::*;
@@ -1354,6 +1373,28 @@ mod tests {
         let (dois, chosen) = ranked(&claim(STROKE, &[], None, Some("jamanetwork.com")), &records);
         assert_eq!(dois[0], "doi:10.1001/jama.2026.19482");
         assert!(chosen);
+    }
+
+    #[test]
+    fn a_record_without_a_place_takes_its_works() {
+        // arXiv's DataCite record of the LIGO paper, merged with OpenAlex's.
+        let title = "Observation of Gravitational Waves from a Binary Black Hole Merger";
+        let mut datacite = titled("10.48550/arxiv.1602.03837", title, &[], 2016);
+        let mut openalex = titled("10.1103/physrevlett.116.061102", title, &[], 2016);
+        openalex.work.container_title = Some("Physical Review Letters".into());
+        openalex.work.volume = Some("116".into());
+        openalex.work.page = Some("061102".into());
+        let mut preprint = datacite.clone();
+        preprint.work.work_type = Some(WorkType::Preprint);
+        add_place(&mut datacite, &openalex);
+        assert_eq!(
+            datacite.work.container_title.as_deref(),
+            Some("Physical Review Letters")
+        );
+        assert_eq!(datacite.work.volume.as_deref(), Some("116"));
+        // A preprint is another version, still in no journal.
+        add_place(&mut preprint, &openalex);
+        assert_eq!(preprint.work.container_title, None);
     }
 
     #[test]

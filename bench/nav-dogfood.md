@@ -129,3 +129,25 @@ and cited-path gates.
   neighbouring function.
 - DESIGN.md is still the index: unscoped greps hit it in 24 of 28 runs.
   Keep its pointers specific; `scripts/doc-paths.py` keeps them existing.
+
+## After the docs pass (2026-11-16, 217033f)
+
+The same tasks after cutting DESIGN.md from 1,736 lines to 544 (an index
+of where things live plus the decisions code can't show), moving
+module-specific rules into `//!` docs, and archiving old changelogs.
+
+| Mean per run | After splits (011fe7d) | After docs pass (217033f) |
+|---|---|---|
+| Correct | 27/28, 1 partial | 27/28, 1 partial |
+| Tool calls | 3.1 | 3.1 |
+| Wasted searches | 1.5 | 1.4 |
+| Input tokens | ~26k | ~28k |
+| Wall time | 10 s | 8 s |
+
+- No task got clearly worse. journal-read took 5 calls each (4 before) by
+  the same route (repo-wide `journal` file list, then `claim.rs` and
+  `cited_journal.rs`), never touching DESIGN.md; the extra turn is most of
+  the token rise. The partial is openalex-cap again (the right file, a
+  neighbouring name).
+- DESIGN.md was read in no run and grep-hit in 25 of 28: it works as an
+  index, as before.

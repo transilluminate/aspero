@@ -418,6 +418,9 @@ pub(crate) fn cited_journal(text: &str) -> Option<String> {
     }
     let compact = compact(text);
     let tokens: Vec<&str> = compact.split_whitespace().collect();
+    if let Some(journal) = prose_journal(&tokens) {
+        return Some(journal);
+    }
     let (at, after) = match styled(&tokens) {
         Some((at, found)) => {
             // "Springer;2010:12-30": a publisher, not a year, before the
@@ -462,6 +465,31 @@ pub(crate) fn cited_journal(text: &str) -> Option<String> {
         .then(|| read_journal(&tokens, end, true, after))
         .flatten()
         .or_else(|| read_journal(&tokens, end, false, after))
+}
+
+/// The journal prose names: "… reported in The Lancet (2020) — …", its
+/// capitalised words between a verb's "in" and the bracketed year.
+fn prose_journal(tokens: &[&str]) -> Option<String> {
+    tokens.iter().enumerate().find_map(|(i, t)| {
+        let verb = i > 0
+            && tokens[i - 1].len() > 2
+            && tokens[i - 1].chars().all(|c| c.is_ascii_lowercase());
+        if *t != "in" || !verb {
+            return None;
+        }
+        let rest = &tokens[i + 1..];
+        let end = rest.iter().position(|w| !name_word(w))?;
+        let year = rest[end]
+            .strip_prefix('(')
+            .is_some_and(|y| bracketed_year(y.trim_end_matches(['.', ','])));
+        let words = &rest[..end];
+        (year
+            && !words.is_empty()
+            && words.len() <= JOURNAL_WORDS
+            && !is_stopword(words[0])
+            && words[0] != "&")
+            .then(|| words.join(" "))
+    })
 }
 
 /// What a journal read from a reference must follow.
@@ -875,6 +903,15 @@ mod tests {
                 "Science",
             ),
             ("Smith J. Deep Learning. Nature. 2015;521:436.", "Nature"),
+            // Prose: a verb's "in", the journal, the bracketed year.
+            (
+                "Huang et al. described in The Lancet (2020) — \"Clinical features of patients\".",
+                "The Lancet",
+            ),
+            (
+                "Wiers et al. described in Genes Brain & Behavior (2008) — \"Relatively strong\".",
+                "Genes Brain & Behavior",
+            ),
             // Harvard: a quoted title, "pp." before the pages; BibTeX.
             (
                 "Altschul, S.F. et al. (1990) 'Basic local alignment search tool', Journal of Molecular Biology, 215(3), pp. 403-410.",
@@ -943,8 +980,8 @@ mod tests {
             "Landsman K. I Am a Strange Loop. 2007.",
             "Kahneman D. Thinking, Fast and Slow. New York: Farrar, Straus and Giroux; 2011.",
             "Smith J. Some title. Nature.",
+            "Smith J. Growth in Cell Cultures (2020 edition).",
             "Ji J, Chen W. Mitigating Deceptive Alignment via Self-Monitoring. 2025. arXiv:2505.18807",
-            "Huang et al. described in The Lancet (2020) — \"Clinical features of patients\".",
         ] {
             assert_eq!(cited_journal(text), None, "{text}");
         }

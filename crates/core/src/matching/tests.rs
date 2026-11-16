@@ -2030,6 +2030,41 @@ fn red_team_minimised_failures_stay_fixed() {
             Claim::from_text("Hochreiter S. Long short-term memory. arXiv preprint. 1997."),
             lstm,
         ),
+        (
+            "adv-45",
+            Claim::from_text(
+                "World Medical Association. Declaration of Geneva: the physician's pledge. JAMA. \
+                 2013;310(20):2191-2194.",
+            ),
+            {
+                let mut r = placed(
+                    &[],
+                    "World Medical Association Declaration of Helsinki",
+                    &[],
+                    2013,
+                    ("JAMA", "310", "2191-2194"),
+                );
+                r.work.work_type = Some(crate::work::WorkType::JournalArticle);
+                r
+            },
+        ),
+        (
+            "corpus-193",
+            Claim::from_text(
+                "Shiomi and SUGIURA reported in Gastroenterology (1984) — \"\
+                 ヒメフタテンヨコバイが媒介するマイコプラズマ様微生物の寄主範囲による類別\".",
+            ),
+            {
+                let mut r = record(
+                    &["10.3186/jjphytopath.50.149"],
+                    "ヒメフタテンヨコバイが媒介するマイコプラズマ様微生物の寄主範囲による類別",
+                    &["Toshiki Shiomi", "Miyoji SUGIURA"],
+                    1984,
+                );
+                r.work.work_type = Some(crate::work::WorkType::JournalArticle);
+                r
+            },
+        ),
         // The app's pre-test of the fixes: the report of the year cited
         // chosen over the one titled, volume and pages; words inserted
         // inside a title.

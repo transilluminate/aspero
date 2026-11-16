@@ -4,9 +4,11 @@
 
 use super::{Agreement, FieldCheck};
 
-/// Field weights in the confidence (before penalties).
+/// Field weights in the confidence (before penalties): the title's.
 const W_TITLE: f64 = 0.5;
+/// The authors' weight in the confidence.
 const W_AUTHORS: f64 = 0.25;
+/// The year's weight in the confidence.
 const W_YEAR: f64 = 0.25;
 
 /// Multiplier when the year is off by two or more.
@@ -75,8 +77,9 @@ pub(super) const EXTENDED_TITLE_CAP: f64 = LOCATION_MISMATCH_CAP;
 /// claim cites a journal: a lookalike copy can't confirm it.
 pub(super) const UNPLACED_CAP: f64 = LOCATION_MISMATCH_CAP;
 
-/// Verdict thresholds on confidence.
+/// Verdict thresholds on confidence: verified at or above this.
 pub const VERIFIED: f64 = 0.85;
+/// Plausible at or above this, below [`VERIFIED`].
 pub const PLAUSIBLE: f64 = 0.6;
 
 pub(super) fn combine(title: FieldCheck, authors: FieldCheck, year: FieldCheck) -> f64 {

@@ -505,6 +505,9 @@ pub struct Usage {
     /// provider says one.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub prepaid_remaining: Option<f64>,
+    /// When the prepaid balance expires, where the provider says.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub prepaid_expires_at: Option<Timestamp>,
 }
 
 impl Usage {
@@ -520,6 +523,7 @@ impl Usage {
             resets_at: later.resets_at.or(self.resets_at),
             limit: later.limit.or(self.limit),
             prepaid_remaining: later.prepaid_remaining.or(self.prepaid_remaining),
+            prepaid_expires_at: later.prepaid_expires_at.or(self.prepaid_expires_at),
         }
     }
 }

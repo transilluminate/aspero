@@ -16,6 +16,7 @@ use std::time::Duration;
 
 use aspero_core::http::status_error;
 use aspero_core::{Error, HttpResponse, Usage};
+use jiff::Timestamp;
 
 /// Error messages longer than this are cut; OpenAlex's 400 bodies list every
 /// valid field name.
@@ -35,7 +36,8 @@ pub(crate) fn usage(resp: &HttpResponse) -> Usage {
 }
 
 /// The budget `/rate-limit` reports: `{"rate_limit": {"daily_budget_usd",
-/// "daily_remaining_usd", "prepaid_remaining_usd", "resets_at", …}}`.
+/// "daily_remaining_usd", "prepaid_remaining_usd", "prepaid_expires_at",
+/// "resets_at", …}}`.
 pub(crate) fn rate_limit(resp: &HttpResponse) -> Result<Usage, Error> {
     #[derive(serde::Deserialize)]
     struct Body {
@@ -47,6 +49,8 @@ pub(crate) fn rate_limit(resp: &HttpResponse) -> Result<Usage, Error> {
         daily_used_usd: Option<f64>,
         daily_remaining_usd: Option<f64>,
         prepaid_remaining_usd: Option<f64>,
+        /// A string or whatever else; never failing the rest.
+        prepaid_expires_at: Option<serde_json::Value>,
         resets_at: Option<String>,
         resets_in_seconds: Option<f64>,
     }
@@ -59,14 +63,36 @@ pub(crate) fn rate_limit(resp: &HttpResponse) -> Result<Usage, Error> {
         .daily_remaining_usd
         .or_else(|| Some(r.daily_budget_usd? - r.daily_used_usd?));
     usage.prepaid_remaining = r.prepaid_remaining_usd;
+    usage.prepaid_expires_at = r.prepaid_expires_at.as_ref().and_then(|v| match v {
+        serde_json::Value::String(s) => date(s),
+        // Unix milliseconds, as a JavaScript Date's value.
+        serde_json::Value::Number(n) => Timestamp::from_millisecond(n.as_i64()?).ok(),
+        _ => None,
+    });
     usage.resets_at = r
         .resets_at
-        .and_then(|t| t.parse::<jiff::Timestamp>().ok())
+        .and_then(|t| t.parse::<Timestamp>().ok())
         .or_else(|| {
             let d = Duration::try_from_secs_f64(r.resets_in_seconds?).ok()?;
             resp.received_at.checked_add(d).ok()
         });
     Ok(usage)
+}
+
+/// A date as `/rate-limit` gives one: ISO 8601 (`resets_at`), or, for
+/// `prepaid_expires_at`, a JavaScript `Date` printed as a string ("Sun Feb
+/// 14 2027 12:08:05 GMT+0000 (Coordinated Universal Time)", seen
+/// 2026-11-16). `None` for anything else.
+pub(crate) fn date(s: &str) -> Option<Timestamp> {
+    let s = s.trim();
+    if let Ok(t) = s.parse::<Timestamp>() {
+        return Some(t);
+    }
+    // The zone's name in brackets says nothing the offset doesn't.
+    let s = s.find(" (").map_or(s, |at| &s[..at]);
+    jiff::fmt::strtime::parse("%a %b %d %Y %H:%M:%S GMT%z", s)
+        .and_then(|t| t.to_timestamp())
+        .ok()
 }
 
 /// `Ok` for 2xx; otherwise the matching [`Error`]. 404 is `NotFound`, which
@@ -122,4 +148,29 @@ fn message(resp: &HttpResponse) -> Option<String> {
         Some((cut, _)) => format!("{}…", &text[..cut]),
         None => text.to_owned(),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn dates_read_as_javascript_prints_them_or_as_iso() {
+        let at = |s: &str| date(s).map(|t| t.to_string());
+        let expiry = Some("2027-02-14T12:08:05Z".to_owned());
+        assert_eq!(
+            at("Sun Feb 14 2027 12:08:05 GMT+0000 (Coordinated Universal Time)"),
+            expiry
+        );
+        assert_eq!(at("Sun Feb 14 2027 12:08:05 GMT+0000"), expiry);
+        assert_eq!(
+            at("Sun Feb 14 2027 13:08:05 GMT+0100 (Central European Standard Time)"),
+            expiry
+        );
+        assert_eq!(at("2027-02-14T12:08:05.000Z"), expiry);
+        assert_eq!(at("2027-02-14T12:08:05Z"), expiry);
+        for nonsense in ["", "soon", "Invalid Date", "Feb 14 2027"] {
+            assert_eq!(at(nonsense), None, "{nonsense}");
+        }
+    }
 }

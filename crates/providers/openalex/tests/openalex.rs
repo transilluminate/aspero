@@ -155,6 +155,29 @@ fn the_budget_comes_free_from_rate_limit_with_a_key() {
     );
 }
 
+/// Hand-written from the fields a key with prepaid credit gets (checked
+/// 2026-11-16; the numbers are made up): the allowance used up, credit
+/// being spent, and when it expires, printed as JavaScript prints a Date.
+#[test]
+fn rate_limit_says_the_prepaid_balance_and_its_expiry() {
+    let (oa, _) = provider([recorded("rate_limit_prepaid")]);
+    let usage = block_on(oa.budget()).unwrap();
+    assert_eq!(usage.limit, Some(1.0));
+    assert_eq!(usage.remaining, Some(0.0));
+    assert_eq!(usage.prepaid_remaining, Some(9.8851));
+    assert_eq!(
+        usage.prepaid_expires_at,
+        Some("2027-02-14T12:08:05Z".parse().unwrap())
+    );
+    assert_eq!(
+        usage.resets_at,
+        Some("2026-11-11T00:00:00Z".parse().unwrap())
+    );
+    // No credit: no expiry.
+    let (oa, _) = provider([recorded("rate_limit")]);
+    assert_eq!(block_on(oa.budget()).unwrap().prepaid_expires_at, None);
+}
+
 #[test]
 fn without_a_key_the_budget_is_never_asked() {
     let (oa, http) = provider_with(None, []);

@@ -7,11 +7,12 @@
 //! `mainEntity`; articles nested deeper (related articles, citations) are
 //! never read. From it: identifiers in `identifier` (a string, or a
 //! `PropertyValue` whose `propertyID` names the kind), `sameAs` and `@id`;
-//! `headline`, else `name`; `author` (people or organisations, objects or
-//! strings); `datePublished`; `pagination`, else `pageStart` and
-//! `pageEnd`; and, up its `isPartOf` chain, a `PublicationVolume`'s
-//! `volumeNumber` and a `Periodical`'s `name`, never another kind's (a
-//! `WebSite`'s name is not a journal).
+//! `name`, else `headline` (which pages also fill with a description,
+//! #118); `author` (people or organisations, objects or strings);
+//! `datePublished`; `pagination`, else `pageStart` and `pageEnd`; and, up
+//! its `isPartOf` chain, a `PublicationVolume`'s `volumeNumber` and a
+//! `Periodical`'s `name`, never another kind's (a `WebSite`'s name is not
+//! a journal).
 
 use serde_json::{Map, Value};
 
@@ -106,6 +107,17 @@ fn each(value: &Value) -> &[Value] {
     }
 }
 
+/// A node's title: its `name`, which names the thing, else its
+/// `headline`, which pages also fill with a description (#118: a
+/// Wikipedia article's is its short description). A `name` that isn't a
+/// title (an address, "Article") is passed over.
+fn title(node: &Map<String, Value>) -> Option<String> {
+    node.get("name")
+        .and_then(text)
+        .filter(|name| super::title::is_title(name, 1, 1))
+        .or_else(|| node.get("headline").and_then(text))
+}
+
 fn fields(article: &Map<String, Value>) -> Found {
     let source = PageSource::JsonLd;
     let mut found = Found::default();
@@ -133,9 +145,7 @@ fn fields(article: &Map<String, Value>) -> Found {
             }
         }
     }
-    found.title = ["headline", "name"]
-        .iter()
-        .find_map(|k| article.get(*k).and_then(text));
+    found.title = title(article);
     for author in article.get("author").map(each).unwrap_or_default() {
         let name = match author {
             Value::Object(person) => person.get("name").and_then(text).or_else(|| {

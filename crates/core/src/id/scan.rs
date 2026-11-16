@@ -15,6 +15,13 @@
 //! cells are split apart. A DOI or URL broken across lines, as text from
 //! PDFs is, is rejoined by the rules `split_references` uses: the mention
 //! then spans both lines.
+//!
+//! Not read, as no free source maps them to a work: JAMA Network's
+//! `/fullarticle/<number>` (Crossref holds the number only in a record's
+//! resource URL, which can't be filtered on, and no other source has it),
+//! Oxford Academic's `/article/<vol>/<issue>/<page>/<id>` (only the page's
+//! `citation_doi` says) and `OpenReview` ids. A caller holding such a page
+//! reads its markup with `webpage::claim_from_page`.
 
 use std::ops::Range;
 

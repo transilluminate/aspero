@@ -1,4 +1,22 @@
-//! Searching one provider.
+//! Searching one provider: rankings aren't comparable across sources, so
+//! a search never fans out.
+//!
+//! The provider is the one named, else the first, in order of preference
+//! ([`SEARCH_ORDER`]), that can search the whole query: its mode, tree,
+//! [`SearchQuery::since`], fields and sort ([`Engine::search`]). Filters it
+//! can't apply are stripped and reported as ignored. Fields (author, title,
+//! container) and sorts it can't apply fail ([`Error::Unsupported`]):
+//! dropping one would widen or reorder the search silently. Nothing in a
+//! query tree, and no `since`, is ever ignored: either fails
+//! ([`Error::UnsupportedQuery`]) with the provider's reason. Relevance never
+//! fails; with only fields to rank by, it is the source's own order.
+//!
+//! A tree is normalised, its leaves checked, the request's own filters
+//! folded in as more of its all, and capped at this year when newest first
+//! ([`cap_years`]); the provider's `express` then says it or says why not.
+//! That one decision is behind both [`Engine::search`] and the offline
+//! [`Engine::search_supports`], so they agree. Relations name a work by any
+//! identifier and are searched by its OpenAlex work id, looked up first.
 
 use std::sync::Arc;
 

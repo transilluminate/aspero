@@ -360,6 +360,50 @@ fn prepaid_days_are_kept_per_provider_and_day_and_survive_rebuilds() {
     assert_eq!(again.start_usd, 8.0, "forgotten, so started afresh");
 }
 
+/// The credit spent here is a running total per provider and day, shared
+/// through the file (other processes, restarts), outliving clearing and
+/// rebuilding; a week on, old days go.
+#[test]
+fn credit_spent_here_adds_up_per_provider_and_day_and_survives_rebuilds() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("cache.sqlite");
+    {
+        let cache = SqliteCache::open(&path).unwrap();
+        assert_eq!(cache.credit_here("openalex", "2026-11-16").unwrap(), 0.0);
+        assert_eq!(
+            cache
+                .add_credit_here("openalex", "2026-11-16", 0.001)
+                .unwrap(),
+            0.001
+        );
+        cache.clear().unwrap();
+    }
+    {
+        let conn = rusqlite::Connection::open(&path).unwrap();
+        conn.pragma_update(None, "user_version", 99).unwrap();
+    }
+    let cache = SqliteCache::open(&path).unwrap();
+    let other = SqliteCache::open(&path).unwrap();
+    assert_eq!(
+        other
+            .add_credit_here("openalex", "2026-11-16", 0.002)
+            .unwrap(),
+        0.003,
+        "another process adds to the same day"
+    );
+    assert_eq!(cache.credit_here("openalex", "2026-11-16").unwrap(), 0.003);
+    assert_eq!(cache.credit_here("openalex", "2026-11-17").unwrap(), 0.0);
+    assert_eq!(cache.credit_here("other", "2026-11-16").unwrap(), 0.0);
+    cache
+        .add_credit_here("openalex", "2026-11-30", 0.001)
+        .unwrap();
+    assert_eq!(
+        cache.credit_here("openalex", "2026-11-16").unwrap(),
+        0.0,
+        "a week on, forgotten"
+    );
+}
+
 #[test]
 fn citation_links_round_trip_per_work_and_direction() {
     let cache = SqliteCache::open_in_memory().unwrap();

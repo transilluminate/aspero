@@ -235,8 +235,6 @@ pub struct Engine {
     refreshing: Arc<tokio::sync::Mutex<()>>,
     /// When a refresh last failed to say the day's use.
     refreshed: Arc<std::sync::Mutex<Option<tokio::time::Instant>>>,
-    /// When a stop at a credit cap was last checked with a refresh.
-    confirmed: Arc<std::sync::Mutex<Option<tokio::time::Instant>>>,
     /// Providers' requests go through an HTTP tape: identifiers are looked
     /// up one per request (see [`EngineBuilder::taped`]).
     taped: bool,
@@ -318,8 +316,11 @@ impl EngineBuilder {
 
     /// Once `provider`'s daily allowance is used up (by anything using the
     /// key), lets its paid calls go on, spending prepaid credit, only while
-    /// the credit spent today is under `usd` (0: never spend credit); until
-    /// then, [`daily_cap`](Self::daily_cap) still applies. Without one, a
+    /// the credit spent here today ([`Budget::credit_spent_today_here`]:
+    /// through this engine and any other sharing its
+    /// [`prepaid_days`](Self::prepaid_days), not other tools using the
+    /// key) is under `usd` (0: never spend credit); until then,
+    /// [`daily_cap`](Self::daily_cap) still applies. Without one, a
     /// used-up allowance is held to the allowance's cap, as before. See
     /// [`cap`](crate::cap) and [`Error::BudgetCapped`].
     pub fn daily_credit_cap(mut self, provider: ProviderId, usd: f64) -> Self {
@@ -331,7 +332,9 @@ impl EngineBuilder {
     /// Where each day's prepaid balances are kept, to tell the credit
     /// spent today ([`Budget::prepaid_spent_today`]) the same in every
     /// process sharing it, and across restarts; usually the cache file.
-    /// Without one, each engine keeps its own.
+    /// The credit charged to these processes' own calls is kept there too
+    /// ([`Budget::credit_spent_today_here`]), so they share one credit
+    /// cap's count. Without one, each engine keeps its own.
     pub fn prepaid_days(mut self, days: Arc<dyn PrepaidDays>) -> Self {
         self.prepaid_days = Some(days);
         self
@@ -365,7 +368,6 @@ impl EngineBuilder {
             disabled: Arc::new(self.disabled),
             refreshing: Arc::default(),
             refreshed: Arc::default(),
-            confirmed: Arc::default(),
             taped: self.taped,
         }
     }

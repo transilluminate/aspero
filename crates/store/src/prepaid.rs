@@ -1,5 +1,7 @@
 //! Providers' prepaid balances by budget day, from which the credit spent
-//! that day is told.
+//! that day by everything using the key is told; and the credit charged to
+//! calls made through engines sharing the store (the cache file), by
+//! budget day: spent "here".
 
 use jiff::Timestamp;
 use rusqlite::{OptionalExtension, TransactionBehavior, params};
@@ -22,7 +24,22 @@ CREATE TABLE IF NOT EXISTS prepaid_day (
 );
 ";
 
-/// How many days of prepaid balances are kept.
+/// The prepaid credit charged to calls made through engines sharing this
+/// store (processes using the cache file), by budget day: what a daily
+/// credit cap counts, since other tools sharing the key (one key per
+/// OpenAlex account) spend credit of their own. Kept like [`PREPAID`],
+/// apart from the versioned schema. Days more than [`PREPAID_DAYS`] old
+/// are pruned as credit is added.
+pub(crate) const CREDIT_HERE: &str = "
+CREATE TABLE IF NOT EXISTS credit_here (
+    provider   TEXT NOT NULL,
+    day        TEXT NOT NULL,      -- the budget day, YYYY-MM-DD (OpenAlex: UTC)
+    usd        REAL NOT NULL,      -- credit charged to calls made here that day
+    PRIMARY KEY (provider, day)
+);
+";
+
+/// How many days of prepaid balances, and of credit spent here, are kept.
 const PREPAID_DAYS: i64 = 7;
 
 /// A provider's prepaid balance over one budget day. Credit spent that day
@@ -99,7 +116,8 @@ impl PrepaidDay {
 
 /// Providers' prepaid balances by budget day, shared between processes
 /// (the cache file), so every process and restart tells the same credit
-/// spent today.
+/// spent today; and the credit charged to calls made through engines
+/// sharing it, by budget day, which a daily credit cap counts.
 pub trait PrepaidDays: Send + Sync {
     /// Notes `balance`, seen at `at` (with the credit `bought` where the
     /// provider said it), for `provider` on `day` (`YYYY-MM-DD`), as
@@ -112,6 +130,14 @@ pub trait PrepaidDays: Send + Sync {
         bought: Option<f64>,
         at: Timestamp,
     ) -> Result<PrepaidDay>;
+
+    /// Adds `usd` of credit charged to a call made here to `provider`'s
+    /// `day` (`YYYY-MM-DD`), and returns the day's total, to a millionth.
+    fn add_credit_here(&self, provider: &str, day: &str, usd: f64) -> Result<f64>;
+
+    /// The credit charged to calls made here on `provider`'s `day`, to a
+    /// millionth: 0 if none.
+    fn credit_here(&self, provider: &str, day: &str) -> Result<f64>;
 }
 
 impl PrepaidDays for SqliteCache {
@@ -170,4 +196,44 @@ impl PrepaidDays for SqliteCache {
         tx.commit()?;
         Ok(seen)
     }
+
+    /// In one write transaction (processes may share the file), forgetting
+    /// days more than a week before `day`.
+    fn add_credit_here(&self, provider: &str, day: &str, usd: f64) -> Result<f64> {
+        let mut conn = self.conn();
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        tx.execute(
+            "INSERT INTO credit_here (provider, day, usd) VALUES (?1, ?2, ?3)
+             ON CONFLICT (provider, day) DO UPDATE SET usd = usd + excluded.usd",
+            params![provider, day, usd],
+        )?;
+        let total: f64 = tx.query_row(
+            "SELECT usd FROM credit_here WHERE provider = ?1 AND day = ?2",
+            params![provider, day],
+            |r| r.get(0),
+        )?;
+        tx.execute(
+            "DELETE FROM credit_here WHERE day < date(?1, ?2)",
+            params![day, format!("-{PREPAID_DAYS} days")],
+        )?;
+        tx.commit()?;
+        Ok(millionths(total))
+    }
+
+    fn credit_here(&self, provider: &str, day: &str) -> Result<f64> {
+        let total: Option<f64> = self
+            .conn()
+            .query_row(
+                "SELECT usd FROM credit_here WHERE provider = ?1 AND day = ?2",
+                params![provider, day],
+                |r| r.get(0),
+            )
+            .optional()?;
+        Ok(millionths(total.unwrap_or(0.0)))
+    }
+}
+
+/// `usd` to a millionth, as the engine counts it.
+fn millionths(usd: f64) -> f64 {
+    (usd * 1e6).round() / 1e6
 }

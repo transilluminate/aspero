@@ -166,9 +166,10 @@ pub struct Global {
     pub openalex_cap_usd: Option<f64>,
 
     /// Once OpenAlex's free allowance is all used today (by anything using
-    /// the key), spend prepaid credit only while the credit spent today
-    /// (by anything using the key) is under this many USD; then stop until
-    /// midnight UTC (exit 5). 0 never spends credit. Default: 0.25.
+    /// the key), spend prepaid credit only while the credit aspero spent
+    /// here today (through this cache file, not other tools on the key) is
+    /// under this many USD; then stop until midnight UTC (exit 5). 0 never
+    /// spends credit. Default: 0.25.
     #[arg(
         long,
         global = true,
@@ -772,8 +773,8 @@ when stdin closes.")]
     #[command(after_help = "\
 With OPENALEX_API_KEY set, asks OpenAlex's /rate-limit, which costs nothing:
   openalex: free allowance $0.0498 of $1.00 used today (cap $0.50), resets
-  00:00 UTC; credit $0.0300 spent today (cap $0.25), $4.97 left, expires
-  2027-02-14; searches $0.001 each, about 450 left today
+  00:00 UTC; credit $0.0300 spent today, $0.0100 here (cap $0.25), $4.97
+  left, expires 2027-02-14; searches $0.001 each, about 450 left today
 
 Without a key, /rate-limit doesn't answer, so one work is looked up alone,
 past the cache (free), and its response's headers say the budget:
@@ -781,25 +782,31 @@ past the cache (free), and its response's headers say the budget:
   00:00 UTC; no prepaid credit (cap $0.25 a day)
 JSON: {\"budgets\": [{\"provider\", \"limit_usd\", \"spent_usd\",
 \"remaining_usd\", \"allowance_cap_usd\", \"prepaid_spent_today_usd\",
-\"credit_cap_usd\", \"prepaid_remaining_usd\", \"prepaid_expires_at\",
-\"spendable_today_usd\", \"search_price_usd\", \"searches_left_today\",
-\"prices_usd\": {\"search\": 0.001, ...}, \"resets_at\", \"seen_at\"}]},
-and \"key\": false without one.
+\"credit_spent_today_here_usd\", \"credit_cap_usd\",
+\"prepaid_remaining_usd\", \"prepaid_expires_at\", \"spendable_today_usd\",
+\"search_price_usd\", \"searches_left_today\", \"prices_usd\": {\"search\":
+0.001, ...}, \"resets_at\", \"seen_at\"}]}, and \"key\": false without one.
+
+Credit \"spent today\" counts everything using the key; \"here\" counts only
+what aspero's own calls were charged through this cache file (the CLI, the
+MCP server, apps sharing it), once the allowance was used up. OpenAlex gives
+one key per account, shared by your scripts and other tools, so the credit
+cap counts \"here\": other tools' credit never stops aspero.
 
 The prices are OpenAlex's own (/rate-limit, so with a key). Searches left:
 what paid calls may still spend today under the caps (the allowance left,
 held to --openalex-cap-usd; then, once the allowance would be used up,
-credit left, held to --openalex-credit-cap-usd less the credit spent
+credit left, held to --openalex-credit-cap-usd less the credit spent here
 today), divided by the search price, rounded down.
 
-Paid calls (searches, batch lookups), with \"used\" and \"spent\" counting
-everything using the key, not just aspero:
+Paid calls (searches, batch lookups), with \"used\" counting everything
+using the key, not just aspero:
   a. free allowance used today < --openalex-cap-usd: the allowance is used
   b. --openalex-cap-usd <= used < the allowance: stop (the rest is held
      back for other tools)
-  c. the allowance all gone (by anything) and credit spent today <
+  c. the allowance all gone (by anything) and credit spent here today <
      --openalex-credit-cap-usd (default $0.25): credit is used, to the cap
-  d. the allowance gone and credit spent today >= the credit cap: stop
+  d. the allowance gone and credit spent here today >= the credit cap: stop
      until the reset (midnight UTC)
 With an allowance cap below the allowance, aspero never takes the key into
 credit itself; only other tools can. A stop is exit 5; free lookups go on.

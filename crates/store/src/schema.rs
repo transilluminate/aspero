@@ -11,7 +11,7 @@ use rusqlite::{Connection, TransactionBehavior, params};
 use crate::edges::EDGES;
 use crate::evict::ACCESS;
 use crate::pacing::PACING;
-use crate::prepaid::PREPAID;
+use crate::prepaid::{CREDIT_HERE, PREPAID};
 use crate::spend::SPEND;
 use crate::{Result, SqliteCache, StoreError};
 
@@ -102,7 +102,7 @@ impl SqliteCache {
             if version(&tx)? != SCHEMA_VERSION {
                 // Disposable: drop whatever is there (older or newer) and rebuild.
                 let tables: Vec<String> = tx
-                    .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' AND name NOT IN ('pacing', 'mcp_spend', 'prepaid_day')")?
+                    .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' AND name NOT IN ('pacing', 'mcp_spend', 'prepaid_day', 'credit_here')")?
                     .query_map([], |r| r.get(0))?
                     .collect::<rusqlite::Result<_>>()?;
                 for table in tables {
@@ -118,6 +118,7 @@ impl SqliteCache {
         conn.execute_batch(SPEND)?;
         drop_old_prepaid(&mut conn)?;
         conn.execute_batch(PREPAID)?;
+        conn.execute_batch(CREDIT_HERE)?;
         add_access(&mut conn)?;
         Ok(SqliteCache {
             conn: Mutex::new(conn),

@@ -251,6 +251,7 @@ async fn once_the_allowance_is_used_up_credit_is_spent_to_its_own_cap() {
     assert_eq!(openalex.calls(), ["budget", "search", "search", "search"]);
     let budget = engine.budgets()[0].1;
     assert_eq!(budget.prepaid_spent_today, Some(0.003));
+    assert_eq!(budget.credit_spent_today_here, Some(0.003));
     assert!(error.to_string().contains("today's credit cap of $0.0025"));
 }
 
@@ -495,26 +496,71 @@ async fn single_lookups_are_never_refused() {
 }
 
 /// Responses' headers can say a stale balance (OpenAlex's servers
-/// disagree): before stopping at the credit cap, `/rate-limit` is asked,
-/// at most once a minute, and its word decides.
-#[tokio::test(start_paused = true)]
-async fn a_stop_at_the_credit_cap_is_checked_with_the_providers_own_word() {
+/// disagree), which skews the credit spent on the key, but not the credit
+/// spent here, which each response's cost tells: the cap counts that, and
+/// no `/rate-limit` is asked to check a stop.
+#[tokio::test]
+async fn stale_balances_dont_move_the_credit_cap() {
     let openalex = Metered::with_credit(1.0, true, 10.0);
     // Headers say $0.01 less than the truth.
     *openalex.skew.lock().unwrap() = 0.01;
-    let engine = credit_engine(openalex.clone(), None, Some(0.005), None);
-    // The refresh says the truth; the search's headers then look like
-    // $0.011 spent, past the cap; just refreshed, so it stops.
+    let engine = credit_engine(openalex.clone(), None, Some(0.0025), None);
+    for _ in 0..3 {
+        search(&engine).await.unwrap();
+    }
+    let error = search(&engine).await.unwrap_err();
+    assert_eq!(credit_capped(&error), (0.0025, 0.003));
+    assert_eq!(openalex.calls(), ["budget", "search", "search", "search"]);
+    let budget = engine.budgets()[0].1;
+    assert_eq!(budget.credit_spent_today_here, Some(0.003));
+    assert_eq!(budget.prepaid_spent_today, Some(0.013));
+}
+
+/// Other tools using the key (a researcher's scripts, another app) have
+/// spent far past this caller's credit cap today; it has spent next to
+/// nothing, so its calls go on, to its cap, and what's spendable is what's
+/// left of the cap.
+#[tokio::test]
+async fn the_credit_cap_counts_only_credit_spent_here() {
+    let id = ProviderId::from_static("openalex");
+    let openalex = Metered::with_credit(1.0, true, 10.0);
+    let engine = credit_engine(openalex.clone(), None, Some(0.0025), None);
+    search(&engine).await.unwrap();
+    // Something else spends $5 of credit on the key.
+    *openalex.prepaid.lock().unwrap() = Some(10.0 - 0.001 - 5.0);
+    search(&engine).await.unwrap();
+    let budget = engine.budgets()[0].1;
+    assert_eq!(budget.prepaid_spent_today, Some(5.002));
+    assert_eq!(budget.credit_spent_today_here, Some(0.002));
+    assert_eq!(engine.spendable_today(&id, &budget), Some(0.0005));
     search(&engine).await.unwrap();
     let error = search(&engine).await.unwrap_err();
-    assert_eq!(credit_capped(&error), (0.005, 0.011));
-    assert_eq!(openalex.calls(), ["budget", "search"]);
+    assert_eq!(credit_capped(&error), (0.0025, 0.003));
+    assert!(
+        error
+            .to_string()
+            .contains("($0.0030 of credit spent today through aspero here)"),
+        "{error}"
+    );
+    let budget = engine.budgets()[0].1;
+    assert_eq!(engine.spendable_today(&id, &budget), Some(0.0));
+}
 
-    // A minute on, the stop is checked: $0.001 spent, so the search goes.
-    tokio::time::advance(std::time::Duration::from_secs(61)).await;
-    search(&engine).await.unwrap();
-    assert_eq!(openalex.calls(), ["budget", "search", "budget", "search"]);
-    // Then the headers' word again, and not asked again within the minute.
-    search(&engine).await.unwrap_err();
-    assert_eq!(openalex.count("budget"), 2);
+/// Two engines sharing a store (two processes on the cache file, or a
+/// restart) count one credit spent here: each sees the other's at once,
+/// before its own next response.
+#[tokio::test]
+async fn engines_sharing_a_store_share_the_credit_spent_here() {
+    let days: Arc<dyn PrepaidDays> = Arc::new(SqliteCache::open_in_memory().unwrap());
+    let openalex = Metered::with_credit(1.0, true, 10.0);
+    let first = credit_engine(openalex.clone(), None, Some(0.0025), Some(days.clone()));
+    let second = credit_engine(openalex.clone(), None, Some(0.0025), Some(days));
+    search(&second).await.unwrap();
+    assert_eq!(second.budgets()[0].1.credit_spent_today_here, Some(0.001));
+    search(&first).await.unwrap();
+    search(&first).await.unwrap();
+    assert_eq!(first.budgets()[0].1.credit_spent_today_here, Some(0.003));
+    // The second's last response said $0.001; the store says $0.003.
+    let error = search(&second).await.unwrap_err();
+    assert_eq!(credit_capped(&error), (0.0025, 0.003));
 }

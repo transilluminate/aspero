@@ -108,7 +108,8 @@ Engine, `crates/engine/src/`:
   `missing.rs`, `retracted.rs`, `references.rs`, `related.rs`,
   `related/plan.rs`, `related/score.rs`, `types.rs`.
 - `retry.rs`, `health.rs` (breaker, spent quotas); `cap.rs` (`reached`,
-  `spendable_today`); `budget.rs` (`Budget`, `PrepaidDay`); `transport.rs`
+  `spendable_today`); `budget.rs` (`Budget`, `PrepaidDay`,
+  `credit_part`); `transport.rs`
   (HTTP client, pacing, `TapeClient`).
 
 Storage, `crates/store/src/`: `lib.rs` (`SqliteCache`), `schema.rs`
@@ -370,15 +371,21 @@ everything using the key. Two caps (`crates/engine/src/cap.rs`): the
 **allowance cap** (`--openalex-cap-usd`) on the free daily allowance, and
 the **credit cap** (#110, `--openalex-credit-cap-usd`, default $0.25, 0
 never; no unlimited setting) on prepaid credit, which OpenAlex spends only
-once the allowance is used up. Before a paid call (`cap::reached`):
+once the allowance is used up. The allowance cap counts everything on the
+key; the credit cap only the credit **spent here** (#136): charged to
+calls made through engines sharing this cache file. OpenAlex gives one key
+per account, shared by a researcher's scripts, test harnesses and apps, so
+a credit cap counting the key would stop a caller that spent nothing,
+while the allowance cap's job is leaving the rest of the allowance to
+those other tools. Before a paid call (`cap::reached`):
 
 1. allowance used today < the allowance cap: go, on the allowance;
 2. allowance cap ≤ used < the allowance: stop (the rest is held back for
    other tools);
-3. the allowance all gone (by anything) and credit spent today < the
+3. the allowance all gone (by anything) and credit spent here today < the
    credit cap: go, on credit;
-4. the allowance gone and credit spent today ≥ the credit cap: stop until
-   the reset.
+4. the allowance gone and credit spent here today ≥ the credit cap: stop
+   until the reset.
 
 So with an allowance cap below the allowance, a caller never takes the key
 into credit itself; only other tools can. A stop is `BudgetCapped` (exit
@@ -387,9 +394,22 @@ time. With the day's use unknown and a key, one free `/rate-limit`
 decides the first paid call. Overshoots: a call's cost is known only
 after it, and others' spending shows only in the next response.
 
-**Credit spent today** isn't reported, so it's told from the prepaid
-balance (`budget.rs`, `PrepaidDay`; in `prepaid_day`, so every process
-agrees). Header balances can't be trusted one by one: OpenAlex's servers
+**Credit spent here** is each paid response's cost (`x-ratelimit-cost-usd`)
+once the allowance is gone, added up per budget day in the cache file's
+`credit_here` table (`PrepaidDays::add_credit_here`; kept a week, through
+`clear`, eviction and rebuilds, read again before each check, so every
+process sharing the file agrees). A cost is credit once the allowance is
+gone: its response says none left, or one did earlier today (a stale
+server may say otherwise). Of the call that used the allowance up, only
+the part past the least left seen before it counts; with none seen, all
+of it, its allowance part too; other tools' spend since the last sighting
+counts that one call short (`budget::credit_part`). Replays cost 0:
+nothing is added.
+
+**Credit spent today** on the key isn't reported, so it's told from the
+prepaid balance (`budget.rs`, `PrepaidDay`; in `prepaid_day`, so every
+process agrees); `aspero budget` shows it beside the credit spent here.
+Header balances can't be trusted one by one: OpenAlex's servers
 lag by minutes (9.84 and 9.66 within a second, 2026-11-16), and reading
 each rise as a top-up once counted $5.33 for $0.34 spent. So a header
 only lowers the balance; only `/rate-limit` sets it, and only a rise in

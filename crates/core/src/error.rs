@@ -35,9 +35,11 @@ pub enum Error {
     /// One of the caller's own daily caps on the provider's spend is
     /// reached, so its paid calls stop until `resets_at`; `which` says
     /// which, and `cap` is that cap. For the allowance's cap, `used` is the
-    /// day's use of the allowance as the provider reports it; for the
-    /// credit's, the prepaid credit spent today. Either counts everything
-    /// using the key. Free calls go on; fall back to other providers.
+    /// day's use of the allowance as the provider reports it, counting
+    /// everything using the key; for the credit's, the prepaid credit
+    /// spent today through aspero here (the engines sharing a store, not
+    /// other tools using the key). Free calls go on; fall back to other
+    /// providers.
     #[error("{}{}", cap_reached(*.which, *.cap, *.used), reset_hint(.resets_at.as_ref()))]
     BudgetCapped {
         cap: f64,
@@ -299,14 +301,14 @@ fn reset_hint(t: Option<&Timestamp>) -> String {
 
 /// "stopped at the daily cap of $0.5000 ($0.5012 used today)", or for
 /// credit, "stopped at today's credit cap of $1.00 ($1.02 of credit spent
-/// today)".
+/// today through aspero here)".
 fn cap_reached(which: CapKind, cap: f64, used: f64) -> String {
     match which {
         CapKind::Allowance => {
             format!("stopped at the daily cap of ${cap:.4} (${used:.4} used today)")
         }
         CapKind::Credit => format!(
-            "stopped at today's credit cap of {} ({} of credit spent today)",
+            "stopped at today's credit cap of {} ({} of credit spent today through aspero here)",
             usd(cap),
             usd(used)
         ),
@@ -375,11 +377,11 @@ mod tests {
         assert_eq!(e.kind(), ErrorKind::BudgetCapped);
         assert_eq!(
             e.to_string(),
-            "stopped at today's credit cap of $1.00 ($1.02 of credit spent today)"
+            "stopped at today's credit cap of $1.00 ($1.02 of credit spent today through aspero here)"
         );
         assert_eq!(
             credit(0.0, 0.0015).to_string(),
-            "stopped at today's credit cap of $0.00 ($0.0015 of credit spent today)"
+            "stopped at today's credit cap of $0.00 ($0.0015 of credit spent today through aspero here)"
         );
     }
 

@@ -5,8 +5,29 @@ and 0.1 to 0.9 in [docs/changelog/0.0x.md](docs/changelog/0.0x.md).
 
 ## Unreleased
 
+Added:
+
+- `Budget.creditSpentTodayHereUsd` (FFI, defaulted `nil`), JSON
+  `credit_spent_today_here_usd` and a "$0.0100 here" figure in `aspero
+  budget`: the prepaid credit charged today to calls made through aspero
+  sharing this cache file, beside the key-wide `prepaidSpentTodayUsd`
+  (#136). Engine: `Budget::credit_spent_today_here`.
+
 Changed:
 
+- The credit cap (`--openalex-credit-cap-usd`,
+  `Config.openalexDailyCreditCapUsd`) counts the credit spent here, not
+  everything on the key (#136): OpenAlex gives one key per account, so a
+  researcher's scripts spending credit no longer stop aspero. Each paid
+  call's cost counts once its response says the allowance is gone (the
+  call that used it up, only the part past what was left), kept per day
+  in the cache file (`credit_here`), shared by every process using it.
+  The stop says "($0.26 of credit spent today through aspero here)", and
+  `BudgetCap.spentUsd` for `.credit` is that figure; `spendableTodayUsd`
+  counts credit left as the cap less it. The allowance cap still counts
+  the whole key. A stop at the credit cap no longer asks `/rate-limit`
+  first, since stale header balances no longer decide it. Library:
+  `PrepaidDays` gains `add_credit_here` and `credit_here`.
 - The FFI crate's records and the `Aspero` handle's methods are split into
   modules by domain. No Swift API changes, but 31 binding checksums do
   (uniffi hashes each item's module path): regenerate the Swift bindings

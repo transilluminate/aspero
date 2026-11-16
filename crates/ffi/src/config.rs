@@ -46,8 +46,9 @@ pub struct Config {
     pub cache_max_mb: Option<u64>,
     /// Once today's OpenAlex allowance is used up (by anything using the
     /// key), lets paid calls go on, spending prepaid credit, only while the
-    /// credit spent today by anything using the key
-    /// (`Budget.prepaidSpentTodayUsd`) is under this many US dollars; `0`
+    /// credit spent today through aspero here, sharing `cacheDir`
+    /// (`Budget.creditSpentTodayHereUsd`; not other tools using the key),
+    /// is under this many US dollars; `0`
     /// never spends credit, more allows more. Until the allowance is used
     /// up, `openalexDailyCapUsd` applies, holding the rest of it back. A
     /// search stopped here fails as `budgetCapped`, its

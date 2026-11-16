@@ -118,12 +118,16 @@ impl ClaimInput {
                 claim.ids.push(id);
             }
         }
-        claim.title = self.title;
-        claim.authors = self.authors;
-        claim.year = self.year;
-        claim.container = self.container;
-        claim.volume = self.volume;
-        claim.page = self.page;
+        // Fields given win; those not given keep what the text says, as
+        // a tagged record's (RIS, EndNote, a citation template) does.
+        claim.title = self.title.or(claim.title);
+        if !self.authors.is_empty() {
+            claim.authors = self.authors;
+        }
+        claim.year = self.year.or(claim.year);
+        claim.container = self.container.or(claim.container);
+        claim.volume = self.volume.or(claim.volume);
+        claim.page = self.page.or(claim.page);
         if let Some(site) = self.site {
             claim.site = Some(
                 aspero_core::site::site_of(&site)
@@ -147,10 +151,16 @@ pub struct InputClaim {
 
 impl InputClaim {
     /// One stdin line: a JSON object or a plain reference. A JSON line's
-    /// `key` is kept even when the rest of it is invalid.
+    /// `key` is kept even when the rest of it is invalid. A line starting
+    /// with `{` that isn't meant as JSON (a Wikipedia template, `{{cite
+    /// journal |…}}`, or a reference in braces) is a reference.
     pub fn from_line(line: &str) -> Self {
-        let (key, claim) = if line.trim_start().starts_with('{') {
-            match serde_json::from_str::<Value>(line) {
+        let json = line.trim_start().starts_with('{') && !line.trim_start().starts_with("{{");
+        let parsed = json.then(|| serde_json::from_str::<Value>(line));
+        // Meant as JSON: an object's first key, or none.
+        let object = || line.trim_start()[1..].trim_start().starts_with(['"', '}']);
+        let (key, claim) = if let Some(parsed) = parsed.filter(|p| p.is_ok() || object()) {
+            match parsed {
                 Err(e) => (None, Err(format!("invalid claim JSON: {e}"))),
                 Ok(value) => (
                     value.get("key").cloned(),
@@ -222,6 +232,29 @@ mod tests {
     }
 
     #[test]
+    fn a_tagged_record_as_text_keeps_its_fields() {
+        // holdout-3 #645: an RIS record on several lines, sent as JSON
+        // text, kept only its DOI (and verified by it); without one
+        // (#509), nothing at all ("claim has no text …").
+        let ris = "TY  - JOUR\nAU  - Inayoshi, Kohei\nAU  - Fenwinho, Idris\nTI  - Supermassive \
+                   black hole formation by cold accretion shocks in the first galaxies\nJO  - \
+                   Monthly Notices of the Royal Astronomical Society\nPY  - 2012\nVL  - 422\nSP  \
+                   - 2539\nDO  - 10.1111/j.1365-2966.2012.20812.x\nER  - ";
+        let line = serde_json::json!({ "text": ris }).to_string();
+        let c = claim(&line).unwrap();
+        assert_eq!(c.authors, ["Inayoshi, Kohei", "Fenwinho, Idris"]);
+        assert_eq!(c.year, Some(2012));
+        assert_eq!(c.volume.as_deref(), Some("422"));
+        assert!(c.title.is_some() && c.container.is_some(), "{c:?}");
+        let undoi = ris.replace("DO  - 10.1111/j.1365-2966.2012.20812.x\n", "");
+        let line = serde_json::json!({ "text": undoi }).to_string();
+        assert!(claim(&line).unwrap().ids.is_empty());
+        // Fields given beside the text still win.
+        let line = serde_json::json!({ "text": ris, "year": 2013 }).to_string();
+        assert_eq!(claim(&line).unwrap().year, Some(2013));
+    }
+
+    #[test]
     fn journal_volume_and_page_as_text_or_numbers() {
         let c = claim(
             r#"{"title": "X", "journal": "N Engl J Med", "volume": 376, "pages": "2545-55"}"#,
@@ -263,5 +296,24 @@ mod tests {
         assert!(bad.claim.is_err());
         assert_eq!(bad.echo()["claim_key"], "ref-12");
         assert!(bad.echo().get("claim").is_none());
+    }
+
+    #[test]
+    fn a_line_in_braces_not_meant_as_json_is_a_reference() {
+        let wiki = claim(
+            "{{cite journal |last1=Melzack |first1=R |title=Pain mechanisms: a new theory \
+             |journal=Science |year=1965 |volume=150 |pages=971–9}}",
+        )
+        .unwrap();
+        assert_eq!(wiki.title.as_deref(), Some("Pain mechanisms: a new theory"));
+        assert_eq!(wiki.authors, ["Melzack, R"]);
+        let braced = claim("{Smith J. A study of things. 2020.}").unwrap();
+        assert!(braced.text.is_some());
+        // A JSON object with a mistake in it is still refused.
+        assert!(
+            claim(r#"{"title": "X""#)
+                .unwrap_err()
+                .contains("invalid claim JSON")
+        );
     }
 }

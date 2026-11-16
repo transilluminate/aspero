@@ -35,11 +35,26 @@ pub fn same_journal(a: &str, b: &str) -> bool {
 /// abbreviates the other's words in order, leaving some out ("Proc Biol
 /// Sci" ↔ "Proceedings of the Royal Society B: Biological Sciences"), nor
 /// is either the initials of a run of the other's words ("PNAS"). "Environ
-/// Sci Technol" is not "Environment International".
+/// Sci Technol" is not "Environment International". A sister journal is
+/// another, though one name runs inside the other ([`sister_journal`]:
+/// "JAMA" for JAMA Internal Medicine).
 pub fn other_journal(cited: &str, actual: &str) -> bool {
+    other_journal_as(cited, actual, false)
+}
+
+/// [`other_journal`] for a journal read from a reference's text, which
+/// may be cut short ([`sister_journal_as`]).
+pub(crate) fn other_journal_read(cited: &str, actual: &str) -> bool {
+    other_journal_as(cited, actual, true)
+}
+
+fn other_journal_as(cited: &str, actual: &str, read: bool) -> bool {
     let (c, a) = (significant(cited), significant(actual));
     if c.is_empty() || a.is_empty() || same_journal(cited, actual) {
         return false;
+    }
+    if sister_journal_as(cited, actual, read) {
+        return true;
     }
     let inside = |short: &[String], long: &[String]| {
         long.windows(short.len()).any(|run| {
@@ -54,6 +69,242 @@ pub fn other_journal(cited: &str, actual: &str) -> bool {
             })
     };
     !(inside(&c, &a) || inside(&a, &c))
+}
+
+/// Words a journal's name may carry that say where or how it's published,
+/// not what it is: NLM's place qualifiers as Zotero writes them without
+/// their brackets ("Lancet Lond Engl", "Proceedings … of the United
+/// States of America"), an edition, and articles in other languages ("Das
+/// Gesundheitswesen").
+const QUALIFIER_WORDS: &[&str] = &[
+    "london", "lond", "england", "engl", "united", "states", "america", "usa", "uk", "york",
+    "online", "print", "ed", "edn", "edition", "das", "die", "les", "los", "las", "il", "lo", "el",
+    "gli", "do", "da", "dos", "a", "an",
+];
+
+/// Words saying a subtitle describes the journal rather than naming a
+/// subject of its own ("BJOG: An International Journal of Obstetrics &
+/// Gynaecology", "Industrial Relations: A Journal of Economy and Society",
+/// "Nihon yakurigaku zasshi. Folia pharmacologica Japonica").
+const DESCRIPTIVE_WORDS: &[&str] = &[
+    "journal",
+    "journals",
+    "international",
+    "official",
+    "revista",
+    "revue",
+    "zeitschrift",
+    "rivista",
+    "folia",
+    "acta",
+    "bulletin",
+    "organ",
+    "publication",
+    "society",
+    "association",
+    "interdisciplinary",
+];
+
+/// Whether `cited` is a sister journal of `actual`'s, of the same family
+/// and publisher: one name is the other's with subject words of its own
+/// ("The Lancet" for The Lancet Oncology, "JAMA" for JAMA Internal
+/// Medicine, "Nature" for Nature Medicine, "Diabetes" for Diabetes Care,
+/// "Circulation" for "Circulation: Heart Failure"; "JCO Oncol Pract" for
+/// the Journal of Clinical Oncology, "NEJM Evid" for the New England
+/// Journal of Medicine). The words the two share abbreviate each other,
+/// or are a name's initials ("JCO", "JACC"); what's left over on either
+/// side tells the journal apart, unless it's what an acronym stands for
+/// ("JAMA: The Journal of the American Medical Association", "MMWR Morb
+/// Mortal Wkly Rep"), a series letter, a structural word ("Section",
+/// "Royal Society"), a place, edition or article ([`QUALIFIER_WORDS`]),
+/// in brackets ("BMJ (Clinical research ed.)"), or a subtitle that
+/// describes the journal ([`DESCRIPTIVE_WORDS`], or one after a series
+/// letter: "Physical review. B, Condensed matter"). An abbreviation
+/// leaving words out in order ("Proc Biol Sci" for "Proceedings of the
+/// Royal Society B: Biological Sciences") is the same journal, not a
+/// sister.
+pub fn sister_journal(cited: &str, actual: &str) -> bool {
+    sister_journal_as(cited, actual, false)
+}
+
+/// [`sister_journal`], with `read` for a journal read from a reference's
+/// text: a reading may run on from the title's end ("… Smoker and in
+/// COPD. PLOS One"), so any part of it after a stop that is the journal
+/// is; and it may be cut short after a dotted abbreviation ("Theory" of
+/// "IEEE Trans. Inform. Theory."), so the record's name ending in it is no
+/// sister ("Energy" for Applied Energy goes untold).
+pub(crate) fn sister_journal_as(cited: &str, actual: &str, read: bool) -> bool {
+    let readings: Vec<&str> = if read {
+        std::iter::once(cited)
+            .chain(cited.match_indices(". ").map(|(i, _)| &cited[i + 2..]))
+            .collect()
+    } else {
+        vec![cited]
+    };
+    readings.iter().all(|cited| {
+        sister_names(cited, actual, read)
+            && main_name(actual).is_none_or(|main| sister_names(cited, main, read))
+            && main_name(cited).is_none_or(|main| sister_names(main, actual, read))
+    })
+}
+
+/// A journal's name before a subtitle that describes it, if it has one:
+/// "BJOG" of "BJOG: An International Journal of Obstetrics &
+/// Gynaecology", "Physical review. B" of "Physical review. B, Condensed
+/// matter".
+fn main_name(name: &str) -> Option<&str> {
+    let (at, rest) = [": ", " : ", ". ", ", "]
+        .iter()
+        .filter_map(|sep| name.find(sep).map(|i| (i, &name[i + sep.len()..])))
+        .min_by_key(|(i, _)| *i)?;
+    let series_letter = |s: &str| {
+        let s = s.trim();
+        s.chars().count() == 1 && s.chars().all(char::is_alphabetic)
+    };
+    // A series letter, then its subject: "Physical review. B, Condensed
+    // matter", "Proceedings of the Royal Society B: Biological Sciences".
+    let head_len = rest.find([',', ':']).unwrap_or(rest.len());
+    if series_letter(&rest[..head_len]) {
+        return Some(&name[..name.len() - rest.len() + head_len]);
+    }
+    if name[..at].rsplit(' ').next().is_some_and(series_letter) {
+        return Some(&name[..at]);
+    }
+    // Abbreviated too: "Injury, Int. J. Care Injured".
+    let descriptive = significant(rest).iter().any(|w| {
+        DESCRIPTIVE_WORDS
+            .iter()
+            .any(|d| w == d || abbreviates_word(w, d))
+    }) || normalise(rest)
+        .split(' ')
+        .next()
+        .is_some_and(|w| matches!(w, "a" | "an" | "the"));
+    descriptive.then(|| &name[..at])
+}
+
+/// [`sister_journal_as`] for two names as they stand.
+fn sister_names(cited: &str, actual: &str, read: bool) -> bool {
+    let unbracketed = |name: &str| {
+        let mut depth = 0usize;
+        name.chars()
+            .filter(|&c| {
+                match c {
+                    '(' | '[' => depth += 1,
+                    ')' | ']' => depth = depth.saturating_sub(1),
+                    _ => return depth == 0,
+                }
+                false
+            })
+            .collect::<String>()
+    };
+    let (c, a) = (
+        significant(&unbracketed(cited)),
+        significant(&unbracketed(actual)),
+    );
+    if c.is_empty() || a.is_empty() || c == a || abbreviates(&c, &a) || abbreviates(&a, &c) {
+        return false;
+    }
+    let pair = |x: &str, y: &str| loosely_abbreviates(x, y) || loosely_abbreviates(y, x);
+    let shared_in = |name: &[String], other: &[String]| -> Vec<usize> {
+        (0..name.len())
+            .filter(|&i| {
+                other.iter().any(|o| pair(&name[i], o))
+                    || initials_of_run(&name[i], other).is_some()
+                    || other
+                        .iter()
+                        .filter_map(|o| initials_of_run(o, name))
+                        .any(|run| run.contains(&i))
+            })
+            .collect()
+    };
+    let shared = shared_in(&a, &c);
+    if shared.is_empty() {
+        return false;
+    }
+    let (own_c, own_a) = (distinguishing(&c, &a), distinguishing(&a, &c));
+    // Read from text, the cited name may be the record's cut short: the
+    // record's own words all before the words they share.
+    if read && own_c.is_empty() && own_a.iter().all(|&i| i < shared[0]) {
+        return false;
+    }
+    !(own_c.is_empty() && own_a.is_empty())
+}
+
+/// Words naming a section a journal may number in its own volumes.
+const SECTION_WORDS: &[&str] = &[
+    "letters",
+    "letter",
+    "lett",
+    "supplement",
+    "supplements",
+    "suppl",
+    "supp",
+];
+
+/// Whether `cited` names a section of `actual`: its name with section
+/// words only ([`SECTION_WORDS`]: "The Astrophysical Journal Letters" of
+/// The Astrophysical Journal, whose letters its volumes numbered until
+/// 2010). Only at the record's own volume and page is it the journal.
+pub(crate) fn section_of(cited: &str, actual: &str) -> bool {
+    let (c, a) = (significant(cited), significant(actual));
+    let own_c = distinguishing(&c, &a);
+    !own_c.is_empty()
+        && distinguishing(&a, &c).is_empty()
+        && own_c
+            .iter()
+            .all(|&i| SECTION_WORDS.contains(&c[i].as_str()))
+}
+
+/// The run of `full`'s words whose initials `word` is ("jco" in "journal
+/// clinical oncology"), as a range, if any.
+fn initials_of_run(word: &str, full: &[String]) -> Option<std::ops::Range<usize>> {
+    let n = word.chars().count();
+    (n > 1 && n <= full.len())
+        .then(|| (0..=full.len() - n).find(|&i| is_initials(word, &full[i..i + n])))
+        .flatten()
+        .map(|i| i..i + n)
+}
+
+/// The positions of `name`'s subject words of its own beside `other` (both
+/// [`significant`]): words that neither abbreviate nor are abbreviated by
+/// any of `other`'s, aren't in a run whose initials are one of `other`'s
+/// words (or of its own: "JAMA" beside "Journal of the American Medical
+/// Association"), and are no initials of a run of `other`'s; a series
+/// letter, structural word or qualifier is none.
+fn distinguishing(name: &[String], other: &[String]) -> Vec<usize> {
+    let pair = |x: &str, y: &str| loosely_abbreviates(x, y) || loosely_abbreviates(y, x);
+    let spelt_out: Vec<std::ops::Range<usize>> = other
+        .iter()
+        .chain(name)
+        .filter_map(|w| initials_of_run(w, name))
+        .collect();
+    // Two words run together on one side ("Cardiothorac" for "Cardio-
+    // Thoracic").
+    let joined = |i: usize| {
+        [i.checked_sub(1).map(|p| (p, i)), Some((i, i + 1))]
+            .into_iter()
+            .flatten()
+            .filter(|&(_, y)| y < name.len())
+            .any(|(x, y)| {
+                let both = format!("{}{}", name[x], name[y]);
+                other
+                    .iter()
+                    .any(|o| o.len() > name[x].len() && loosely_abbreviates(o, &both))
+            })
+    };
+    (0..name.len())
+        .filter(|&i| {
+            let w = &name[i];
+            w.chars().count() > 1
+                && !w.chars().all(|c| c.is_ascii_digit())
+                && !STRUCTURAL_WORDS.contains(&w.as_str())
+                && !QUALIFIER_WORDS.contains(&w.as_str())
+                && !other.iter().any(|o| pair(w, o))
+                && initials_of_run(w, other).is_none()
+                && !spelt_out.iter().any(|run| run.contains(&i))
+                && !joined(i)
+        })
+        .collect()
 }
 
 /// Words of a full name an abbreviation may leave out, besides stopwords
@@ -98,8 +349,12 @@ fn abbreviates_in_order(short: &[String], full: &[String]) -> bool {
 
 /// [`abbreviates_word`], or the same with vowels dropped after the first
 /// letter, for spellings that differ ("anaesth" ↔ "anesthesia",
-/// "paediatr" ↔ "pediatrics").
+/// "paediatr" ↔ "pediatrics"): for four letters or more, so that a short
+/// word ("Gut") isn't any word with its consonants ("Gastroenterology").
 fn loosely_abbreviates(short: &str, full: &str) -> bool {
+    if short.chars().count() < 4 {
+        return abbreviates_word(short, full);
+    }
     let skeleton = |w: &str| -> String {
         let mut chars = w.chars();
         chars
@@ -183,9 +438,99 @@ fn is_initials(word: &str, full: &[String]) -> bool {
     word.chars().count() == full.len() && word.chars().zip(full).all(|(c, f)| f.starts_with(c))
 }
 
+/// BibTeX's accents and special letters as the letters they mark, the
+/// accent dropped (names and titles are compared folded):
+/// `Micha{\"e}l` is "Michael", `Veli{\v{c}}kovi{\'c}` "Velickovic",
+/// `Tr{\k{e}}bacz` "Trebacz", `\ss` "ss", `\&` "&". Braces stay.
+pub(crate) fn delatex(text: &str) -> String {
+    const ACCENTS: &str = "\"'`^~=.vkcuHrdbt";
+    const LETTERS: &[(&str, &str)] = &[
+        ("ss", "ss"),
+        ("aa", "a"),
+        ("AA", "A"),
+        ("ae", "ae"),
+        ("AE", "AE"),
+        ("oe", "oe"),
+        ("OE", "OE"),
+        ("o", "o"),
+        ("O", "O"),
+        ("l", "l"),
+        ("L", "L"),
+        ("i", "i"),
+        ("j", "j"),
+    ];
+    let chars: Vec<char> = text.chars().collect();
+    let mut out = String::with_capacity(text.len());
+    let mut i = 0;
+    while i < chars.len() {
+        // A letter's group, its braces dropped too: `{\"e}`, `{\v{c}}`.
+        if chars[i] == '{' && chars.get(i + 1) == Some(&'\\') {
+            let mut depth = 0usize;
+            let close = (i..chars.len().min(i + 12)).find(|&j| {
+                match chars[j] {
+                    '{' => depth += 1,
+                    '}' => depth -= 1,
+                    _ => {}
+                }
+                depth == 0
+            });
+            if let Some(close) = close {
+                let inner: String = chars[i + 1..close].iter().collect();
+                let letter = delatex(&inner);
+                if !letter.contains(['\\', '{', '}']) && letter.chars().count() <= 2 {
+                    out.push_str(&letter);
+                    i = close + 1;
+                    continue;
+                }
+            }
+        }
+        if chars[i] != '\\' || i + 1 >= chars.len() {
+            out.push(chars[i]);
+            i += 1;
+            continue;
+        }
+        let next = chars[i + 1];
+        let word: String = chars[i + 1..]
+            .iter()
+            .take_while(|c| c.is_ascii_alphabetic())
+            .collect();
+        if let Some((_, letter)) = LETTERS.iter().find(|(name, _)| *name == word) {
+            out.push_str(letter);
+            i += 1 + word.len();
+        } else if ACCENTS.contains(next) && (!next.is_ascii_alphabetic() || word.len() == 1) {
+            // The accent, then its letter: bare or in braces.
+            i += 2;
+            while chars.get(i) == Some(&' ') {
+                i += 1;
+            }
+            if chars.get(i) == Some(&'{') {
+                i += 1;
+                while let Some(&c) = chars.get(i) {
+                    i += 1;
+                    if c == '}' {
+                        break;
+                    }
+                    out.push(c);
+                }
+            } else if let Some(&c) = chars.get(i) {
+                out.push(c);
+                i += 1;
+            }
+        } else if !next.is_ascii_alphabetic() {
+            // An escaped character: `\&`, `\%`.
+            out.push(next);
+            i += 2;
+        } else {
+            out.push(chars[i]);
+            i += 1;
+        }
+    }
+    out
+}
+
 /// A field of a BibTeX entry pasted as a reference (`@article{key, journal
-/// = {Nature}, …}`), its braces dropped: `None` if the text isn't one or
-/// lacks the field.
+/// = {Nature}, …}`), its braces dropped and its accents read
+/// ([`delatex`]): `None` if the text isn't one or lacks the field.
 pub(crate) fn bibtex_field(text: &str, name: &str) -> Option<String> {
     let text = text.trim_start();
     if !text.starts_with('@') {
@@ -222,7 +567,7 @@ pub(crate) fn bibtex_field(text: &str, name: &str) -> Option<String> {
         };
         let mut depth = 0usize;
         let mut value = String::new();
-        for c in text[start + 1..].chars() {
+        for c in delatex(&text[start + 1..]).chars() {
             match c {
                 c if c == close && depth == 0 => {
                     let value = value.split_whitespace().collect::<Vec<_>>().join(" ");
@@ -240,11 +585,13 @@ pub(crate) fn bibtex_field(text: &str, name: &str) -> Option<String> {
 
 /// The first page of a page or range: "2545" from "2545-55" or "2545–2555".
 pub fn first_page(pages: &str) -> &str {
-    pages
-        .split(['-', '–', '—', ','])
-        .next()
-        .unwrap_or("")
-        .trim()
+    // Up to whatever separates the last page, a dash however a record
+    // garbles it ("205???210").
+    let pages = pages.trim();
+    let end = pages
+        .find(|c: char| !(c.is_alphanumeric() || c == '.'))
+        .unwrap_or(pages.len());
+    &pages[..end]
 }
 
 /// Volume and first page as a reference gives them.
@@ -269,10 +616,40 @@ pub(crate) fn locator(text: &str) -> Locator {
     }
     let compact = compact(text);
     let tokens: Vec<&str> = compact.split_whitespace().collect();
-    match styled(&tokens) {
-        Some((_, found)) => found,
-        None => labelled(&tokens),
+    if let Some((_, found)) = styled(&tokens) {
+        return found;
     }
+    // Chicago without pages: "Journal 94, no. 2 (2004)."
+    let found = labelled(&tokens);
+    Locator {
+        volume: found
+            .volume
+            .or_else(|| dated_end(&tokens).and_then(|(_, volume)| volume)),
+        ..found
+    }
+}
+
+/// Whether a free-text reference gives an issue with its volume, as a
+/// journal's article is cited: Vancouver's "2019;23(5):159-175", APA's
+/// "22(2), 3–16", Chicago's "94, no. 2". A book series' volume
+/// ("Lecture Notes in Computer Science, vol. 9351") has none.
+pub(crate) fn cites_issue(text: &str) -> bool {
+    if text.trim_start().starts_with('@') {
+        return bibtex_field(text, "number").is_some() && bibtex_field(text, "volume").is_some();
+    }
+    let compact = compact(text);
+    let tokens: Vec<&str> = compact.split_whitespace().collect();
+    let Some((i, _)) = styled(&tokens) else {
+        return false;
+    };
+    let token = tokens[i];
+    let head = token.split(':').next().unwrap_or(token);
+    let head = head.rsplit(';').next().unwrap_or(head);
+    let bracketed = head.split_once('(').is_some_and(|(_, rest)| {
+        let issue = rest.split(')').next().unwrap_or("");
+        !issue.is_empty() && issue.len() <= 8 && !bracketed_year(rest.trim_end_matches([',', '.']))
+    });
+    bracketed || tokens.get(i + 1).is_some_and(|t| is_label(t, &["no"]))
 }
 
 /// The reference with the spaces that styles put around their separators
@@ -292,6 +669,16 @@ fn compact(text: &str) -> String {
             let trimmed = compact.trim_end().len();
             compact.truncate(trimmed);
         }
+        // A page label run into its page: "pp.58-63", "p.054433".
+        if c.is_ascii_digit() {
+            let label = compact
+                .rsplit(char::is_whitespace)
+                .next()
+                .is_some_and(|t| t == "pp." || t == "p.");
+            if label {
+                compact.push(' ');
+            }
+        }
         compact.push(c);
     }
     compact
@@ -308,11 +695,15 @@ fn styled(tokens: &[&str]) -> Option<(usize, Locator)> {
         let token = token.trim_end_matches(['.', ',']);
         // Vancouver: [year;]volume[(issue)]:page[-end], with a year, issue
         // or page range to tell it from a time of day ("at 10:30").
+        // MLA: volume.issue (year): page[-end], "77.4 (2005): 1321-1373".
         if let Some((head, pages)) = token.split_once(':') {
             let volume = head.rsplit(';').next().unwrap_or(head);
             let styled = head.contains([';', '(']) || pages.contains(['-', '–', '—']);
             if styled
-                && let (Some(volume), Some(page)) = (volume_number(volume), page_number(pages))
+                && let (Some(volume), Some(page)) = (
+                    volume_number(volume).or_else(|| mla_volume(volume)),
+                    page_number(pages),
+                )
             {
                 return Some((i, at(volume, page)));
             }
@@ -320,6 +711,17 @@ fn styled(tokens: &[&str]) -> Option<(usize, Locator)> {
         // Harvard labels the pages: "Cell, 144(5), pp. 646-674".
         let labelled_page = is_page_label(tokens.get(i + 1).copied().unwrap_or(""));
         let page_at = if labelled_page { i + 2 } else { i + 1 };
+        // Chicago: "Journal 94, no. 2 (2004): 317-321", the issue labelled,
+        // the year bracketed before the pages.
+        if tokens[i].ends_with(',')
+            && let Some(volume) = volume_number(token)
+            && tokens.get(i + 1).is_some_and(|t| is_label(t, &["no"]))
+            && let Some((head, pages)) = tokens.get(i + 2).and_then(|t| t.split_once(':'))
+            && head.split_once('(').is_some_and(|(_, y)| bracketed_year(y))
+            && let Some(page) = page_number(pages)
+        {
+            return Some((i, at(volume, page)));
+        }
         // APA: volume(issue), page[–end]
         if tokens[i].ends_with(',')
             && token.contains('(')
@@ -341,12 +743,14 @@ fn styled(tokens: &[&str]) -> Option<(usize, Locator)> {
             return Some((i, at(volume, page)));
         }
         // Nature's single page, "Nature 530, 484 (2016)", only right after
-        // the journal's word.
+        // the journal's word, abbreviated or not ("J. Org. Chem. 101, 6301
+        // (1994)").
         if tokens[i].ends_with(',')
             && let Some(volume) = volume_number(token)
             && let Some((pages, year)) = next_page.and_then(|p| p.split_once('('))
             && bracketed_year(year)
-            && (ranged(pages) || (i > 0 && name_word(tokens[i - 1])))
+            && (ranged(pages)
+                || (i > 0 && name_word(tokens[i - 1].strip_suffix('.').unwrap_or(tokens[i - 1]))))
             && let Some(page) = page_number(pages)
         {
             return Some((i, at(volume, page)));
@@ -387,10 +791,551 @@ fn labelled(tokens: &[&str]) -> Locator {
             "pp" | "p" | "pages" | "page" if found.page.is_none() => {
                 found.page = next().and_then(page_number);
             }
+            // IEEE's article number, where the page would be: "Art. no. 615".
+            "art" if found.page.is_none() && next().is_some_and(|n| is_label(n, &["no"])) => {
+                found.page = tokens.get(i + 2).and_then(|p| page_number(p));
+            }
             _ => {}
         }
     }
     found
+}
+
+/// Conferences whose papers are cited by venue, each by its acronyms and
+/// the words of its name that tell it apart (joining words and numbers
+/// aside: "Proceedings of the 34th International Conference on Machine
+/// Learning"). A proceedings' name is otherwise free ("2017 IEEE
+/// Conference on Computer Vision and Pattern Recognition (CVPR)",
+/// "Advances in Neural Information Processing Systems 30"), so these are
+/// named rather than ruled.
+const CONFERENCES: &[(&[&str], &[&str])] = &[
+    (
+        &["neurips", "nips"],
+        &["neural", "information", "processing", "systems"],
+    ),
+    (
+        &["icml"],
+        &["international", "conference", "machine", "learning"],
+    ),
+    (&["iclr"], &["learning", "representations"]),
+    (&["cvpr"], &["computer", "vision", "pattern", "recognition"]),
+    (
+        &["iccv"],
+        &["international", "conference", "computer", "vision"],
+    ),
+    (&["eccv"], &["european", "conference", "computer", "vision"]),
+    (
+        &["wacv"],
+        &["winter", "conference", "applications", "computer", "vision"],
+    ),
+    (&["bmvc"], &["british", "machine", "vision"]),
+    (
+        &["acl"],
+        &[
+            "annual",
+            "meeting",
+            "association",
+            "computational",
+            "linguistics",
+        ],
+    ),
+    (
+        &["emnlp"],
+        &["empirical", "methods", "natural", "language", "processing"],
+    ),
+    (&["naacl"], &["north", "american", "chapter"]),
+    (
+        &["coling"],
+        &[
+            "international",
+            "conference",
+            "computational",
+            "linguistics",
+        ],
+    ),
+    (
+        &["kdd", "sigkdd"],
+        &["knowledge", "discovery", "data", "mining"],
+    ),
+    (
+        &["aaai"],
+        &["aaai", "conference", "artificial", "intelligence"],
+    ),
+    (
+        &["ijcai"],
+        &[
+            "international",
+            "joint",
+            "conference",
+            "artificial",
+            "intelligence",
+        ],
+    ),
+    (&["aistats"], &["artificial", "intelligence", "statistics"]),
+    (&["uai"], &["uncertainty", "artificial", "intelligence"]),
+    (&["colt"], &["conference", "learning", "theory"]),
+    (&["chi"], &["human", "factors", "computing", "systems"]),
+    (
+        &["icra"],
+        &["international", "conference", "robotics", "automation"],
+    ),
+    (&["iros"], &["intelligent", "robots", "systems"]),
+    (&["corl"], &["conference", "robot", "learning"]),
+    (
+        &["isca"],
+        &["international", "symposium", "computer", "architecture"],
+    ),
+    (
+        &["micro"],
+        &["international", "symposium", "microarchitecture"],
+    ),
+    (
+        &["sigir"],
+        &["research", "development", "information", "retrieval"],
+    ),
+    (
+        &["sigmod"],
+        &["international", "conference", "management", "data"],
+    ),
+    (&["vldb"], &["very", "large", "data", "bases"]),
+    (
+        &["icse"],
+        &["international", "conference", "software", "engineering"],
+    ),
+    (
+        &["osdi"],
+        &["operating", "systems", "design", "implementation"],
+    ),
+    (
+        &["sosp"],
+        &["symposium", "operating", "systems", "principles"],
+    ),
+    (
+        &["nsdi"],
+        &["networked", "systems", "design", "implementation"],
+    ),
+    (
+        &["pldi"],
+        &["programming", "language", "design", "implementation"],
+    ),
+    (&["popl"], &["principles", "programming", "languages"]),
+    (
+        &["icassp"],
+        &["acoustics", "speech", "signal", "processing"],
+    ),
+    (&["interspeech"], &["interspeech"]),
+    (
+        &["miccai"],
+        &[
+            "medical",
+            "image",
+            "computing",
+            "computer",
+            "assisted",
+            "intervention",
+        ],
+    ),
+    (&["wsdm"], &["web", "search", "data", "mining"]),
+    (&["cikm"], &["information", "knowledge", "management"]),
+    (&["recsys"], &["recommender", "systems"]),
+];
+
+/// Acronyms that are words or names too ("ACL" a ligament, "Chi" a
+/// family name): read only in capitals.
+const WORDLIKE_ACRONYMS: &[&str] = &["acl", "chi", "micro", "colt", "uai", "isca"];
+
+/// The conferences (indices into [`CONFERENCES`]) a venue's name, or the
+/// text that cites one, names: by acronym ("ICCV", "NeurIPS 2017",
+/// "CVPR'17") or by its name's words in order.
+pub(crate) fn conferences(name: &str) -> Vec<usize> {
+    let tokens: Vec<&str> = name
+        .split(|c: char| !c.is_alphanumeric())
+        .filter(|t| !t.is_empty())
+        .collect();
+    let acronym = |a: &str| {
+        tokens.iter().enumerate().any(|(i, t)| {
+            let t = t.trim_end_matches(|c: char| c.is_ascii_digit());
+            if holds_meeting(&tokens, i) {
+                return false;
+            }
+            if WORDLIKE_ACRONYMS.contains(&a) {
+                t.eq_ignore_ascii_case(a) && t.chars().all(|c| c.is_ascii_uppercase())
+            } else {
+                t.eq_ignore_ascii_case(a)
+            }
+        })
+    };
+    let words: Vec<String> = normalise(name)
+        .split(' ')
+        .filter(|w| !w.is_empty() && !JOURNAL_STOPWORDS.contains(w))
+        .filter(|w| !w.chars().any(|c| c.is_ascii_digit()))
+        .map(str::to_owned)
+        .collect();
+    let named = |phrase: &[&str]| words.windows(phrase.len()).any(|run| run == phrase);
+    CONFERENCES
+        .iter()
+        .enumerate()
+        .filter(|(_, (acronyms, phrase))| acronyms.iter().any(|a| acronym(a)) || named(phrase))
+        .map(|(i, _)| i)
+        .collect()
+}
+
+/// Whether the acronym at `tokens[i]` names who holds a meeting rather
+/// than the meeting: a society before its other conferences ("the
+/// International AAAI Conference on Web and Social Media" is ICWSM, not
+/// AAAI's conference), a conference before its workshops ("ICML Workshop
+/// on …").
+fn holds_meeting(tokens: &[&str], i: usize) -> bool {
+    let meeting = |t: &&str| {
+        [
+            "conference",
+            "symposium",
+            "workshop",
+            "workshops",
+            "congress",
+            "meeting",
+            "colloquium",
+        ]
+        .iter()
+        .any(|m| t.eq_ignore_ascii_case(m))
+    };
+    match tokens.get(i + 1) {
+        Some(next) if meeting(next) => true,
+        Some(next) if next.eq_ignore_ascii_case("international") => {
+            tokens.get(i + 2).is_some_and(meeting)
+        }
+        _ => false,
+    }
+}
+
+/// Whether a venue cited is a conference's or a workshop's proceedings:
+/// "In Proceedings of …", "… Conference on …", "Advances in Neural …".
+pub(crate) fn proceedings(venue: &str) -> bool {
+    !conferences(venue).is_empty()
+        || normalise(venue).split(' ').any(|w| {
+            matches!(
+                w,
+                "proceedings" | "proc" | "conference" | "symposium" | "workshop" | "congress"
+            )
+        })
+}
+
+/// Words of a proceedings' name that say what kind of meeting, who holds
+/// it and when, not what it is about: "Proceedings of the 16th Annual
+/// ACM/IEEE International Conference on …", "Companion of the …", and the
+/// furniture a reference puts after it ("pp.", "eds.").
+const PROCEEDINGS_BOILERPLATE: &[&str] = &[
+    "proceedings",
+    "proceeding",
+    "proc",
+    "procs",
+    "companion",
+    "conference",
+    "conferences",
+    "conf",
+    "symposium",
+    "symposia",
+    "symp",
+    "workshop",
+    "workshops",
+    "wksp",
+    "congress",
+    "meeting",
+    "colloquium",
+    "summit",
+    "forum",
+    "annual",
+    "annu",
+    "international",
+    "int",
+    "intl",
+    "world",
+    "joint",
+    "acm",
+    "ieee",
+    "cvf",
+    "rsj",
+    "ifip",
+    "siam",
+    "spie",
+    "usenix",
+    "edition",
+    "ed",
+    "eds",
+    "editor",
+    "editors",
+    "vol",
+    "volume",
+    "pp",
+    "page",
+    "pages",
+    "part",
+    "extended",
+    "abstracts",
+    "adjunct",
+    "papers",
+    "poster",
+    "posters",
+    "demo",
+    "demos",
+    "track",
+    "session",
+    "series",
+    "held",
+    "th",
+    "st",
+    "nd",
+    "rd",
+    "a",
+    "an",
+    "at",
+    "to",
+    "with",
+];
+
+/// Ordinals spelt out, as editions are: "Tenth Annual …".
+const ORDINALS: &[&str] = &[
+    "first",
+    "second",
+    "third",
+    "fourth",
+    "fifth",
+    "sixth",
+    "seventh",
+    "eighth",
+    "ninth",
+    "tenth",
+    "eleventh",
+    "twelfth",
+    "thirteenth",
+    "fourteenth",
+    "fifteenth",
+    "sixteenth",
+    "seventeenth",
+    "eighteenth",
+    "nineteenth",
+    "twentieth",
+    "thirtieth",
+    "fortieth",
+    "fiftieth",
+    "twenty",
+    "thirty",
+    "forty",
+    "fifty",
+    "sixty",
+];
+
+/// Capitalised tokens that name a publisher, place or numeral, not a
+/// conference.
+const NOT_ACRONYMS: &[&str] = &[
+    "acm", "ieee", "cvf", "rsj", "ifip", "siam", "spie", "usenix", "usa", "ny", "uk", "lncs", "pp",
+    "ii", "iii", "iv", "vi", "vii", "viii", "ix", "xi", "xii", "eds", "lnai", "lnbi", "ccis",
+    "pmlr", "ceur", "lipics", "eptcs", "oasics", "jmlr", "aisc", "doi", "isbn", "issn",
+];
+
+/// A proceedings' name as words of its subject and acronyms: "Proceedings
+/// of the Tenth Annual ACM/IEEE International Conference on Human-Robot
+/// Interaction (HRI '15)" is about "human robot interaction", "HRI". A
+/// special interest group (SIGCHI, SIGACCESS) holds a meeting; its name is
+/// neither.
+struct Subject {
+    words: Vec<String>,
+    acronyms: Vec<String>,
+    /// The name's words, lower-cased, numbers aside: what an acronym of
+    /// the name is made of ([`Subject::fits`]).
+    letters: Vec<Vec<char>>,
+}
+
+impl Subject {
+    fn new(name: &str) -> Subject {
+        let tokens: Vec<&str> = name
+            .split(|c: char| !c.is_alphanumeric())
+            .filter(|t| !t.is_empty())
+            .collect();
+        let letters: Vec<Vec<char>> = tokens
+            .iter()
+            .filter(|t| t.chars().next().is_some_and(char::is_alphabetic))
+            .map(|t| t.chars().flat_map(char::to_lowercase).collect())
+            .collect();
+        // A society before its other meetings ("International AAAI
+        // Conference on Web and Social Media") names neither.
+        let holders: Vec<String> = (0..tokens.len())
+            .filter(|&i| holds_meeting(&tokens, i))
+            .map(|i| tokens[i].to_ascii_lowercase())
+            .collect();
+        let alphabetic: Vec<&&str> = tokens
+            .iter()
+            .filter(|t| t.chars().all(char::is_alphabetic) && t.chars().count() > 3)
+            .collect();
+        // A name in capitals throughout has words, not acronyms.
+        let shouting = alphabetic.len() >= 3
+            && alphabetic
+                .iter()
+                .filter(|t| t.chars().all(char::is_uppercase))
+                .count()
+                * 2
+                > alphabetic.len();
+        let mut acronyms: Vec<String> = Vec::new();
+        if !shouting {
+            for (i, t) in tokens.iter().enumerate() {
+                let t = t.trim_end_matches(|c: char| c.is_ascii_digit());
+                let upper = t.chars().filter(char::is_ascii_uppercase).count();
+                let lower = t.to_ascii_lowercase();
+                if upper >= 2
+                    && !holds_meeting(&tokens, i)
+                    && (2..=12).contains(&t.len())
+                    && t.chars().all(|c| c.is_ascii_alphabetic())
+                    && !NOT_ACRONYMS.contains(&lower.as_str())
+                    && !lower.starts_with("sig")
+                    && !acronyms.contains(&lower)
+                {
+                    acronyms.push(lower);
+                }
+            }
+        }
+        let words = normalise(name)
+            .split(' ')
+            .filter(|w| w.chars().count() > 1)
+            .filter(|w| !w.chars().any(|c| c.is_ascii_digit()))
+            .filter(|w| {
+                !JOURNAL_STOPWORDS.contains(w)
+                    && !PROCEEDINGS_BOILERPLATE.contains(w)
+                    && !ORDINALS.contains(w)
+                    && !w.starts_with("sig")
+                    && !acronyms.iter().any(|a| a == w)
+                    && !holders.iter().any(|h| h == w)
+            })
+            .map(str::to_owned)
+            .fold(Vec::new(), |mut words, w| {
+                if !words.contains(&w) {
+                    words.push(w);
+                }
+                words
+            });
+        Subject {
+            words,
+            acronyms,
+            letters,
+        }
+    }
+
+    /// Whether `acronym` could be this name's: its letters in order, each
+    /// word giving its initial and, after it, any of its letters ("mwscas"
+    /// of "Midwest Symposium on Circuits and Systems", "aies" of
+    /// "AAAI/ACM Conference on AI, Ethics, and Society"; not "icecs" of
+    /// "International Symposium on Circuits and Systems").
+    fn fits(&self, acronym: &str) -> bool {
+        // From the acronym's `k`th letter, in word `word` after its letter
+        // `at` (none begun: `None`); states that failed are remembered.
+        type State = (usize, usize, Option<usize>);
+        fn from(
+            acronym: &[char],
+            words: &[Vec<char>],
+            (k, word, at): State,
+            failed: &mut std::collections::HashSet<State>,
+        ) -> bool {
+            let Some(&c) = acronym.get(k) else {
+                return true;
+            };
+            if failed.contains(&(k, word, at)) {
+                return false;
+            }
+            // On in the word begun, after the letter used last.
+            let within = at.is_some_and(|at| {
+                (at + 1..words[word].len()).any(|i| {
+                    words[word][i] == c && from(acronym, words, (k + 1, word, Some(i)), failed)
+                })
+            });
+            let found = within
+                || (word + usize::from(at.is_some())..words.len()).any(|w| {
+                    words[w].first() == Some(&c)
+                        && from(acronym, words, (k + 1, w, Some(0)), failed)
+                });
+            if !found {
+                failed.insert((k, word, at));
+            }
+            found
+        }
+        let acronym: Vec<char> = acronym.chars().collect();
+        from(
+            &acronym,
+            &self.letters,
+            (0, 0, None),
+            &mut std::collections::HashSet::new(),
+        )
+    }
+}
+
+/// One subject word for another, or for its abbreviation or plural:
+/// "Robot." for "Robotics", "Computers" for "Computer".
+fn same_subject_word(a: &str, b: &str) -> bool {
+    let (short, long) = if a.len() <= b.len() { (a, b) } else { (b, a) };
+    short == long || (short.len() >= 3 && long.starts_with(short))
+}
+
+/// Whether a proceedings cited is the record's, by what each is about:
+/// `Some(true)` when they share an acronym or most of the record's
+/// subject, `Some(false)` when they're clearly about different things
+/// ("… Workshop on User Interface Test Automation" for "… World Conference
+/// on Mobile and Contextual Learning", or "`RecSys '26`" alone for a name
+/// whose own acronym is "IUI"), `None` when it can't be told (an acronym
+/// against a name without one: "ASSETS" for "… Conference on Computers and
+/// Accessibility"). `cited` may run on into what a reference puts after
+/// the venue (pages, a publisher): words there only make a mismatch less
+/// likely.
+pub(crate) fn proceedings_agree(cited: &str, actual: &str) -> Option<bool> {
+    let (cited, actual) = (Subject::new(cited), Subject::new(actual));
+    let same_acronym =
+        |a: &String, b: &String| a == b || a.ends_with(b.as_str()) || b.ends_with(a.as_str());
+    if cited
+        .acronyms
+        .iter()
+        .any(|c| actual.acronyms.iter().any(|a| same_acronym(c, a)))
+    {
+        return Some(true);
+    }
+    if cited.words.is_empty() {
+        return (!cited.acronyms.is_empty() && !actual.acronyms.is_empty()).then_some(false);
+    }
+    if actual.words.is_empty() {
+        return None;
+    }
+    let shared = actual
+        .words
+        .iter()
+        .filter(|a| cited.words.iter().any(|c| same_subject_word(c, a)))
+        .count();
+    // Named by an acronym the record's name can't make: another meeting
+    // of the same field and society, its words shared ("… Conference on
+    // Electronics, Circuits and Systems (ICECS)" for the "… Midwest
+    // Symposium on Circuits and Systems", "(ICMR '25)" for "… Conference
+    // on Multimedia in Asia").
+    let foreign = !cited.acronyms.is_empty() && !cited.acronyms.iter().any(|c| actual.fits(c));
+    if shared * 2 >= actual.words.len() {
+        Some(!foreign)
+    } else if shared * 3 <= actual.words.len() {
+        Some(false)
+    } else {
+        None
+    }
+}
+
+/// Whether a venue's name is a meeting's, as a record's container: "…
+/// Conference on …", "Companion of …", and with `proceedings` "Proceedings
+/// of …" too (journals are called that: the Royal Society's).
+pub(crate) fn meeting_name(venue: &str, proceedings: bool) -> bool {
+    normalise(venue).split(' ').any(|w| {
+        matches!(
+            w,
+            "conference"
+                | "symposium"
+                | "workshop"
+                | "workshops"
+                | "congress"
+                | "companion"
+                | "colloquium"
+        ) || (proceedings && w == "proceedings")
+    })
 }
 
 /// Words at most a journal's name runs to ("Proceedings of the National
@@ -423,14 +1368,44 @@ const JOURNAL_WORDS: usize = 16;
 /// Injured 47 (2016)"). A journal misread would be called another journal,
 /// so better none.
 pub(crate) fn cited_journal(text: &str) -> Option<String> {
+    match read_cited_journal(text)? {
+        Reading::Sure(journal) => Some(journal),
+        Reading::Maybe(_) => None,
+    }
+}
+
+/// The journals a free-text reference may cite: the one
+/// [`cited_journal`] reads, else, where a run of dotted abbreviations
+/// follows a title ending in a capitalised word ("… by Nanoparticles. J.
+/// Am. Chem. Soc. 113, 3391", "… Sri Lanka. Cad. Saúde Pública.
+/// 2005;2:e185"), each reading starting after a stop in it, longest first:
+/// one of them is the journal, so it is clearly another only when every
+/// one is.
+pub(crate) fn cited_journals(text: &str) -> Vec<String> {
+    match read_cited_journal(text) {
+        Some(Reading::Sure(journal)) => vec![journal],
+        Some(Reading::Maybe(readings)) => readings,
+        None => Vec::new(),
+    }
+}
+
+/// A journal read from a reference.
+enum Reading {
+    /// Told with confidence.
+    Sure(String),
+    /// One of these, where the title ends unclear.
+    Maybe(Vec<String>),
+}
+
+fn read_cited_journal(text: &str) -> Option<Reading> {
     if text.trim_start().starts_with('@') {
         // BibTeX: its journal field.
-        return bibtex_field(text, "journal");
+        return bibtex_field(text, "journal").map(Reading::Sure);
     }
     let compact = compact(text);
     let tokens: Vec<&str> = compact.split_whitespace().collect();
     if let Some(journal) = prose_journal(&tokens) {
-        return Some(journal);
+        return Some(Reading::Sure(journal));
     }
     let (at, after) = match styled(&tokens) {
         Some((at, found)) => {
@@ -452,14 +1427,17 @@ pub(crate) fn cited_journal(text: &str) -> Option<String> {
     while end > 0 && is_date_word(tokens[end - 1]) {
         end -= 1;
     }
-    let last = *tokens[..end].last()?;
+    if let Some(journal) = quoted_journal(&tokens, end) {
+        return Some(Reading::Sure(journal));
+    }
+    let last = without_comma_after_stop(tokens[..end].last()?);
     // The journal's last word, with the stop or comma ending it (always,
-    // without a styled locator).
+    // after a title and before a year, a link or a label).
     let ending = last.strip_suffix(['.', ',']);
     let last_word = ending.unwrap_or(last);
     if !name_word(last_word)
         || is_stopword(last_word)
-        || (after != After::Anything && ending.is_none())
+        || (matches!(after, After::Title | After::Quoted) && ending.is_none())
     {
         return None;
     }
@@ -472,10 +1450,104 @@ pub(crate) fn cited_journal(text: &str) -> Option<String> {
         && tokens[end - 2]
             .strip_suffix('.')
             .is_some_and(|w| name_word(w) && capitalised(w));
+    // Undotted, a short abbreviation after another ("… Creation. Psychol.
+    // Sci. 5, 14"; not initials, "JAMA"): the title may have ended
+    // before either.
+    let undotted = read_journal(&tokens, end, false, after).filter(|j| {
+        let short = !j.contains(' ')
+            && last.ends_with('.')
+            && j.chars().count() <= 4
+            && j.chars().any(char::is_lowercase);
+        !(dotted && short)
+    });
     dotted
         .then(|| read_journal(&tokens, end, true, after))
         .flatten()
-        .or_else(|| read_journal(&tokens, end, false, after))
+        .or(undotted)
+        .map(Reading::Sure)
+        .or_else(|| readings(&tokens, end, after))
+}
+
+/// The journal between a quoted title and `end`, as written, in sentence
+/// case too ("“…” Revue historique 35, no. 1 (1974): 130", "'…', Journal
+/// of Molecular Biology, 215(3)"): words without digits, stops only
+/// abbreviating, back to the closing quote.
+fn quoted_journal(tokens: &[&str], end: usize) -> Option<String> {
+    let mut k = end;
+    while k > 0 && end - k <= JOURNAL_WORDS {
+        let t = without_comma_after_stop(tokens[k - 1]);
+        if closes_quote(t) {
+            let words = &tokens[k..end];
+            let first = *words.first()?;
+            // The last word's stop kept in a dotted name ("Mach. Intell.").
+            let last = without_comma_after_stop(words[words.len() - 1]);
+            let dotted = words.len() > 1 && words[words.len() - 2].ends_with('.');
+            let last = match last.strip_suffix(['.', ',']) {
+                Some(word) if !(dotted && last.ends_with('.')) => word,
+                _ => last,
+            };
+            let mut words = words[..words.len() - 1].to_vec();
+            words.push(last);
+            return (first != "&" && !is_stopword(first) && capitalised(first))
+                .then(|| spaced_colons(&words.join(" ")));
+        }
+        let word = t.strip_suffix(['.', ',']).unwrap_or(t);
+        let inner = k < end && t.ends_with(',');
+        let abbreviation = !t.ends_with('.') || capitalised(word);
+        if inner
+            || !abbreviation
+            || word.is_empty()
+            || !word
+                .chars()
+                .all(|c| c.is_alphabetic() || matches!(c, '-' | '\'' | '’' | '&' | ':'))
+        {
+            return None;
+        }
+        k -= 1;
+    }
+    None
+}
+
+/// The journal whose last word is `tokens[end - 1]` where the title's end
+/// is unclear: back through the name's words, stopped or not, each stop a
+/// place the title may have ended and the journal begun. The reading
+/// after a closing quote is sure (IEEE's "“…,” IEEE Trans. Pattern Anal.
+/// Mach. Intell., vol. 56").
+fn readings(tokens: &[&str], end: usize, after: After) -> Option<Reading> {
+    let mut words = vec![without_comma_after_stop(tokens[end - 1])];
+    let reading = |words: &[&str]| -> Option<String> {
+        let first = *words.last()?;
+        (first != "&" && !is_stopword(first))
+            .then(|| spaced_colons(&words.iter().rev().copied().collect::<Vec<_>>().join(" ")))
+    };
+    let mut found: Vec<String> = Vec::new();
+    let mut k = end - 1;
+    while k > 0 && words.len() <= JOURNAL_WORDS {
+        let t = tokens[k - 1];
+        if closes_quote(t) {
+            return reading(&words).map(Reading::Sure);
+        }
+        if sentence_end(t) {
+            found.extend(reading(&words));
+        }
+        let name = t == "&"
+            || is_stopword(t)
+            || name_word(t.strip_suffix('.').unwrap_or(t))
+            || colon_name(t);
+        if !name {
+            break;
+        }
+        words.push(t);
+        k -= 1;
+    }
+    if k == 0 && after == After::Anything {
+        found.extend(reading(&words));
+    }
+    if after == After::Quoted || found.is_empty() {
+        return None;
+    }
+    found.reverse();
+    Some(Reading::Maybe(found))
 }
 
 /// The journal prose names: "… reported in The Lancet (2020) — …", its
@@ -493,8 +1565,30 @@ fn prose_journal(tokens: &[&str]) -> Option<String> {
         let year = rest[end]
             .strip_prefix('(')
             .is_some_and(|y| bracketed_year(y.trim_end_matches(['.', ','])));
+        // "… the 2007 Bar-Haim paper in Psychol Sci (Threat-related …)":
+        // a paper's journal, before what is bracketed after it.
+        let paper = matches!(tokens[i - 1], "paper" | "article" | "study" | "report")
+            && rest[end].starts_with('(');
+        // "… showed in Cancer Epidemiology, 38, 211–214, in …": a journal,
+        // its last word's comma, then its volume and pages.
+        let placed = rest[end]
+            .strip_suffix(',')
+            .is_some_and(|w| !w.is_empty() && name_word(w))
+            && rest
+                .get(end + 1)
+                .and_then(|v| v.strip_suffix(','))
+                .is_some_and(|v| volume_number(v).is_some())
+            && rest.get(end + 2).is_some_and(|p| {
+                ranged(p) && page_number(p.trim_end_matches([',', '.'])).is_some()
+            });
+        if placed {
+            let mut words = rest[..end].to_vec();
+            words.push(rest[end].trim_end_matches(','));
+            return (words.len() <= JOURNAL_WORDS && !is_stopword(words[0]) && words[0] != "&")
+                .then(|| words.join(" "));
+        }
         let words = &rest[..end];
-        (year
+        ((year || paper)
             && !words.is_empty()
             && words.len() <= JOURNAL_WORDS
             && !is_stopword(words[0])
@@ -511,6 +1605,9 @@ enum After {
     Anything,
     /// The title, ended by a stop or a closing quote.
     Title,
+    /// The title, the journal itself ended by a bracketed year (Chicago's
+    /// "“…” Journal (2010)", "… Druck. `ApJ` (1939)"), not a stop.
+    Dated,
     /// A quoted title (Harvard's "'…', Chest.").
     Quoted,
 }
@@ -518,14 +1615,19 @@ enum After {
 /// Where the journal ends in a reference without a styled locator, and
 /// what it must follow ([`cited_journal`]).
 fn unstyled_end(tokens: &[&str]) -> Option<(usize, After)> {
-    // Labelled: "Journal of Clinical Investigation, vol. 8, p. 109".
-    let label = |t: &&str| {
-        matches!(
-            t.trim_end_matches(['.', ',']).to_ascii_lowercase().as_str(),
-            "vol" | "volume" | "no" | "pp" | "p"
-        )
+    // Chicago: "“Title.” Journal 94, no. 2 (2004).", "… Journal (2010)."
+    if let Some((at, _)) = dated_end(tokens) {
+        return Some((at, After::Dated));
+    }
+    // Labelled: "Journal of Clinical Investigation, vol. 8, p. 109"; a
+    // label before a number ("J. P. (1982)" has an initial, not a page).
+    let label = |i: usize| {
+        is_label(tokens[i], &["vol", "volume", "no", "pp", "p"])
+            && tokens
+                .get(i + 1)
+                .is_some_and(|n| n.starts_with(|c: char| c.is_ascii_digit()))
     };
-    if let Some(i) = tokens.iter().position(label) {
+    if let Some(i) = (0..tokens.len()).find(|&i| label(i)) {
         return (i > 0 && tokens[i - 1].ends_with(',')).then_some((i, After::Title));
     }
     // The links ending it, then the year: "JAMA. 2020. doi:10.1001/…".
@@ -551,10 +1653,50 @@ fn unstyled_end(tokens: &[&str]) -> Option<(usize, After)> {
 
 /// "pp." or "p.", before a page.
 fn is_page_label(t: &str) -> bool {
-    matches!(
-        t.trim_end_matches(['.', ',']).to_ascii_lowercase().as_str(),
-        "pp" | "p"
-    )
+    is_label(t, &["pp", "p"])
+}
+
+/// A label, one of `labels`, as written: "no.", "Vol.", "pp.,".
+fn is_label(t: &str, labels: &[&str]) -> bool {
+    let t = t.trim_end_matches(['.', ',']);
+    labels.iter().any(|l| l.eq_ignore_ascii_case(t))
+}
+
+/// Chicago's end, a bracketed year after the journal (and its volume and
+/// issue), its links aside: "Journal 94, no. 2 (2004).", "Mind 133
+/// (2024).", "eClinicalMedicine (2010).". Where the journal ends, and the
+/// volume given.
+fn dated_end(tokens: &[&str]) -> Option<(usize, Option<String>)> {
+    let mut end = tokens.len();
+    while end > 0 && is_link(tokens[end - 1]) {
+        end -= 1;
+    }
+    let (number, year) = tokens[..end]
+        .last()?
+        .trim_end_matches(['.', ','])
+        .split_once('(')?;
+    if !bracketed_year(year) {
+        return None;
+    }
+    if number.is_empty() {
+        return Some((end - 1, None));
+    }
+    // The volume before a labelled issue: "94, no. 2 (2004)".
+    if end >= 3 && is_label(tokens[end - 2], &["no"]) {
+        let volume = tokens[end - 3].strip_suffix(',').and_then(volume_number)?;
+        return Some((end - 3, Some(volume)));
+    }
+    // Right after the journal's word: "Psychological Science 5 (1994)".
+    let journal = end >= 2 && name_word(tokens[end - 2].trim_end_matches('.'));
+    journal.then(|| (end - 1, volume_number(number)))
+}
+
+/// A stop and the comma after it, as IEEE ends a dotted journal ("Mach.
+/// Intell., vol. 56"): the stop only.
+fn without_comma_after_stop(t: &str) -> &str {
+    t.strip_suffix(',')
+        .filter(|w| w.ends_with('.'))
+        .unwrap_or(t)
 }
 
 /// A link or identifier ending a reference: a DOI, URL, PMID or arXiv ID.
@@ -575,7 +1717,7 @@ fn closes_quote(t: &str) -> bool {
 /// `dotted`: abbreviated with stops, the name kept as printed, stops and
 /// all.
 fn read_journal(tokens: &[&str], end: usize, dotted: bool, after: After) -> Option<String> {
-    let last = tokens[end - 1];
+    let last = without_comma_after_stop(tokens[end - 1]);
     let mut k = end - 1;
     let mut words = vec![if dotted {
         last
@@ -601,7 +1743,7 @@ fn read_journal(tokens: &[&str], end: usize, dotted: bool, after: After) -> Opti
             } else {
                 return None;
             }
-        } else if name_word(t) {
+        } else if name_word(t) || colon_name(t) {
             words.push(t);
         } else if sentence_end(t) {
             // "Int. J. Care Injured": a stop inside a dotted name.
@@ -623,7 +1765,7 @@ fn read_journal(tokens: &[&str], end: usize, dotted: bool, after: After) -> Opti
     }
     let follows = match after {
         After::Anything => true,
-        After::Title => ended.is_some(),
+        After::Title | After::Dated => ended.is_some(),
         After::Quoted => ended == Some(true),
     };
     if !follows {
@@ -634,7 +1776,24 @@ fn read_journal(tokens: &[&str], end: usize, dotted: bool, after: After) -> Opti
     if words[0] == "&" || is_stopword(words[0]) {
         return None;
     }
-    Some(words.join(" "))
+    Some(spaced_colons(&words.join(" ")))
+}
+
+/// Name words around a colon inside a name, the space after it dropped
+/// ([`compact`]): "JAMA:The" in "JAMA: The Journal of the American Medical
+/// Association".
+fn colon_name(t: &str) -> bool {
+    t.contains(':')
+        && t.split(':').all(|w| w.is_empty() || name_word(w))
+        && t.split(':').any(|w| !w.is_empty())
+}
+
+/// A name with its colons spaced as written: "JAMA: The Journal …".
+fn spaced_colons(name: &str) -> String {
+    name.split(':')
+        .map(str::trim)
+        .collect::<Vec<_>>()
+        .join(": ")
 }
 
 /// A word of a journal's name as references print it: letters (and
@@ -655,8 +1814,10 @@ fn capitalised(w: &str) -> bool {
     w.chars().next().is_some_and(char::is_uppercase)
 }
 
+/// A journal name's joining word, accents aside ("für").
 fn is_stopword(w: &str) -> bool {
     JOURNAL_STOPWORDS.contains(&w)
+        || (w.starts_with(char::is_lowercase) && JOURNAL_STOPWORDS.contains(&normalise(w).as_str()))
 }
 
 /// A word ending a sentence: "placenta.", "al.", "Need?", "(2021).".
@@ -717,16 +1878,29 @@ fn ranged(pages: &str) -> bool {
     pages.contains(['-', '–', '—'])
 }
 
+/// MLA's volume and issue before the bracketed year: "77.4(2005)" → "77".
+fn mla_volume(s: &str) -> Option<String> {
+    let (numbers, year) = s.split_once('(')?;
+    let (volume, issue) = numbers.split_once('.')?;
+    (bracketed_year(year) && is_digits(issue) && issue.len() <= 6)
+        .then(|| volume_number(volume))
+        .flatten()
+}
+
 /// "376" or "376(26)": the volume number.
 fn volume_number(s: &str) -> Option<String> {
     let volume = s.split('(').next().unwrap_or(s);
     (volume.len() <= 6 && is_digits(volume)).then(|| volume.to_owned())
 }
 
-/// "2545-55", "e1234" or "S12": the first page.
+/// "2545-55", "e1234", "S12" or "R3" (a letter for a section or
+/// supplement: Nucleic Acids Research's "D1", a review's "R3"): the first
+/// page.
 fn page_number(s: &str) -> Option<String> {
     let page = first_page(s.trim_end_matches(['.', ',', ';']));
-    let digits = page.trim_start_matches(['e', 'E', 's', 'S']);
+    let digits = page
+        .strip_prefix(|c: char| c.is_ascii_alphabetic())
+        .unwrap_or(page);
     (digits.len() <= 8 && is_digits(digits)).then(|| page.to_ascii_lowercase())
 }
 
@@ -972,6 +2146,276 @@ mod tests {
     }
 
     #[test]
+    fn journals_and_places_are_read_in_more_styles() {
+        // Red team, held-out round (holdout-1): Nature's single page after
+        // a dotted name, IEEE's comma after one, Chicago's issue and
+        // bracketed year, a colon inside a name, an initial "P." that
+        // isn't a page.
+        let loc = |v: &str, p: &str| Locator {
+            volume: Some(v.into()),
+            page: Some(p.into()),
+        };
+        for (text, journal, place) in [
+            (
+                "Mondain-Monval, O. et al. Anisotropic Rayleigh scattering investigations in \
+                 smectic A liquid crystal phases. J. Org. Chem. 101, 6301 (1994).",
+                "J. Org. Chem.",
+                Some(loc("101", "6301")),
+            ),
+            (
+                "R. Khandekar, S. Rao, and U. Vazirani, “Graph partitioning using single \
+                 commodity flows,” IEEE Trans. Pattern Anal. Mach. Intell., vol. 56, no. 4, pp. \
+                 1-15, 2009.",
+                "IEEE Trans. Pattern Anal. Mach. Intell.",
+                Some(loc("56", "1")),
+            ),
+            (
+                "V. V. Kiselev, “Genesis of spiral galaxies,” Mon. Not. R. Astron. Soc., vol. \
+                 428, no. 5, pp. 674-684, 2013.",
+                "Mon. Not. R. Astron. Soc.",
+                Some(loc("428", "674")),
+            ),
+            (
+                "Antonovics, Kate, and Robert Town. “Are All the Good Men Married? Uncovering \
+                 the Sources of the Marital Wage Premium.” American Economic Review 94, no. 2 \
+                 (2004): 317-321.",
+                "American Economic Review",
+                Some(loc("94", "317")),
+            ),
+            (
+                "v. Koczkás, Julius. “die ultraviolette absorption.” Zeitschrift für Physik 59, \
+                 no. 3-4 (1930): 274-288.",
+                "Zeitschrift für Physik",
+                Some(loc("59", "274")),
+            ),
+            (
+                "Alonso-González, Rafael. “Ventrículo derecho y cardiopatías congénitas en el \
+                 adulto.” eClinicalMedicine (2010).",
+                "eClinicalMedicine",
+                None,
+            ),
+            (
+                "Park, Robin. “Sex-bias in COVID-19-associated illness severity.” American \
+                 Journal of Epidemiology (2020). https://doi.org/10.1016/j.eclinm.2020.100519",
+                "American Journal of Epidemiology",
+                None,
+            ),
+            // After a quoted title, the journal as written, in sentence case
+            // too.
+            (
+                "Berry, Christopher J. “Adam Smith's Considerations on Language.” Revue \
+                 historique 35, no. 1 (1974): 130.",
+                "Revue historique",
+                Some(loc("35", "130")),
+            ),
+            (
+                "Doe, J. 'Ventrículo derecho', Revista española de cardiología, 63(9), pp. \
+                 1070-1080.",
+                "Revista española de cardiología",
+                Some(loc("63", "1070")),
+            ),
+            (
+                "Ramachandran, V. S. “Perception of Shape from Shading.” Psychological Science 5 \
+                 (1994).",
+                "Psychological Science",
+                Some(Locator {
+                    volume: Some("5".into()),
+                    page: None,
+                }),
+            ),
+            (
+                "Montgomery, James D. “A Formalization.” American Sociological Review 68, no. 5 \
+                 (2003).",
+                "American Sociological Review",
+                Some(Locator {
+                    volume: Some("68".into()),
+                    page: None,
+                }),
+            ),
+            (
+                "Füchtbauer & von Heesen, W. Verbreiterung und Verschiebung von Kaliumserienlinien \
+                 durch Helium von hohem Druck. ApJ (1939). https://doi.org/10.1007/bf01340112",
+                "ApJ",
+                None,
+            ),
+            (
+                "Watson ZT, Ru W, et al. Differential selectivity of microglia and astrocytes. \
+                 JAMA: The Journal of the American Medical Association. 2026. \
+                 doi:10.1093/brain/awaf429",
+                "JAMA: The Journal of the American Medical Association",
+                None,
+            ),
+            (
+                "Boucher, R. E., & Noonan, J. P. (1982). Adaptive Detection and Removal of \
+                 Non-Gaussian Spikes from Gaussian Data. Proceedings of the AAAI Symposium \
+                 Series. https://doi.org/10.1109/tpami.1982.4767218",
+                "Proceedings of the AAAI Symposium Series",
+                None,
+            ),
+        ] {
+            assert_eq!(cited_journal(text).as_deref(), Some(journal), "{text}");
+            if let Some(place) = place {
+                assert_eq!(locator(text), place, "{text}");
+            }
+        }
+        // Bare numbers and years elsewhere are still no place.
+        for text in [
+            "Smith J. Title. Publisher, 2010.",
+            "Smith J. (2010). Some Title. Oxford University Press.",
+            "We saw 12 (2010) patients.",
+        ] {
+            assert_eq!(locator(text), Locator::default(), "{text}");
+        }
+    }
+
+    #[test]
+    fn a_dotted_journal_after_a_title_in_title_case_is_one_of_its_readings() {
+        // Held-out round: the title's last word and the journal's first
+        // both end with a stop, so either may begin the journal.
+        for (text, journal) in [
+            (
+                "Perera C. After the Tsunami: Legal Implications of Mass Burials of Unidentified \
+                 Victims in Sri Lanka. Cad. Saúde Pública. 2005;2(6):e185.",
+                "Cad. Saúde Pública",
+            ),
+            (
+                "D'Aniell, F. 1,3-Stereocontrol with Bromoallenes. Synthesis of N-Boc-ADDA in \
+                 Serine/Threonine Phosphatases. Chem. Rev. (1996).",
+                "Chem. Rev.",
+            ),
+            (
+                "Rauch, J. Big Signals from Small Particles: Regulation of Cell Signaling \
+                 Pathways by Nanoparticles. J. Am. Chem. Soc. 113, 3391 (2013).",
+                "J. Am. Chem. Soc.",
+            ),
+            (
+                "Licht, A. L. Gravitational Waves on Conductors. Class. Quantum Grav. 22, 505 \
+                 (2005).",
+                "Class. Quantum Grav.",
+            ),
+            (
+                "Doe J. Water in New York City. J. Am. Chem. Soc. 2001;123:45-50.",
+                "J. Am. Chem. Soc.",
+            ),
+        ] {
+            assert_eq!(cited_journal(text), None, "{text}");
+            let readings = cited_journals(text);
+            assert!(
+                readings
+                    .iter()
+                    .any(|r| r.trim_end_matches('.') == journal.trim_end_matches('.')),
+                "{text}: {readings:?}"
+            );
+        }
+        // A sure reading is the only one.
+        assert_eq!(
+            cited_journals("Smith J. Is it safe? eLife. 2020;9:e1234."),
+            ["eLife"]
+        );
+        assert!(
+            cited_journals("Smith J. Title. Journal of clinical medicine. 2020;9:12").is_empty()
+        );
+    }
+
+    #[test]
+    fn round_three_styles_give_their_locators_and_journals() {
+        // holdout-2: MLA, Harvard's page label run into its page, IEEE's
+        // article number.
+        for (text, volume, page) in [
+            (
+                "Bergeret, F. S., et al. \"Odd triplet superconductivity.\" Physical Review B \
+                 77.4 (2005): 1321-1373.",
+                "77",
+                "1321",
+            ),
+            (
+                "Barro, R.J., 2008. Consumption Disasters. American Economic Review, 100(2), \
+                 pp.58-63.",
+                "100",
+                "58",
+            ),
+            (
+                "Maier-Flaig, H., 2016. Spin pumping. Nature Physics, 94(5), p.054433.",
+                "94",
+                "054433",
+            ),
+            (
+                "T. M. Jones, \"Instrumental Stakeholder Theory,\" Acad Management Rev, vol. 20, \
+                 no. 2, Art. no. 615, 1995.",
+                "20",
+                "615",
+            ),
+        ] {
+            let found = locator(text);
+            assert_eq!(found.volume.as_deref(), Some(volume), "{text}");
+            assert_eq!(found.page.as_deref(), Some(page), "{text}");
+        }
+        assert_eq!(
+            cited_journal(
+                "Bergeret, F. S., et al. \"Odd triplet superconductivity.\" Physical Review B \
+                 77.4 (2005): 1321-1373."
+            )
+            .as_deref(),
+            Some("Physical Review B")
+        );
+        assert_eq!(
+            cited_journal("the 2007 Bar-Haim paper in Psychol Sci (Threat-related bias.)")
+                .as_deref(),
+            Some("Psychol Sci")
+        );
+        // A short abbreviation after another isn't read alone; each reading
+        // is weighed.
+        let nonaka = "Nonaka, I. A Dynamic Theory of Organizational Knowledge Creation. \
+                      Psychol. Sci. 5, 14–37 (1994).";
+        assert_eq!(cited_journal(nonaka), None);
+        assert!(cited_journals(nonaka).contains(&"Psychol. Sci.".to_owned()));
+        assert_eq!(
+            cited_journal("Huang C, et al. Clinical features in Wuhan, China. JAMA. 2020.")
+                .as_deref(),
+            Some("JAMA")
+        );
+    }
+
+    #[test]
+    fn conferences_are_told_by_acronym_or_name() {
+        let named = |venue: &str| -> Vec<&str> {
+            conferences(venue)
+                .into_iter()
+                .map(|i| CONFERENCES[i].0[0])
+                .collect()
+        };
+        assert_eq!(
+            named("2017 IEEE Conference on Computer Vision and Pattern Recognition (CVPR)"),
+            ["cvpr"]
+        );
+        assert_eq!(
+            named("In IEEE International Conference on Computer Vision (ICCV), 5967–5976."),
+            ["iccv"]
+        );
+        assert_eq!(
+            named("Advances in Neural Information Processing Systems 30"),
+            ["neurips"]
+        );
+        assert_eq!(named("NeurIPS'17"), ["neurips"]);
+        assert_eq!(
+            named(
+                "Proceedings of the 20th ACM SIGKDD international conference on Knowledge \
+                 discovery and data mining"
+            ),
+            ["kdd"]
+        );
+        assert_eq!(
+            named("Proceedings of the 2019 CHI Conference on Human Factors in Computing Systems"),
+            ["chi"]
+        );
+        // Words that are acronyms too, not in capitals, name none.
+        assert!(named("Chi H, Acl reconstruction outcomes. Am J Sports Med.").is_empty());
+        assert!(named("Pattern Recognition").is_empty());
+        assert!(proceedings("In: Proceedings of the 5th Workshop on Things"));
+        assert!(!proceedings("Journal of Machine Learning Research"));
+    }
+
+    #[test]
     fn a_journal_not_clearly_given_is_not_read() {
         for text in [
             // No journal, or no styled locator.
@@ -1023,6 +2467,35 @@ mod tests {
                 "J Am Coll Cardiol",
                 "Journal of the American College of Surgeons",
             ),
+            // Sister journals of one family: a name inside the other with
+            // subject words of its own (holdout-4's `w:sister-journal`).
+            // Until round 5 "not clearly another".
+            ("Lancet Infect Dis", "The Lancet"),
+            ("The Lancet", "The Lancet Oncology"),
+            ("Lancet", "The Lancet Infectious Diseases"),
+            ("JAMA", "JAMA Internal Medicine"),
+            ("JAMA Intern Med", "JAMA"),
+            ("Nature", "Nature Medicine"),
+            ("Cell", "Cell Reports"),
+            ("BMJ", "BMJ Open"),
+            ("Diabetes", "Diabetes Care"),
+            ("Energy", "Applied Energy"),
+            ("Pediatric Critical Care Medicine", "Critical Care Medicine"),
+            ("JCO Oncol Pract", "Journal of Clinical Oncology"),
+            ("NEJM Evid", "New England Journal of Medicine"),
+            (
+                "JACC Heart Fail",
+                "Journal of the American College of Cardiology",
+            ),
+            ("JACS Au", "Journal of the American Chemical Society"),
+            ("AJPM Focus", "American Journal of Preventive Medicine"),
+            (
+                "International Journal of Nursing Studies Advances",
+                "International Journal of Nursing Studies",
+            ),
+            ("Circulation", "Circulation: Heart Failure"),
+            // A word with a name's consonants isn't its abbreviation.
+            ("BMJ Open Gastroenterology", "Gut"),
         ] {
             assert!(other_journal(cited, actual), "{cited} ≠ {actual}");
         }
@@ -1066,11 +2539,22 @@ mod tests {
                 "Eur J Cardiothorac Surg",
                 "European Journal of Cardio-Thoracic Surgery",
             ),
-            // Possibly a sister journal, possibly the same: not clearly.
-            ("Lancet Infect Dis", "The Lancet"),
+            // What an acronym stands for, a place, a bracketed qualifier.
+            (
+                "JAMA",
+                "JAMA: The Journal of the American Medical Association",
+            ),
+            (
+                "JAMA: The Journal of the American Medical Association",
+                "JAMA",
+            ),
+            ("Lancet Lond Engl", "The Lancet"),
+            ("Science", "Science (New York, N.Y.)"),
+            ("Lancet Infect Dis", "The Lancet Infectious Diseases"),
             ("", "The Lancet"),
         ] {
             assert!(!other_journal(cited, actual), "{cited} ~ {actual}");
+            assert!(!sister_journal(cited, actual), "{cited} ~ {actual}");
         }
     }
 }

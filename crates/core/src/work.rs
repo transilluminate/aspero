@@ -409,18 +409,58 @@ pub(crate) fn is_body_word(word: &str) -> bool {
     BODIES.contains(&word)
 }
 
+/// A name written family name first, as DataCite's creators often are
+/// ("Lubrano, Emanuele", "Carvalho, Schubert Ribeiro de"): its family and
+/// given names. Not a name with a suffix or degree after the comma ("Smith,
+/// Jr.", "Julio A., M.D. Ramirez"), nor initials before it.
+pub(crate) fn inverted(literal: &str) -> Option<(&str, &str)> {
+    let (family, given) = literal.split_once(',')?;
+    let (family, given) = (family.trim(), given.trim());
+    let named = !family.is_empty()
+        && family.split_whitespace().count() <= 3
+        && family
+            .split_whitespace()
+            .all(|w| !w.ends_with('.') && w.chars().filter(|c| c.is_alphabetic()).count() >= 2);
+    let suffix = given.split_whitespace().any(|w| {
+        matches!(
+            w.trim_end_matches(['.', ','])
+                .replace('.', "")
+                .to_lowercase()
+                .as_str(),
+            "jr" | "sr" | "ii" | "iii" | "iv" | "md" | "phd" | "dr" | "prof" | "msc" | "mph"
+        )
+    });
+    let whole = format!("{given} {family}");
+    (named
+        && !given.is_empty()
+        && !given.contains(',')
+        && !suffix
+        && split_literal(&whole).is_some())
+    .then_some((family, given))
+}
+
 /// A personal name written whole ("Yann LeCun", "Vincent van Gogh"), as
 /// family and given names; `None` for anything that may be an
 /// organisation's.
 fn split_literal(literal: &str) -> Option<(String, Option<String>)> {
+    if literal.contains(',') {
+        return inverted(literal)
+            .map(|(family, given)| (family.to_owned(), Some(given.to_owned())));
+    }
     let words: Vec<&str> = literal.split_whitespace().collect();
+    let acronym = |w: &str| w.chars().count() > 2 && w.chars().all(|c| !c.is_lowercase());
+    // A family name in capitals after given names written otherwise
+    // ("Seok-Bae LEE", "A. H. LINSSEN"), as some sources print it; not
+    // an acronym among other words ("NHS England", "WHO Europe").
+    let capitals_last = |i: usize| {
+        i + 1 == words.len() && words[..i].iter().all(|w| !acronym(w.trim_end_matches('.')))
+    };
     let personal = (2..=5).contains(&words.len())
-        && words.iter().all(|w| {
+        && words.iter().enumerate().all(|(i, w)| {
             let lower = w.trim_end_matches(['.', ',']).to_lowercase();
             let capital = w.chars().next().is_some_and(char::is_uppercase);
-            let acronym = w.chars().count() > 2 && w.chars().all(|c| !c.is_lowercase());
             (capital || PARTICLES.contains(&lower.as_str()))
-                && !acronym
+                && (!acronym(w) || capitals_last(i))
                 && !BODIES.contains(&lower.as_str())
                 && !w.chars().any(|c| c.is_ascii_digit())
         });
@@ -698,6 +738,28 @@ mod tests {
             Some(("van Gogh".into(), Some("Vincent".into())))
         );
         assert_eq!(Person::literal("World Health Organization").parts(), None);
+        // Inverted (DataCite's creators), or the family name in capitals
+        // (holdout-2 #407, #482).
+        let parts = |name: &str| Person::literal(name).parts();
+        assert_eq!(
+            parts("Lubrano, Emanuele"),
+            Some(("Lubrano".into(), Some("Emanuele".into())))
+        );
+        assert_eq!(
+            parts("van der Berg, Anna"),
+            Some(("van der Berg".into(), Some("Anna".into())))
+        );
+        assert_eq!(
+            parts("Seok-Bae LEE"),
+            Some(("LEE".into(), Some("Seok-Bae".into())))
+        );
+        assert_eq!(
+            parts("A. H. LINSSEN"),
+            Some(("LINSSEN".into(), Some("A. H.".into())))
+        );
+        assert_eq!(parts("NHS England"), None);
+        assert_eq!(parts("Smith, Jr."), None);
+        assert_eq!(parts("Consortium, The PROTECT"), None);
         // #69: OpenAlex title-cases "ATLS Subcommittee".
         for body in [
             "Atls Subcommittee",

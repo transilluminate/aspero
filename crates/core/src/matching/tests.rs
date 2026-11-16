@@ -281,9 +281,11 @@ fn journal_volume_and_page_are_checked_in_text_and_fields() {
     assert_eq!(a.page.agreement, Agreement::Mismatch);
     assert!((PLAUSIBLE..VERIFIED).contains(&a.confidence), "{a:?}");
 
-    // Structured: the journal is compared by abbreviation rules; for a
-    // work not known to be a journal article, a different one lowers the
-    // ranking without settling the verdict.
+    // Structured: the journal is compared by abbreviation rules. A record
+    // in a journal, its type not given (Europe PMC's editorials and
+    // letters; holdout-1 #478, #492), is held to it as an article is: the
+    // wrong journal is plausible. For a work in proceedings, a different
+    // name lowers the ranking without settling the verdict.
     let claim = Claim {
         title: Some("Fibrinolysis for patients with intermediate-risk pulmonary embolism".into()),
         authors: vec!["Meyer G".into()],
@@ -292,6 +294,11 @@ fn journal_volume_and_page_are_checked_in_text_and_fields() {
         ..Claim::default()
     };
     let a = assess(&claim, &peitho());
+    assert_eq!(a.container.agreement, Agreement::Mismatch);
+    assert!((PLAUSIBLE..VERIFIED).contains(&a.confidence), "{a:?}");
+    let mut proceedings = peitho();
+    proceedings.work.work_type = Some(crate::work::WorkType::ConferencePaper);
+    let a = assess(&claim, &proceedings);
     assert_eq!(a.container.agreement, Agreement::Mismatch);
     assert!(a.confidence >= VERIFIED && a.confidence < 1.0, "{a:?}");
 }
@@ -510,6 +517,19 @@ fn title_and_year_alone_cannot_verify() {
         ),
     );
     assert!(letter.confidence < VERIFIED && article.confidence >= VERIFIED);
+    // A title in capitals names no one ("WOMEN ON ORAL" isn't a family
+    // name and initials; holdout-1 #382): title and year, plausible.
+    let title = "THE α-FETOPROTEIN TEST IN PREGNANT WOMEN, WOMEN ON ORAL CONTRACEPTIVES, NEWBORN \
+                 BABIES, AND PYRIDOXINE-DEPRIVED BABOONS";
+    let a = assess(
+        &Claim::from_text(format!("“{title}”, 1970.")),
+        &record(&[], title, &["J. M. Foy", "C. R. Wood"], 1970),
+    );
+    assert_eq!(a.authors.agreement, Agreement::Unknown, "{a:?}");
+    assert!((PLAUSIBLE..VERIFIED).contains(&a.confidence), "{a:?}");
+    // Capitals with initials as references write them still name people.
+    assert!(authors::names_given("SMITH JA, JONES B. A title. 2020."));
+    assert!(authors::names_given("DUPONT, J. Un titre. 2020."));
 }
 
 #[test]
@@ -565,6 +585,44 @@ fn replies_and_corrections_are_not_the_original() {
             2014,
         ),
     );
+    assert!(a.confidence >= VERIFIED, "{a:?}");
+    // Nor is the original a correction cited (holdout-1 #185, corpus
+    // #105): the correction's record may be missing, but the original
+    // isn't verified in its place, its title and place quoted inside.
+    let cloning = placed(
+        &[],
+        "Cloning of a cGMP-gated cation channel from mouse kidney inner medullary collecting \
+         duct",
+        &["K H Karlson", "F Ciampolillo-Bates", "D E McCoy"],
+        1995,
+        ("Biochimica et Biophysica Acta", "1236", "197-200"),
+    );
+    let corrigendum = "Karlson KH, Ciampolillo-Bates F, McCoy DE. Corrigendum to \"Cloning of a \
+                       cGMP-gated cation channel from mouse kidney inner medullary collecting \
+                       duct\" [Biochim. Biophys. Acta 1236 (1995) 197-200]. Biochim Biophys Acta. \
+                       1995;1238(2):197.";
+    let a = assess(&Claim::from_text(corrigendum), &cloning);
+    assert!((PLAUSIBLE..VERIFIED).contains(&a.confidence), "{a:?}");
+    let shamloul = placed(
+        &[],
+        "Complementary and Alternative Medicine (CAM) for Sexual Dysfunction",
+        &["Rany Shamloul", "Anthony J. Bella"],
+        2014,
+        ("The Journal of Sexual Medicine", "11", "1097-1098"),
+    );
+    let corrections = "Corrections to “Shamloul R, Bella AJ. Complementary and alternative \
+                       medicine (CAM) for sexual dysfunction. J Sex Med 2014;11:1097–8”. J Sexual \
+                       Med. 2014;11:2126.";
+    let a = assess(&Claim::from_text(corrections), &shamloul);
+    assert!(a.confidence < VERIFIED, "{a:?}");
+    // The correction's own record verifies.
+    let mut notice = shamloul.clone();
+    notice.work.title = Some(
+        "Corrections to “Complementary and Alternative Medicine (CAM) for Sexual Dysfunction”"
+            .into(),
+    );
+    notice.work.page = None;
+    let a = assess(&Claim::from_text(corrections), &notice);
     assert!(a.confidence >= VERIFIED, "{a:?}");
 }
 
@@ -1078,6 +1136,20 @@ fn invented_co_authors_are_not_an_author_match() {
             "{text}: {a:?}"
         );
     }
+    // A co-author with initials of their own is no given name beside the
+    // next family name (holdout-1 #425: "Harrowgate, O., & Palmer, H.",
+    // Palmer's given name Humphrey).
+    let mut burrell = record(
+        &[],
+        "Analogy: A Study of Qualification and Argument in Theology",
+        &["David B. Burrell", "Humphrey Palmer"],
+        1976,
+    );
+    burrell.work.work_type = Some(crate::work::WorkType::JournalArticle);
+    let text = "Burrell, D., Harrowgate, O., & Palmer, H. (1976). Analogy: A Study of \
+                Qualification and Argument in Theology. The Philosophical Review, 85(1), 107.";
+    let a = assess(&Claim::from_text(text), &burrell);
+    assert_eq!(a.authors.agreement, Agreement::Partial, "{text}");
     // Structured: one of two claimed authors invented.
     let claim = Claim {
         title: Some("Fibrinolysis for patients with intermediate-risk pulmonary embolism".into()),
@@ -1088,6 +1160,78 @@ fn invented_co_authors_are_not_an_author_match() {
     let a = assess(&claim, &peitho());
     assert_eq!(a.authors.agreement, Agreement::Partial);
     assert!((PLAUSIBLE..VERIFIED).contains(&a.confidence), "{a:?}");
+}
+
+#[test]
+fn a_byline_naming_none_of_the_records_authors_differs() {
+    // Holdout-1: names written as IEEE ("F. Eskdale-Mora"), MLA ("Nadler,
+    // Steven.") and BibTeX (`author`) do, none the record's: different
+    // authors, not none given (#384, #543, #561).
+    let baer = placed(
+        &[],
+        "Nonlinear regression and the solution of simultaneous equations",
+        &["Robert M. Baer"],
+        1962,
+        ("Communications of the ACM", "5", "397-398"),
+    );
+    let mysticism = placed(
+        &[],
+        "A Philosophical Study of Mysticism",
+        &["Irl Goldwin Whitchurch", "Charles A. Bennett"],
+        1924,
+        ("The Philosophical Review", "33", "406"),
+    );
+    let figueroa = placed(
+        &[],
+        "Maximum Entropy Context Models for Ranking Biographical Answers to Open-Domain \
+         Definition Questions",
+        &["Alejandro Figueroa", "John Atkinson"],
+        2011,
+        (
+            "Proceedings of the AAAI Conference on Artificial Intelligence",
+            "25",
+            "1173-1179",
+        ),
+    );
+    for (text, record) in [
+        (
+            "F. Eskdale-Mora, “Nonlinear regression and the solution of simultaneous \
+             equations,” Commun. ACM, vol. 5, no. 7, pp. 397-398, 1962.",
+            &baer,
+        ),
+        (
+            "Nadler, Steven. “A Philosophical Study of Mysticism.” The Philosophical Review, \
+             vol. 33, no. 4, 1924, p. 406.",
+            &mysticism,
+        ),
+        (
+            "@article{li2011, author = {Li, Haoyang and Bai, Li}, title = {Maximum Entropy \
+             Context Models for Ranking Biographical Answers to Open-Domain Definition \
+             Questions}, journal = {Proceedings of the AAAI Conference on Artificial \
+             Intelligence}, year = {2011}, volume = {25}, pages = {1173--1179}}",
+            &figueroa,
+        ),
+    ] {
+        let a = assess(&Claim::from_text(text), record);
+        assert_eq!(a.authors.agreement, Agreement::Mismatch, "{text}");
+        assert!(a.confidence < VERIFIED, "{text}: {a:?}");
+    }
+    // Their own authors still verify.
+    for (text, record) in [
+        (
+            "R. M. Baer, “Nonlinear regression and the solution of simultaneous equations,” \
+             Commun. ACM, vol. 5, no. 7, pp. 397-398, 1962.",
+            &baer,
+        ),
+        (
+            "Whitchurch, Irl Goldwin. “A Philosophical Study of Mysticism.” The Philosophical \
+             Review, vol. 33, no. 4, 1924, p. 406.",
+            &mysticism,
+        ),
+    ] {
+        let a = assess(&Claim::from_text(text), record);
+        assert!(a.confidence >= VERIFIED, "{text}: {a:?}");
+    }
 }
 
 #[test]
@@ -1640,7 +1784,8 @@ fn a_preprint_and_a_journal_article_are_other_versions_of_each_other() {
     let a = assess(&Claim::from_text(text), &preprint);
     assert_eq!(a.container.agreement, Agreement::Mismatch, "{a:?}");
     assert!((PLAUSIBLE..VERIFIED).contains(&a.confidence), "{a:?}");
-    // Cited as the preprint it is, or by its identifier: verified.
+    // Cited as the preprint it is, or by its arXiv identifier beside a
+    // venue (as computing and physics cite): verified.
     for text in [
         "Yuan H, Zhou B. Cross-embodiment dexterous grasping with reinforcement learning. arXiv. \
          2024.",
@@ -1650,6 +1795,20 @@ fn a_preprint_and_a_journal_article_are_other_versions_of_each_other() {
         let a = assess(&Claim::from_text(text), &preprint);
         assert!(a.confidence >= VERIFIED, "{text}: {a:?}");
     }
+    // A preprint server's DOI with a journal's name names two versions
+    // (round 5): plausible.
+    let mut biorxiv = record(
+        &["doi:10.1101/2024.01.02.573000"],
+        "Cross-Embodiment Dexterous Grasping with Reinforcement Learning",
+        &["Haoqi Yuan", "Bohan Zhou"],
+        2024,
+    );
+    biorxiv.work.work_type = Some(crate::work::WorkType::Preprint);
+    let text = "Yuan H, Zhou B. Cross-embodiment dexterous grasping with reinforcement learning. \
+                Science Robotics. 2024. doi:10.1101/2024.01.02.573000";
+    let a = assess(&Claim::from_text(text), &biorxiv);
+    assert_eq!(a.container.agreement, Agreement::Mismatch, "{a:?}");
+    assert!((PLAUSIBLE..VERIFIED).contains(&a.confidence), "{a:?}");
     for text in [
         format!("Rivers E, Nguyen B. {EGDT}. medRxiv preprint, 2001."),
         format!("Rivers E, Nguyen B. {EGDT}. arXiv preprint. 2001."),
@@ -2172,4 +2331,2140 @@ fn red_team_minimised_failures_stay_fixed() {
         let a = assess(&Claim::from_text(text), &record);
         assert!(a.confidence >= VERIFIED, "{text}: {a:?}");
     }
+}
+
+#[test]
+fn held_out_red_team_failures_stay_fixed() {
+    // Minimised false VERIFIEDs from bench/redteam/holdout-1.jsonl (round
+    // 2), against the records they verified: none may verify now. Each
+    // with its line there.
+    let ids = |mut r: SourceRecord, id: &str| {
+        r.ids = vec![id.parse().unwrap()];
+        r
+    };
+    let jcp = article(
+        "Anisotropic Rayleigh scattering investigations in smectic A liquid crystal phases",
+        &["O. Mondain-Monval", "H. J. Coles", "T. Claverie"],
+        1994,
+        ("The Journal of Chemical Physics", "101", "6301"),
+    );
+    let tsunami = article(
+        "After the Tsunami: Legal Implications of Mass Burials of Unidentified Victims in Sri \
+         Lanka",
+        &["Clifford Perera"],
+        2005,
+        ("PLoS Medicine", "2", "e185"),
+    );
+    let khandekar = article(
+        "Graph partitioning using single commodity flows",
+        &["Rohit Khandekar", "Satish Rao", "Umesh Vazirani"],
+        2009,
+        ("Journal of the ACM", "56", "1-15"),
+    );
+    let mut eclinm = record(
+        &["10.1016/j.eclinm.2020.100519"],
+        "Sex-bias in COVID-19-associated illness severity and mortality in cancer patients: A \
+         systematic review and meta-analysis",
+        &["Robin Park", "Anusha Chidharla", "Kathan Mehta"],
+        2020,
+    );
+    eclinm.work.work_type = Some(crate::work::WorkType::JournalArticle);
+    eclinm.work.container_title = Some("EClinicalMedicine".into());
+    // Europe PMC's record, its type not given.
+    let mut nursing = record(
+        &["10.1016/j.ijnurstu.2011.09.008"],
+        "Addressing the complexity conundrum in and of nursing",
+        &["David R Thompson", "Alexander M Clark"],
+        2011,
+    );
+    nursing.work.container_title = Some("International journal of nursing studies".into());
+    nursing.work.other_years = vec![2012];
+    let laris = placed(
+        &["10.1038/s41467-021-25141-1"],
+        "On the problems and promises of savanna fire regime change",
+        &["Paul Laris"],
+        2021,
+        ("Nature communications", "12", "4891"),
+    );
+    let mut brain = record(
+        &["10.1093/brain/awaf429"],
+        "Differential selectivity of microglia and astrocytes in HIV-1 gp120-induced synaptic \
+         pruning",
+        &[
+            "Zachary T Watson",
+            "Silvana Valdebenito-Silva",
+            "Michael S. Spurgat",
+        ],
+        2025,
+    );
+    brain.work.work_type = Some(crate::work::WorkType::JournalArticle);
+    brain.work.container_title = Some("Brain".into());
+    let mut tpami = record(
+        &["10.1109/tpami.1982.4767218"],
+        "Adaptive Detection and Removal of Non-Gaussian Spikes from Gaussian Data",
+        &["Rachel Boucher", "J.P. Noonan"],
+        1982,
+    );
+    tpami.work.work_type = Some(crate::work::WorkType::JournalArticle);
+    tpami.work.container_title =
+        Some("IEEE Transactions on Pattern Analysis and Machine Intelligence".into());
+    let goldman = ids(
+        article(
+            "Cellular specificity of serotonin storage and axonal transport in identified \
+             neurones of Aplysia californica",
+            &["James E. Goldman", "James H. Schwartz"],
+            1974,
+            ("The Journal of Physiology", "242", "61-76"),
+        ),
+        "10.1113/jphysiol.1974.sp010694",
+    );
+    let cases: Vec<(&str, Claim, SourceRecord)> = vec![
+        (
+            "h1-475",
+            Claim::from_text(
+                "Mondain-Monval, O. et al. Anisotropic Rayleigh scattering investigations in \
+                 smectic A liquid crystal phases. J. Org. Chem. 101, 6301 (1994).",
+            ),
+            jcp.clone(),
+        ),
+        (
+            "h1-478",
+            Claim {
+                title: Some("Addressing the complexity conundrum in and of nursing".into()),
+                authors: vec!["Thompson, D.R.".into(), "Clark, A.M.".into()],
+                year: Some(2012),
+                container: Some("Annals of Internal Medicine".into()),
+                ..Claim::default()
+            },
+            nursing,
+        ),
+        (
+            "h1-483",
+            Claim::from_text(
+                "Perera C. After the Tsunami: Legal Implications of Mass Burials of Unidentified \
+                 Victims in Sri Lanka. Cad. Saúde Pública. 2005;2(6):e185.",
+            ),
+            tsunami.clone(),
+        ),
+        (
+            "h1-493",
+            Claim::from_text(
+                "R. Khandekar, S. Rao, and U. Vazirani, “Graph partitioning using single \
+                 commodity flows,” IEEE Trans. Pattern Anal. Mach. Intell., vol. 56, no. 4, pp. \
+                 1-15, 2009.",
+            ),
+            khandekar.clone(),
+        ),
+        (
+            "h1-494",
+            Claim::from_text(
+                "Park, Robin, Anusha Chidharla, and Kathan Mehta. “Sex-bias in \
+                 COVID-19-associated illness severity and mortality in cancer patients: A \
+                 systematic review and meta-analysis.” American Journal of Epidemiology (2020). \
+                 https://doi.org/10.1016/j.eclinm.2020.100519",
+            ),
+            eclinm.clone(),
+        ),
+        (
+            "h1-503",
+            Claim::from_text(
+                "Laris, P. On the problems and promises of savanna fire regime change. Sci Rep \
+                 12, 4891 (2021).",
+            ),
+            laris.clone(),
+        ),
+        (
+            "h1-476",
+            Claim::from_text(
+                "Watson ZT, Valdebenito-Silva S, Spurgat M, et al. Differential selectivity of \
+                 microglia and astrocytes in HIV-1 gp120-induced synaptic pruning. JAMA: The \
+                 Journal of the American Medical Association. 2025. doi:10.1093/brain/awaf429",
+            ),
+            brain,
+        ),
+        (
+            "h1-484",
+            Claim::from_text(
+                "Boucher, R. E., & Noonan, J. P. (1982). Adaptive Detection and Removal of \
+                 Non-Gaussian Spikes from Gaussian Data. Proceedings of the AAAI Symposium \
+                 Series. https://doi.org/10.1109/tpami.1982.4767218",
+            ),
+            tpami,
+        ),
+        (
+            "h1-505",
+            Claim::from_text(
+                "Mondain-Monval, O. et al. Anisotropic Rayleigh scattering investigations in \
+                 smectic A liquid crystal phases. J. Chem. Phys. 102, 6301 (1994).",
+            ),
+            jcp.clone(),
+        ),
+        (
+            "h1-469",
+            Claim::from_text(
+                "Goldman, J. E., & Schwartz, J. H. (1972). Cellular specificity of serotonin \
+                 storage and axonal transport in identified neurones of Aplysia californica. \
+                 The Journal of Physiology, 242(1), 61-76. \
+                 https://doi.org/10.1113/jphysiol.1974.sp010694",
+            ),
+            goldman.clone(),
+        ),
+        (
+            "h1-738",
+            Claim::from_text(
+                "C. Brukner, M. Zukowski, and A. Zeilinger, “The essence of entanglement,” Phys. \
+                 Rev. A, vol. 63, no. 10, pp. 644-661, 2001.",
+            ),
+            article(
+                "Conceptual inadequacy of the Shannon information in quantum measurements",
+                &["Časlav Brukner", "Anton Zeilinger"],
+                2001,
+                ("Physical Review A", "63", "644"),
+            ),
+        ),
+        (
+            "h1-694",
+            Claim::from_text(
+                "@inproceedings{k2022, author = {Kingsley-Odhiambo, Henrik and Merriweather-Sung, \
+                 Ilse}, title = {Federated contrastive pretraining for clinical note \
+                 de-identification}, booktitle = {Findings of the Association for Computational \
+                 Linguistics: EMNLP 2022}, year = {2022}, pages = {3321--3334}}",
+            ),
+            {
+                let mut r = record(
+                    &["isbn:9781959429432"],
+                    "Findings of the Association for Computational Linguistics",
+                    &["Association for Computational Linguistics"],
+                    2022,
+                );
+                r.work.work_type = Some(crate::work::WorkType::Book);
+                r
+            },
+        ),
+        (
+            "h1-496",
+            Claim::from_text(
+                "@article{levitt1996, author = {Levitt, S. D.}, title = {The Effect of Prison \
+                 Population Size on Crime Rates: Evidence from Prison Overcrowding Litigation}, \
+                 journal = {Social Science & Medicine}, year = {1996}}",
+            ),
+            {
+                let mut r = record(
+                    &[],
+                    "The effect of prison population size on crime rates: evidence from prison \
+                     overcrowding litigation",
+                    &["Steven D. Levitt"],
+                    1996,
+                );
+                r.work.work_type = Some(crate::work::WorkType::Book);
+                r
+            },
+        ),
+        (
+            "h1-491",
+            Claim::from_text(
+                "Berry, Christopher J. “Adam Smith's Considerations on Language.” Revue \
+                 historique 35, no. 1 (1974): 130.",
+            ),
+            article(
+                "Adam Smith's Considerations on Language",
+                &["Christopher J. Berry"],
+                1974,
+                ("Journal of the History of Ideas", "35", "130-138"),
+            ),
+        ),
+        (
+            "h1-458",
+            Claim::from_text(
+                "@article{goldman1972, author = {Goldman, J. E. and Schwartz, J. H.}, title = \
+                 {Cellular specificity of serotonin storage and axonal transport in identified \
+                 neurones of Aplysia californica}, journal = {The Journal of Physiology}, year = \
+                 {1972}, volume = {242}, pages = {61--76}, doi = \
+                 {10.1113/jphysiol.1974.sp010694}}",
+            ),
+            goldman.clone(),
+        ),
+    ];
+    for (id, claim, record) in &cases {
+        let a = assess(claim, record);
+        assert!(a.confidence < VERIFIED, "{id}: {a:?}");
+    }
+    // The same works cited right still verify.
+    for (claim, record) in [
+        (
+            "Mondain-Monval, O. et al. Anisotropic Rayleigh scattering investigations in smectic \
+             A liquid crystal phases. J. Chem. Phys. 101, 6301 (1994).",
+            jcp,
+        ),
+        (
+            "Perera C. After the Tsunami: Legal Implications of Mass Burials of Unidentified \
+             Victims in Sri Lanka. PLoS Med. 2005;2(6):e185.",
+            tsunami,
+        ),
+        (
+            "R. Khandekar, S. Rao, and U. Vazirani, “Graph partitioning using single commodity \
+             flows,” J. ACM, vol. 56, no. 4, pp. 1-15, 2009.",
+            khandekar,
+        ),
+        (
+            "Park, Robin, Anusha Chidharla, and Kathan Mehta. “Sex-bias in COVID-19-associated \
+             illness severity and mortality in cancer patients: A systematic review and \
+             meta-analysis.” EClinicalMedicine (2020). \
+             https://doi.org/10.1016/j.eclinm.2020.100519",
+            eclinm,
+        ),
+        (
+            "Laris, P. On the problems and promises of savanna fire regime change. Nat Commun \
+             12, 4891 (2021).",
+            laris,
+        ),
+        (
+            "Goldman, J. E., & Schwartz, J. H. (1974). Cellular specificity of serotonin \
+             storage and axonal transport in identified neurones of Aplysia californica. The \
+             Journal of Physiology, 242(1), 61-76. https://doi.org/10.1113/jphysiol.1974.sp010694",
+            goldman,
+        ),
+    ] {
+        let a = assess(&Claim::from_text(claim), &record);
+        assert!(a.confidence >= VERIFIED, "{claim}: {a:?}");
+    }
+}
+
+/// A conference paper's record: its proceedings as the container.
+fn proceedings(title: &str, authors: &[&str], year: i16, venue: &str, pages: &str) -> SourceRecord {
+    let mut r = record(&[], title, authors, year);
+    r.work.work_type = Some(crate::work::WorkType::ConferencePaper);
+    r.work.container_title = Some(venue.into());
+    r.work.page = Some(pages.into());
+    r
+}
+
+/// An arXiv preprint's record, as OpenAlex gives it: in no venue.
+fn arxiv_preprint(id: &str, title: &str, authors: &[&str], year: i16) -> SourceRecord {
+    let mut r = record(&[id], title, authors, year);
+    r.work.work_type = Some(crate::work::WorkType::Preprint);
+    r.work.container_title = Some("arXiv (Cornell University)".into());
+    r
+}
+
+#[test]
+fn second_held_out_red_team_failures_stay_fixed() {
+    // Minimised false VERIFIEDs from bench/redteam/holdout-2.jsonl (round
+    // 3), against the records they verified: none may verify now. Each
+    // with its line there.
+    let pix2pix = proceedings(
+        "Image-to-Image Translation with Conditional Adversarial Networks",
+        &["Phillip Isola", "Jun-Yan Zhu", "Tinghui Zhou"],
+        2017,
+        "2017 IEEE Conference on Computer Vision and Pattern Recognition (CVPR)",
+        "5967-5976",
+    );
+    let deepwalk = proceedings(
+        "DeepWalk: online learning of social representations",
+        &["Bryan Perozzi", "Rami Al-Rfou", "Steven Skiena"],
+        2014,
+        "Proceedings of the 20th ACM SIGKDD international conference on Knowledge discovery \
+         and data mining",
+        "701-710",
+    );
+    let tpu = proceedings(
+        "In-Datacenter Performance Analysis of a Tensor Processing Unit",
+        &["Norman P. Jouppi", "Cliff Young", "Nishant Patil"],
+        2017,
+        "Proceedings - International Symposium on Computer Architecture/Proceedings",
+        "1-12",
+    );
+    let mut attention = arxiv_preprint(
+        "arxiv:1706.03762",
+        "Attention Is All You Need",
+        &VASWANI,
+        2017,
+    );
+    attention
+        .ids
+        .push("doi:10.48550/arxiv.1706.03762".parse().unwrap());
+    // Its place pooled from the proceedings' record.
+    attention.work.volume = Some("30".into());
+    let gan = arxiv_preprint(
+        "arxiv:1406.2661",
+        "Generative Adversarial Networks",
+        &["Ian J. Goodfellow", "Jean Pouget-Abadie", "Mehdi Mirza"],
+        2014,
+    );
+    let rmp = article(
+        "Odd triplet superconductivity and related phenomena in superconductor-ferromagnet \
+         structures",
+        &["F. S. Bergeret", "A. F. Volkov", "K. B. Efetov"],
+        2005,
+        ("Reviews of Modern Physics", "77", "1321-1373"),
+    );
+    let aer = article(
+        "Consumption Disasters in the Twentieth Century",
+        &["Robert J. Barro", "José F. Ursúa"],
+        2008,
+        ("American Economic Review", "98", "58-63"),
+    );
+    let prb = article(
+        "Spin pumping in strongly coupled magnon-photon systems",
+        &["H. Maier-Flaig", "Michael Harder", "Rudolf Gross"],
+        2016,
+        ("Physical Review B", "94", "054433"),
+    );
+    let nonaka = article(
+        "A Dynamic Theory of Organizational Knowledge Creation",
+        &["Ikujiro Nonaka"],
+        1994,
+        ("Organization Science", "5", "14-37"),
+    );
+    let jones = article(
+        "Instrumental Stakeholder Theory: A Synthesis of Ethics and Economics",
+        &["Thomas M. Jones"],
+        1995,
+        ("Academy of Management Review", "20", "404-437"),
+    );
+    let bar_haim = article(
+        "Threat-related attentional bias in anxious and nonanxious individuals: A \
+         meta-analytic study.",
+        &["Yair Bar-Haim", "Dominique Lamy", "Lee Pergamin"],
+        2007,
+        ("Psychological Bulletin", "133", "1-24"),
+    );
+    let wu = article(
+        "Risk Factors Associated With Acute Respiratory Distress Syndrome and Death in Patients \
+         With Coronavirus Disease 2019 Pneumonia in Wuhan, China",
+        &["Chaomin Wu", "Xiaoyan Chen", "Yanping Cai"],
+        2020,
+        ("JAMA Internal Medicine", "180", "934-943"),
+    );
+    let hastings = article(
+        "Monte Carlo sampling methods using Markov chains and their applications",
+        &["W. K. Hastings"],
+        1970,
+        ("Biometrika", "57", "97-109"),
+    );
+    let methadone = article(
+        "Methadone maintenance treatment and mortality in people with criminal convictions: A \
+         population-based retrospective cohort study from Canada",
+        &["Angela Russolillo", "Akm Moniruzzaman", "Julian M. Somers"],
+        2018,
+        ("PLoS Medicine", "15", "e1002625"),
+    );
+    let varia = article(
+        "Intraperitoneal Radioactive Phosphorus (32P) Versus Observation After Negative \
+         Second-Look Laparotomy for Stage III Ovarian Carcinoma: A Randomized Trial of the \
+         Gynecologic Oncology Group",
+        &["Mark A. Varia", "Frederick B. Stehman", "Brian N. Bundy"],
+        2003,
+        ("Journal of Clinical Oncology", "21", "2849-2855"),
+    );
+    let unplaced = |mut r: SourceRecord| {
+        r.work.volume = None;
+        r.work.page = None;
+        r
+    };
+    let bae = unplaced(article(
+        "Resolving Conflicts between Informed Consent and Patients' Privacy in Medical \
+         Emergencies",
+        &["Hyuna Bae", "Seok-Bae LEE", "Hye-Young JANG"],
+        2007,
+        ("Korean Journal of Medical Ethics", "10", "73-82"),
+    ));
+    let trieling = unplaced(article(
+        "Monopolar vortices in an irrotational annular shear flow",
+        &["R. R. Trieling", "A. H. LINSSEN", "G. J. F. van Heijst"],
+        1998,
+        ("Journal of Fluid Mechanics", "360", "273-294"),
+    ));
+    let rangel = unplaced(article(
+        "La enseñanza de la accesibilidad en los cursos de Archivística en Brasil: un análisis \
+         formativo de los planes de estudio",
+        &[
+            "Thayron Rodrigues Rangel",
+            "Lucía María Velloso de Oliveira",
+        ],
+        2024,
+        ("Inclusão Social", "16", "1"),
+    ));
+    let mut autophagy = record(
+        &["10.4161/auto.19496"],
+        "Guidelines for the use and interpretation of assays for monitoring autophagy",
+        &["Daniel J. Klionsky", "Fabio C. Abdalla", "Hagai Abeliovich"],
+        2012,
+    );
+    autophagy.work.work_type = Some(crate::work::WorkType::JournalArticle);
+    autophagy.work.container_title = Some("Autophagy".into());
+    // OpenAlex types it a preprint (bioRxiv's DOI prefix), in a journal.
+    let mut cytoscape = record(
+        &["10.1101/gr.1239303", "pmid:14597658"],
+        "Cytoscape: A Software Environment for Integrated Models of Biomolecular Interaction \
+         Networks",
+        &["Paul Shannon", "Andrew Markiel", "Owen Ozier"],
+        2003,
+    );
+    cytoscape.work.work_type = Some(crate::work::WorkType::Preprint);
+    cytoscape.work.container_title = Some("Genome Research".into());
+    let panel = arxiv_preprint(
+        "arxiv:2610.36176",
+        "Probabilistic Causal Panel Analysis",
+        &["Carl Bonander", "Mats Ekman"],
+        2026,
+    );
+    let noma = article(
+        "On the Performance of Non-Orthogonal Multiple Access in 5G Systems with Randomly \
+         Deployed Users",
+        &["Zhiguo Ding", "Zheng Yang", "Pingzhi Fan"],
+        2014,
+        ("IEEE Signal Processing Letters", "21", "1501-1505"),
+    );
+    let cases: Vec<(&str, Claim, &SourceRecord)> = vec![
+        // k: a conference paper at another conference.
+        (
+            "h2-747",
+            Claim::from_text(
+                "Phillip Isola, Jun-Yan Zhu, Tinghui Zhou, and Alexei A. Efros. 2017. \
+                 Image-to-Image Translation with Conditional Adversarial Networks. In IEEE \
+                 International Conference on Computer Vision (ICCV), 5967–5976.",
+            ),
+            &pix2pix,
+        ),
+        (
+            "h2-751",
+            Claim::from_text(
+                "@inproceedings{perozzi2014deepwalk, title={DeepWalk: online learning of social \
+                 representations}, author={Perozzi, Bryan and Al-Rfou, Rami and Skiena, \
+                 Steven}, booktitle={Proceedings of the International Conference on Machine \
+                 Learning (ICML)}, pages={701--710}, year={2014}, publisher={ACM}}",
+            ),
+            &deepwalk,
+        ),
+        (
+            "h2-753",
+            Claim::from_text(
+                "Norman P. Jouppi, Cliff Young, and Nishant Patil. 2017. In-Datacenter \
+                 Performance Analysis of a Tensor Processing Unit. In IEEE/ACM International \
+                 Symposium on Microarchitecture (MICRO), 1–12.",
+            ),
+            &tpu,
+        ),
+        // k: a preprint's record can't confirm the conference cited.
+        (
+            "h2-758",
+            Claim::from_text(
+                "A. Vaswani et al., \"Attention Is All You Need,\" in Proceedings of the 34th \
+                 International Conference on Machine Learning (ICML 2017), 2017.",
+            ),
+            &attention,
+        ),
+        (
+            "h2-761",
+            Claim::from_text(
+                "@inproceedings{goodfellow2014generative, title={Generative Adversarial \
+                 Networks}, author={Goodfellow, Ian J. and Pouget-Abadie, Jean and Mirza, \
+                 Mehdi}, booktitle={International Conference on Learning Representations (ICLR \
+                 2014)}, year={2014}}",
+            ),
+            &gan,
+        ),
+        // c: locators and journals in styles not read before.
+        (
+            "h2-562",
+            Claim::from_text(
+                "Bergeret, F. S., et al. \"Odd triplet superconductivity and related phenomena \
+                 in superconductor-ferromagnet structures.\" Physical Review B 77.4 (2005): \
+                 1321-1373.",
+            ),
+            &rmp,
+        ),
+        (
+            "h2-594",
+            Claim::from_text(
+                "Barro, R.J. and Ursúa, J.F., 2008. Consumption Disasters in the Twentieth \
+                 Century. American Economic Review, 100(2), pp.58-63.",
+            ),
+            &aer,
+        ),
+        (
+            "h2-564",
+            Claim::from_text(
+                "Maier-Flaig, H., Harder, M., Gross, R., 2016. Spin pumping in strongly coupled \
+                 magnon-photon systems. Nature Physics, 94(5), p.054433.",
+            ),
+            &prb,
+        ),
+        (
+            "h2-566",
+            Claim::from_text(
+                "25. Nonaka, I. A Dynamic Theory of Organizational Knowledge Creation. Psychol. \
+                 Sci. 5, 14–37 (1994).",
+            ),
+            &nonaka,
+        ),
+        (
+            "h2-595",
+            Claim::from_text(
+                "T. M. Jones, \"Instrumental Stakeholder Theory: A Synthesis of Ethics and \
+                 Economics,\" Acad Management Rev, vol. 20, no. 2, Art. no. 615, 1995.",
+            ),
+            &jones,
+        ),
+        (
+            "h2-557",
+            Claim::from_text(
+                "the 2007 Bar-Haim paper in Psychol Sci (Threat-related attentional bias in \
+                 anxious and nonanxious individuals: A meta-analytic study.)",
+            ),
+            &bar_haim,
+        ),
+        // j: a title with words swapped for synonyms.
+        (
+            "h2-720",
+            Claim::from_text(
+                "Wu, Chaomin, et al. \"Likelihood Determinants Associated With Acute \
+                 Respiratory Distress Syndrome and Death in Patients With Coronavirus Illness \
+                 2019 Pneumonia in Wuhan, China.\" JAMA Internal Medicine 180.7 (2020): 934.",
+            ),
+            &wu,
+        ),
+        (
+            "h2-745",
+            Claim::from_text(
+                "39. Hastings, W. K. Monte Carlo sampling approaches with Markov chains and their \
+                 applications. Biometrika 57, 97–109 (1970).",
+            ),
+            &hastings,
+        ),
+        (
+            "h2-732",
+            Claim::from_text(
+                "Russolillo, A., Moniruzzaman, A. & Somers, J. M. Methadone maintenance therapy \
+                 and mort- ality in people with criminal convictions: A population-driven \
+                 retrospective cohort study from Canada. PLoS Med. 15, e1002625 (2018).",
+            ),
+            &methadone,
+        ),
+        (
+            "h2-731",
+            Claim {
+                title: Some(
+                    "Intraperitoneal Radioactive Phosphorus (32P) Versus Observation After \
+                     Negative Second-Look Laparotomy for Stage III Ovarian Carcinoma: A \
+                     Controlled Study of the Gynecologic Oncology Group"
+                        .into(),
+                ),
+                authors: vec!["Varia, Mark A.".into(), "Stehman, Frederick B.".into()],
+                year: Some(2003),
+                container: Some("Journal of Clinical Oncology".into()),
+                volume: Some("21".into()),
+                page: Some("2849-2855".into()),
+                ..Claim::default()
+            },
+            &varia,
+        ),
+        // b: co-authors added beside the real first author.
+        (
+            "h2-482",
+            Claim::from_text(
+                "Bae, H-A., LEE, S-B., Corvastine, E. and JANG, H-Y., 2007. Resolving Conflicts \
+                 between Informed Consent and Patients' Privacy in Medical Emergencies. Korean \
+                 Journal of Medical Ethics, 10(1), pp.73-82.",
+            ),
+            &bae,
+        ),
+        (
+            "h2-496",
+            Claim::from_text(
+                "TRIELING, R.R. and Corveshaw, C., 1998. Monopolar vortices in an irrotational \
+                 annular shear flow. Journal of Fluid Mechanics, 360, pp.273-294.",
+            ),
+            &trieling,
+        ),
+        (
+            "h2-495",
+            Claim::from_text(
+                "Rangel TR, Thalubrecht HL, María Velloso de Oliveira L. La enseñanza de la \
+                 accesibilidad en los cursos de Archivística en Brasil: un análisis formativo de \
+                 los planes de estudio. Inclusão Soc. 2024;16(1).",
+            ),
+            &rangel,
+        ),
+        // h: a journal's article cited as a preprint, a preprint in a journal.
+        (
+            "h2-718",
+            Claim::from_text(
+                "Klionsky, D. J., Abdalla, F. C., & Abeliovich, H. (2011). Guidelines for the \
+                 use and interpretation of assays for monitoring autophagy. bioRxiv [Preprint].",
+            ),
+            &autophagy,
+        ),
+        (
+            "h2-715",
+            Claim::from_text(
+                "Shannon, P., Markiel, A., & Ozier, O. (2002). Cytoscape: A Software \
+                 Environment for Integrated Models of Biomolecular Interaction Networks. bioRxiv \
+                 [Preprint].",
+            ),
+            &cytoscape,
+        ),
+        (
+            "h2-699",
+            Claim::from_text(
+                "Bonander, Carl, et al. \"Probabilistic Causal Panel Analysis.\" Journal of \
+                 Econometrics 251.1 (2026): 743-752.",
+            ),
+            &panel,
+        ),
+        // d: another work's place under a title in Chinese.
+        (
+            "h2-624",
+            Claim::from_text(
+                "[26] 周毅艺. 化学分析仪器计量检定分析[J]. IEEE Signal Processing Letters, 2014, \
+                 21(12): 1501-1505.",
+            ),
+            &noma,
+        ),
+    ];
+    let failing: Vec<String> = cases
+        .iter()
+        .filter_map(|(id, claim, record)| {
+            let a = assess(claim, record);
+            (a.confidence >= VERIFIED).then(|| format!("{id}: {a:?}"))
+        })
+        .collect();
+    assert!(failing.is_empty(), "{failing:#?}");
+    // f: BibTeX's arXiv eprint is the identifier claimed.
+    let eprint = Claim::from_text(
+        "@misc{shanu2017, title={A Computational Approach for Designing Tiger Corridors in \
+         India}, author={Shanu, Saurabh}, year={2017}, eprint={1710.64837}, \
+         archivePrefix={arXiv}, primaryClass={cs.CY}}",
+    );
+    assert_eq!(eprint.ids, ["arxiv:1710.64837".parse::<WorkId>().unwrap()]);
+
+    // The same works cited right still verify.
+    let right: Vec<(Claim, &SourceRecord)> = vec![
+        (
+            Claim::from_text(
+                "Phillip Isola, Jun-Yan Zhu, and Tinghui Zhou. 2017. Image-to-Image Translation \
+                 with Conditional Adversarial Networks. In Proceedings of the IEEE Conference on \
+                 Computer Vision and Pattern Recognition (CVPR), 5967–5976.",
+            ),
+            &pix2pix,
+        ),
+        (
+            Claim::from_text(
+                "@inproceedings{perozzi2014deepwalk, title={DeepWalk: online learning of social \
+                 representations}, author={Perozzi, Bryan and Al-Rfou, Rami and Skiena, \
+                 Steven}, booktitle={Proceedings of the 20th ACM SIGKDD International Conference \
+                 on Knowledge Discovery and Data Mining (KDD)}, pages={701--710}, year={2014}}",
+            ),
+            &deepwalk,
+        ),
+        (
+            Claim::from_text(
+                "Norman P. Jouppi, Cliff Young, and Nishant Patil. 2017. In-Datacenter \
+                 Performance Analysis of a Tensor Processing Unit. In Proceedings of the 44th \
+                 Annual International Symposium on Computer Architecture (ISCA), 1–12.",
+            ),
+            &tpu,
+        ),
+        (
+            Claim::from_text(
+                "Vaswani A, Shazeer N, Parmar N. Attention is all you need. arXiv:1706.03762. \
+                 2017.",
+            ),
+            &attention,
+        ),
+        (
+            Claim::from_text(
+                "Bergeret, F. S., et al. \"Odd triplet superconductivity and related phenomena \
+                 in superconductor-ferromagnet structures.\" Reviews of Modern Physics 77.4 \
+                 (2005): 1321-1373.",
+            ),
+            &rmp,
+        ),
+        (
+            Claim::from_text(
+                "Barro, R.J. and Ursúa, J.F., 2008. Consumption Disasters in the Twentieth \
+                 Century. American Economic Review, 98(2), pp.58-63.",
+            ),
+            &aer,
+        ),
+        (
+            Claim::from_text(
+                "Maier-Flaig, H., Harder, M., Gross, R., 2016. Spin pumping in strongly coupled \
+                 magnon-photon systems. Physical Review B, 94(5), p.054433.",
+            ),
+            &prb,
+        ),
+        (
+            Claim::from_text(
+                "25. Nonaka, I. A Dynamic Theory of Organizational Knowledge Creation. Organ. \
+                 Sci. 5, 14–37 (1994).",
+            ),
+            &nonaka,
+        ),
+        (
+            Claim::from_text(
+                "T. M. Jones, \"Instrumental Stakeholder Theory: A Synthesis of Ethics and \
+                 Economics,\" Acad Management Rev, vol. 20, no. 2, Art. no. 404, 1995.",
+            ),
+            &jones,
+        ),
+        (
+            Claim::from_text(
+                "Wu, Chaomin, et al. \"Risk Factors Associated With Acute Respiratory Distress \
+                 Syndrome and Death in Patients With Coronavirus Disease 2019 Pneumonia in Wuhan, \
+                 China.\" JAMA Internal Medicine 180.7 (2020): 934.",
+            ),
+            &wu,
+        ),
+        (
+            Claim::from_text(
+                "Russolillo, A., Moniruzzaman, A. & Somers, J. M. Methadone maintenance \
+                 treatment and mort- ality in people with criminal convictions: A \
+                 population-based retrospective cohort study from Canada. PLoS Med. 15, \
+                 e1002625 (2018).",
+            ),
+            &methadone,
+        ),
+        (
+            Claim::from_text(
+                "Bae, H-A., LEE, S-B. and JANG, H-Y., 2007. Resolving Conflicts between Informed \
+                 Consent and Patients' Privacy in Medical Emergencies. Korean Journal of Medical \
+                 Ethics, 10(1), pp.73-82.",
+            ),
+            &bae,
+        ),
+        (
+            Claim::from_text(
+                "Rangel TR, María Velloso de Oliveira L. La enseñanza de la accesibilidad en los \
+                 cursos de Archivística en Brasil: un análisis formativo de los planes de \
+                 estudio. Inclusão Soc. 2024;16(1).",
+            ),
+            &rangel,
+        ),
+        (
+            Claim::from_text(
+                "Klionsky, D. J., Abdalla, F. C., & Abeliovich, H. (2012). Guidelines for the \
+                 use and interpretation of assays for monitoring autophagy. Autophagy, 8(4), \
+                 445-544.",
+            ),
+            &autophagy,
+        ),
+    ];
+    let failing: Vec<String> = right
+        .iter()
+        .filter_map(|(claim, record)| {
+            let a = assess(claim, record);
+            (a.confidence < VERIFIED).then(|| format!("{claim:?}: {a:?}"))
+        })
+        .collect();
+    assert!(failing.is_empty(), "{failing:#?}");
+}
+
+#[test]
+fn a_paper_merged_with_its_preprint_is_at_the_conference_its_doi_names() {
+    // h2-747: the CVPR paper's record merged with its arXiv preprint's,
+    // without a venue; its IEEE DOI names the conference.
+    let mut merged = arxiv_preprint(
+        "doi:10.1109/cvpr.2017.632",
+        "Image-to-Image Translation with Conditional Adversarial Networks",
+        &["Phillip Isola", "Jun-Yan Zhu", "Tinghui Zhou"],
+        2017,
+    );
+    merged.work.container_title = None;
+    merged.ids.push("arxiv:1611.07004".parse().unwrap());
+    let cite = |venue: &str| {
+        Claim::from_text(format!(
+            "Phillip Isola, Jun-Yan Zhu, and Tinghui Zhou. 2017. Image-to-Image Translation with \
+             Conditional Adversarial Networks. In {venue}, 5967–5976."
+        ))
+    };
+    let iccv = assess(
+        &cite("IEEE International Conference on Computer Vision (ICCV)"),
+        &merged,
+    );
+    assert_eq!(iccv.container.agreement, Agreement::Mismatch, "{iccv:?}");
+    assert!(iccv.confidence < VERIFIED, "{iccv:?}");
+    let cvpr = assess(
+        &cite("Proceedings of the IEEE Conference on Computer Vision and Pattern Recognition"),
+        &merged,
+    );
+    assert!(cvpr.confidence >= VERIFIED, "{cvpr:?}");
+    // h2-760: a preprint merged with another repository's copy (a DataCite
+    // DOI naming no venue) can't confirm the conference cited.
+    let mut batchnorm = arxiv_preprint(
+        "arxiv:1502.03167",
+        "Batch Normalization: Accelerating Deep Network Training by Reducing Internal \
+         Covariate Shift",
+        &["Sergey Ioffe", "Christian Szegedy"],
+        2015,
+    );
+    batchnorm.work.container_title = None;
+    batchnorm.ids.push("doi:10.57702/o9raffed".parse().unwrap());
+    let text = "S. Ioffe and C. Szegedy, \"Batch Normalization: Accelerating Deep Network \
+                Training by Reducing Internal Covariate Shift,\" in Advances in Neural \
+                Information Processing Systems 28 (NeurIPS 2015), 2015.";
+    let a = assess(&Claim::from_text(text), &batchnorm);
+    assert!((PLAUSIBLE..VERIFIED).contains(&a.confidence), "{a:?}");
+}
+
+#[test]
+fn a_title_reworded_with_synonyms_is_not_the_records() {
+    // h2-726: words swapped for synonyms, given apart.
+    for (claimed, actual) in [
+        (
+            "Function of Insulin Resistance in Human Illness",
+            "Role of Insulin Resistance in Human Disease",
+        ),
+        (
+            "Breast cancer screening uptake and barriers among females in Hue, Vietnam: A \
+             cross-sectional review.",
+            "Breast cancer screening uptake and barriers among women in Hue, Vietnam: A \
+             cross-sectional survey.",
+        ),
+    ] {
+        assert!(text::replaces(claimed, actual), "{claimed}");
+    }
+    // The same title written otherwise is not reworded: respelt, misspelt,
+    // abbreviated, a number or Greek letter spelt out, a word broken at a
+    // line's end, words dropped.
+    for (claimed, actual) in [
+        (
+            "Randomised trial of tumour necrosis factor alpha blockade vs placebo",
+            "Randomized trial of tumor necrosis factor α blockade versus placebo",
+        ),
+        (
+            "Type II diabetes in the programme: a mort ality study",
+            "Type 2 diabetes in the program: a mortality study",
+        ),
+        (
+            "Role of Insulin Resistance in Disease",
+            "Role of Insulin Resistance in Human Disease",
+        ),
+        // A Roman numeral for a digit, years that differ by a digit aligned
+        // as they are (holdout-1 #277).
+        (
+            "Midlife in the United States (MIDUS 2), 2004-2006",
+            "National Survey of Midlife Development in the United States (MIDUS II), 2004-2006",
+        ),
+        (
+            "Role of Insulin Resistance in Human Disease",
+            "Role of Insulin Resistance in Human Disease",
+        ),
+        // Another title altogether isn't reworded: it differs.
+        (
+            "Deep residual learning for image recognition",
+            "Role of Insulin Resistance in Human Disease",
+        ),
+    ] {
+        assert!(!text::replaces(claimed, actual), "{claimed}");
+    }
+}
+
+#[test]
+fn a_paper_cited_at_another_meeting_is_told_by_its_subject() {
+    // h3-890, h3-896, h3-912: no named conference on either side.
+    let cite = |authors: &str, title: &str, venue: &str| {
+        Claim::from_text(format!("{authors}. {title}. In {venue}"))
+    };
+    for (n, claim, record) in [
+        (
+            "h3-890",
+            cite(
+                "MacCallum, K., & Parsons, D. (2017)",
+                "Evaluating a Mobile Toolkit for Designing Mobile Learning Activities",
+                "Proceedings of the 2nd International Workshop on User Interface Test \
+                 Automation (pp. 1–6).",
+            ),
+            proceedings(
+                "Evaluating a Mobile Toolkit for Designing Mobile Learning Activities",
+                &["Kathryn MacCallum", "David Parsons"],
+                2017,
+                "Proceedings of the 16th World Conference on Mobile and Contextual Learning",
+                "1-6",
+            ),
+        ),
+        (
+            "h3-896",
+            cite(
+                "James Kennedy, Paul Baxter, and Tony Belpaeme. 2015",
+                "The Robot Who Tried Too Hard",
+                "The 26th International ACM SIGACCESS Conference on Computers and \
+                 Accessibility (ASSETS '15). 67–74.",
+            ),
+            proceedings(
+                "The Robot Who Tried Too Hard",
+                &["James Kennedy", "Paul Baxter", "Tony Belpaeme"],
+                2015,
+                "Proceedings of the Tenth Annual ACM/IEEE International Conference on \
+                 Human-Robot Interaction",
+                "67-74",
+            ),
+        ),
+        (
+            "h3-912",
+            cite(
+                "Xiaoyu Wang, Eric Bier, Thomas Butkiewicz, William Ribarsky, and Wenwen Dou. \
+                 2011",
+                "Designing visual analytics systems for organizational environments",
+                "Interaction Design and Children (IDC '11). 1–9.",
+            ),
+            proceedings(
+                "Designing visual analytics systems for organizational environments",
+                &[
+                    "Xiaoyu Wang",
+                    "Eric Bier",
+                    "Thomas Butkiewicz",
+                    "William Ribarsky",
+                    "Wenwen Dou",
+                ],
+                2011,
+                "Proceedings of the 2011 Visual Information Communication - International \
+                 Symposium",
+                "1-9",
+            ),
+        ),
+    ] {
+        let a = assess(&claim, &record);
+        assert_eq!(a.container.agreement, Agreement::Mismatch, "{n}: {a:?}");
+        assert!((PLAUSIBLE..VERIFIED).contains(&a.confidence), "{n}: {a:?}");
+    }
+
+    // Names compared by subject, acronyms and furniture aside.
+    for (cited, actual, expected) in [
+        (
+            "Proceedings of the 9th International Conference on Information Communication \
+             and Management (ICICM 2013). 129–130.",
+            "Proceedings of the 2013 Conference on the Theory of Information Retrieval",
+            Some(false),
+        ),
+        (
+            "Fifteenth ACM Conference on Recommender Systems (RecSys '26). 1803–1820.",
+            "Proceedings of the 31st International Conference on Intelligent User Interfaces",
+            Some(false),
+        ),
+        (
+            "Companion of the 2025 ACM/IEEE International Conference on Human-Robot \
+             Interaction (HRI '25). 544–548.",
+            "Proceedings of the 2025 International Conference on Artificial Intelligence and \
+             Smart Manufacturing",
+            Some(false),
+        ),
+        // An acronym alone, against a name with its own.
+        (
+            "RecSys '26",
+            "CUI 2021 - 3rd Conference on Conversational User Interfaces",
+            Some(false),
+        ),
+        // The same meeting, written otherwise.
+        (
+            "Proc. IEEE Int. Conf. Robot. Autom., pp. 1–6",
+            "2015 IEEE International Conference on Robotics and Automation (ICRA)",
+            Some(true),
+        ),
+        (
+            "Proceedings of the 2019 CHI Conference on Human Factors in Computing Systems \
+             (CHI '19). Association for Computing Machinery, New York, NY, USA, 1–12.",
+            "Proceedings of the 2019 CHI Conference on Human Factors in Computing Systems",
+            Some(true),
+        ),
+        (
+            "IEEE/RSJ Int. Conf. Intell. Robots Syst. (IROS)",
+            "2021 IEEE/RSJ International Conference on Intelligent Robots and Systems (IROS)",
+            Some(true),
+        ),
+        (
+            "HRI '15",
+            "Proceedings of the Tenth Annual ACM/IEEE International Conference on \
+             Human-Robot Interaction (HRI)",
+            Some(true),
+        ),
+        // An acronym against a name without one: can't be told.
+        (
+            "ASSETS '15",
+            "Proceedings of the 17th International ACM SIGACCESS Conference on Computers & \
+             Accessibility",
+            None,
+        ),
+        (
+            "Proc. UIST",
+            "Proceedings of the 28th Annual ACM Symposium on User Interface Software & \
+             Technology",
+            None,
+        ),
+    ] {
+        assert_eq!(
+            publication::proceedings_agree(cited, actual),
+            expected,
+            "{cited} | {actual}"
+        );
+    }
+
+    // Cited at its own meeting, however written, it still verifies.
+    let hri = proceedings(
+        "The Robot Who Tried Too Hard",
+        &["James Kennedy", "Paul Baxter", "Tony Belpaeme"],
+        2015,
+        "Proceedings of the Tenth Annual ACM/IEEE International Conference on Human-Robot \
+         Interaction",
+        "67-74",
+    );
+    for venue in [
+        "Proceedings of the Tenth Annual ACM/IEEE International Conference on Human-Robot \
+         Interaction (HRI '15). 67–74.",
+        "Proc. ACM/IEEE Int. Conf. Human-Robot Interaction, pp. 67–74, 2015.",
+        "HRI '15. 67–74.",
+    ] {
+        let claim = cite(
+            "James Kennedy, Paul Baxter, and Tony Belpaeme. 2015",
+            "The Robot Who Tried Too Hard",
+            venue,
+        );
+        let a = assess(&claim, &hri);
+        assert!(a.confidence >= VERIFIED, "{venue}: {a:?}");
+    }
+    // A journal called "Proceedings of …" is held as a journal.
+    let pnas = article(
+        "Neural networks and physical systems with emergent collective computational abilities",
+        &["J J Hopfield"],
+        1982,
+        (
+            "Proceedings of the National Academy of Sciences",
+            "79",
+            "2554-2558",
+        ),
+    );
+    let a = assess(
+        &Claim::from_text(
+            "Hopfield JJ. Neural networks and physical systems with emergent collective \
+             computational abilities. Proc Natl Acad Sci U S A. 1982;79(8):2554-8.",
+        ),
+        &pnas,
+    );
+    assert!(a.confidence >= VERIFIED, "{a:?}");
+}
+
+#[test]
+fn a_journal_article_cited_in_a_meetings_proceedings_is_another_venue() {
+    // h3-908: the HRI paper's namesake in a journal, found for a citation
+    // of a symposium's proceedings.
+    let journal = article(
+        "Is a Robot better than Video for Initiating Remote Social Connections among Children?",
+        &["Nuri Kim", "Jeonghye Han", "Wendy Ju"],
+        2014,
+        (
+            "Journal of Institute of Control, Robotics and Systems",
+            "20",
+            "208-209",
+        ),
+    );
+    let claim = Claim::from_text(
+        "Kim, N., Han, J., & Ju, W. (2014). Is a robot better than video for initiating remote \
+         social connections among children? In Proceedings of the 8th International Symposium \
+         on Visual Information Communication and Interaction (pp. 208–209).",
+    );
+    let a = assess(&claim, &journal);
+    assert_eq!(a.container.agreement, Agreement::Mismatch, "{a:?}");
+    assert!((PLAUSIBLE..VERIFIED).contains(&a.confidence), "{a:?}");
+    // Cited in its journal, it verifies.
+    let claim = Claim::from_text(
+        "Kim, N., Han, J., & Ju, W. (2014). Is a robot better than video for initiating remote \
+         social connections among children? Journal of Institute of Control, Robotics and \
+         Systems, 20, 208–209.",
+    );
+    let a = assess(&claim, &journal);
+    assert!(a.confidence >= VERIFIED, "{a:?}");
+    // A journal called "Proceedings of …", abbreviated, isn't a meeting.
+    let prsb = article(
+        "Rapid evolution of a sexually selected trait",
+        &["Alice Smith-Holloway"],
+        2003,
+        (
+            "Proceedings of the Royal Society B: Biological Sciences",
+            "270",
+            "1234-1240",
+        ),
+    );
+    let claim = Claim::from_text(
+        "Smith-Holloway A. Rapid evolution of a sexually selected trait. In Proc. R. Soc. B \
+         270, 1234–1240 (2003).",
+    );
+    let a = assess(&claim, &prsb);
+    assert!(a.confidence >= VERIFIED, "{a:?}");
+}
+
+/// A book chapter's record, in no volume: its book as the container.
+fn chapter(title: &str, authors: &[&str], year: i16, book: &str) -> SourceRecord {
+    let mut r = record(&[], title, authors, year);
+    r.work.work_type = Some(crate::work::WorkType::Chapter);
+    r.work.container_title = Some(book.into());
+    r
+}
+
+#[test]
+fn a_chapter_cited_as_a_journals_article_is_plausible() {
+    let methane = chapter(
+        "Methane Cycling and Climate",
+        &["Han Dolman"],
+        2019,
+        "Biogeochemical Cycles and Climate",
+    );
+    let psychotherapy = chapter(
+        "Integrative Psychotherapy with Children",
+        &["Athena A. Drewes", "John W. Seymour"],
+        2019,
+        "Handbook of Psychotherapy Integration",
+    );
+    let culpability = chapter(
+        "Law, Neuroscience, and Criminal Culpability",
+        &["Lisa Claydon"],
+        2011,
+        "Law and Neuroscience",
+    );
+    let structured = Claim {
+        title: Some("Law, Neuroscience, and Criminal Culpability".into()),
+        authors: vec!["Lisa Claydon".into()],
+        year: Some(2011),
+        container: Some("Journal of Neuroscience".into()),
+        volume: Some("60".into()),
+        page: Some("141-170".into()),
+        ..Claim::default()
+    };
+    for (n, claim, record, venue) in [
+        // The book's title as the journal, with a volume and issue.
+        (
+            "h3-947",
+            Claim::from_text(
+                "Dolman H. Methane Cycling and Climate. Biogeochemical Cycles and Climate. \
+                 2019;23(5):159-175.",
+            ),
+            &methane,
+            Agreement::Match,
+        ),
+        (
+            "h3-948 (APA)",
+            Claim::from_text(
+                "Dolman, H. (2019). Methane Cycling and Climate. Biogeochemical Cycles and \
+                 Climate, 23(5), 159–175.",
+            ),
+            &methane,
+            Agreement::Match,
+        ),
+        // A real journal of the field.
+        (
+            "h3-964",
+            Claim::from_text(
+                "Drewes AA, Seymour JW. Integrative Psychotherapy with Children. Psychotherapy \
+                 Research. 2019;54(12):341-356.",
+            ),
+            &psychotherapy,
+            Agreement::Mismatch,
+        ),
+        ("h3-959", structured, &culpability, Agreement::Mismatch),
+    ] {
+        let a = assess(&claim, record);
+        assert_eq!(a.container.agreement, venue, "{n}: {a:?}");
+        assert!((PLAUSIBLE..VERIFIED).contains(&a.confidence), "{n}: {a:?}");
+    }
+    // Cited as a chapter, or in its series' volume, it verifies.
+    let mut lncs = chapter(
+        "U-Net: Convolutional Networks for Biomedical Image Segmentation",
+        &["Olaf Ronneberger", "Philipp Fischer", "Thomas Brox"],
+        2015,
+        "Lecture Notes in Computer Science",
+    );
+    lncs.work.page = Some("234-241".into());
+    for (claim, record) in [
+        (
+            "Dolman H. Methane Cycling and Climate. In: Dolman H, ed. Biogeochemical Cycles and \
+             Climate. Oxford University Press; 2019:159-175.",
+            &methane,
+        ),
+        (
+            "Ronneberger O, Fischer P, Brox T. U-Net: Convolutional Networks for Biomedical \
+             Image Segmentation. Lecture Notes in Computer Science, vol. 9351, pp. 234–241. \
+             Springer, 2015.",
+            &lncs,
+        ),
+    ] {
+        let a = assess(&Claim::from_text(claim), record);
+        assert!(a.confidence >= VERIFIED, "{claim}: {a:?}");
+    }
+    // Nor does the book, its title where the journal stands.
+    let mut book = record(
+        &[],
+        "Biogeochemical Cycles and Climate",
+        &["Han Dolman"],
+        2019,
+    );
+    book.work.work_type = Some(crate::work::WorkType::Book);
+    let a = assess(
+        &Claim::from_text(
+            "Dolman H. Methane Cycling and Climate. Biogeochemical Cycles and Climate. \
+             2019;23(5):159-175.",
+        ),
+        &book,
+    );
+    assert!(a.confidence < VERIFIED, "{a:?}");
+    let a = assess(
+        &Claim::from_text("Dolman H. Biogeochemical Cycles and Climate. Oxford: OUP; 2019."),
+        &book,
+    );
+    assert!(a.confidence >= VERIFIED, "{a:?}");
+    assert!(publication::cites_issue(
+        "Psychotherapy Research. 2019;54(12):341-356."
+    ));
+    assert!(publication::cites_issue(
+        "Psychotherapy Research, 54(12), 341–356."
+    ));
+    assert!(!publication::cites_issue("Injury 47 (2016) 797–804"));
+    assert!(!publication::cites_issue("N Engl J Med. 2017;376:2545-55."));
+}
+
+#[test]
+fn an_identified_work_with_other_authors_is_plausible() {
+    // h3-138: the record's byline garbled into one name, cited as the
+    // record gives it; h3-622: every author invented. The DOI, title and
+    // place name the work: plausible, never verified, nor a mismatch.
+    let mut ruff = placed(
+        &["doi:10.1080/026990599120963"],
+        "In search of a unified definition for mild traumatic brain injury",
+        &["Ronald M. Ruff, Paul Jurica"],
+        1999,
+        ("Brain Injury", "13", "943-952"),
+    );
+    ruff.work.work_type = Some(crate::work::WorkType::JournalArticle);
+    let claim = |authors: &[&str]| Claim {
+        title: Some("In search of a unified definition for mild traumatic brain injury".into()),
+        authors: authors.iter().map(|a| (*a).to_owned()).collect(),
+        container: Some("Brain Injury".into()),
+        volume: Some("13".into()),
+        page: Some("943-952".into()),
+        ids: vec!["doi:10.1080/026990599120963".parse().unwrap()],
+        ..Claim::default()
+    };
+    for authors in [
+        &["Ruff, Paul Jurica, Ronald M"][..],
+        &["Mervimbe, Maren L."],
+    ] {
+        let a = assess(&claim(authors), &ruff);
+        assert!(
+            (PLAUSIBLE..VERIFIED).contains(&a.confidence),
+            "{authors:?}: {a:?}"
+        );
+    }
+    // Without the place, other authors still differ.
+    let mut bare = claim(&["Mervimbe, Maren L."]);
+    bare.volume = None;
+    bare.page = None;
+    assert!(assess(&bare, &ruff).confidence < PLAUSIBLE);
+}
+
+#[test]
+fn a_journals_words_in_the_title_are_the_titles() {
+    // h3-594: a reworded title whose words are the journal's too, at the
+    // work's place with its DOI, was read as no title at all.
+    let mut gh = placed(
+        &["doi:10.1016/s1096-6374(02)00018-7"],
+        "The role of growth hormone in fetal development",
+        &["Michael J. Waters", "P. L. Kaye"],
+        2002,
+        ("Growth Hormone & IGF Research", "12", "137-146"),
+    );
+    gh.work.work_type = Some(crate::work::WorkType::JournalArticle);
+    let reworded = Claim::from_text(
+        "27. Waters MJ, Kaye PL. The contribution of growth hormone in fetal design. Growth \
+         Hormone & IGF Research. 2002;12(3):137-146. doi:10.1016/s1096-6374(02)00018-7",
+    );
+    let a = assess(&reworded, &gh);
+    assert_ne!(a.title.agreement, Agreement::Unknown, "{a:?}");
+    assert!(a.confidence < VERIFIED, "{a:?}");
+    // Without a title, the journal's words are the journal's.
+    let titleless =
+        Claim::from_text("Waters MJ, Kaye PL. Growth Hormone & IGF Research. 2002;12(3):137-146.");
+    let a = assess(&titleless, &gh);
+    assert!(a.confidence >= VERIFIED, "{a:?}");
+}
+
+#[test]
+fn a_stranger_among_names_in_a_script_without_capitals_is_seen() {
+    // h3-646: an invented co-author among Arabic names, which can't be
+    // told a person's by their capitals: the byline was not taken as
+    // complete, so the stranger passed.
+    let mut r = record(
+        &["doi:10.59743/jaf.v8i2.405"],
+        "تأثير هرمونات الغدة الدرقية وفيتامين د والسكر التراكمي على متلازمة تكيس المبايض",
+        &[
+            "امحمد عثمان فيدان",
+            "سليمان مصطفى الأطيرش",
+            "أسماء محمد القنيدي",
+            "رنيم محمد الأطرش",
+            "ريان علي بيت المال",
+        ],
+        2024,
+    );
+    r.work.work_type = Some(crate::work::WorkType::JournalArticle);
+    let claim = |authors: &[&str]| Claim {
+        title: r.work.title.clone(),
+        authors: authors.iter().map(|a| (*a).to_owned()).collect(),
+        year: Some(2024),
+        ..Claim::default()
+    };
+    let named = [
+        "فيدان, ا. ع.",
+        "سليمان مصطفى الأطيرش",
+        "القنيدي, أ. م.",
+        "الأطرش, ر. م.",
+        "بيت المال, ر. ع.",
+    ];
+    assert!(assess(&claim(&named), &r).confidence >= VERIFIED);
+    let mut stranger = named.to_vec();
+    stranger.insert(4, "Paldekwe, B. L.");
+    let a = assess(&claim(&stranger), &r);
+    assert!((PLAUSIBLE..VERIFIED).contains(&a.confidence), "{a:?}");
+}
+
+#[test]
+fn third_held_out_red_team_failures_stay_fixed() {
+    // Minimised false VERIFIEDs from bench/redteam/holdout-3.jsonl (round
+    // 4) not covered by a test of their own, against the records they
+    // verified: none may verify now.
+    let mut feds = record(
+        &["doi:10.17016/feds.2007.52"],
+        "Do High Debt Payments Hinder Household Consumption Smoothing?",
+        &["Kathleen W. Johnson", "Geng Li"],
+        2007,
+    );
+    feds.work.work_type = Some(crate::work::WorkType::JournalArticle);
+    feds.work.container_title = Some("Finance and Economics Discussion Series".into());
+    feds.work.page = Some("1-40".into());
+    let hepatoid = article(
+        "Hepatoid adenocarcinoma in the lung",
+        &["Yasufumi Hayashi", "Yoshinori Takanashi", "Hiroyuki Ohsawa"],
+        2002,
+        ("Lung Cancer", "38", "211-214"),
+    );
+    let mut alcohol = record(
+        &["doi:10.15288/jsad.2020.81.297", "pmid:32527381"],
+        "Alcohol Policy and Coronavirus: An Open Research Agenda",
+        &["Maristela G. Monteiro", "Jürgen Rehm", "Maik Duennbier"],
+        2020,
+    );
+    alcohol.work.work_type = Some(crate::work::WorkType::JournalArticle);
+    alcohol.work.container_title = Some("Journal of Studies on Alcohol and Drugs".into());
+    let cases: Vec<(&str, &str, &SourceRecord)> = vec![
+        // c: a year five off, a series' number like a year in the volume.
+        (
+            "h3-691",
+            "Johnson, K.W. and Li, G. (2012) 'Do High Debt Payments Hinder Household \
+             Consumption Smoothing?', Finance and Economics Discussion Series, 2007.0(52), pp. \
+             1-40.",
+            &feds,
+        ),
+        // c: another journal, named in prose before its volume and pages.
+        (
+            "h3-717",
+            "As Hayashi et al. (2002) showed in Cancer Epidemiology, 38, 211–214, in “Hepatoid \
+             adenocarcinoma in the lung”, the effect held across subgroups.",
+            &hepatoid,
+        ),
+        // h: a journal's article cited as a Research Square preprint.
+        (
+            "h3-885",
+            "Monteiro, M. G., Rehm, J., & Duennbier, M. (2020). Alcohol Policy and \
+             Coronavirus: An Open Research Agenda. Research Square.",
+            &alcohol,
+        ),
+    ];
+    let failing: Vec<String> = cases
+        .iter()
+        .filter_map(|(id, claim, record)| {
+            let a = assess(&Claim::from_text(*claim), record);
+            (a.confidence >= VERIFIED).then(|| format!("{id}: {a:?}"))
+        })
+        .collect();
+    assert!(failing.is_empty(), "{failing:#?}");
+
+    // The same works cited right still verify.
+    for (claim, record) in [
+        (
+            "Johnson, K.W. and Li, G. (2007) 'Do High Debt Payments Hinder Household \
+             Consumption Smoothing?', Finance and Economics Discussion Series, 2007.0(52), pp. \
+             1-40.",
+            &feds,
+        ),
+        (
+            "As Hayashi et al. (2002) showed in Lung Cancer, 38, 211–214, in “Hepatoid \
+             adenocarcinoma in the lung”, the effect held across subgroups.",
+            &hepatoid,
+        ),
+        (
+            "Monteiro, M. G., Rehm, J., & Duennbier, M. (2020). Alcohol Policy and \
+             Coronavirus: An Open Research Agenda. Journal of Studies on Alcohol and Drugs.",
+            &alcohol,
+        ),
+    ] {
+        let a = assess(&Claim::from_text(claim), record);
+        assert!(a.confidence >= VERIFIED, "{claim}: {a:?}");
+    }
+}
+
+#[test]
+fn a_sister_journal_cited_is_another_journal() {
+    // holdout-4's `w:sister-journal`: the family's parent cited for a
+    // sister's article, or a sister for the parent's.
+    let oncology = article(
+        "Cognitive Impairment Among Older Patients With Hematologic Cancers",
+        &["Tetsuya Tanimoto", "Takahiro Morita", "Kenzo Tsuda"],
+        2018,
+        ("JAMA Oncology", "4", "1783"),
+    );
+    let jama = article(
+        "Study: Exercise May Match Medication in Reducing Mortality Associated With \
+         Cardiovascular Disease, Diabetes",
+        &["Mike Mitka"],
+        2013,
+        ("JAMA", "310", "2026"),
+    );
+    let cell = article(
+        "GPAT2 is required for root cap cuticle formation in young Arabidopsis seedlings",
+        &["Alice Berhin", "Aurore Guerault", "Damien De Bellis"],
+        2025,
+        ("Cell Reports", "44", "116686"),
+    );
+    for (claim, record) in [
+        (
+            "Tanimoto T, Morita T, Tsuda K. Cognitive Impairment Among Older Patients With \
+             Hematologic Cancers. JAMA. 2018;4(12):1783.",
+            &oncology,
+        ),
+        (
+            "Mitka, M. Study: Exercise May Match Medication in Reducing Mortality Associated \
+             With Cardiovascular Disease, Diabetes. JAMA Intern Med 310, 2026 (2013).",
+            &jama,
+        ),
+        (
+            "Berhin A, Guerault A, De Bellis D. GPAT2 is required for root cap cuticle \
+             formation in young Arabidopsis seedlings. Cell. 2025;44:116686.",
+            &cell,
+        ),
+    ] {
+        let a = assess(&Claim::from_text(claim), record);
+        assert_eq!(a.container.agreement, Agreement::Mismatch, "{claim}");
+        assert!(
+            (PLAUSIBLE..VERIFIED).contains(&a.confidence),
+            "{claim}: {a:?}"
+        );
+    }
+    // Structured, the parent for its sister.
+    let claim = Claim {
+        title: Some("Cognitive Impairment Among Older Patients With Hematologic Cancers".into()),
+        authors: vec!["Tanimoto, T.".into()],
+        year: Some(2018),
+        container: Some("JAMA".into()),
+        ..Claim::default()
+    };
+    let a = assess(&claim, &oncology);
+    assert_eq!(a.container.agreement, Agreement::Mismatch);
+    assert!(a.confidence < VERIFIED, "{a:?}");
+    // Its own abbreviation, or its name with its subtitle, verifies.
+    for (claim, record) in [
+        (
+            "Tanimoto T, Morita T, Tsuda K. Cognitive Impairment Among Older Patients With \
+             Hematologic Cancers. JAMA Oncol. 2018;4(12):1783.",
+            &oncology,
+        ),
+        (
+            "Mitka, M. Study: Exercise May Match Medication in Reducing Mortality Associated \
+             With Cardiovascular Disease, Diabetes. JAMA: The Journal of the American Medical \
+             Association 310, 2026 (2013).",
+            &jama,
+        ),
+    ] {
+        let a = assess(&Claim::from_text(claim), record);
+        assert!(a.confidence >= VERIFIED, "{claim}: {a:?}");
+    }
+}
+
+#[test]
+fn fourth_held_out_red_team_failures_stay_fixed() {
+    // Minimised false VERIFIEDs from bench/redteam/holdout-4.jsonl (round
+    // 5) not covered by a test of their own, against the records they
+    // verified: none may verify now.
+    let diabetes_care = article(
+        "Nutritional Risk of High-Carbohydrate, Guar Gum Dietary Supplementation in \
+         Non-Insulin-Dependent Diabetes Mellitus",
+        &["M. A. S. Van Duyn", "T. A. Leo", "M. E. McIvor"],
+        1986,
+        ("Diabetes Care", "9", "497-503"),
+    );
+    // A conference's abstract printed in a journal's supplement.
+    let mut abstract_ = placed(
+        &["doi:10.1136/annrheumdis-2018-eular.6693"],
+        "AB0300 Ultrasound evaluation of ankle and foot joints in rheumatoid arthritis",
+        &["Safaa Fellous", "Hanan Rkain", "Saloua Afilal"],
+        2018,
+        ("Annals of the Rheumatic Diseases", "77", "1328"),
+    );
+    abstract_.work.work_type = Some(crate::work::WorkType::Other("conference-abstract".into()));
+    let cases: Vec<(&str, &str, &SourceRecord)> = vec![
+        // A BibTeX `journal` naming the parent, though the title has its
+        // word.
+        (
+            "h4-715",
+            "@article{vanduyn1986, author = {Van Duyn, M A S and Leo, T A and McIvor, M E}, \
+             title = {Nutritional Risk of High-Carbohydrate, Guar Gum Dietary Supplementation \
+             in Non-Insulin-Dependent Diabetes Mellitus}, journal = {Diabetes}, year = {1986}, \
+             volume = {9}, pages = {497--503}}",
+            &diabetes_care,
+        ),
+        (
+            "h4-695",
+            "Fellous, S., Rkain, H., & Afilal, S. (2018). AB0300 Ultrasound evaluation of ankle \
+             and foot joints in rheumatoid arthritis. RMD Open, 77, 1328.",
+            &abstract_,
+        ),
+    ];
+    let failing: Vec<String> = cases
+        .iter()
+        .filter_map(|(id, claim, record)| {
+            let a = assess(&Claim::from_text(*claim), record);
+            (a.confidence >= VERIFIED).then(|| format!("{id}: {a:?}"))
+        })
+        .collect();
+    assert!(failing.is_empty(), "{failing:#?}");
+
+    // The same works cited right still verify.
+    for (claim, record) in [
+        (
+            "@article{vanduyn1986, author = {Van Duyn, M A S and Leo, T A and McIvor, M E}, \
+             title = {Nutritional Risk of High-Carbohydrate, Guar Gum Dietary Supplementation \
+             in Non-Insulin-Dependent Diabetes Mellitus}, journal = {Diabetes Care}, year = \
+             {1986}, volume = {9}, pages = {497--503}}",
+            &diabetes_care,
+        ),
+        (
+            "Fellous, S., Rkain, H., & Afilal, S. (2018). AB0300 Ultrasound evaluation of ankle \
+             and foot joints in rheumatoid arthritis. Annals of the Rheumatic Diseases, 77, 1328.",
+            &abstract_,
+        ),
+    ] {
+        let a = assess(&Claim::from_text(claim), record);
+        assert!(a.confidence >= VERIFIED, "{claim}: {a:?}");
+    }
+}
+
+#[test]
+fn a_meeting_of_the_same_society_cited_is_another_venue() {
+    // holdout-4's `w:conference-same-society`: another meeting of the
+    // society holding the record's (AAAI's ICWSM for its AAAI conference),
+    // or of its field, sharing words with it.
+    let mut aaai = proceedings(
+        "Sparsity-Guided Holistic Explanation for LLMs with Interpretable Inference-Time \
+         Intervention",
+        &["Zhen Tan", "Tianlong Chen", "Zhenyu Zhang"],
+        2024,
+        "Proceedings of the AAAI Conference on Artificial Intelligence",
+        "21619-21627",
+    );
+    // OpenAlex types AAAI's proceedings as a journal's articles.
+    aaai.work.work_type = Some(crate::work::WorkType::JournalArticle);
+    aaai.work.volume = Some("38".into());
+    let mut icwsm = proceedings(
+        "Link Me Baby One More Time: Social Music Discovery on Spotify",
+        &["Shazia Babul", "Desislava Hristova", "Antonio Lima"],
+        2025,
+        "Proceedings of the International AAAI Conference on Web and Social Media",
+        "146-159",
+    );
+    icwsm.work.work_type = Some(crate::work::WorkType::JournalArticle);
+    let mwscas = proceedings(
+        "Micropower class AB CMOS current conveyor based on quasi-floating gate techniques",
+        &["A. J. Lopez-Martin", "L. Acosta", "J. M. Algueta"],
+        2009,
+        "2009 52nd IEEE International Midwest Symposium on Circuits and Systems",
+        "140-143",
+    );
+    let iscas = proceedings(
+        "All-digital frequency and clock synthesis architectures from a signals and systems \
+         perspective, current state and future directions",
+        &["P. P. Sotiriadis"],
+        2010,
+        "Proceedings of 2010 IEEE International Symposium on Circuits and Systems",
+        "233-236",
+    );
+    let mm_asia = proceedings(
+        "PMCMatcher: A Parallel Multi-Scale Cascaded Transformer-Based Network for Multimodal \
+         Feature Matching",
+        &["Yun Liao", "Jiayi Lyu", "Junhui Liu"],
+        2025,
+        "Proceedings of the 7th ACM International Conference on Multimedia in Asia",
+        "1-8",
+    );
+    // A repository's copy: no venue, volume or page.
+    let mut copy = record(
+        &["doi:10.5445/ir/1000029612"],
+        "Towards Social Integration of Humanoid Robots by Conversational Concept Learning",
+        &["F. Kraft", "K. Kilgour", "R. Saam"],
+        2011,
+    );
+    copy.work.work_type = Some(crate::work::WorkType::JournalArticle);
+    // A talk's record at DataCite (Underline's), typed an article.
+    let mut talk = record(
+        &["doi:10.48448/z49g-ka35"],
+        "Attack On Prompt: Backdoor Attack in Prompt-Based Continual Learning",
+        &["Thien Trang Nguyen Vu", "Anh Tuan Tran", "Nhat Ho"],
+        2025,
+    );
+    talk.work.work_type = Some(crate::work::WorkType::Preprint);
+    for (n, claim, record) in [
+        (
+            "h4-784",
+            "T. Nguyen, A. Tran, and N. Ho, \"Attack on Prompt: Backdoor Attack in Prompt-Based \
+             Continual Learning,\" in Proceedings of the International AAAI Conference on Web \
+             and Social Media (ICWSM-25), 2025, pp. 19686–19694.",
+            &talk,
+        ),
+        (
+            "h4-771",
+            "Tan, Z., Chen, T., and Zhang, Z. 2024. Sparsity-Guided Holistic Explanation for \
+             LLMs with Interpretable Inference-Time Intervention. In Proceedings of the \
+             International AAAI Conference on Web and Social Media (ICWSM-24), 21619–21627.",
+            &aaai,
+        ),
+        (
+            "h4-793",
+            "Babul, S., Hristova, D., and Lima, A. 2025. Link Me Baby One More Time: Social \
+             Music Discovery on Spotify. In Proceedings of the AAAI Conference on Artificial \
+             Intelligence (AAAI-25), 146–159.",
+            &icwsm,
+        ),
+        (
+            "h4-776",
+            "A. J. Lopez-Martin, L. Acosta, and J. M. Algueta, \"Micropower class AB CMOS \
+             current conveyor based on quasi-floating gate techniques,\" in Proc. 2009 IEEE \
+             International Conference on Electronics, Circuits and Systems (ICECS), 2009, pp. \
+             140–143.",
+            &mwscas,
+        ),
+        (
+            "h4-788",
+            "P. P. Sotiriadis, \"All-digital frequency and clock synthesis architectures from a \
+             signals and systems perspective, current state and future directions,\" in Proc. \
+             2010 IEEE International Conference on Electronics, Circuits and Systems (ICECS), \
+             2010, pp. 233–236.",
+            &iscas,
+        ),
+        (
+            "h4-780",
+            "@inproceedings{liao2025, author = {Liao, Yun and Lyu, Jiayi and Liu, Junhui}, title \
+             = {PMCMatcher: A Parallel Multi-Scale Cascaded Transformer-Based Network for \
+             Multimodal Feature Matching}, booktitle = {Proceedings of the 2025 International \
+             Conference on Multimedia Retrieval (ICMR '25)}, year = {2025}, pages = {1--8}}",
+            &mm_asia,
+        ),
+        (
+            "h4-792",
+            "F. Kraft, K. Kilgour, and R. Saam, \"Towards social integration of humanoid robots \
+             by conversational concept learning,\" in Proc. 2010 IEEE International Conference \
+             on Robotics and Automation (ICRA), 2010, pp. 352–357.",
+            &copy,
+        ),
+    ] {
+        let a = assess(&Claim::from_text(claim), record);
+        assert_eq!(a.container.agreement, Agreement::Mismatch, "{n}: {a:?}");
+        assert!((PLAUSIBLE..VERIFIED).contains(&a.confidence), "{n}: {a:?}");
+    }
+    // At their own meetings, however written, they verify.
+    for (claim, record) in [
+        (
+            "Tan, Z., Chen, T., and Zhang, Z. 2024. Sparsity-Guided Holistic Explanation for \
+             LLMs with Interpretable Inference-Time Intervention. In Proceedings of the AAAI \
+             Conference on Artificial Intelligence (AAAI-24), 21619–21627.",
+            &aaai,
+        ),
+        (
+            "Babul, S., Hristova, D., and Lima, A. 2025. Link Me Baby One More Time: Social \
+             Music Discovery on Spotify. In Proceedings of the International AAAI Conference \
+             on Web and Social Media (ICWSM-25), 146–159.",
+            &icwsm,
+        ),
+        (
+            "A. J. Lopez-Martin, L. Acosta, and J. M. Algueta, \"Micropower class AB CMOS \
+             current conveyor based on quasi-floating gate techniques,\" in Proc. 52nd IEEE \
+             International Midwest Symposium on Circuits and Systems (MWSCAS), 2009, pp. \
+             140–143.",
+            &mwscas,
+        ),
+        (
+            "P. P. Sotiriadis, \"All-digital frequency and clock synthesis architectures from a \
+             signals and systems perspective, current state and future directions,\" in Proc. \
+             2010 IEEE International Symposium on Circuits and Systems (ISCAS), 2010, pp. \
+             233–236.",
+            &iscas,
+        ),
+    ] {
+        let a = assess(&Claim::from_text(claim), record);
+        assert!(a.confidence >= VERIFIED, "{claim}: {a:?}");
+    }
+    // An acronym the name can make, its letters among its words' initials.
+    for (cited, actual, expected) in [
+        (
+            "Proceedings of the 2019 AAAI/ACM Conference on AI, Ethics, and Society (AIES '19)",
+            "Proceedings of the AAAI/ACM Conference on AI, Ethics, and Society",
+            Some(true),
+        ),
+        (
+            "Proceedings of the 2nd Conference on Causal Learning and Reasoning, PMLR 213",
+            "Conference on Causal Learning and Reasoning",
+            Some(true),
+        ),
+        (
+            "Proceedings of the International AAAI Conference on Web and Social Media \
+             (ICWSM-22)",
+            "Proceedings of the AAAI Conference on Artificial Intelligence",
+            Some(false),
+        ),
+    ] {
+        assert_eq!(
+            publication::proceedings_agree(cited, actual),
+            expected,
+            "{cited} | {actual}"
+        );
+    }
+}
+
+#[test]
+fn a_preprint_cited_as_its_journal_version_is_another_version() {
+    // holdout-4's `w:preprint-as-journal`: the preprint's DOI given with
+    // the journal's name and place, found on the journal article's record
+    // that carries both (OpenAlex merges them).
+    let merged = |preprint_doi: &str| {
+        let mut r = article(
+            "Effectiveness of pleurodesis for postoperative air leaks after lung resection",
+            &["Norifumi Tsubokawa", "Takahiro Mimae", "Ryoichi Ito"],
+            2024,
+            ("Journal of Cardiothoracic Surgery", "19", "2"),
+        );
+        r.ids = vec![
+            "doi:10.1186/s13019-023-02444-6".parse().unwrap(),
+            preprint_doi.parse().unwrap(),
+        ];
+        r
+    };
+    let cited = |doi: &str| {
+        format!(
+            "Tsubokawa N, Mimae T, Ito R, et al. Effectiveness of Pleurodesis for Postoperative \
+             Air Leaks after Lung Resection. Journal of Cardiothoracic Surgery. 2024;19(1):2. \
+             doi:{doi}"
+        )
+    };
+    let record = merged("doi:10.21203/rs.3.rs-2791419/v1");
+    let claim = Claim::from_text(cited("10.21203/rs.3.rs-2791419/v1"));
+    let a = assess(&claim, &record);
+    assert_eq!(a.ids, Agreement::Match);
+    assert_eq!(a.container.agreement, Agreement::Mismatch, "{a:?}");
+    assert!((PLAUSIBLE..VERIFIED).contains(&a.confidence), "{a:?}");
+    assert_eq!(
+        preprint_version_claimed(&claim, &record),
+        Some("Research Square")
+    );
+    // The journal's own DOI: the article.
+    let claim = Claim::from_text(cited("10.1186/s13019-023-02444-6"));
+    let a = assess(&claim, &record);
+    assert!(a.confidence >= VERIFIED, "{a:?}");
+    assert_eq!(preprint_version_claimed(&claim, &record), None);
+    // A bioRxiv DOI is a preprint's; Genome Research's, under the same
+    // prefix, is an article's.
+    let record = merged("doi:10.1101/2023.01.02.522000");
+    let claim = Claim::from_text(cited("10.1101/2023.01.02.522000"));
+    assert!(assess(&claim, &record).confidence < VERIFIED);
+    let record = merged("doi:10.1101/gr.277000.122");
+    let claim = Claim::from_text(cited("10.1101/gr.277000.122"));
+    assert!(assess(&claim, &record).confidence >= VERIFIED);
+
+    // An arXiv identifier beside the journal: as physics cites.
+    let record = merged("arxiv:2401.01234");
+    let claim = Claim::from_text(
+        "Tsubokawa N, Mimae T, Ito R, et al. Effectiveness of Pleurodesis for Postoperative Air \
+         Leaks after Lung Resection. Journal of Cardiothoracic Surgery. 2024;19(1):2. \
+         arXiv:2401.01234",
+    );
+    assert!(assess(&claim, &record).confidence >= VERIFIED);
+}
+
+#[test]
+fn a_journal_article_cited_as_a_chapter_is_another_container() {
+    // holdout-4's `w:article-as-chapter`: a journal's article cited in an
+    // edited book, the reverse of round 4's chapter cited as an article.
+    let midwifery = article(
+        "The use of amnioinfusion in nurse-midwifery practice",
+        &["Barbara Snell"],
+        1993,
+        ("Journal of Nurse-Midwifery", "38", "S62-S71"),
+    );
+    let forensic = article(
+        "Nurses and Medicolegal Death Investigation",
+        &["Stacy A. Drake", "Yijiong Yang"],
+        2020,
+        ("Journal of Forensic Nursing", "16", "207-214"),
+    );
+    let ecology = article(
+        "Concerning the Ecology of Urtica Dioica L.",
+        &["J. D. Ivins"],
+        1952,
+        ("Journal of Ecology", "40", "380"),
+    );
+    for (claim, record) in [
+        (
+            "SNELL B. The use of amnioinfusion in nurse-midwifery practice. In: Corvaro IR, \
+             Mirkrand P, editors. Handbook of Nurse-Midwifery. Elsevier BV; 1993. p. S62-S71.",
+            &midwifery,
+        ),
+        (
+            "Drake, S.A. et al. (2020) 'Nurses and Medicolegal Death Investigation', in \
+             Korvanne, E.T., Grathwell, A. (eds) Handbook of Forensic Nursing. Ovid \
+             Technologies (Wolters Kluwer Health). pp. 207–214.",
+            &forensic,
+        ),
+        (
+            "Ivins (1952). Concerning the Ecology of Urtica Dioica L. In E. Ulmova, O. S. \
+             Grathquist (Eds.), Handbook of Ecology (pp. 380). JSTOR.",
+            &ecology,
+        ),
+    ] {
+        let a = assess(&Claim::from_text(claim), record);
+        assert_eq!(a.container.agreement, Agreement::Mismatch, "{claim}: {a:?}");
+        assert!(
+            (PLAUSIBLE..VERIFIED).contains(&a.confidence),
+            "{claim}: {a:?}"
+        );
+    }
+    // In its journal, or in a series' volume of that name, it verifies; so
+    // does an edition's "2nd ed." or a prose "in".
+    let mut enzymology = article(
+        "Purification of membrane proteins",
+        &["Jane Doe-Alvarez"],
+        1990,
+        ("Methods in Enzymology", "182", "253-264"),
+    );
+    enzymology.work.work_type = Some(crate::work::WorkType::JournalArticle);
+    for (claim, record) in [
+        (
+            "Snell B. The use of amnioinfusion in nurse-midwifery practice. J Nurse Midwifery. \
+             1993;38:S62-S71.",
+            &midwifery,
+        ),
+        (
+            "Doe-Alvarez J. Purification of membrane proteins. In: Deutscher MP, editor. \
+             Methods in Enzymology. Vol 182. 1990. p. 253-264.",
+            &enzymology,
+        ),
+    ] {
+        let a = assess(&Claim::from_text(claim), record);
+        assert!(a.confidence >= VERIFIED, "{claim}: {a:?}");
+    }
+}
+
+#[test]
+fn a_notice_is_not_the_original_it_corrects() {
+    // holdout-4's `w:erratum-cited-as-original`: the original's title and
+    // authors at the notice's place, or with its DOI. Nature's and
+    // Springer's notices are titled "Author Correction: …", "Publisher
+    // Correction: …"; a notice's record may say what it is only by type.
+    let mut correction = article(
+        "Author Correction: Enhanced energy coupling for indirect-drive fast-ignition fusion \
+         targets",
+        &["F. Zhang", "H. B. Cai", "W. M. Zhou"],
+        2020,
+        ("Nature Physics", "16", "815-815"),
+    );
+    correction.work.work_type = Some(crate::work::WorkType::Other("erratum".into()));
+    let mut publisher = record(
+        &["doi:10.1007/s15010-026-02851-6"],
+        "Publisher Correction: Efficacy and safety of praziquantel combined with artemisinin \
+         derivatives versus praziquantel monotherapy for schistosomiasis",
+        &["Yu Yang", "Jie Meng", "Chen Li"],
+        2026,
+    );
+    publisher.work.work_type = Some(crate::work::WorkType::JournalArticle);
+    publisher.work.container_title = Some("Infection".into());
+    let mut retraction = article(
+        "Shear and shuffle in twinning in titanium – RETRACTION",
+        &["Bin Li"],
+        2016,
+        ("Journal of Materials Research", "31", "2361-2361"),
+    );
+    retraction.work.work_type = Some(crate::work::WorkType::Other("retraction".into()));
+    for (claim, record) in [
+        (
+            "Zhang, F. et al. (2020) 'Enhanced energy coupling for indirect-drive fast-ignition \
+             fusion targets', Nature Physics, 16(7), pp. 815–815.",
+            &correction,
+        ),
+        (
+            "Yang Y, Meng J, Li C, et al. Efficacy and safety of praziquantel combined with \
+             artemisinin derivatives versus praziquantel monotherapy for schistosomiasis. \
+             Infection. 2026. doi:10.1007/s15010-026-02851-6",
+            &publisher,
+        ),
+        (
+            "Li B. Shear and shuffle in twinning in titanium. Journal of Materials Research. \
+             2016;31(15):2361–2361.",
+            &retraction,
+        ),
+    ] {
+        let a = assess(&Claim::from_text(claim), record);
+        assert!(a.confidence < VERIFIED, "{claim}: {a:?}");
+        assert!(record_derivative_kind(&record.work).is_some(), "{claim}");
+    }
+    // Cited as the notice it is, it verifies.
+    let claim = Claim::from_text(
+        "Zhang, F. et al. (2020) 'Author Correction: Enhanced energy coupling for \
+         indirect-drive fast-ignition fusion targets', Nature Physics, 16(7), pp. 815–815.",
+    );
+    let a = assess(&claim, &correction);
+    assert!(a.confidence >= VERIFIED, "{a:?}");
+    // A retracted article is the work cited, however marked and typed:
+    // IEEE's keep their DOI under "Notice of Retraction", Elsevier's under
+    // "RETRACTED:", and OpenAlex types them `retraction`.
+    for title in [
+        "Notice of Retraction: Laboratorial Research on the Treatment of Multi-A/O Process to \
+         Municipal Wastewater",
+        "RETRACTED: Laboratorial Research on the Treatment of Multi-A/O Process to Municipal \
+         Wastewater",
+    ] {
+        let mut retracted = article(
+            title,
+            &["Huifang Dong", "Dapeng Deng", "Dagong Li"],
+            2011,
+            (
+                "2011 5th International Conference on Bioinformatics",
+                "1",
+                "1-4",
+            ),
+        );
+        retracted.work.work_type = Some(crate::work::WorkType::Other("retraction".into()));
+        let claim = Claim::from_text(
+            "Dong H, Deng D, Li D. Laboratorial Research on the Treatment of Multi-A/O Process to \
+             Municipal Wastewater. 2011.",
+        );
+        let a = assess(&claim, &retracted);
+        assert!(a.confidence >= VERIFIED, "{title}: {a:?}");
+    }
+}
+
+#[test]
+fn wild_red_team_citations_as_models_write_them() {
+    // bench/redteam/wild-1.jsonl (round 5): real citations models wrote,
+    // right but for a model's habits, against the records they missed.
+    let emperor = article(
+        "Cardiovascular and Renal Outcomes with Empagliflozin in Heart Failure",
+        &[
+            "Milton Packer",
+            "Stefan D. Anker",
+            "Javed Butler",
+            "Gerasimos Filippatos",
+        ],
+        2020,
+        ("New England Journal of Medicine", "383", "1413-1424"),
+    );
+    let mut braden = article(
+        "The Braden Scale for Predicting Pressure Sore Risk",
+        &[
+            "Nancy Bergstrom",
+            "Barbara J. Braden",
+            "Antoinette Laguzza",
+            "Victoria Holman",
+        ],
+        1987,
+        ("Nursing Research", "36", "205-210"),
+    );
+    // As the record garbles its dash.
+    braden.work.page = Some("205???210".into());
+    let griffiths = article(
+        "Nurse staffing and patient outcomes: Strengths and limitations of the evidence to \
+         inform policy and practice. A review and discussion paper based on evidence reviewed \
+         for the National Institute for Health and Care Excellence Safe Staffing guideline \
+         development",
+        &["Peter Griffiths", "Jane Ball", "Jonathan Drennan"],
+        2016,
+        ("International Journal of Nursing Studies", "63", "213-225"),
+    );
+    let mut gat = record(
+        &["arxiv:1710.10903"],
+        "Graph Attention Networks",
+        &["Petar Veličković", "Guillem Cucurull", "Arantxa Casanova"],
+        2018,
+    );
+    gat.work.work_type = Some(crate::work::WorkType::Preprint);
+    let pulsar = article(
+        "Discovery of a pulsar in a binary system",
+        &["R. A. Hulse", "J. H. Taylor"],
+        1975,
+        ("The Astrophysical Journal", "195", "L51-L53"),
+    );
+    for (n, claim, record) in [
+        // A trial's label before the byline is no author.
+        (
+            "w1-41",
+            "EMPEROR-Reduced (empagliflozin, n=3,730): Packer M, Anker SD, Butler J, et al. \
+             Cardiovascular and renal outcomes with empagliflozin in heart failure. N Engl J \
+             Med. 2020;383:1413-1424.",
+            &emperor,
+        ),
+        (
+            "w1-90",
+            "Bergstrom N, Braden BJ, Laguzza A, Holman V. The Braden Scale for predicting \
+             pressure sore risk. Nurs Res. 1987;36(4):205-210.",
+            &braden,
+        ),
+        // A record's title running on into a description, cited without.
+        (
+            "w1-374",
+            "Griffiths P, Ball J, Drennan J, et al. Nurse staffing and patient outcomes: \
+             strengths and limitations of the evidence to inform policy and practice. Int J \
+             Nurs Stud. 2016;63:213-25.",
+            &griffiths,
+        ),
+        // BibTeX's accents in its authors.
+        (
+            "w1-339",
+            "@misc{velickovic2018graph, author = {Veli{\\v{c}}kovi{\\'c}, Petar and Cucurull, \
+             Guillem and Casanova, Arantxa}, title = {Graph Attention Networks}, year = {2018}, \
+             eprint = {1710.10903}, archivePrefix = {arXiv}}",
+            &gat,
+        ),
+        // A journal's letters, numbered in its volumes, at its place.
+        (
+            "w1-249",
+            "Hulse, R. A., & Taylor, J. H. (1975). \"Discovery of a pulsar in a binary system.\" \
+             The Astrophysical Journal Letters, 195, L51–L53.",
+            &pulsar,
+        ),
+    ] {
+        let a = assess(&Claim::from_text(claim), record);
+        assert!(a.confidence >= VERIFIED, "{n}: {a:?}");
+    }
+    // A page with a section's letter is read: "pp. R3–R20" for pages
+    // 121–138 is the wrong page.
+    let ebell = article(
+        "The long-term economic impact of leaving the EU",
+        &["Monique Ebell", "James Warren"],
+        2016,
+        ("National Institute Economic Review", "236", "121-138"),
+    );
+    let claim = Claim::from_text(
+        "Ebell, M. and Warren, J. (2016) 'The long-term economic impact of leaving the EU', \
+         National Institute Economic Review, 236, pp. R3–R20.",
+    );
+    let a = assess(&claim, &ebell);
+    assert_eq!(a.page.agreement, Agreement::Mismatch, "{a:?}");
+    assert!((PLAUSIBLE..VERIFIED).contains(&a.confidence), "{a:?}");
+    // The letters cited at another place are the sister journal.
+    let claim = Claim::from_text(
+        "Hulse, R. A., & Taylor, J. H. (1975). \"Discovery of a pulsar in a binary system.\" \
+         The Astrophysical Journal Letters, 196, L1–L3.",
+    );
+    assert!(assess(&claim, &pulsar).confidence < VERIFIED);
 }

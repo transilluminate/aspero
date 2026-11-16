@@ -21,6 +21,8 @@ struct Mock {
     known: HashMap<WorkId, String>,
     /// More identifiers a known work's record carries.
     aliases: HashMap<WorkId, Vec<WorkId>>,
+    /// Identifiers answered with a record under another one.
+    renamed: HashMap<WorkId, WorkId>,
     failures: Mutex<VecDeque<Error>>,
     lookups: Mutex<Vec<Vec<WorkId>>>,
     searches: Mutex<Vec<SearchQuery>>,
@@ -37,6 +39,7 @@ impl Mock {
             caps,
             known: HashMap::new(),
             aliases: HashMap::new(),
+            renamed: HashMap::new(),
             failures: Mutex::default(),
             lookups: Mutex::default(),
             searches: Mutex::default(),
@@ -54,6 +57,15 @@ impl Mock {
         let id: WorkId = id.parse().unwrap();
         self.known.insert(id.clone(), "aliased".into());
         self.aliases.insert(id, vec![alias.parse().unwrap()]);
+        self
+    }
+
+    /// Knows `id`, answering with a record that lists `listed` instead
+    /// (OpenAlex's concept record for a Zenodo version's DOI).
+    fn answers_as(mut self, id: &str, listed: &str) -> Self {
+        let id: WorkId = id.parse().unwrap();
+        self.known.insert(id.clone(), "renamed".into());
+        self.renamed.insert(id, listed.parse().unwrap());
         self
     }
 
@@ -127,7 +139,7 @@ impl Provider for Mock {
             .map(|id| Lookup {
                 id: id.clone(),
                 record: self.known.get(id).map(|t| {
-                    let mut record = self.record(id, t);
+                    let mut record = self.record(self.renamed.get(id).unwrap_or(id), t);
                     record
                         .ids
                         .extend(self.aliases.get(id).into_iter().flatten().cloned());
@@ -997,4 +1009,16 @@ async fn relations_are_searched_by_their_openalex_work() {
 
 fn engine_of(mock: Arc<Mock>) -> Engine {
     engine(vec![(mock, 10)])
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_record_found_for_an_identifier_it_does_not_list_carries_it() {
+    // OpenAlex answers a Zenodo version's DOI with the concept's record.
+    let version = "10.5281/zenodo.23931972";
+    let concept = "10.5281/zenodo.23931971";
+    let openalex = Arc::new(Mock::new("openalex", &[IdKind::Doi]).answers_as(version, concept));
+    let engine = engine(vec![(openalex, 10)]);
+    let report = engine.lookup(&ids(&[version]), FieldSet::DEFAULT).await;
+    let record = report.results[0].record.as_ref().unwrap();
+    assert_eq!(record.ids, ids(&[concept, version]));
 }

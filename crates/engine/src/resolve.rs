@@ -506,16 +506,30 @@ impl Engine {
         // cleaned-up keywords) on every keyword provider. Results are added
         // in provider-then-title order, so merging stays deterministic.
         titles = distinct(titles);
-        titles.truncate(MAX_TITLE_SEARCHES);
         // No hit pointed to the title (a conference paper without a DOI, a
         // book Crossref lacks): the title the reference's shape suggests,
-        // else the cleaned-up keywords (a bare title ranks far better).
-        if titles.is_empty()
-            && claim.title.is_none()
-            && let Some(title) = claim.text.as_deref().and_then(matching::probable_title)
+        // else the cleaned-up keywords (a bare title ranks far better). So
+        // too, first, when the hits point only to part of it ("graph
+        // convolutional networks" of "Semi-Supervised Classification with
+        // Graph Convolutional Networks") or past it, to other words the
+        // reference shares with them (a publisher's: "addison wesley
+        // longman").
+        // A part only of a title the reference marks as one (BibTeX's, a
+        // quoted one): a title guessed from its sentences may be the part.
+        if claim.title.is_none()
+            && let Some(text) = claim.text.as_deref()
+            && let Some(title) = matching::probable_title(text)
         {
-            titles.push(title);
+            let given = matching::given_title(text).is_some();
+            if titles.iter().all(|t| match beside_title(t, &title) {
+                Beside::Part => given,
+                Beside::Apart => true,
+                Beside::Same => false,
+            }) {
+                titles.insert(0, title);
+            }
         }
+        titles.truncate(MAX_TITLE_SEARCHES);
         let keywords = titles.is_empty();
         let mut jobs: Vec<(ProviderId, SearchQuery, Via)> = Vec::new();
         for provider in self.searchers(false) {
@@ -927,17 +941,60 @@ fn prefer_site(candidates: &mut [Candidate], claim: &Claim) -> bool {
 /// The journal, volume and page of another record of the work, for a
 /// record that gives none of them and isn't a preprint (arXiv's DataCite
 /// record of a paper published in Physical Review Letters): the work
-/// appeared there, whichever record of it is kept.
+/// appeared there, whichever record of it is kept. And the volume or page
+/// a record in the same journal leaves out (Crossref's BMC records give no
+/// article number; Europe PMC's do), so a wrong one cited is seen.
 fn add_place(record: &mut SourceRecord, other: &SourceRecord) {
+    let same_version = record.ids.iter().any(|x| {
+        matches!(x.kind(), IdKind::Doi | IdKind::Pmid)
+            && other.ids.iter().any(|y| same_work_id(x, y))
+    });
     let (w, o) = (&mut record.work, &other.work);
-    if w.work_type != Some(WorkType::Preprint)
-        && w.container_title.is_none()
-        && w.volume.is_none()
-        && w.page.is_none()
-    {
+    if w.work_type == Some(WorkType::Preprint) {
+        return;
+    }
+    if w.container_title.is_none() && w.volume.is_none() && w.page.is_none() {
         w.container_title.clone_from(&o.container_title);
         w.volume.clone_from(&o.volume);
         w.page.clone_from(&o.page);
+        return;
+    }
+    // A record of the same version (a DOI or PMID shared) that gives its
+    // pages but not its venue (OpenAlex's of an ACM paper, "37–42" in no
+    // proceedings) is in the other's, where its numbers don't contradict:
+    // a venue cited is checked whichever record is kept.
+    let agree = |a: &Option<String>, b: &Option<String>| match (a, b) {
+        (Some(a), Some(b)) => aspero_core::publication::first_page(a)
+            .eq_ignore_ascii_case(aspero_core::publication::first_page(b)),
+        _ => true,
+    };
+    if w.container_title.is_none()
+        && o.container_title.is_some()
+        && same_version
+        && agree(&w.volume, &o.volume)
+        && agree(&w.page, &o.page)
+    {
+        w.container_title.clone_from(&o.container_title);
+        if w.volume.is_none() {
+            w.volume.clone_from(&o.volume);
+        }
+        return;
+    }
+    let same_journal = match (&w.container_title, &o.container_title) {
+        (Some(a), Some(b)) => aspero_core::publication::same_journal(a, b),
+        _ => false,
+    };
+    let same_volume = match (&w.volume, &o.volume) {
+        (Some(a), Some(b)) => a.trim().eq_ignore_ascii_case(b.trim()),
+        _ => true,
+    };
+    if same_journal && same_volume {
+        if w.volume.is_none() {
+            w.volume.clone_from(&o.volume);
+        }
+        if w.page.is_none() {
+            w.page.clone_from(&o.page);
+        }
     }
 }
 
@@ -960,6 +1017,42 @@ fn add_years(record: &mut SourceRecord, pooled: &[i16]) {
         }
     }
     record.work.other_years.sort_unstable();
+}
+
+/// How a title a matcher's hit shares with the reference stands to the
+/// title the reference's shape suggests.
+#[derive(Debug, PartialEq, Eq)]
+enum Beside {
+    /// A part of it, shorter.
+    Part,
+    /// None of it: no word of four letters or more in common.
+    Apart,
+    /// It, or overlapping it otherwise: the title found.
+    Same,
+}
+
+/// How `shared`, a title a matcher's hit shares with the reference,
+/// stands to `probable`, the title the reference's shape suggests.
+fn beside_title(shared: &str, probable: &str) -> Beside {
+    let (shared, probable) = (matching::normalise(shared), matching::normalise(probable));
+    if shared == probable {
+        return Beside::Same;
+    }
+    if probable.len() > shared.len() && format!(" {probable} ").contains(&format!(" {shared} ")) {
+        return Beside::Part;
+    }
+    let long = |s: &str| -> Vec<String> {
+        s.split(' ')
+            .filter(|w| w.chars().count() >= 4)
+            .map(str::to_owned)
+            .collect()
+    };
+    let p = long(&probable);
+    if long(&shared).iter().any(|w| p.contains(w)) {
+        Beside::Same
+    } else {
+        Beside::Apart
+    }
 }
 
 /// Titles with duplicates (by normalised form) removed, order kept.
@@ -1395,6 +1488,79 @@ mod tests {
         // A preprint is another version, still in no journal.
         add_place(&mut preprint, &openalex);
         assert_eq!(preprint.work.container_title, None);
+        // Crossref's BMC record without its article number, Europe PMC's
+        // with it (holdout-1 #508: cited at another page, verified).
+        let title = "Views of health care professionals and policy-makers on the use of \
+                     surveillance data to combat antimicrobial resistance";
+        let mut crossref = titled("10.1186/s12889-020-8383-8", title, &[], 2020);
+        crossref.work.container_title = Some("BMC Public Health".into());
+        crossref.work.volume = Some("20".into());
+        let mut europepmc = crossref.clone();
+        europepmc.work.container_title = Some("BMC public health".into());
+        europepmc.work.page = Some("279".into());
+        let mut elsewhere = europepmc.clone();
+        elsewhere.work.container_title = Some("Public Health Reviews".into());
+        let mut kept = crossref.clone();
+        add_place(&mut kept, &elsewhere);
+        assert_eq!(kept.work.page, None, "another journal's page");
+        add_place(&mut crossref, &europepmc);
+        assert_eq!(crossref.work.page.as_deref(), Some("279"));
+        // OpenAlex's record of an ACM paper gives its pages, not its
+        // proceedings; Crossref's gives them (holdout-3 #894: cited at
+        // another meeting, verified by OpenAlex's).
+        let title = "Mobile Agents for Mobile Games";
+        let mut openalex = titled("10.1145/2751496.2751500", title, &[], 2015);
+        openalex.work.page = Some("37-42".into());
+        let mut crossref = openalex.clone();
+        crossref.work.page = None;
+        crossref.work.container_title =
+            Some("Proceedings of the 2nd Workshop on Mobile Gaming".into());
+        let mut elsewhere = openalex.clone();
+        add_place(&mut openalex, &crossref);
+        assert_eq!(
+            openalex.work.container_title.as_deref(),
+            Some("Proceedings of the 2nd Workshop on Mobile Gaming")
+        );
+        // Not another version's, nor at other pages.
+        let mut other_version = crossref.clone();
+        other_version.ids = vec!["doi:10.1145/9999999.9999999".parse().unwrap()];
+        add_place(&mut elsewhere, &other_version);
+        assert_eq!(elsewhere.work.container_title, None);
+        let mut moved = crossref.clone();
+        moved.work.page = Some("101".into());
+        add_place(&mut elsewhere, &moved);
+        assert_eq!(elsewhere.work.container_title, None);
+    }
+
+    #[test]
+    fn the_references_own_title_is_searched_beside_a_hits_part_of_it() {
+        // wild-1 #337: Crossref's hits shared only "Graph Convolutional
+        // Networks" of a BibTeX title; holdout-3's books, a publisher's
+        // words.
+        let probable = "Semi-Supervised Classification with Graph Convolutional Networks";
+        assert_eq!(
+            beside_title("graph convolutional networks", probable),
+            Beside::Part
+        );
+        assert_eq!(
+            beside_title("addison wesley longman", "The Mythical Man-Month"),
+            Beside::Apart
+        );
+        // The title found, or one overlapping it otherwise: the hits'.
+        assert_eq!(
+            beside_title(
+                "semi supervised classification with graph convolutional networks",
+                probable
+            ),
+            Beside::Same
+        );
+        assert_eq!(
+            beside_title(
+                "Graph Convolutional Networks for Text Classification",
+                probable
+            ),
+            Beside::Same
+        );
     }
 
     #[test]

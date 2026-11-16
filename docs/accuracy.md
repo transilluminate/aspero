@@ -136,25 +136,61 @@ recorded fixture), so it stays fixed without the network.
 
 ## Results
 
-**Results will be published after the current fix and held-out round.**
+**aspero 0.30.0, held out** — `bench/redteam/holdout-5.jsonl`: 1,232
+citations built independently of the code (by an agent that never read the
+matching rules or earlier corpora), shaped like what people paste: reference
+lists from theses, reviews, guidelines and papers, about half from medicine
+and allied health, including Cochrane versions, guideline editions, grey
+literature, conference papers, preprints, errata and non-English works. Run
+live on 2026-11-16.
 
-The starting point, for honesty's sake: aspero 0.26.0 on the corpus the
-current fixes are being tuned on (322 citations, 2026-11-16; details in
-[bench/redteam/README.md](../bench/redteam/README.md)). Not a held-out
-result:
+| Criterion | Result | Target |
+|---|---|---|
+| Wrong → `verified` | 35/613 (5.7%) | ≤ 2% — not yet met |
+| Invented works, nonexistent identifiers, another work's DOI or PMID → `verified` | 0/180 | 0 |
+| Real → `mismatch` or `not_found` | 12/583 (2.1%) | ≤ 3% |
+| Real → `verified` | 533/583 (91.4%) | ≥ 85% |
+| Real → `verified` or `plausible` | 571/583 (97.9%) | ≥ 95% |
+| Wrong → `plausible` naming the field that differs | 276/286 (96.5%) | ≥ 80% |
+| Retracted works flagged | 36/36 | 100% |
 
-| | 0.26.0 baseline |
-|---|---|
-| Wrong → `verified` | 31/152 (20.4%) |
-| Invented works, DOI swaps and nonexistent identifiers caught | 69/69 |
-| Real → `verified` or `plausible` | 147/155 (94.8%) |
-| Retracted works flagged | 15/15 |
+What still gets through is a real work cited with one subtle error: the
+wrong conference of the same field (8 of 28), a journal article cited as
+a preprint (4 of 8) or as a book chapter (4 of 10), a sister journal (4
+of 27), an older Cochrane version or guideline edition (2 of 14 each).
+Nothing invented, and no identifier belonging to another work, was
+verified.
 
-What got through was a *real* work cited wrongly: invented co-authors,
-the wrong journal, an extended title, a chimera. An adversarial round of
-58 citations built on those weaknesses verified 48 of them. Both sets are
-in `bench/redteam/failures.jsonl`, each with a minimal reproduction and
-the rule that let it through.
+**How it got here.** Each round fixed what one corpus showed and was then
+measured on a corpus it had never seen:
+
+| Round (release) | Measured on | Wrong → `verified` | Real accepted |
+|---|---|---|---|
+| — (0.26.0) | the first corpus, as found | 31/152 (20.4%) | 94.8% |
+| 1 (0.27.0) | holdout-1 (unseen) | 29/351 (8.3%) | 97.6% |
+| 2 | holdout-2 (unseen, harder formats) | 40/399 (10.0%) | 90.5% |
+| 3 | holdout-3 (unseen) | 36/426 (8.5%) | 96.5% |
+| 4 | holdout-4 (unseen, subtle errors) | 74/481 (15.4%) | 98.1% |
+| 5 (0.30.0) | holdout-5 (unseen) | 35/613 (5.7%) | 97.9% |
+
+Each held-out corpus was built to be harder than the last, so the rates
+aren't a smooth series; what they show is that invented works and other
+works' identifiers have been caught throughout, and that each round's
+fixes generalise to the kinds of error they target (on the corpora each
+round was tuned on, wrong → `verified` reached 0–2%).
+
+**Real model output.** `bench/redteam/wild-1.jsonl`: 394 references
+written by Claude Haiku and Sonnet asked for literature reviews without
+tools, each checked by hand against Crossref, Europe PMC and Open Library.
+93% (Sonnet) and 86% (Haiku) were correct; the commonest error was
+invented co-authors after a correct first author. 0.30.0 verifies 85.7%
+of the correct ones and lets 3 of the 31 wrong ones through (a chimera of
+two trials, another paper's NBER number, an invented book co-author); it
+was tuned on this corpus, so treat it as a check, not a held-out score.
+
+The corpora, their method notes (`bench/redteam/holdout-*.md`,
+`wild-1.md`) and each round's notes (`bench/redteam/README.md`) are in the
+repository.
 
 ## Reproducing it
 

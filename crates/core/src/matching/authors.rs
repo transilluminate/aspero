@@ -61,10 +61,25 @@ const PEOPLE_BESIDE_BODIES: usize = 3;
 /// consortium's members may be cited by name) unless people are listed
 /// with it.
 pub(super) fn complete_byline(authors: &[Person]) -> bool {
-    let people = authors.iter().filter(|p| p.parts().is_some()).count();
+    let people = authors
+        .iter()
+        .filter(|p| p.parts().is_some() || p.literal.as_deref().is_some_and(uncased_name))
+        .count();
     !authors.is_empty()
         && authors.len() < FULL_BYLINE
         && (people == authors.len() || people >= PEOPLE_BESIDE_BODIES)
+}
+
+/// A name of two to five words in a script without capitals (Arabic,
+/// Hebrew, Thai), which tells a person's name from an organisation's no
+/// other way: "امحمد عثمان فيدان".
+fn uncased_name(name: &str) -> bool {
+    let parts: Vec<&str> = name.split_whitespace().collect();
+    (2..=5).contains(&parts.len())
+        && parts.iter().all(|w| {
+            w.chars()
+                .all(|c| c.is_alphabetic() && !c.is_uppercase() && !c.is_lowercase())
+        })
 }
 
 /// Every word of every name on a byline, normalised.
@@ -111,16 +126,49 @@ fn edit_distance(a: &str, b: &str) -> usize {
 /// al." and organisations aren't checked.
 pub(super) fn claimed_strangers(claimed: &[String], authors: &[Person]) -> bool {
     let names = name_words(authors);
-    claimed
-        .iter()
-        .filter_map(|n| claimed_family(n))
-        .any(|family| {
-            let parts: Vec<&str> = family.split(' ').filter(|w| !is_particle(w)).collect();
-            let placeholder = matches!(family.as_str(), "al" | "others" | "etal");
-            !placeholder
-                && !parts.iter().any(|w| is_body_word(w))
-                && !parts.iter().all(|w| names.iter().any(|n| near(n, w)))
+    claimed.iter().any(|name| {
+        let Some(family) = claimed_family(name) else {
+            return false;
+        };
+        let parts: Vec<&str> = family.split(' ').filter(|w| !is_particle(w)).collect();
+        let placeholder = matches!(family.as_str(), "al" | "others" | "etal");
+        !placeholder
+            && !parts.iter().any(|w| is_body_word(w))
+            && !parts.iter().all(|w| names.iter().any(|n| near(n, w)))
+            && !shortened(name, &parts, authors)
+    })
+}
+
+/// Whether a claimed double-barrelled name is an author's that the record
+/// gives shorter ("Hirschi-Santelmo, Sandrine" for "Sandrine Hirschi"):
+/// one of its parts is that author's family name, and the given name's
+/// initial agrees.
+fn shortened(name: &str, parts: &[&str], authors: &[Person]) -> bool {
+    let Some((_, given)) = name.split_once(',') else {
+        return false;
+    };
+    let Some(initial) = given
+        .trim()
+        .chars()
+        .next()
+        .and_then(|c| c.to_uppercase().next())
+    else {
+        return false;
+    };
+    parts.len() > 1
+        && authors.iter().any(|p| {
+            p.parts().is_some_and(|(family, _)| {
+                let family = normalise(&family);
+                parts.iter().any(|w| near(w, &family))
+            }) && p.initials().is_some_and(|i| i.starts_with(initial))
         })
+}
+
+/// Whether a claimed author is an organisation ("Committee on Infectious
+/// Diseases", "EVER-ILD investigators"): neither found nor missed among a
+/// record's people.
+pub(super) fn is_body(name: &str) -> bool {
+    words(name).iter().any(|w| is_body_word(w))
 }
 
 /// Whether a reference's byline (its text before the title) names someone
@@ -134,8 +182,9 @@ pub(super) fn claimed_strangers(claimed: &[String], authors: &[Person]) -> bool 
 /// Lancet").
 pub(super) fn byline_strangers(byline: &str, authors: &[Person], journal: Option<&str>) -> bool {
     let mut tokens: Vec<(String, &str)> = Vec::new();
+    let mut spans = Vec::new();
     for (word, span) in spanned_words(byline) {
-        let raw = &byline[span];
+        let raw = &byline[span.clone()];
         if raw.chars().next().is_some_and(char::is_lowercase)
             && !BYLINE_WORDS.contains(&word.as_str())
             && !is_particle(&word)
@@ -143,7 +192,20 @@ pub(super) fn byline_strangers(byline: &str, authors: &[Person], journal: Option
             break;
         }
         tokens.push((word, raw));
+        spans.push(span);
     }
+    // A family name, its initials after a comma ("Harrowgate, O.") or,
+    // two or three run together, after a space ("Thalubrecht HL"; one
+    // after a space may be a middle initial: "John A. Smith").
+    let initialled = |i: usize| {
+        tokens.get(i + 1).is_some_and(|(_, raw)| {
+            let gap = &byline[spans[i].end..spans[i + 1].start];
+            (gap.contains(',') && is_initials(raw))
+                || (gap.trim().is_empty()
+                    && (2..=3).contains(&raw.chars().count())
+                    && raw.chars().all(char::is_uppercase))
+        })
+    };
     if tokens.iter().any(|(w, _)| is_body_word(w)) {
         return false;
     }
@@ -185,11 +247,12 @@ pub(super) fn byline_strangers(byline: &str, authors: &[Person], journal: Option
             return false;
         }
         // A given name written out ("Jumper, John"), within a word or two
-        // of its family name.
+        // of its family name; not a family name with initials of its own.
         let first = word.chars().next().unwrap_or(' ');
-        let given = (i.saturating_sub(2)..(i + 3).min(tokens.len()))
-            .filter(|&j| j != i)
-            .any(|j| initials_at(j).is_some_and(|ini| ini.is_empty() || ini.contains(first)));
+        let given = !initialled(i)
+            && (i.saturating_sub(2)..(i + 3).min(tokens.len()))
+                .filter(|&j| j != i)
+                .any(|j| initials_at(j).is_some_and(|ini| ini.is_empty() || ini.contains(first)));
         !given
     })
 }
@@ -200,6 +263,9 @@ pub(super) fn family_name(p: &Person) -> Option<String> {
     let name = p.family.as_deref().or(p.literal.as_deref())?;
     let last = if p.family.is_some() {
         normalise(name)
+    } else if let Some((family, _)) = crate::work::inverted(name) {
+        // Inverted: "Carvalho, Schubert Ribeiro de" (DataCite's).
+        words(family).pop()?
     } else {
         words(name).pop()?
     };
@@ -269,6 +335,8 @@ pub(super) fn author_overlap(claimed: &[String], families: &[String]) -> f64 {
 /// Whether a reference names authors: "et al", or a family name followed
 /// by initials ("Laan DV", "Smith, J."). A family name is never followed by
 /// a full stop, so "Int. J. Care Injured" in a running header isn't one.
+/// One in capitals is set off as a name ("SMITH JA,", "DUPONT, J."), not
+/// two words of a title in capitals ("WOMEN ON ORAL").
 pub(super) fn names_given(text: &str) -> bool {
     if normalise(text).contains("et al") {
         return true;
@@ -281,6 +349,7 @@ pub(super) fn names_given(text: &str) -> bool {
             .chars()
             .filter(|c| *c != '.')
             .collect();
+        let capitals = !family.chars().any(char::is_lowercase);
         !w[0].ends_with('.')
             && family.chars().count() >= 2
             && family.chars().next().is_some_and(char::is_uppercase)
@@ -289,6 +358,7 @@ pub(super) fn names_given(text: &str) -> bool {
                 .all(|c| c.is_alphabetic() || matches!(c, '-' | '\''))
             && (1..=3).contains(&initials.chars().count())
             && initials.chars().all(char::is_uppercase)
+            && (!capitals || w[1].ends_with(['.', ',', ';']))
     })
 }
 
@@ -320,5 +390,40 @@ mod tests {
         let claimed = ["A. van der Berg".to_owned(), "Smith J".to_owned()];
         assert_eq!(author_overlap(&claimed, &families), 1.0);
         assert!(!same_family("goldsmith", "smith"));
+    }
+
+    #[test]
+    fn an_inverted_literal_name_gives_its_family_name() {
+        // holdout-2 #407, #408: DataCite's creators.
+        for (name, family) in [
+            ("Carvalho, Schubert Ribeiro de", "carvalho"),
+            ("Lubrano, Emanuele", "lubrano"),
+            ("Schubert Ribeiro de Carvalho", "carvalho"),
+            // Open Library's, a degree after the comma: as before.
+            ("Julio A., M.D. Ramirez", "ramirez"),
+        ] {
+            assert_eq!(
+                family_name(&Person::literal(name)).as_deref(),
+                Some(family),
+                "{name}"
+            );
+        }
+        // A family name in capitals doesn't make the record's names an
+        // organisation's, and a double-barrelled name the record shortens is
+        // the author's.
+        let authors = [
+            Person::literal("Hyuna Bae"),
+            Person::literal("Seok-Bae LEE"),
+            Person::literal("Sandrine Hirschi"),
+        ];
+        assert!(complete_byline(&authors));
+        let claimed = [
+            "Bae, H.".to_owned(),
+            "Hirschi-Santelmo, Sandrine".to_owned(),
+        ];
+        assert!(!claimed_strangers(&claimed, &authors));
+        let invented = ["Bae, H.".to_owned(), "Corvastine-Hirschi, Eamon".to_owned()];
+        assert!(claimed_strangers(&invented, &authors));
+        assert!(is_body("Committee on Infectious Diseases"));
     }
 }

@@ -14,6 +14,155 @@ Changed:
   batch filters $0.0001 each) but sends more requests (DESIGN "HTTP
   tape").
 
+Fixed (from a held-out red team 0.27.0's fixes never saw,
+`bench/redteam/holdout-1.jsonl`: wrong citations verified fell from 29
+of 351 to none, 229 of them answered, the rest at OpenAlex's daily cap;
+real ones verified 351 of 382, from 343, and accepted 375, from 373):
+
+- The journal is read in more styles: Nature's single page after a
+  dotted name ("J. Org. Chem. 101, 6301 (1994)"), IEEE's comma after one
+  ("Mach. Intell., vol. 56"), Chicago's issue and bracketed year
+  ("Journal 94, no. 2 (2004): 317-321", which read the issue as the
+  volume, and "“…” eClinicalMedicine (2010)."), a colon inside a name
+  ("JAMA: The Journal of …"), the words after a quoted title in sentence
+  case ("Revue historique"), and dotted names after a title in title
+  case ("… by Nanoparticles. J. Am. Chem. Soc."), where each reading is
+  weighed and the journal is clearly another only if every one is.
+- A record in a journal whose type isn't given (Europe PMC's) is held to
+  its journal like an article, structured claims included.
+- A year or journal word inside a DOI or link ("10.1113/jphysiol.1974…",
+  "10.1093/brain/…") is not the year or journal cited.
+- A byline naming people as IEEE, MLA or BibTeX write them, none of them
+  the work's authors, makes the authors different, not unknown; a
+  co-author with initials of their own is no given name of the next.
+- A BibTeX entry's title is compared as its title (not a booktitle that
+  is a proceedings' name), and a quoted title counts however short.
+- A book doesn't confirm a BibTeX `@article`'s journal; the original
+  isn't verified for a correction of it cited ("Corrigendum to “…”"); a
+  record without its page takes it from another record of the work in
+  the same journal and volume.
+- A title in capitals ("… WOMEN ON ORAL CONTRACEPTIVES …") no longer
+  reads as names.
+
+Fixed (from a second held-out red team, `bench/redteam/holdout-2.jsonl`,
+replayed offline from the tape of round 2's run: wrong citations verified
+fell from 39 of 399 to 2, 87 claims needing requests the tape lacks; real
+ones mismatched or not found fell from 19 to 9 of 441):
+
+- A conference paper cited at another conference (CVPR's at ICCV, KDD's
+  at ICML) is plausible, the venue named: the major conferences are told
+  by acronym or name, the record's by its proceedings or IEEE DOI. A
+  preprint server's copy cited in a conference's proceedings can't
+  confirm the conference: plausible, as a copy can't confirm a journal.
+  Real NeurIPS or ICML citations whose only record is arXiv's are
+  plausible too.
+- A title with words swapped for others anywhere in it, several
+  together ("Likelihood Determinants" for "Risk Factors", "A Controlled
+  Study" for "A Randomized Trial"), in free text or a structured claim,
+  is plausible at most; spelling, abbreviations, numbers spelt out and
+  words broken at a line's end still match.
+- More locators and journals are read: MLA's `77.4 (2005): 1321-1373`,
+  Harvard's `pp.58-63` and `p.054433`, IEEE's `Art. no. 615`, prose's "the
+  2007 … paper in Psychol Sci (…)", and dotted names after a title in
+  title case ending in a short abbreviation (`… Creation. Psychol. Sci.
+  5, 14`), each reading weighed.
+- Invented co-authors beside a real first author are caught where the
+  record gives a family name in capitals (`Seok-Bae LEE`), and next to
+  Vancouver initials (`Rangel TR, Thalubrecht HL, …`).
+- A journal word inside the work's title isn't the journal cited
+  (`… monitoring autophagy. bioRxiv [Preprint]`), and a record OpenAlex
+  types a preprint but in a journal PubMed indexes is that journal's
+  article, so either cited as a preprint is plausible.
+- A Chinese or Japanese title is a title given, however few spaces: one
+  at another work's journal, volume and page is no longer verified.
+- A BibTeX entry's arXiv `eprint` and `pmid` are identifiers claimed, so
+  an unassigned arXiv ID there is checked.
+- A record a provider gives for an identifier it doesn't list (OpenAlex
+  answers a Zenodo version's DOI with the concept's record) carries it:
+  the version's DOI no longer "does not exist".
+- An inverted name in a record (`Lubrano, Emanuele`, DataCite's) is split
+  as one; a claimed double-barrelled name an author's record shortens
+  (`Hirschi-Santelmo` for Hirschi) and an organisation among a structured
+  claim's authors are no strangers; BMJ's page `698.1` is page 698.
+
+Fixed (from a third held-out red team, `bench/redteam/holdout-3.jsonl`,
+replayed offline: wrong citations verified fell from 36 of 426 to none;
+real ones verified 474 of 508, from 475, and accepted 490):
+
+- A paper cited in any other meeting's proceedings is plausible, the
+  venue named: proceedings' names are compared by what they are about,
+  their furniture (Proceedings of the, ordinals, years, Annual,
+  International, ACM/IEEE, SIG…, Conference on) set aside, and by their
+  acronyms ("In … Conference on Computers and Accessibility (ASSETS
+  '15)" for an HRI paper). A journal's article cited "In Proceedings of
+  …" a meeting is another venue too. A record giving its pages but not
+  its proceedings (OpenAlex's of ACM papers) takes them from another
+  record of the same DOI, so the venue is checked whichever is kept.
+- A book's chapter cited as a journal's article (a volume and issue, its
+  book's title or a journal as the journal) is plausible, its volume
+  named; nor does the book verify for it.
+- An RIS or EndNote record or a citation template sent as a JSON claim's
+  `text` keeps the fields it gives: an RIS record on several lines kept
+  only its DOI (and verified by it whatever authors it named), or was
+  refused as empty without one.
+- A work named by its claimed identifier, whole title and place, cited
+  with other authors, is plausible rather than a mismatch.
+- A journal's words in a reworded title before it are the title's, not
+  the journal's, so the title is compared; an invented co-author among
+  names in a script without capitals (Arabic) is seen; a volume
+  numbered like a year (`2007.0(52)`) is no year cited; prose naming a
+  journal before its volume and pages (`showed in Cancer Epidemiology,
+  38, 211–214`) is read; "Research Square" names a preprint server.
+- Developer: OpenAlex's 404s answered on prepaid credit, past the daily
+  allowance, are recorded on the HTTP tape (they read as a spent budget,
+  so a red-team run on credit replayed its "not found" lookups as
+  misses). The red team counts an ISBN-10 or a versioned DOI as the
+  work's own identifier.
+
+Fixed (from a fourth held-out red team, `bench/redteam/holdout-4.jsonl`,
+and 394 references two language models wrote, `bench/redteam/wild-1.jsonl`,
+replayed offline: wrong citations verified fell from 74 of 481 to 9, and
+in wild-1 from 4 of 31 to 3; real ones verified 537 of 569, unchanged,
+and in wild-1 309 of 363, from 305):
+
+- A sister journal cited is another journal, plausible with the journal
+  named: the family's parent for a sister's article ("JAMA" for JAMA
+  Oncology, "The Lancet" for The Lancet Infectious Diseases, "Nature"
+  for Nature Medicine) or a sister for the parent's ("JAMA Intern Med",
+  "NEJM Evid", "JACC Heart Fail"). One name inside the other no longer
+  makes them possibly the same; what each has of its own decides, an
+  acronym's expansion, a series letter, a place, edition or descriptive
+  subtitle aside. Abbreviations still match ("Lancet Infect Dis").
+- A meeting of the same society cited is another venue: a society's
+  acronym before its other meetings ("International AAAI Conference on
+  Web and Social Media") isn't its conference's, and a venue cited by an
+  acronym the record's name can't make (ICECS for the Midwest Symposium
+  on Circuits and Systems) is another meeting. A copy in no venue (a
+  repository's, a talk's) can't confirm a meeting cited.
+- A journal's article cited by its preprint's DOI (Research Square,
+  Preprints.org, bioRxiv, SSRN, …) with the journal's name and place is
+  plausible, the server named; so is a preprint's record, its server DOI
+  claimed, cited in a journal by name alone. An arXiv identifier beside
+  a journal or venue still verifies.
+- A journal's article cited as a chapter of an edited book ("In: …,
+  editors. Handbook of …") is plausible, another container.
+- A correction notice titled "Author Correction:" or "Publisher
+  Correction:", typed a correction by its record, or titled "… –
+  RETRACTION", is not the original it corrects; a claim citing one after
+  its year ("(2015) 'Correction: …'") cites one.
+- As models write them: a trial's label before the byline
+  ("EMPEROR-Reduced (…): Packer M, …") is no invented author; BibTeX's
+  accents (`Veli{\v{c}}kovi{\'c}`) are read; a record's garbled dash
+  ("205???210") or title running on into a second sentence no longer
+  differs; a page with a section's letter (`pp. R3–R20`, BMJ's `m1123`)
+  is read; a journal's letters numbered in its volumes are the journal.
+- A reference's own title (BibTeX's, a quoted one) is searched when the
+  citation matchers' hits share only part of it, or only other words
+  (a publisher's), with the reference.
+- Developer: the red team compares identifiers however a corpus writes
+  them (bare DOIs, `PMID:`), and prints a criterion with nothing to
+  measure as n/a.
+
 ## 0.29.0
 
 Added:
@@ -83,6 +232,14 @@ Added:
 
 Added:
 
+- References pasted as a Wikipedia citation template (`{{cite journal
+  |last1=… |title=… |journal=… |doi=…}}`, any `cite …` or `citation`), an
+  RIS record (its lines run together on one, or not) or an EndNote record
+  (`%0 Journal Article %A … %T …`) are read as their fields, a structured
+  claim, wherever a reference is taken (`verify`'s arguments and stdin,
+  MCP, the apps). A stdin line starting with `{{` was refused as invalid
+  JSON; one starting with `{` that isn't meant as JSON is a reference
+  now too.
 - Developer: an HTTP record/replay tape (`ASPERO_HTTP_TAPE`,
   `ASPERO_HTTP_TAPE_MODE=replay-only`), on by default for `verify_bench`
   and `scripts/redteam.py`: each distinct request is paid for once and

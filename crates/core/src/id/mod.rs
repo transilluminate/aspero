@@ -419,6 +419,21 @@ mod tests {
         assert_eq!(id.to_string(), "doi:10.1038/s41586-020-2649-2");
     }
 
+    /// Found by fuzzing: a kind's own parser, as a page's `citation_doi`
+    /// is read, kept look-alikes the display then didn't re-parse to.
+    #[test]
+    fn look_alikes_parse_alike_as_any_kind() {
+        let doi = WorkId::parse_as(IdKind::Doi, "10.1038/nat\u{2013}ure").unwrap();
+        assert_eq!(doi.to_string(), "doi:10.1038/nat-ure");
+        let url = "doi.org/10.1183/Y13993003\u{200B}.00000-2020";
+        let doi = WorkId::parse_as(IdKind::Doi, url).unwrap();
+        assert_eq!(doi.to_string(), "doi:10.1183/y13993003.00000-2020");
+        let encoded = "https://doi.org/10.1038/nat%E2%80%93ure";
+        assert_eq!(parse(encoded).unwrap(), parse("10.1038/nat-ure").unwrap());
+        let pmcid = WorkId::parse_as(IdKind::Pmcid, "PMC\u{200B}4458712").unwrap();
+        assert_eq!(pmcid.to_string(), "pmcid:PMC4458712");
+    }
+
     #[test]
     fn detects_kind_from_bare_prefixed_and_url_forms() {
         let cases = [

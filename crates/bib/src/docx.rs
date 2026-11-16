@@ -43,14 +43,25 @@ const PARTS: [&str; 3] = [
     "word/endnotes.xml",
 ];
 
+/// Largest part read, uncompressed: a long thesis's body, every citation
+/// field included, is a few MB, while a zip can inflate a few MB to
+/// gigabytes. A body over it is unreadable; other parts over it are
+/// skipped.
+const MAX_PART: u64 = 64 * 1024 * 1024;
+
 /// Reads a .docx file's citation fields and text.
 pub fn read_docx(bytes: &[u8]) -> Result<DocxReferences, ReadError> {
+    read_parts(bytes, MAX_PART)
+}
+
+/// [`read_docx`], reading parts of at most `max_part` bytes.
+fn read_parts(bytes: &[u8], max_part: u64) -> Result<DocxReferences, ReadError> {
     let mut zip = zip::ZipArchive::new(Cursor::new(bytes)).map_err(|_| ReadError::Unrecognised)?;
     let mut read = |name: &str| -> Option<String> {
-        let mut part = zip.by_name(name).ok()?;
+        let part = zip.by_name(name).ok()?;
         let mut xml = String::new();
-        part.read_to_string(&mut xml).ok()?;
-        Some(xml)
+        part.take(max_part + 1).read_to_string(&mut xml).ok()?;
+        (xml.len() as u64 <= max_part).then_some(xml)
     };
     let body = read(PARTS[0]).ok_or(ReadError::Unrecognised)?;
     let mut fields = Fields::default();
@@ -323,5 +334,22 @@ mod tests {
         assert_eq!(read.manager, None);
         assert_eq!(read.text, "1. Smith J. A study. 2020.\n");
         assert_eq!(read_docx(b"not a zip"), Err(ReadError::Unrecognised));
+    }
+
+    /// A 3 MB file whose body inflated to 3 GB was read whole (out of
+    /// memory under the docx fuzz target), so a crafted document could
+    /// exhaust an app's memory.
+    #[test]
+    fn parts_past_the_limit_are_not_read() {
+        let body = r"<w:p><w:r><w:t>1. Smith J. A study. 2020.</w:t></w:r></w:p>";
+        let mendeley = r#"{"citationItems":[{"id":"ITEM-1","itemData":{"type":"book","title":"Deep Learning","ISBN":"9780262035613"}}],"mendeley":{}}"#;
+        let instr = escape(&format!("ADDIN CSL_CITATION {mendeley}"));
+        let notes = format!(r#"<w:p><w:fldSimple w:instr="{instr}"/></w:p>"#);
+        let file = docx(body, Some(&notes));
+        assert_eq!(read_parts(&file, 1000).unwrap().entries.len(), 1);
+        let read = read_parts(&file, 300).unwrap();
+        assert!(read.entries.is_empty(), "the footnotes are skipped");
+        assert_eq!(read.text, "1. Smith J. A study. 2020.\n");
+        assert_eq!(read_parts(&file, 100), Err(ReadError::Unrecognised));
     }
 }

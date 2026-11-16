@@ -4,7 +4,7 @@
 use std::time::Duration;
 
 use aspero_core::{FieldSet, Hit, Page, ProviderId, Raw, SearchQuery, SourceRecord, Work, WorkId};
-use aspero_store::{Cache, Direction, Edges, SqliteCache};
+use aspero_store::{Cache, Direction, Edges, PrepaidDay, PrepaidDays, SqliteCache};
 use jiff::Timestamp;
 
 const OA: ProviderId = ProviderId::from_static("openalex");
@@ -237,6 +237,77 @@ fn key_spend_adds_up_per_day_and_survives_rebuilds() {
     cache.add_key_spend("k1", "2026-12-20", 0.25).unwrap();
     assert_eq!(cache.key_spend("k1", "2026-11-14").unwrap(), 0.0);
     assert_eq!(cache.key_spend("k1", "2026-12-20").unwrap(), 0.25);
+}
+
+/// Credit spent today is the day's first balance less the latest: a fall
+/// is spend, a top-up raises the start rather than counting as negative
+/// spend, a small rise or an older sighting is responses out of order,
+/// and a new day starts again.
+#[test]
+fn prepaid_spend_is_told_from_the_days_first_balance() {
+    let see = |known, balance, s| PrepaidDay::see(known, balance, at(s));
+    let first = see(None, 10.0, 0);
+    assert_eq!((first.start_usd, first.last_usd), (10.0, 10.0));
+    assert_eq!(first.spent_usd(), 0.0);
+
+    let fell = see(Some(first), 9.75, 10);
+    assert_eq!(fell.spent_usd(), 0.25);
+    // A top-up of $5 after $0.25 spent: still $0.25 spent, then more.
+    let topped = see(Some(fell), 14.75, 20);
+    assert_eq!((topped.start_usd, topped.spent_usd()), (15.0, 0.25));
+    assert_eq!(see(Some(topped), 14.5, 30).spent_usd(), 0.5);
+    // A response answered before the last, arriving after it.
+    let late = see(Some(fell), 9.751, 25);
+    assert_eq!(late, fell, "a rise under a cent is no top-up");
+    assert_eq!(see(Some(fell), 9.0, 5), fell, "older than the latest");
+}
+
+/// The day's balances are shared through the file (other processes,
+/// restarts) and outlive clearing and rebuilding; each day starts again.
+#[test]
+fn prepaid_days_are_kept_per_provider_and_day_and_survive_rebuilds() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("cache.sqlite");
+    {
+        let cache = SqliteCache::open(&path).unwrap();
+        let day = cache
+            .see_prepaid("openalex", "2026-11-16", 10.0, at(0))
+            .unwrap();
+        assert_eq!(day.spent_usd(), 0.0);
+        cache.clear().unwrap();
+    }
+    {
+        let conn = rusqlite::Connection::open(&path).unwrap();
+        conn.pragma_update(None, "user_version", 99).unwrap();
+    }
+    let cache = SqliteCache::open(&path).unwrap();
+    let other = SqliteCache::open(&path).unwrap();
+    let day = other
+        .see_prepaid("openalex", "2026-11-16", 9.0, at(10))
+        .unwrap();
+    assert_eq!(day.spent_usd(), 1.0, "another process sees the same day");
+    let day = cache
+        .see_prepaid("openalex", "2026-11-16", 8.5, at(20))
+        .unwrap();
+    assert_eq!((day.start_usd, day.spent_usd()), (10.0, 1.5));
+    // The next day starts from its own first balance.
+    let next = cache
+        .see_prepaid("openalex", "2026-11-17", 8.5, at(86_400))
+        .unwrap();
+    assert_eq!(next.spent_usd(), 0.0);
+    // Another provider's day is its own.
+    let mine = cache
+        .see_prepaid("other", "2026-11-16", 3.0, at(30))
+        .unwrap();
+    assert_eq!(mine.spent_usd(), 0.0);
+    // A week on, the old days go.
+    cache
+        .see_prepaid("openalex", "2026-11-30", 8.0, at(14 * 86_400))
+        .unwrap();
+    let again = cache
+        .see_prepaid("openalex", "2026-11-16", 8.0, at(14 * 86_400))
+        .unwrap();
+    assert_eq!(again.start_usd, 8.0, "forgotten, so started afresh");
 }
 
 #[test]

@@ -703,7 +703,8 @@ method, url, body, status, headers, response, recorded_at)`), so benchmark
 and red-team runs pay for each distinct request once, ever, and are
 reproducible. A request on the tape is replayed; one that isn't is sent,
 and recorded if its answer is data: a 2xx, or a 404 (a meaningful "not
-found") unless it says a budget is spent; never a 429, 5xx, other error or
+found") unless it says a budget is spent (OpenAlex's daily allowance at
+zero with no prepaid credit left: a 404 paid from credit is data); never a 429, 5xx, other error or
 transport failure, nor OpenAlex's `/rate-limit` (live state).
 Identifier lookups are batched (OpenAlex's DOI filter, up to 100), so a
 change that gives claims identifiers they lacked (a template read, an

@@ -388,14 +388,19 @@ fn is_live(url: &str) -> bool {
 /// Whether a response is deterministic data, worth replaying: a 2xx, or a
 /// 404 that isn't a spent budget (OpenAlex answers the request crossing
 /// its budget with an error status, and says so in its body or headers).
+/// Past the daily allowance, prepaid credit pays: the budget is spent only
+/// when that is too.
 fn recordable(resp: &HttpResponse) -> bool {
     match resp.status {
         200..=299 => true,
         404 => {
-            let spent = resp
-                .header("x-ratelimit-remaining-usd")
-                .and_then(|v| v.trim().parse::<f64>().ok())
-                .is_some_and(|r| r <= 0.0);
+            let spent = |name: &str| {
+                resp.header(name)
+                    .and_then(|v| v.trim().parse::<f64>().ok())
+                    .map(|r| r <= 0.0)
+            };
+            let spent = spent("x-ratelimit-remaining-usd") == Some(true)
+                && spent("x-ratelimit-prepaid-remaining-usd") != Some(false);
             !spent && !resp.text().contains("not_enough_credits")
         }
         _ => false,
@@ -674,6 +679,28 @@ mod tests {
             Timestamp::UNIX_EPOCH,
         );
         assert!(!recordable(&credits));
+        // Past the daily allowance, on prepaid credit, a 404 is "not
+        // found": the round-3 red team's misses went unrecorded so.
+        let prepaid = HttpResponse::new(
+            404,
+            vec![
+                ("x-ratelimit-remaining-usd".into(), "0".into()),
+                ("x-ratelimit-prepaid-remaining-usd".into(), "8.8513".into()),
+            ],
+            Vec::new(),
+            Timestamp::UNIX_EPOCH,
+        );
+        assert!(recordable(&prepaid));
+        let both_spent = HttpResponse::new(
+            404,
+            vec![
+                ("x-ratelimit-remaining-usd".into(), "0".into()),
+                ("x-ratelimit-prepaid-remaining-usd".into(), "0".into()),
+            ],
+            Vec::new(),
+            Timestamp::UNIX_EPOCH,
+        );
+        assert!(!recordable(&both_spent));
     }
 
     #[tokio::test]

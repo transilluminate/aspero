@@ -84,6 +84,7 @@ unrelated paper.
 cargo build --release -p aspero
 OPENALEX_API_KEY=… ASPERO_MAILTO=… scripts/redteam.py --failures
 scripts/redteam.py --rescore --failures      # re-score the saved results
+scripts/redteam.py bench/redteam/holdout-1.jsonl --results target/h1.json
 ```
 
 Claims go to `aspero verify - --format json` in one batch through
@@ -195,6 +196,75 @@ none; book records often leave real subtitles out, so a subtitle added
 to a book's title is tolerated). Real misses left: SHAP (a NeurIPS paper
 without a DOI), Said's *Orientalism* and Cohen's *Statistical Power
 Analysis* (books no searched index returned).
+
+## Round 2: the held-out corpus (2026-11-16, unreleased)
+
+`holdout-1.jsonl` (760 citations, 382 real; see
+[holdout-1.md](holdout-1.md)) was written without seeing the corpus,
+the failures or the code, and first run after round 1's fixes. It is no
+longer held out: its failures shaped round 2, so a later round needs a
+new one. Run it with
+`scripts/redteam.py bench/redteam/holdout-1.jsonl --results target/h1.json`.
+
+The first run hit OpenAlex's daily cap: 121 citations came back
+`unverifiable` (mostly invented works and identifiers, which then go
+unanswered rather than found), so the numbers below are of the 229
+wrong and 380 real citations answered; the rest need a re-run. Re-scored
+from that run's cache (keyless: a search the fixes newly need fails the
+same way, three more citations: #656, #694, #747).
+
+```
+                                              round 1 fixes    round 2
+wrong -> verified                              29/351 (8.3%)   0/351 (0.0%)   <= 2%
+invented, fake ID, DOI swap -> verified         1/141 (0.7%)   0/141 (0.0%)   <= 0%
+real -> mismatch or not_found                   7/382 (1.8%)   5/382 (1.3%)   <= 3%
+real -> verified                              343/382 (89.8%) 351/382 (91.9%) >= 85%
+real -> verified or plausible                 373/382 (97.6%) 375/382 (98.2%) >= 95%
+wrong -> plausible names a differing field   131/131 (100%)  155/155 (100%)   >= 80%
+retracted flagged                              27/27 (100%)    27/27 (100%)    >= 100%
+```
+
+All PASS. The round-1 corpus stays at 0/152 false VERIFIED, real
+accepted 152/155, verified 146/155 (147: corpus #105, a correction cited,
+verified its original; now plausible), and the known-answer bench at
+49/49.
+
+The 29 false VERIFIEDs, by what let them through (each rule in DESIGN,
+"Resolve, verify and check"; minimised in
+`held_out_red_team_failures_stay_fixed` and the per-rule tests in
+`crates/core/src/matching/tests.rs` and `crates/core/src/publication.rs`):
+
+| Pattern | Cases | Example | Rule now |
+|---|---|---|---|
+| Journal unread: Nature single page after a dotted name | 475, 505, 515, 741 | `… phases. J. Org. Chem. 101, 6301 (1994).` | read, as after an undotted one |
+| Journal unread: IEEE comma after the stop | 493, 736, 739 | `“…,” IEEE Trans. Pattern Anal. Mach. Intell., vol. 56` | read, back to the quote |
+| Journal unread: Chicago | 486, 494 | `“…” eClinicalMedicine (2010).` | a bracketed year ends the journal |
+| Journal unread: dotted name after a title in title case | 483, 490, 501 | `… Sri Lanka. Cad. Saúde Pública. 2005;2(6):e185.` | every reading weighed |
+| Journal unread: colon, initial "P." as a label, `ApJ (1939)` | 476, 484, 488 | `… JAMA: The Journal of the American Medical Association. 2026.` | read |
+| Journal word inside a DOI | 476 | `doi:10.1093/brain/awaf429` matched "Brain" | links aside |
+| Untyped record (Europe PMC) not held to its journal | 478, 492, 503 | `{"journal": "Annals of Internal Medicine", …}` | held, structured or text |
+| Book for a BibTeX `@article` | 496 | `journal = {Social Science & Medicine}` vs Open Library | plausible at most |
+| Year inside the DOI | 458, 469 | `(1972) … doi.org/10.1113/jphysiol.1974.sp010694` | links aside |
+| Byline names unread (IEEE, MLA, BibTeX) | 384, 399, 543, 561 | `F. Eskdale-Mora, “Nonlinear regression …”` | different authors |
+| Co-author's initials taken for a given name | 425 | `Burrell, D., Harrowgate, O., & Palmer, H.` | a stranger |
+| Quoted two-word title forgiven at the place | 738 | `“The essence of entanglement,” Phys. Rev. A, vol. 63` | a title given |
+| BibTeX booktitle matched as the title | 694 | `booktitle = {Findings of the ACL: EMNLP 2022}` | the title field |
+| Record without its page (Crossref BMC) | 508 | `BMC Public Health. 2020;20(1):419.` | page from Europe PMC's record |
+
+Chicago's `Journal 94, no. 2 (2004): 317-321` read the issue as the
+volume: 21 of 29 Chicago references had a volume "mismatch", 11 real
+ones plausible for it; 9 now verified (Crossref numbers the other two,
+in Revue historique, otherwise). Of real citations, the original was
+verified for a correction cited (#185), and a BibTeX book matched one of
+its chapters (#371): both fixed; an all-caps title read as names made a
+real title-and-year citation a mismatch (#382): plausible now.
+
+Left: 18 of 30 chimeras are plausible where the policy says mismatch or
+not_found (none verified); real misses #208 (the claimed DOI reported
+missing), #247 (the arXiv ID resolves to the renamed published
+version), #272, #303, #307 (not found by any search), #373 and #376
+(unanswered at the cap). No API response or corpus file seen in this
+round contained instruction-like text.
 
 ## Failures (`failures.jsonl`)
 

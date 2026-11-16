@@ -347,7 +347,8 @@ citation styles. The rules, each from a real failure:
 
 - **Wrong year halves confidence.** Lookalike re-deposits carry the real
   title, authors and abstract under another year. Year scores halve per
-  year off; the nearest of any edition's years counts.
+  year off; the nearest of any edition's years counts. A year inside a
+  link or identifier ("10.1113/jphysiol.1974.sp010694") is none cited.
 - **Different authors halve confidence.** Similarly titled surveys and
   books by others otherwise pass.
 - **One field can't verify.** "Deep learning" matches many works.
@@ -358,6 +359,8 @@ citation styles. The rules, each from a real failure:
   or a title of a word or two found in free text, matches by chance.
 - **Titles compare on content words**, and a dropped subtitle still
   matches; a few shared topic words in free text are not a title match.
+  A BibTeX entry's title is compared as a claimed title is, not looked
+  for anywhere in the entry (its booktitle may be a proceedings' title).
 - **A title with words added or replaced is partial, plausible at
   most** (#102): the work's title carried on in the same sentence ("Deep
   learning for medical image analysis": a joining or lowercase word, not
@@ -381,12 +384,18 @@ citation styles. The rules, each from a real failure:
   is no word an abbreviation must match; a series letter is.
 - **Replies, errata and comments are not the original.** Their titles
   repeat the original's; confidence halves unless the claim cites one.
+  Nor is the original one cited ("Corrigendum to “…” [Biochim. Biophys.
+  Acta 1236 (1995) 197-200]", "Corrections to …"): plausible at most, so
+  the notice's record ranks first when found. Not for a retraction cited
+  ("retraction of" is a title's words too).
 - **Online and print years both count**, so either year of an
   online-first paper matches, as do years across merged records.
 - **Journal, volume and first page** come from claim fields or the text
   (Vancouver `2017;376(26):2545`, APA `376(26), 2545` or `Journal, 146,
-  106274.`, Harvard `376(26), pp. 2545`, Nature `530, 484 (2016)`,
-  `vol./pp.`, BibTeX fields). Journals match by rule (each abbreviated word
+  106274.`, Harvard `376(26), pp. 2545`, Nature `530, 484 (2016)`, also
+  after a dotted name (`J. Org. Chem. 101, 6301 (1994)`), Chicago `94,
+  no. 2 (2004): 317-321` (the issue labelled, not the volume) or `94, no.
+  2 (2004).`, `vol./pp.`, BibTeX fields). Journals match by rule (each abbreviated word
   abbreviates the next significant word, or initials: NEJM, JAMA), not a
   list, so a journal the rule doesn't see only lowers the ranking. A
   different volume or page caps a match at plausible: a citation error,
@@ -401,16 +410,26 @@ citation styles. The rules, each from a real failure:
   styled locator (#102), only after a title that has clearly ended (a stop
   or a closing quote): before the year ending the reference (`… JAMA.
   2020.`), its links, a labelled locator (IEEE `"…," Journal, vol. 8`,
-  `no. 10223`), or ending it after a quoted title (Harvard `'…',
+  `no. 10223`, a number after the label: an initial "P." is none), a
+  bracketed year (Chicago `"…" eClinicalMedicine (2010).`, `… Druck. ApJ
+  (1939).`), or ending it after a quoted title (Harvard `'…',
   Chest.`); a BibTeX entry's `journal`; in prose, between a verb's "in"
-  and a bracketed year (`reported in The Lancet (2020)`). A publisher (`Springer;
-  2010:12-30`, `MIT Press; 2016.`), a lowercase word, a run of dotted
-  abbreviations that may have begun earlier, or the work's own title in
-  title case gives none. Different means clearly another: not the
+  and a bracketed year (`reported in The Lancet (2020)`). After a quoted
+  title, the words up to the locator are the journal as written, in
+  sentence case too (`"…" Revue historique 35, no. 1`), dotted (IEEE's
+  `Mach. Intell.,`) or with a colon (`JAMA: The Journal of …`). A
+  publisher (`Springer; 2010:12-30`, `MIT Press; 2016.`), a lowercase
+  word, or the work's own title in title case gives none. A run of dotted
+  abbreviations that may have begun earlier (`… by Nanoparticles. J. Am.
+  Chem. Soc.`, `… Sri Lanka. Cad. Saúde Pública.`) gives each reading
+  that starts after a stop in it: the journal one of them, so it matches
+  if any does and is clearly another only if every one is. Different means clearly another: not the
   same by rule, neither name (abbreviated, spelling aside) inside the other
   (`Proc Natl Acad Sci U S A` ↔ `Proceedings of the National Academy of
-  Sciences`), nor initials of part of it (PNAS). Only journal articles are
-  held to it (series, proceedings and repositories go by many names), and
+  Sciences`), nor initials of part of it (PNAS). Only journal articles,
+  and records in a journal whose type isn't given (Europe PMC's
+  editorials and letters), are held to it, structured claims or text
+  (series, proceedings and repositories go by many names), and
   a preprint is when the reference cites a journal (not a preprint
   server) unless the claimed identifier is the preprint's: it's another
   version. So is a journal's article cited as a preprint ("medRxiv
@@ -418,12 +437,16 @@ citation styles. The rules, each from a real failure:
   Zenodo copy, a report; not a preprint, book, chapter, dataset or
   software) can't confirm a journal cited, nor can one without volume or
   page, its journal unconfirmed, confirm a journal, volume and page all
-  cited: plausible at most, unless a claimed identifier is its; and of
+  cited, nor a book a BibTeX `@article`'s journal: plausible at most,
+  unless a claimed identifier is its; and of
   equally confident candidates, the one confirming more of journal,
   volume and page ranks first. Candidates are scored with every
   identifier known for the work, whichever record of it is kept, and a
   record giving none of journal, volume and page (not a preprint) takes
-  those of another record of the work merged with it. The
+  those of another record of the work merged with it; one in the same
+  journal and volume, the page it leaves out (Crossref's BMC records
+  give no article number, Europe PMC's do). A journal's words inside a
+  link (`doi:10.1093/brain/…`) don't name it. The
   journal read is in `read`, and a `journal` difference's `cited`.
   Matching volume and page corroborate like authors; with journal and
   volume agreeing, a title missing from a short reference doesn't count
@@ -431,7 +454,9 @@ citation styles. The rules, each from a real failure:
   run that are none of the work's authors, journal, numbers or furniture)
   keeps its title mismatch: with the work's authors and the place, that
   is plausible (a translated title, or one work's title at another's
-  place), never verified. Journal, volume and first page all agreeing
+  place), never verified. A quoted title, or BibTeX's, is a title given
+  however short (`"The essence of entanglement," Phys. Rev. A, vol.
+  63`). Journal, volume and first page all agreeing
   (and no title against them) verify on their own (0.9; 0.8 a year off),
   so running
   headers (`Injury 47 (2016) 797–804`, `Nature 521, 436–444 (2015)`) are
@@ -447,9 +472,16 @@ citation styles. The rules, each from a real failure:
   most: in free text, a capitalised name word in the byline (the text
   before the title, or BibTeX's `author`) that is none of the record's
   names give or take a letter, nor a given name beside its family name;
-  in a structured claim, a family name not on the record. Not checked for
+  in a structured claim, a family name not on the record. A family name
+  with initials of its own after a comma (`Harrowgate, O., & Palmer, H.`)
+  is no given name of the next. Not checked for
   initials, an organisation's byline, a record cut short (100 authors)
   or naming an organisation with fewer than three people, or books.
+  A byline naming people, none of them the record's, as any style writes
+  them (IEEE `F. Eskdale-Mora, "…"`, MLA `Nadler, Steven. "…"`, BibTeX's
+  `author`), has different authors, not unknown ones; two words of a
+  title in capitals (`WOMEN ON ORAL`) are no name and initials: a family
+  name in capitals takes initials set off by a stop or comma.
 - **Another edition or version is plausible**: a book (or one reprinted
   whole as a chapter, cited with its publisher) with another year, and a
   dataset or software matching the claimed identifier and title, cited

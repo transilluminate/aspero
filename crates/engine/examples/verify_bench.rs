@@ -18,6 +18,10 @@
 //! on the cache's age. `ASPERO_HTTP_TAPE=off` runs without a tape, through
 //! a dedicated cache in `target/bench-cache` (re-runs within its lifetimes
 //! free) as before. Exits non-zero if any case fails.
+//!
+//! Once the day's OpenAlex allowance is used up, prepaid credit is spent up
+//! to $5 a day (`ASPERO_OPENALEX_CREDIT_CAP_USD`), not the library's $0.25,
+//! so a run isn't stopped part-way.
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -25,6 +29,10 @@ use std::sync::Arc;
 use aspero_core::{Claim, WorkId};
 use aspero_engine::{HttpTape, SecretString, SqliteCache, StandardConfig, Verification, standard};
 use serde::Deserialize;
+
+/// The most prepaid credit a bench run spends in a day, unless
+/// `ASPERO_OPENALEX_CREDIT_CAP_USD` says otherwise.
+const BENCH_CREDIT_CAP_USD: f64 = 5.0;
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -109,6 +117,16 @@ async fn main() -> std::process::ExitCode {
     .expect("bench cache");
     let mut config = StandardConfig::all(env("OPENALEX_API_KEY").map(SecretString::from));
     config.mailto = env("ASPERO_MAILTO");
+    // Not the library's $0.25: a bench run shouldn't stop part-way once
+    // the allowance is gone.
+    config.openalex_daily_credit_cap_usd = Some(env("ASPERO_OPENALEX_CREDIT_CAP_USD").map_or(
+        BENCH_CREDIT_CAP_USD,
+        |v| {
+            v.trim()
+                .parse()
+                .unwrap_or_else(|_| panic!("ASPERO_OPENALEX_CREDIT_CAP_USD: {v:?} isn't USD"))
+        },
+    ));
     config.cache = Some(Arc::new(cache));
     config.http_tape = tape;
     let engine = standard(config).expect("engine");

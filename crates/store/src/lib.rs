@@ -106,6 +106,91 @@ CREATE TABLE IF NOT EXISTS mcp_spend (
 /// How many days of per-key spend are kept.
 const SPEND_DAYS: i64 = 31;
 
+/// Each provider's prepaid balance over a budget day, from which the
+/// credit spent that day is told ([`PrepaidDay`]): kept apart from the
+/// versioned schema like the MCP spend, and for the same reason. Days more
+/// than [`PREPAID_DAYS`] old are pruned as balances are seen.
+const PREPAID: &str = "
+CREATE TABLE IF NOT EXISTS prepaid_day (
+    provider   TEXT NOT NULL,
+    day        TEXT NOT NULL,      -- the budget day, YYYY-MM-DD (OpenAlex: UTC)
+    start_usd  REAL NOT NULL,      -- the first balance seen, raised by top-ups
+    last_usd   REAL NOT NULL,      -- the latest balance seen
+    seen_at    INTEGER NOT NULL,   -- when it was seen, unix milliseconds
+    PRIMARY KEY (provider, day)
+);
+";
+
+/// How many days of prepaid balances are kept.
+const PREPAID_DAYS: i64 = 7;
+
+/// A balance rise smaller than this (USD) is taken as responses arriving
+/// out of order (each says the balance when it was answered), not a
+/// top-up.
+const TOP_UP_AT_LEAST: f64 = 0.01;
+
+/// A provider's prepaid balance over one budget day: the first balance
+/// seen in it (raised by any top-up since) and the latest. Credit spent
+/// that day is `start_usd − last_usd`. A day first seen part-way through
+/// misses what was spent before, an undercount.
+#[derive(Debug, Clone, Copy, PartialEq)]
+#[non_exhaustive]
+pub struct PrepaidDay {
+    pub start_usd: f64,
+    pub last_usd: f64,
+    /// When `last_usd` was seen.
+    pub seen_at: Timestamp,
+}
+
+impl PrepaidDay {
+    /// The day as it stands after `balance` is seen at `at`: the first
+    /// sighting starts it; a fall is spend; a rise of a cent or more is a
+    /// top-up, which raises the start by as much, so it isn't counted as
+    /// negative spend; a smaller rise, or a sighting older than the latest,
+    /// is responses arriving out of order, and changes nothing.
+    pub fn see(known: Option<PrepaidDay>, balance: f64, at: Timestamp) -> PrepaidDay {
+        let Some(mut day) = known else {
+            return PrepaidDay {
+                start_usd: balance,
+                last_usd: balance,
+                seen_at: at,
+            };
+        };
+        if at < day.seen_at {
+            return day;
+        }
+        let rise = balance - day.last_usd;
+        if rise >= TOP_UP_AT_LEAST {
+            day.start_usd += rise;
+        } else if rise > 0.0 {
+            return day;
+        }
+        day.last_usd = balance;
+        day.seen_at = at;
+        day
+    }
+
+    /// Credit spent over the day, to a millionth; never negative.
+    pub fn spent_usd(&self) -> f64 {
+        ((self.start_usd - self.last_usd).max(0.0) * 1e6).round() / 1e6
+    }
+}
+
+/// Providers' prepaid balances by budget day, shared between processes
+/// (the cache file), so every process and restart tells the same credit
+/// spent today.
+pub trait PrepaidDays: Send + Sync {
+    /// Notes `balance`, seen at `at`, for `provider` on `day`
+    /// (`YYYY-MM-DD`), as [`PrepaidDay::see`] does, and returns the day.
+    fn see_prepaid(
+        &self,
+        provider: &str,
+        day: &str,
+        balance: f64,
+        at: Timestamp,
+    ) -> Result<PrepaidDay>;
+}
+
 /// Citation links, added beside the versioned schema so that adding them
 /// keeps the rest of the cache (a rebuild drops and recreates them too).
 /// One row per work and direction: the ids it cites (`references`), or a
@@ -351,7 +436,7 @@ impl SqliteCache {
             if version(&tx)? != SCHEMA_VERSION {
                 // Disposable: drop whatever is there (older or newer) and rebuild.
                 let tables: Vec<String> = tx
-                    .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' AND name NOT IN ('pacing', 'mcp_spend')")?
+                    .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' AND name NOT IN ('pacing', 'mcp_spend', 'prepaid_day')")?
                     .query_map([], |r| r.get(0))?
                     .collect::<rusqlite::Result<_>>()?;
                 for table in tables {
@@ -365,6 +450,7 @@ impl SqliteCache {
         conn.execute_batch(PACING)?;
         conn.execute_batch(EDGES)?;
         conn.execute_batch(SPEND)?;
+        conn.execute_batch(PREPAID)?;
         add_access(&mut conn)?;
         Ok(SqliteCache {
             conn: Mutex::new(conn),
@@ -723,6 +809,60 @@ impl Pacing for SqliteCache {
         )?;
         tx.commit()?;
         Ok(Timestamp::from_millisecond(slot).unwrap_or(now))
+    }
+}
+
+impl PrepaidDays for SqliteCache {
+    /// In one write transaction (processes may share the file), forgetting
+    /// days more than a week before `day`.
+    fn see_prepaid(
+        &self,
+        provider: &str,
+        day: &str,
+        balance: f64,
+        at: Timestamp,
+    ) -> Result<PrepaidDay> {
+        let mut conn = self.conn();
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let known = tx
+            .query_row(
+                "SELECT start_usd, last_usd, seen_at FROM prepaid_day \
+                 WHERE provider = ?1 AND day = ?2",
+                params![provider, day],
+                |r| {
+                    Ok(PrepaidDay {
+                        start_usd: r.get(0)?,
+                        last_usd: r.get(1)?,
+                        seen_at: Timestamp::from_millisecond(r.get(2)?)
+                            .unwrap_or(Timestamp::UNIX_EPOCH),
+                    })
+                },
+            )
+            .optional()?;
+        let seen = PrepaidDay::see(known, balance, at);
+        if Some(seen) != known {
+            tx.execute(
+                "INSERT INTO prepaid_day (provider, day, start_usd, last_usd, seen_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5)
+                 ON CONFLICT (provider, day) DO UPDATE SET start_usd = excluded.start_usd,
+                     last_usd = excluded.last_usd, seen_at = excluded.seen_at",
+                params![
+                    provider,
+                    day,
+                    seen.start_usd,
+                    seen.last_usd,
+                    seen.seen_at.as_millisecond()
+                ],
+            )?;
+        }
+        if known.is_none() {
+            tx.execute(
+                "DELETE FROM prepaid_day WHERE day < date(?1, ?2)",
+                params![day, format!("-{PREPAID_DAYS} days")],
+            )?;
+        }
+        tx.commit()?;
+        Ok(seen)
     }
 }
 

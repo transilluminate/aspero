@@ -5,7 +5,7 @@ use std::sync::Arc;
 use aspero_core::{Error, HttpClient, ProviderId, ResiliencePolicy};
 
 use crate::transport::{HttpTape, Paced, ReqwestClient, TapeClient};
-use crate::{Cache, CachePolicy, Engine, EngineBuilder, Pacing, SecretString};
+use crate::{Cache, CachePolicy, Engine, EngineBuilder, Pacing, PrepaidDays, SecretString};
 
 #[cfg(feature = "crossref")]
 pub use aspero_crossref::CrossrefConfig;
@@ -55,6 +55,10 @@ fn names() -> String {
     names.join(", ")
 }
 
+/// The most OpenAlex prepaid credit spent in a day, in USD, unless
+/// [`StandardConfig::openalex_daily_credit_cap_usd`] says otherwise.
+pub const DEFAULT_OPENALEX_CREDIT_CAP_USD: f64 = 0.25;
+
 /// Settings for the compiled-in providers. `None` disables a provider.
 #[derive(Clone, Default)]
 #[non_exhaustive]
@@ -72,6 +76,19 @@ pub struct StandardConfig {
     /// it, shared by everything using the key) reaches this many USD,
     /// until the budget resets; see [`EngineBuilder::daily_cap`].
     pub openalex_daily_cap_usd: Option<f64>,
+    /// Once OpenAlex's daily allowance is used up (by anything using the
+    /// key), lets paid calls spend prepaid credit only while the credit
+    /// spent today (by anything using the key) is under this many USD: 0
+    /// never spends credit, more allows more; until then,
+    /// `openalex_daily_cap_usd` applies. `None`:
+    /// [`DEFAULT_OPENALEX_CREDIT_CAP_USD`]. There's no unlimited setting:
+    /// more credit a day takes a larger number. See
+    /// [`EngineBuilder::daily_credit_cap`].
+    pub openalex_daily_credit_cap_usd: Option<f64>,
+    /// Where each day's prepaid balances are shared with other processes
+    /// (usually the cache file, as `pacing`), so the credit spent today is
+    /// told the same by all; `None` keeps them in this engine.
+    pub prepaid_days: Option<Arc<dyn PrepaidDays>>,
     /// An HTTP tape every provider's requests go through, for benchmark
     /// and red-team runs ([`TapeClient`]); usually
     /// [`HttpTape::from_env`]. `None` (the default) sends every request.
@@ -247,6 +264,9 @@ pub fn standard(config: StandardConfig) -> Result<Engine, Error> {
         builder = builder.cache(cache);
     }
     builder = builder.cache_policy(config.cache_policy);
+    if let Some(days) = config.prepaid_days {
+        builder = builder.prepaid_days(days);
+    }
     for id in config.disabled {
         builder = builder.disabled(id);
     }
@@ -260,6 +280,12 @@ pub fn standard(config: StandardConfig) -> Result<Engine, Error> {
         if let Some(cap) = config.openalex_daily_cap_usd {
             builder = builder.daily_cap(aspero_openalex::ID, cap);
         }
+        builder = builder.daily_credit_cap(
+            aspero_openalex::ID,
+            config
+                .openalex_daily_credit_cap_usd
+                .unwrap_or(DEFAULT_OPENALEX_CREDIT_CAP_USD),
+        );
     }
 
     #[cfg(feature = "crossref")]

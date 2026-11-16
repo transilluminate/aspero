@@ -288,13 +288,42 @@ pub struct Failure {
 /// A daily cap reached: paid calls to the provider stop until `resetsAt`.
 #[derive(Debug, Clone, PartialEq, uniffi::Record)]
 pub struct BudgetCap {
-    /// The cap in US dollars, as `Config.openalexDailyCapUsd` set it.
+    /// The cap reached in US dollars: `Config.openalexDailyCapUsd`, or for
+    /// `capKind` `.credit`, `Config.openalexDailyCreditCapUsd`.
     pub cap_usd: f64,
-    /// Spent today in US dollars, as the provider reports it: by everything
-    /// using the key.
+    /// Spent today against that cap in US dollars, by everything using the
+    /// key: the allowance's use as the provider reports it, or for
+    /// `.credit`, the prepaid credit spent today
+    /// (`Budget.prepaidSpentTodayUsd`).
     pub spent_usd: f64,
     /// When the provider's budget resets (OpenAlex: midnight UTC).
     pub resets_at: Option<SystemTime>,
+    /// Which cap was reached. Always given by aspero; optional only so
+    /// records made before it existed still build.
+    #[uniffi(default = None)]
+    pub cap_kind: Option<BudgetCapKind>,
+}
+
+/// Which of the daily caps was reached.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Enum)]
+pub enum BudgetCapKind {
+    /// The cap on the daily allowance (`Config.openalexDailyCapUsd`),
+    /// reached with some of the allowance left, or, with no credit cap,
+    /// once it's used up.
+    Allowance,
+    /// The cap on prepaid credit spent today
+    /// (`Config.openalexDailyCreditCapUsd`), once the allowance is used
+    /// up.
+    Credit,
+}
+
+impl From<aspero_core::CapKind> for BudgetCapKind {
+    fn from(kind: aspero_core::CapKind) -> Self {
+        match kind {
+            aspero_core::CapKind::Credit => BudgetCapKind::Credit,
+            _ => BudgetCapKind::Allowance,
+        }
+    }
 }
 
 impl From<&engine::EngineError> for Failure {
@@ -328,10 +357,12 @@ impl BudgetCap {
                 cap,
                 used,
                 resets_at,
+                which,
             } => Some(BudgetCap {
                 cap_usd: *cap,
                 spent_usd: *used,
                 resets_at: resets_at.map(time),
+                cap_kind: Some((*which).into()),
             }),
             _ => None,
         }
@@ -1248,6 +1279,19 @@ pub struct Budget {
     /// the provider says one.
     #[uniffi(default = None)]
     pub prepaid_remaining_usd: Option<f64>,
+    /// Prepaid credit spent today, in US dollars, by everything using the
+    /// key (the app, the CLI, scripts), as the allowance's use is: the
+    /// day's first balance seen (by anything sharing the cache), raised by
+    /// any top-up since, less the balance now. OpenAlex doesn't say it, so
+    /// a day first seen part-way through misses what was spent before.
+    /// Against `Config.openalexDailyCreditCapUsd`. `None` where no balance
+    /// is known today.
+    #[uniffi(default = None)]
+    pub prepaid_spent_today_usd: Option<f64>,
+    /// When the prepaid balance expires, where the provider says (OpenAlex:
+    /// asked by `refreshBudgets` with a key).
+    #[uniffi(default = None)]
+    pub prepaid_expires_at: Option<SystemTime>,
 }
 
 impl Budget {
@@ -1259,6 +1303,8 @@ impl Budget {
             seen_at: time(b.seen_at),
             limit_usd: b.limit,
             prepaid_remaining_usd: b.prepaid_remaining,
+            prepaid_spent_today_usd: b.prepaid_spent_today,
+            prepaid_expires_at: b.prepaid_expires_at.map(time),
         }
     }
 }
@@ -2849,6 +2895,7 @@ mod tests {
                 cap: 0.5,
                 used: 0.5012,
                 resets_at: Some(resets),
+                which: aspero_core::CapKind::Allowance,
             },
         };
         let failure = Failure::from(&e);
@@ -2860,6 +2907,7 @@ mod tests {
                 cap_usd: 0.5,
                 spent_usd: 0.5012,
                 resets_at: Some(time(resets)),
+                cap_kind: Some(BudgetCapKind::Allowance),
             })
         );
         // So does a relation's work left unresolved by the cap.
@@ -2872,11 +2920,16 @@ mod tests {
                 cap: 0.5,
                 used: 0.5012,
                 resets_at: Some(resets),
+                which: aspero_core::CapKind::Credit,
             })),
         };
         let failure = Failure::from(&unresolved);
         assert_eq!(failure.provider.as_deref(), Some("openalex"));
-        assert_eq!(failure.budget_cap.map(|c| c.cap_usd), Some(0.5));
+        let cap = failure.budget_cap.unwrap();
+        assert_eq!(
+            (cap.cap_usd, cap.cap_kind),
+            (0.5, Some(BudgetCapKind::Credit))
+        );
         // Other failures carry none.
         let other = engine::EngineError::Provider {
             provider: ProviderId::from_static("openalex"),

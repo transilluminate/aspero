@@ -205,10 +205,20 @@ its `Config`):
 | Flag (variable) | Effect |
 |---|---|
 | `--openalex-cap-usd USD` (`ASPERO_OPENALEX_CAP_USD`) | Stop OpenAlex's paid calls once today's use, as OpenAlex reports it for the key, reaches this; lookups (free) go on, checks fall back to the free sources, searches that need OpenAlex fail (exit 5). `aspero budget` shows today's use. |
+| `--openalex-credit-cap-usd USD` (`ASPERO_OPENALEX_CREDIT_CAP_USD`) | Once the free allowance is all used today (by anything using the key), spend prepaid credit only while the credit spent today is under this; default 0.25, 0 never spends credit. See below. |
 | `--without europepmc,openlibrary` (`ASPERO_DISABLED_SOURCES`) | Sources never to ask: `openalex`, `crossref`, `datacite`, `doi`, `europepmc`, `openlibrary`. |
 | `--cache-found-days N` (`ASPERO_CACHE_FOUND_DAYS`) | How long a found record is trusted (default 7). |
 | `--cache-not-found-days N` (`ASPERO_CACHE_NOT_FOUND_DAYS`) | How long a "not found" is trusted (default 1). |
 | `--cache-max-mb N` (`ASPERO_CACHE_MAX_MB`) | Limit the cache's size; the least recently used answers go first. `aspero cache stats` shows the size. |
+
+OpenAlex's paid calls, with "used" and "spent" counting everything using
+the key: (a) free allowance used today under the allowance cap: go;
+(b) past the allowance cap with some allowance left: stop, holding the
+rest back for other tools; (c) the allowance all gone and credit spent
+today under the credit cap ($0.25 unless set): go, on credit; (d) credit
+spent today at the credit cap: stop until midnight UTC. A last call, or
+calls in flight together, can pass a cap by their own cost, and others'
+spending shows only in the next response. `aspero budget` shows both.
 
 ## Library
 

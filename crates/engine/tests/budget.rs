@@ -3,8 +3,8 @@
 
 use std::sync::Arc;
 
-use aspero_core::testing::{FIXTURE_TIME, ReplayClient, fixture};
-use aspero_core::{FieldSet, HttpResponse, ResiliencePolicy, WorkId};
+use aspero_core::testing::{FIXTURE_TIME, ReplayClient, fixture, response};
+use aspero_core::{Error, FieldSet, HttpResponse, ResiliencePolicy, SearchQuery, WorkId};
 use aspero_engine::{Engine, OpenAlexConfig, SecretString};
 use aspero_openalex::OpenAlex;
 
@@ -53,6 +53,53 @@ async fn with_a_key_refreshing_asks_rate_limit_for_free() {
     );
     assert_eq!(budget.seen_at, FIXTURE_TIME);
     assert_eq!(engine.budgets(), budgets, "remembered");
+    // No credit: none spent, and no expiry.
+    assert_eq!(budget.prepaid_spent_today, Some(0.0));
+    assert_eq!(budget.prepaid_expires_at, None);
+}
+
+/// With credit, `/rate-limit` says when it expires; the day's first
+/// balance is where today's credit spend starts, and a search's headers
+/// then tell what it spent.
+#[tokio::test]
+async fn credit_spent_today_counts_from_the_days_first_balance() {
+    let spent_a_search = response(
+        200,
+        &[
+            ("x-ratelimit-cost-usd", "0.001"),
+            ("x-ratelimit-limit-usd", "1"),
+            ("x-ratelimit-remaining-usd", "0"),
+            ("x-ratelimit-prepaid-remaining-usd", "9.8841"),
+            ("x-ratelimit-reset", "3600"),
+        ],
+        &String::from_utf8(recorded("works_search").body).unwrap(),
+    );
+    let (engine, _) = engine(
+        Some("test-key"),
+        vec![recorded("rate_limit_prepaid"), spent_a_search],
+    );
+    let budget = engine.refresh_budgets().await[0].1;
+    assert_eq!(budget.prepaid_remaining, Some(9.8851));
+    assert_eq!(
+        budget.prepaid_spent_today,
+        Some(0.0),
+        "the day's first sighting"
+    );
+    assert_eq!(
+        budget.prepaid_expires_at,
+        Some("2027-02-14T12:08:05Z".parse().unwrap())
+    );
+    engine
+        .search(Some("openalex"), &SearchQuery::new("deep learning"))
+        .await
+        .unwrap();
+    let budget = engine.budgets()[0].1;
+    assert_eq!(budget.prepaid_spent_today, Some(0.001));
+    assert_eq!(
+        budget.prepaid_expires_at,
+        Some("2027-02-14T12:08:05Z".parse().unwrap()),
+        "kept: headers don't say it"
+    );
 }
 
 #[tokio::test]
@@ -79,4 +126,60 @@ async fn offline_refreshing_sends_nothing() {
     let offline = engine.with_options(aspero_engine::CallOptions::offline());
     assert!(offline.refresh_budgets().await.is_empty());
     assert!(http.requests().is_empty());
+}
+
+/// A failing search, as OpenAlex might answer once the day's allowance is
+/// used up, with `prepaid` USD of credit left.
+fn failing_at_no_allowance(prepaid: &str) -> HttpResponse {
+    response(
+        503,
+        &[
+            ("x-ratelimit-limit-usd", "1"),
+            ("x-ratelimit-remaining-usd", "0"),
+            ("x-ratelimit-prepaid-remaining-usd", prepaid),
+            ("x-ratelimit-reset", "43200"),
+        ],
+        "",
+    )
+}
+
+/// OpenAlex spends credit once the allowance is used up: a failure then,
+/// with credit left, isn't a spent budget, and OpenAlex isn't stopped
+/// until the reset; with no credit left either, it is.
+#[tokio::test]
+async fn the_allowance_used_up_with_credit_left_doesnt_stop_openalex() {
+    let search = || SearchQuery::new("deep learning");
+    let (credit, http) = engine(
+        Some("test-key"),
+        vec![failing_at_no_allowance("9.8851"), recorded("works_search")],
+    );
+    let failed = credit.search(Some("openalex"), &search()).await;
+    assert!(failed.is_err(), "the fault itself fails");
+    assert!(
+        credit.unavailable().is_empty(),
+        "{:?}",
+        credit.unavailable()
+    );
+    assert!(
+        credit.search(Some("openalex"), &search()).await.is_ok(),
+        "asked again"
+    );
+    assert_eq!(http.requests().len(), 2);
+
+    let (spent, http) = engine(
+        Some("test-key"),
+        vec![failing_at_no_allowance("0"), recorded("works_search")],
+    );
+    let failed = spent.search(Some("openalex"), &search()).await;
+    assert!(failed.is_err());
+    let unavailable = spent.unavailable();
+    assert!(
+        matches!(unavailable.as_slice(), [(_, Error::QuotaExhausted { .. })]),
+        "{unavailable:?}"
+    );
+    assert!(
+        spent.search(Some("openalex"), &search()).await.is_err(),
+        "not asked"
+    );
+    assert_eq!(http.requests().len(), 1);
 }

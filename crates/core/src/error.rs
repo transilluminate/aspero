@@ -32,15 +32,18 @@ pub enum Error {
     #[error("usage quota exhausted{}", reset_hint(.resets_at.as_ref()))]
     QuotaExhausted { resets_at: Option<Timestamp> },
 
-    /// The caller's own daily cap on the provider's spend is reached: `used`
-    /// (the day's use as the provider reports it, shared by everything
-    /// using the key) is at least `cap`, so its paid calls stop until
-    /// `resets_at`. Free calls go on; fall back to other providers.
-    #[error("stopped at the daily cap of ${cap:.4} (${used:.4} used today){}", reset_hint(.resets_at.as_ref()))]
+    /// One of the caller's own daily caps on the provider's spend is
+    /// reached, so its paid calls stop until `resets_at`; `which` says
+    /// which, and `cap` is that cap. For the allowance's cap, `used` is the
+    /// day's use of the allowance as the provider reports it; for the
+    /// credit's, the prepaid credit spent today. Either counts everything
+    /// using the key. Free calls go on; fall back to other providers.
+    #[error("{}{}", cap_reached(*.which, *.cap, *.used), reset_hint(.resets_at.as_ref()))]
     BudgetCapped {
         cap: f64,
         used: f64,
         resets_at: Option<Timestamp>,
+        which: CapKind,
     },
 
     #[error("network error: {0}")]
@@ -92,6 +95,28 @@ pub enum Error {
 
     #[error(transparent)]
     InvalidId(#[from] IdError),
+}
+
+/// Which of a caller's daily caps on a provider's spend was reached
+/// ([`Error::BudgetCapped`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
+pub enum CapKind {
+    /// The cap on the provider's daily allowance (OpenAlex's free $1 a
+    /// day with a key).
+    Allowance,
+    /// The cap on prepaid credit spent in a day, which applies once the
+    /// allowance is used up.
+    Credit,
+}
+
+impl CapKind {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            CapKind::Allowance => "allowance",
+            CapKind::Credit => "credit",
+        }
+    }
 }
 
 /// What a caller should do about an error. Stable: the CLI derives exit
@@ -272,6 +297,33 @@ fn reset_hint(t: Option<&Timestamp>) -> String {
     t.map(|t| format!(" (resets at {t})")).unwrap_or_default()
 }
 
+/// "stopped at the daily cap of $0.5000 ($0.5012 used today)", or for
+/// credit, "stopped at today's credit cap of $1.00 ($1.02 of credit spent
+/// today)".
+fn cap_reached(which: CapKind, cap: f64, used: f64) -> String {
+    match which {
+        CapKind::Allowance => {
+            format!("stopped at the daily cap of ${cap:.4} (${used:.4} used today)")
+        }
+        CapKind::Credit => format!(
+            "stopped at today's credit cap of {} ({} of credit spent today)",
+            usd(cap),
+            usd(used)
+        ),
+    }
+}
+
+/// Dollars to the cent, or to a hundredth of a cent where cents would
+/// round it off: "$1.02", "$0.0015".
+fn usd(v: f64) -> String {
+    let cents = (v * 100.0).round() / 100.0;
+    if (cents - v).abs() < 1e-9 {
+        format!("${v:.2}")
+    } else {
+        format!("${v:.4}")
+    }
+}
+
 fn message_hint(m: Option<&str>) -> String {
     m.map(|m| format!(": {m}")).unwrap_or_default()
 }
@@ -300,6 +352,7 @@ mod tests {
             cap: 0.5,
             used: 0.5012,
             resets_at: Some(Timestamp::UNIX_EPOCH),
+            which: CapKind::Allowance,
         };
         assert!(!e.is_retryable() && !e.trips_breaker());
         assert_eq!(e.category(), ErrorCategory::Throttled);
@@ -307,6 +360,26 @@ mod tests {
         assert_eq!(
             e.to_string(),
             "stopped at the daily cap of $0.5000 ($0.5012 used today) (resets at 1970-01-01T00:00:00Z)"
+        );
+    }
+
+    #[test]
+    fn a_reached_credit_cap_says_so() {
+        let credit = |cap, used| Error::BudgetCapped {
+            cap,
+            used,
+            resets_at: None,
+            which: CapKind::Credit,
+        };
+        let e = credit(1.0, 1.02);
+        assert_eq!(e.kind(), ErrorKind::BudgetCapped);
+        assert_eq!(
+            e.to_string(),
+            "stopped at today's credit cap of $1.00 ($1.02 of credit spent today)"
+        );
+        assert_eq!(
+            credit(0.0, 0.0015).to_string(),
+            "stopped at today's credit cap of $0.00 ($0.0015 of credit spent today)"
         );
     }
 

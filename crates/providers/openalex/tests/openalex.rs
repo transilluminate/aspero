@@ -155,6 +155,29 @@ fn the_budget_comes_free_from_rate_limit_with_a_key() {
     );
 }
 
+/// Hand-written from the fields a key with prepaid credit gets (checked
+/// 2026-11-16; the numbers are made up): the allowance used up, credit
+/// being spent, and when it expires, printed as JavaScript prints a Date.
+#[test]
+fn rate_limit_says_the_prepaid_balance_and_its_expiry() {
+    let (oa, _) = provider([recorded("rate_limit_prepaid")]);
+    let usage = block_on(oa.budget()).unwrap();
+    assert_eq!(usage.limit, Some(1.0));
+    assert_eq!(usage.remaining, Some(0.0));
+    assert_eq!(usage.prepaid_remaining, Some(9.8851));
+    assert_eq!(
+        usage.prepaid_expires_at,
+        Some("2027-02-14T12:08:05Z".parse().unwrap())
+    );
+    assert_eq!(
+        usage.resets_at,
+        Some("2026-11-11T00:00:00Z".parse().unwrap())
+    );
+    // No credit: no expiry.
+    let (oa, _) = provider([recorded("rate_limit")]);
+    assert_eq!(block_on(oa.budget()).unwrap().prepaid_expires_at, None);
+}
+
 #[test]
 fn without_a_key_the_budget_is_never_asked() {
     let (oa, http) = provider_with(None, []);
@@ -551,6 +574,56 @@ fn the_request_crossing_the_budget_is_quota_exhausted_whatever_its_status() {
         let err = block_on(oa.search(&SearchQuery::new("x"))).unwrap_err();
         assert!(matches!(err, Error::QuotaExhausted { .. }), "{err:?}");
     }
+}
+
+/// Credit is spent once the allowance is used up: a failure with the
+/// allowance at zero but credit left is the failure it says, not a spent
+/// budget (which would stop OpenAlex until the reset); with neither left,
+/// it's spent.
+#[test]
+fn the_allowance_used_up_with_credit_left_is_not_quota_exhausted() {
+    let failing = |status, prepaid: &'static str| {
+        response(
+            status,
+            &[
+                ("retry-after", "1"),
+                ("x-ratelimit-remaining-usd", "0"),
+                ("x-ratelimit-prepaid-remaining-usd", prepaid),
+                ("x-ratelimit-reset", "3600"),
+            ],
+            r#"{"error":"Rate limit exceeded"}"#,
+        )
+    };
+    let (oa, _) = provider([
+        failing(429, "9.8851"),
+        failing(503, "9.8851"),
+        failing(429, "0"),
+        failing(503, "0"),
+    ]);
+    let err = block_on(oa.search(&SearchQuery::new("x"))).unwrap_err();
+    assert!(matches!(err, Error::RateLimited { .. }), "{err:?}");
+    let err = block_on(oa.search(&SearchQuery::new("x"))).unwrap_err();
+    assert!(matches!(err, Error::Server { status: 503, .. }), "{err:?}");
+    for _ in 0..2 {
+        let err = block_on(oa.search(&SearchQuery::new("x"))).unwrap_err();
+        assert!(matches!(err, Error::QuotaExhausted { .. }), "{err:?}");
+    }
+}
+
+/// Credit spent too: OpenAlex's own word still decides.
+#[test]
+fn not_enough_credits_is_quota_exhausted_even_with_credit_said_left() {
+    let worded = response(
+        402,
+        &[
+            ("x-ratelimit-remaining-usd", "0"),
+            ("x-ratelimit-prepaid-remaining-usd", "0.0001"),
+        ],
+        r#"{"error":"not_enough_credits"}"#,
+    );
+    let (oa, _) = provider([worded]);
+    let err = block_on(oa.search(&SearchQuery::new("x"))).unwrap_err();
+    assert!(matches!(err, Error::QuotaExhausted { .. }), "{err:?}");
 }
 
 #[test]

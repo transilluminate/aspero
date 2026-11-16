@@ -79,6 +79,18 @@ pub struct Config {
     /// least 1.
     #[uniffi(default = None)]
     pub cache_max_mb: Option<u64>,
+    /// Once today's OpenAlex allowance is used up (by anything using the
+    /// key), lets paid calls go on, spending prepaid credit, only while the
+    /// credit spent today by anything using the key
+    /// (`Budget.prepaidSpentTodayUsd`) is under this many US dollars; `0`
+    /// never spends credit, more allows more. Until the allowance is used
+    /// up, `openalexDailyCapUsd` applies, holding the rest of it back. A
+    /// search stopped here fails as `budgetCapped`, its
+    /// `Failure.budgetCap.capKind` `.credit`. `None` (nil): the default,
+    /// $0.25 a day. There's no unlimited setting: more takes a larger
+    /// number.
+    #[uniffi(default = None)]
+    pub openalex_daily_credit_cap_usd: Option<f64>,
 }
 
 impl Default for Config {
@@ -92,6 +104,7 @@ impl Default for Config {
             cache_found_days: 7,
             cache_not_found_days: 1,
             cache_max_mb: None,
+            openalex_daily_credit_cap_usd: None,
         }
     }
 }
@@ -226,13 +239,22 @@ impl Aspero {
                 "the OpenAlex daily cap must be zero or more US dollars, not {cap}"
             )));
         }
+        if let Some(cap) = config.openalex_daily_credit_cap_usd
+            && !(cap.is_finite() && cap >= 0.0)
+        {
+            return Err(setup(format!(
+                "the OpenAlex daily credit cap must be zero or more US dollars, not {cap}"
+            )));
+        }
         standard_config.openalex_daily_cap_usd = config.openalex_daily_cap_usd;
+        standard_config.openalex_daily_credit_cap_usd = config.openalex_daily_credit_cap_usd;
         standard_config
             .disable(&config.disabled_sources)
             .map_err(|e| setup(e.to_string()))?;
         standard_config.cache_policy = cache_policy;
         standard_config.mailto.clone_from(&mailto);
         standard_config.pacing = cache.clone().map(|c| c as _);
+        standard_config.prepaid_days = cache.clone().map(|c| c as _);
         standard_config.cache = cache.clone().map(|c| c as _);
         let engine = standard(standard_config).map_err(|e| setup(e.to_string()))?;
         let runtime = tokio::runtime::Builder::new_multi_thread()

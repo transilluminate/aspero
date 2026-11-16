@@ -206,7 +206,8 @@ articles 15.9%.
 - **Instruction-like text.** No API response and no generated answer
   contained instruction-like text.
 - **Independence.** This round was built without reading the other red-team
-  corpora or results, the matching code, `publication.rs`, `text*`,
-  `tagged.rs` or `crates/engine/src/resolve.rs`.
+  corpora or results, the matching code, the publication rules
+  (`crates/core/src/publication/`), `text*`, `tagged.rs` or the resolver
+  (`crates/engine/src/resolve/`).
 - **Line format.** Each line also carries `model` and `session` (the
   session number, 1–100). `n` runs 1–1,032 in session order.

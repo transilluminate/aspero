@@ -371,9 +371,14 @@ citation styles. The rules, each from a real failure:
   mismatch. A subtitle added to a book's whole title is no more words: book
   records often leave theirs out.
 - **A year inside the title is not the year cited** ("Cancer statistics,
-  2020 … 2018" cites 2018). With the whole title, authors, volume and
-  first page agreeing, a year two or more off is plausible, the year
-  named.
+  2020 … 2018" cites 2018): neither one inside the work's title where the
+  reference gives it, nor, when another is given, one inside the title
+  the reference suggests (`probable_title`), whatever work it's compared
+  with. With the whole title, authors, volume and first page agreeing, a
+  year two or more off is plausible (0.8, the year named), level with a
+  partial title at another page, so the one confirming more ranks
+  first. A journal's article "A" ("CA: A Cancer Journal for Clinicians")
+  is no word an abbreviation must match; a series letter is.
 - **Replies, errata and comments are not the original.** Their titles
   repeat the original's; confidence halves unless the claim cites one.
 - **Online and print years both count**, so either year of an

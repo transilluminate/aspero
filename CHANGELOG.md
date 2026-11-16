@@ -17,7 +17,8 @@ of 152 to none, with real ones accepted 152 of 155, from 147):
 - A year inside a title ("Cancer statistics, 2020") no longer stands in
   for the year cited, and is part of the title: the 2020 report cited as
   of 2018 with its volume and pages is plausible, the year named, not the
-  2018 report.
+  2018 report nor "Colorectal cancer statistics, 2020". "CA Cancer J
+  Clin" now matches "CA: A Cancer Journal for Clinicians".
 - The cited journal is read in more styles: before the year ending a
   Vancouver reference ("… JAMA. 2020."), before its DOI link, IEEE's
   "vol." and "no.", Harvard's "'…', Chest." and "pp.", BibTeX's

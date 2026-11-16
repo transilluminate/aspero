@@ -172,6 +172,61 @@ fn is_initials(word: &str, full: &[String]) -> bool {
     word.chars().count() == full.len() && word.chars().zip(full).all(|(c, f)| f.starts_with(c))
 }
 
+/// A field of a BibTeX entry pasted as a reference (`@article{key, journal
+/// = {Nature}, …}`), its braces dropped: `None` if the text isn't one or
+/// lacks the field.
+pub(crate) fn bibtex_field(text: &str, name: &str) -> Option<String> {
+    let text = text.trim_start();
+    if !text.starts_with('@') {
+        return None;
+    }
+    let lower = text.to_ascii_lowercase();
+    let mut from = 0;
+    while let Some(found) = lower[from..].find(name) {
+        let at = from + found;
+        from = at + name.len();
+        // The whole field name ("title", not "booktitle"), then "=".
+        let whole = !lower[..at]
+            .chars()
+            .next_back()
+            .is_some_and(char::is_alphanumeric);
+        let Some(rest) = lower[from..].trim_start().strip_prefix('=') else {
+            continue;
+        };
+        if !whole {
+            continue;
+        }
+        let start = text.len() - rest.trim_start().len();
+        let close = match text[start..].chars().next()? {
+            '{' => '}',
+            '"' => '"',
+            _ => {
+                // A bare number: `year = 2020`.
+                let bare: String = text[start..]
+                    .chars()
+                    .take_while(char::is_ascii_alphanumeric)
+                    .collect();
+                return (!bare.is_empty()).then_some(bare);
+            }
+        };
+        let mut depth = 0usize;
+        let mut value = String::new();
+        for c in text[start + 1..].chars() {
+            match c {
+                c if c == close && depth == 0 => {
+                    let value = value.split_whitespace().collect::<Vec<_>>().join(" ");
+                    return (!value.is_empty()).then_some(value);
+                }
+                '{' => depth += 1,
+                '}' => depth = depth.saturating_sub(1),
+                c => value.push(c),
+            }
+        }
+        return None;
+    }
+    None
+}
+
 /// The first page of a page or range: "2545" from "2545-55" or "2545–2555".
 pub fn first_page(pages: &str) -> &str {
     pages

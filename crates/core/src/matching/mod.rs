@@ -20,6 +20,8 @@ mod authors;
 mod derivative;
 mod text;
 
+use std::ops::Range;
+
 use serde::{Deserialize, Serialize};
 
 use crate::id::{IdKind, WorkId, starts_with_ci};
@@ -27,7 +29,9 @@ use crate::provider::Place;
 use crate::publication::{self, first_page, journal_in, other_journal, same_journal};
 use crate::record::SourceRecord;
 
-use authors::{author_overlap, family_name, same_family};
+use authors::{
+    author_overlap, byline_strangers, claimed_strangers, complete_byline, family_name, same_family,
+};
 pub use derivative::{
     WorkKind, claim_mentions_derivative, derivative_kind, derivative_work_kind, is_derivative,
 };
@@ -80,6 +84,9 @@ const JOURNAL_MISMATCH_PENALTY: f64 = 0.9;
 /// clearly another ([`other_journal`]): a citation error, as a wrong volume
 /// is, and a tell of invented references.
 const JOURNAL_MISMATCH_CAP: f64 = LOCATION_MISMATCH_CAP;
+/// Confidence ceiling when the claim names an author the record's complete
+/// byline lacks: invented co-authors beside a real first author.
+const STRANGERS_CAP: f64 = LOCATION_MISMATCH_CAP;
 
 /// Verdict thresholds on confidence.
 pub const VERIFIED: f64 = 0.85;
@@ -382,6 +389,22 @@ fn cites_chapter(text: &str) -> bool {
     })
 }
 
+/// A free-text reference's byline: a BibTeX entry's author field, else
+/// its text before the record's title (at `span`), or before the first of
+/// the title's words when it's cited otherwise.
+fn byline(text: &Normalised, title: Option<&str>, span: Option<&Range<usize>>) -> Option<String> {
+    if let Some(authors) = publication::bibtex_field(&text.raw, "author") {
+        return Some(authors);
+    }
+    let start = if let Some(span) = span {
+        span.start
+    } else {
+        let title = content_words(title?);
+        text.words.iter().position(|w| title.contains(w))?
+    };
+    Some(text.raw[..text.spans[start].start].to_owned())
+}
+
 fn dedup_years(mut years: Vec<i16>) -> Vec<i16> {
     years.sort_unstable();
     years.dedup();
@@ -425,6 +448,32 @@ pub fn assess(claim: &Claim, record: &SourceRecord) -> Assessment {
         }
     } else {
         FieldCheck::UNKNOWN
+    };
+    // Where the record's title stands in free text: what precedes it is the
+    // byline, what follows the journal and place.
+    let title_span = match (&claim.title, &work_title, &text) {
+        (None, Some(actual), Some(text)) => text.title_span(actual),
+        _ => None,
+    };
+    // Names the claim gives that the record's byline lacks: invented
+    // co-authors beside a real first author. Not a match, whoever is first.
+    // Not for books, whose records often list only the first author (Open
+    // Library's Sutton without Barto).
+    let strangers = authors.agreement != Agreement::Unknown
+        && work.work_type != Some(crate::work::WorkType::Book)
+        && complete_byline(&work.authors)
+        && if claim.authors.is_empty() {
+            text.as_ref()
+                .and_then(|text| byline(text, work_title.as_deref(), title_span.as_ref()))
+                .is_some_and(|b| {
+                    byline_strangers(&b, &work.authors, work.container_title.as_deref())
+                })
+        } else {
+            claimed_strangers(&claim.authors, &work.authors)
+        };
+    let authors = match authors.score {
+        Some(s) if strangers => FieldCheck::scored(s.min(CORROBORATING_AUTHORS)),
+        _ => authors,
     };
 
     let actual_years: Vec<i16> = work
@@ -620,6 +669,11 @@ pub fn assess(claim: &Claim, record: &SourceRecord) -> Assessment {
         && !claim.text.as_deref().is_some_and(cites_chapter)
     {
         confidence = confidence.max(EDITION);
+    }
+    // Authors the work doesn't have are an error in the citation, and a
+    // tell of invented references, whatever else agrees.
+    if strangers {
+        confidence = confidence.min(STRANGERS_CAP);
     }
     // A reply, correction or commentary is not the work it responds to,
     // unless the citation says it is citing one.

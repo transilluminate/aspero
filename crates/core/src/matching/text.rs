@@ -1,6 +1,8 @@
 //! Text comparison: normalising, titles, and looking for a record's fields
 //! inside a free-text reference.
 
+use std::ops::Range;
+
 use unicode_normalization::UnicodeNormalization;
 
 use super::AUTHORS_COMPARED;
@@ -15,6 +17,35 @@ pub fn normalise(s: &str) -> String {
         .map(|c| if c.is_alphanumeric() { c } else { ' ' })
         .collect();
     folded.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+/// [`normalise`]'s words, each with where it stands in `s` (a byte
+/// range), so what surrounds a word can be read as written.
+pub(super) fn spanned_words(s: &str) -> Vec<(String, Range<usize>)> {
+    let mut found: Vec<(String, Range<usize>)> = Vec::new();
+    let mut open = false;
+    for (at, c) in s.char_indices() {
+        let folded: String = c
+            .nfkd()
+            .filter(|c| !unicode_normalization::char::is_combining_mark(*c))
+            .flat_map(char::to_lowercase)
+            .collect();
+        let end = at + c.len_utf8();
+        for f in folded.chars() {
+            match found.last_mut() {
+                _ if !f.is_alphanumeric() => open = false,
+                Some((word, span)) if open => {
+                    word.push(f);
+                    span.end = end;
+                }
+                _ => {
+                    found.push((f.to_string(), at..end));
+                    open = true;
+                }
+            }
+        }
+    }
+    found
 }
 
 pub(super) fn words(s: &str) -> Vec<String> {
@@ -108,18 +139,41 @@ pub(super) fn dedup(mut v: Vec<String>) -> Vec<String> {
 
 /// A reference string prepared for "is X mentioned?" questions.
 pub(super) struct Normalised {
+    /// The reference as written.
+    pub(super) raw: String,
     /// Space-padded, so phrase matches respect word boundaries.
     padded: String,
     pub(super) words: Vec<String>,
+    /// Where each word stands in `raw`.
+    pub(super) spans: Vec<Range<usize>>,
 }
 
 impl Normalised {
     pub(super) fn new(text: &str) -> Self {
-        let norm = normalise(text);
+        let (words, spans): (Vec<String>, Vec<Range<usize>>) =
+            spanned_words(text).into_iter().unzip();
         Normalised {
-            words: norm.split(' ').map(str::to_owned).collect(),
-            padded: format!(" {norm} "),
+            raw: text.to_owned(),
+            padded: format!(" {} ", words.join(" ")),
+            words,
+            spans,
         }
+    }
+
+    /// The words (as indices into `words`) where `title` (or its main
+    /// title, without subtitle) stands as a phrase, first found.
+    pub(super) fn title_span(&self, title: &str) -> Option<Range<usize>> {
+        let title = unmarked(title);
+        [title, main_title(title)].into_iter().find_map(|t| {
+            let phrase = words(t);
+            if phrase.is_empty() {
+                return None;
+            }
+            self.words
+                .windows(phrase.len())
+                .position(|run| run == phrase.as_slice())
+                .map(|at| at..at + phrase.len())
+        })
     }
 
     /// 1.0 if the title (or its main title, without subtitle) appears as a

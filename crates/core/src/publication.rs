@@ -299,6 +299,16 @@ fn compact(text: &str) -> String {
             let trimmed = compact.trim_end().len();
             compact.truncate(trimmed);
         }
+        // A page label run into its page: "pp.58-63", "p.054433".
+        if c.is_ascii_digit() {
+            let label = compact
+                .rsplit(char::is_whitespace)
+                .next()
+                .is_some_and(|t| t == "pp." || t == "p.");
+            if label {
+                compact.push(' ');
+            }
+        }
         compact.push(c);
     }
     compact
@@ -315,11 +325,15 @@ fn styled(tokens: &[&str]) -> Option<(usize, Locator)> {
         let token = token.trim_end_matches(['.', ',']);
         // Vancouver: [year;]volume[(issue)]:page[-end], with a year, issue
         // or page range to tell it from a time of day ("at 10:30").
+        // MLA: volume.issue (year): page[-end], "77.4 (2005): 1321-1373".
         if let Some((head, pages)) = token.split_once(':') {
             let volume = head.rsplit(';').next().unwrap_or(head);
             let styled = head.contains([';', '(']) || pages.contains(['-', '–', '—']);
             if styled
-                && let (Some(volume), Some(page)) = (volume_number(volume), page_number(pages))
+                && let (Some(volume), Some(page)) = (
+                    volume_number(volume).or_else(|| mla_volume(volume)),
+                    page_number(pages),
+                )
             {
                 return Some((i, at(volume, page)));
             }
@@ -407,10 +421,202 @@ fn labelled(tokens: &[&str]) -> Locator {
             "pp" | "p" | "pages" | "page" if found.page.is_none() => {
                 found.page = next().and_then(page_number);
             }
+            // IEEE's article number, where the page would be: "Art. no. 615".
+            "art" if found.page.is_none() && next().is_some_and(|n| is_label(n, &["no"])) => {
+                found.page = tokens.get(i + 2).and_then(|p| page_number(p));
+            }
             _ => {}
         }
     }
     found
+}
+
+/// Conferences whose papers are cited by venue, each by its acronyms and
+/// the words of its name that tell it apart (joining words and numbers
+/// aside: "Proceedings of the 34th International Conference on Machine
+/// Learning"). A proceedings' name is otherwise free ("2017 IEEE
+/// Conference on Computer Vision and Pattern Recognition (CVPR)",
+/// "Advances in Neural Information Processing Systems 30"), so these are
+/// named rather than ruled.
+const CONFERENCES: &[(&[&str], &[&str])] = &[
+    (
+        &["neurips", "nips"],
+        &["neural", "information", "processing", "systems"],
+    ),
+    (
+        &["icml"],
+        &["international", "conference", "machine", "learning"],
+    ),
+    (&["iclr"], &["learning", "representations"]),
+    (&["cvpr"], &["computer", "vision", "pattern", "recognition"]),
+    (
+        &["iccv"],
+        &["international", "conference", "computer", "vision"],
+    ),
+    (&["eccv"], &["european", "conference", "computer", "vision"]),
+    (
+        &["wacv"],
+        &["winter", "conference", "applications", "computer", "vision"],
+    ),
+    (&["bmvc"], &["british", "machine", "vision"]),
+    (
+        &["acl"],
+        &[
+            "annual",
+            "meeting",
+            "association",
+            "computational",
+            "linguistics",
+        ],
+    ),
+    (
+        &["emnlp"],
+        &["empirical", "methods", "natural", "language", "processing"],
+    ),
+    (&["naacl"], &["north", "american", "chapter"]),
+    (
+        &["coling"],
+        &[
+            "international",
+            "conference",
+            "computational",
+            "linguistics",
+        ],
+    ),
+    (
+        &["kdd", "sigkdd"],
+        &["knowledge", "discovery", "data", "mining"],
+    ),
+    (
+        &["aaai"],
+        &["aaai", "conference", "artificial", "intelligence"],
+    ),
+    (
+        &["ijcai"],
+        &[
+            "international",
+            "joint",
+            "conference",
+            "artificial",
+            "intelligence",
+        ],
+    ),
+    (&["aistats"], &["artificial", "intelligence", "statistics"]),
+    (&["uai"], &["uncertainty", "artificial", "intelligence"]),
+    (&["colt"], &["conference", "learning", "theory"]),
+    (&["chi"], &["human", "factors", "computing", "systems"]),
+    (
+        &["icra"],
+        &["international", "conference", "robotics", "automation"],
+    ),
+    (&["iros"], &["intelligent", "robots", "systems"]),
+    (&["corl"], &["conference", "robot", "learning"]),
+    (
+        &["isca"],
+        &["international", "symposium", "computer", "architecture"],
+    ),
+    (
+        &["micro"],
+        &["international", "symposium", "microarchitecture"],
+    ),
+    (
+        &["sigir"],
+        &["research", "development", "information", "retrieval"],
+    ),
+    (
+        &["sigmod"],
+        &["international", "conference", "management", "data"],
+    ),
+    (&["vldb"], &["very", "large", "data", "bases"]),
+    (
+        &["icse"],
+        &["international", "conference", "software", "engineering"],
+    ),
+    (
+        &["osdi"],
+        &["operating", "systems", "design", "implementation"],
+    ),
+    (
+        &["sosp"],
+        &["symposium", "operating", "systems", "principles"],
+    ),
+    (
+        &["nsdi"],
+        &["networked", "systems", "design", "implementation"],
+    ),
+    (
+        &["pldi"],
+        &["programming", "language", "design", "implementation"],
+    ),
+    (&["popl"], &["principles", "programming", "languages"]),
+    (
+        &["icassp"],
+        &["acoustics", "speech", "signal", "processing"],
+    ),
+    (&["interspeech"], &["interspeech"]),
+    (
+        &["miccai"],
+        &[
+            "medical",
+            "image",
+            "computing",
+            "computer",
+            "assisted",
+            "intervention",
+        ],
+    ),
+    (&["wsdm"], &["web", "search", "data", "mining"]),
+    (&["cikm"], &["information", "knowledge", "management"]),
+    (&["recsys"], &["recommender", "systems"]),
+];
+
+/// Acronyms that are words or names too ("ACL" a ligament, "Chi" a
+/// family name): read only in capitals.
+const WORDLIKE_ACRONYMS: &[&str] = &["acl", "chi", "micro", "colt", "uai", "isca"];
+
+/// The conferences (indices into [`CONFERENCES`]) a venue's name, or the
+/// text that cites one, names: by acronym ("ICCV", "NeurIPS 2017",
+/// "CVPR'17") or by its name's words in order.
+pub(crate) fn conferences(name: &str) -> Vec<usize> {
+    let tokens: Vec<&str> = name
+        .split(|c: char| !c.is_alphanumeric())
+        .filter(|t| !t.is_empty())
+        .collect();
+    let acronym = |a: &str| {
+        tokens.iter().any(|t| {
+            let t = t.trim_end_matches(|c: char| c.is_ascii_digit());
+            if WORDLIKE_ACRONYMS.contains(&a) {
+                t.eq_ignore_ascii_case(a) && t.chars().all(|c| c.is_ascii_uppercase())
+            } else {
+                t.eq_ignore_ascii_case(a)
+            }
+        })
+    };
+    let words: Vec<String> = normalise(name)
+        .split(' ')
+        .filter(|w| !w.is_empty() && !JOURNAL_STOPWORDS.contains(w))
+        .filter(|w| !w.chars().any(|c| c.is_ascii_digit()))
+        .map(str::to_owned)
+        .collect();
+    let named = |phrase: &[&str]| words.windows(phrase.len()).any(|run| run == phrase);
+    CONFERENCES
+        .iter()
+        .enumerate()
+        .filter(|(_, (acronyms, phrase))| acronyms.iter().any(|a| acronym(a)) || named(phrase))
+        .map(|(i, _)| i)
+        .collect()
+}
+
+/// Whether a venue cited is a conference's or a workshop's proceedings:
+/// "In Proceedings of …", "… Conference on …", "Advances in Neural …".
+pub(crate) fn proceedings(venue: &str) -> bool {
+    !conferences(venue).is_empty()
+        || normalise(venue).split(' ').any(|w| {
+            matches!(
+                w,
+                "proceedings" | "proc" | "conference" | "symposium" | "workshop" | "congress"
+            )
+        })
 }
 
 /// Words at most a journal's name runs to ("Proceedings of the National
@@ -525,10 +731,20 @@ fn read_cited_journal(text: &str) -> Option<Reading> {
         && tokens[end - 2]
             .strip_suffix('.')
             .is_some_and(|w| name_word(w) && capitalised(w));
+    // Undotted, a short abbreviation after another ("… Creation. Psychol.
+    // Sci. 5, 14"; not initials, "JAMA"): the title may have ended
+    // before either.
+    let undotted = read_journal(&tokens, end, false, after).filter(|j| {
+        let short = !j.contains(' ')
+            && last.ends_with('.')
+            && j.chars().count() <= 4
+            && j.chars().any(char::is_lowercase);
+        !(dotted && short)
+    });
     dotted
         .then(|| read_journal(&tokens, end, true, after))
         .flatten()
-        .or_else(|| read_journal(&tokens, end, false, after))
+        .or(undotted)
         .map(Reading::Sure)
         .or_else(|| readings(&tokens, end, after))
 }
@@ -630,8 +846,12 @@ fn prose_journal(tokens: &[&str]) -> Option<String> {
         let year = rest[end]
             .strip_prefix('(')
             .is_some_and(|y| bracketed_year(y.trim_end_matches(['.', ','])));
+        // "… the 2007 Bar-Haim paper in Psychol Sci (Threat-related …)":
+        // a paper's journal, before what is bracketed after it.
+        let paper = matches!(tokens[i - 1], "paper" | "article" | "study" | "report")
+            && rest[end].starts_with('(');
         let words = &rest[..end];
-        (year
+        ((year || paper)
             && !words.is_empty()
             && words.len() <= JOURNAL_WORDS
             && !is_stopword(words[0])
@@ -919,6 +1139,15 @@ fn bracketed_year(s: &str) -> bool {
 /// A page range: "797–804".
 fn ranged(pages: &str) -> bool {
     pages.contains(['-', '–', '—'])
+}
+
+/// MLA's volume and issue before the bracketed year: "77.4(2005)" → "77".
+fn mla_volume(s: &str) -> Option<String> {
+    let (numbers, year) = s.split_once('(')?;
+    let (volume, issue) = numbers.split_once('.')?;
+    (bracketed_year(year) && is_digits(issue) && issue.len() <= 6)
+        .then(|| volume_number(volume))
+        .flatten()
 }
 
 /// "376" or "376(26)": the volume number.
@@ -1345,6 +1574,104 @@ mod tests {
         assert!(
             cited_journals("Smith J. Title. Journal of clinical medicine. 2020;9:12").is_empty()
         );
+    }
+
+    #[test]
+    fn round_three_styles_give_their_locators_and_journals() {
+        // holdout-2: MLA, Harvard's page label run into its page, IEEE's
+        // article number.
+        for (text, volume, page) in [
+            (
+                "Bergeret, F. S., et al. \"Odd triplet superconductivity.\" Physical Review B \
+                 77.4 (2005): 1321-1373.",
+                "77",
+                "1321",
+            ),
+            (
+                "Barro, R.J., 2008. Consumption Disasters. American Economic Review, 100(2), \
+                 pp.58-63.",
+                "100",
+                "58",
+            ),
+            (
+                "Maier-Flaig, H., 2016. Spin pumping. Nature Physics, 94(5), p.054433.",
+                "94",
+                "054433",
+            ),
+            (
+                "T. M. Jones, \"Instrumental Stakeholder Theory,\" Acad Management Rev, vol. 20, \
+                 no. 2, Art. no. 615, 1995.",
+                "20",
+                "615",
+            ),
+        ] {
+            let found = locator(text);
+            assert_eq!(found.volume.as_deref(), Some(volume), "{text}");
+            assert_eq!(found.page.as_deref(), Some(page), "{text}");
+        }
+        assert_eq!(
+            cited_journal(
+                "Bergeret, F. S., et al. \"Odd triplet superconductivity.\" Physical Review B \
+                 77.4 (2005): 1321-1373."
+            )
+            .as_deref(),
+            Some("Physical Review B")
+        );
+        assert_eq!(
+            cited_journal("the 2007 Bar-Haim paper in Psychol Sci (Threat-related bias.)")
+                .as_deref(),
+            Some("Psychol Sci")
+        );
+        // A short abbreviation after another isn't read alone; each reading
+        // is weighed.
+        let nonaka = "Nonaka, I. A Dynamic Theory of Organizational Knowledge Creation. \
+                      Psychol. Sci. 5, 14–37 (1994).";
+        assert_eq!(cited_journal(nonaka), None);
+        assert!(cited_journals(nonaka).contains(&"Psychol. Sci.".to_owned()));
+        assert_eq!(
+            cited_journal("Huang C, et al. Clinical features in Wuhan, China. JAMA. 2020.")
+                .as_deref(),
+            Some("JAMA")
+        );
+    }
+
+    #[test]
+    fn conferences_are_told_by_acronym_or_name() {
+        let named = |venue: &str| -> Vec<&str> {
+            conferences(venue)
+                .into_iter()
+                .map(|i| CONFERENCES[i].0[0])
+                .collect()
+        };
+        assert_eq!(
+            named("2017 IEEE Conference on Computer Vision and Pattern Recognition (CVPR)"),
+            ["cvpr"]
+        );
+        assert_eq!(
+            named("In IEEE International Conference on Computer Vision (ICCV), 5967–5976."),
+            ["iccv"]
+        );
+        assert_eq!(
+            named("Advances in Neural Information Processing Systems 30"),
+            ["neurips"]
+        );
+        assert_eq!(named("NeurIPS'17"), ["neurips"]);
+        assert_eq!(
+            named(
+                "Proceedings of the 20th ACM SIGKDD international conference on Knowledge \
+                 discovery and data mining"
+            ),
+            ["kdd"]
+        );
+        assert_eq!(
+            named("Proceedings of the 2019 CHI Conference on Human Factors in Computing Systems"),
+            ["chi"]
+        );
+        // Words that are acronyms too, not in capitals, name none.
+        assert!(named("Chi H, Acl reconstruction outcomes. Am J Sports Med.").is_empty());
+        assert!(named("Pattern Recognition").is_empty());
+        assert!(proceedings("In: Proceedings of the 5th Workshop on Things"));
+        assert!(!proceedings("Journal of Machine Learning Research"));
     }
 
     #[test]

@@ -24,7 +24,7 @@ use std::ops::Range;
 
 use serde::{Deserialize, Serialize};
 
-use crate::id::{IdKind, WorkId, starts_with_ci};
+use crate::id::{IdKind, WorkId, is_digits, starts_with_ci};
 use crate::provider::Place;
 use crate::publication::{self, first_page, journal_in, other_journal, same_journal};
 use crate::record::SourceRecord;
@@ -191,8 +191,14 @@ impl Claim {
                 }
             }
         }
+        let mut ids = find_ids(&text);
+        for id in bibtex_ids(&text) {
+            if !ids.iter().any(|f| same_work_id(f, &id)) {
+                ids.push(id);
+            }
+        }
         Claim {
-            ids: find_ids(&text),
+            ids,
             text: Some(text),
             alternatives,
             ..Claim::default()
@@ -464,6 +470,38 @@ fn byline(text: &Normalised, title: Option<&str>, span: Option<&Range<usize>>) -
     Some(text.raw[..text.spans.get(start).map_or(text.raw.len(), |s| s.start)].to_owned())
 }
 
+/// The venue a claim cites, to tell a conference by: its container, a
+/// BibTeX entry's `booktitle` (else `journal`), or a reference's text
+/// after the work's title (at `span`; all of it when the title isn't found
+/// there), its links aside ("10.1109/cvpr.2017.632" names no venue cited).
+fn cited_venue(
+    claim: &Claim,
+    text: Option<&Normalised>,
+    span: Option<&Range<usize>>,
+) -> Option<String> {
+    if let Some(container) = &claim.container {
+        return Some(container.clone());
+    }
+    let text = text?;
+    if text.raw.trim_start().starts_with('@') {
+        return publication::bibtex_field(&text.raw, "booktitle")
+            .or_else(|| publication::bibtex_field(&text.raw, "journal"));
+    }
+    let after = span
+        .and_then(|s| text.spans.get(s.end.checked_sub(1)?))
+        .map_or(0, |w| w.end);
+    let venue: Vec<&str> = text.raw[after..]
+        .split_whitespace()
+        .filter(|t| {
+            let t = t.trim_start_matches(['(', '[', '<']).to_ascii_lowercase();
+            !(["doi", "http", "www.", "arxiv", "10."]
+                .iter()
+                .any(|p| t.starts_with(p)))
+        })
+        .collect();
+    Some(venue.join(" "))
+}
+
 fn dedup_years(mut years: Vec<i16>) -> Vec<i16> {
     years.sort_unstable();
     years.dedup();
@@ -531,7 +569,19 @@ pub fn assess(claim: &Claim, record: &SourceRecord) -> Assessment {
     let authors = if families.is_empty() {
         FieldCheck::UNKNOWN
     } else if !claim.authors.is_empty() {
-        FieldCheck::scored(author_overlap(&claim.authors, &families))
+        // Organisations named beside people, or alone, aren't compared:
+        // records list a committee's members, or no one.
+        let people: Vec<String> = claim
+            .authors
+            .iter()
+            .filter(|a| !authors::is_body(a))
+            .cloned()
+            .collect();
+        if people.is_empty() {
+            FieldCheck::UNKNOWN
+        } else {
+            FieldCheck::scored(author_overlap(&people, &families))
+        }
     } else if let Some(text) = &text {
         // A reference that names no one ("Injury 47 (2016) 797–804", a
         // pasted title) doesn't name others. One whose byline names
@@ -604,11 +654,21 @@ pub fn assess(claim: &Claim, record: &SourceRecord) -> Assessment {
     // cited). Or with words of its own inserted ("… Septic Shock in Adults
     // and Children (Sepsis-3)"); words dropped are a title shortened.
     let found = matches!(title.agreement, Agreement::Match | Agreement::Partial);
+    // Or with words replaced anywhere, however many together: "Likelihood
+    // Determinants Associated With …" for "Risk Factors Associated With
+    // …", "A Controlled Study" for "A Randomized Trial" (synonyms, as an
+    // invented reference's or a paraphrase's are).
     let reworded = match (&work_title, &text) {
         (Some(actual), Some(text)) if found && title_span.is_none() && claim.title.is_none() => {
             text.substitutes_in(actual)
                 .or_else(|| text.inserts_in(actual).then_some(false))
+                .or_else(|| text.replaces_in(actual).then_some(false))
         }
+        (Some(actual), _) if found => claim
+            .title
+            .as_deref()
+            .is_some_and(|claimed| text::replaces(claimed, actual))
+            .then_some(false),
         _ => None,
     };
     let substituted = reworded.is_some();
@@ -642,13 +702,24 @@ pub fn assess(claim: &Claim, record: &SourceRecord) -> Assessment {
         FieldCheck::scored(0.5f64.powi(i32::from(delta.min(30))))
     };
 
-    let preprint = work.work_type == Some(WorkType::Preprint)
-        || work.container_title.as_deref().is_some_and(preprint_server);
+    // OpenAlex types some journals' articles as preprints (Genome
+    // Research's, under bioRxiv's DOI prefix): one in a journal PubMed
+    // indexes is an article.
+    let indexed_article = work.work_type == Some(WorkType::Preprint)
+        && work
+            .container_title
+            .as_deref()
+            .is_some_and(|c| !preprint_server(c))
+        && record.ids.iter().any(|id| id.kind() == IdKind::Pmid);
+    let preprint = !indexed_article
+        && (work.work_type == Some(WorkType::Preprint)
+            || work.container_title.as_deref().is_some_and(preprint_server));
     // Only a journal article's journal is held against a citation: books'
     // series, proceedings and repositories go by many names. A record in a
     // journal whose type isn't given (Europe PMC's editorials, letters,
     // news) is in one too.
     let article = work.work_type == Some(WorkType::JournalArticle)
+        || indexed_article
         || (work.work_type.is_none() && work.container_title.is_some() && !preprint);
     // A journal read from text that is the work's own title, in title case
     // ("… Hooper D. Hot Gravitons From Kerr Black Holes. 2020."), is none.
@@ -702,19 +773,29 @@ pub fn assess(claim: &Claim, record: &SourceRecord) -> Assessment {
         {
             FieldCheck::exact(true)
         }
+        // Of several readings, one word ("Sci." of "… Creation. Psychol.
+        // Sci.") is the journal only if it names it ("Lancet." of "…
+        // China. Lancet."), not if it's one of its words.
         Some(actual)
             if cites_journal
                 && (article || claim.container.is_some())
-                && journals.iter().all(|cited| other_journal(cited, actual)) =>
+                && journals.iter().all(|cited| {
+                    other_journal(cited, actual)
+                        || (journals.len() > 1
+                            && publication::significant(cited).len() == 1
+                            && !same_journal(cited, actual))
+                }) =>
         {
             FieldCheck::exact(false)
         }
-        // Not inside its links: "doi:10.1093/brain/…" names no journal.
+        // Not inside its links ("doi:10.1093/brain/…" names no journal),
+        // nor inside the work's title ("… monitoring autophagy" names no
+        // Autophagy).
         Some(actual)
             if !(cites_journal && sure)
                 && text
                     .as_ref()
-                    .is_some_and(|t| journal_in(&t.words_outside_links(), actual)) =>
+                    .is_some_and(|t| journal_in(&t.words_outside(title_span.as_ref()), actual)) =>
         {
             FieldCheck::exact(true)
         }
@@ -726,10 +807,68 @@ pub fn assess(claim: &Claim, record: &SourceRecord) -> Assessment {
         } else {
             container
         };
-    // A journal article cited in a journal clearly not its own, or a
-    // preprint cited as a journal's article.
-    let wrong_journal =
-        container.agreement == Agreement::Mismatch && (preprint_of_cited || article);
+    // A conference paper cited at another conference ("… In IEEE
+    // International Conference on Computer Vision (ICCV)" for CVPR's), or
+    // a preprint, at none, cited in a conference's proceedings: the venue
+    // cited isn't confirmed, unless the claimed identifier says which
+    // version is meant.
+    let venue = cited_venue(claim, text.as_ref(), title_span.as_ref());
+    let cited_conferences: Vec<usize> = venue.as_deref().map_or_else(Vec::new, |v| {
+        let in_title = work_title
+            .as_deref()
+            .map(publication::conferences)
+            .unwrap_or_default();
+        publication::conferences(v)
+            .into_iter()
+            .filter(|c| !in_title.contains(c))
+            .collect()
+    });
+    // The conference a record is at: its proceedings' name, else what an
+    // IEEE DOI names ("10.1109/cvpr.2017.632"), for a record of the paper
+    // merged with its preprint's, without a venue.
+    let own_conferences: Vec<usize> = match work.container_title.as_deref() {
+        Some(venue) if !preprint_server(venue) => publication::conferences(venue),
+        _ => record
+            .ids
+            .iter()
+            .filter(|id| id.kind() == IdKind::Doi)
+            .map(ToString::to_string)
+            .filter_map(|doi| {
+                doi.strip_prefix("doi:10.1109/")
+                    .map(|s| publication::conferences(s.split('.').next().unwrap_or("")))
+            })
+            .flatten()
+            .collect(),
+    };
+    let other_conference = !cited_conferences.is_empty()
+        && !own_conferences.is_empty()
+        && !cited_conferences
+            .iter()
+            .any(|c| own_conferences.contains(c));
+    // A preprint server's copy, cited in a conference's proceedings it
+    // can't confirm (a place pooled from its published version's record
+    // names no venue).
+    let posted = work.container_title.as_deref().is_some_and(preprint_server)
+        || record.ids.iter().any(|id| id.kind() == IdKind::Arxiv);
+    let confirmed = cited_conferences
+        .iter()
+        .any(|c| own_conferences.contains(c));
+    let preprint_at_conference = preprint
+        && posted
+        && !confirmed
+        && venue.as_deref().is_some_and(publication::proceedings)
+        && id_agreement(&claim.ids, &record.ids) != Agreement::Match;
+    let container = if other_conference
+        || (preprint_at_conference && container.agreement != Agreement::Match)
+    {
+        FieldCheck::exact(false)
+    } else {
+        container
+    };
+    // A journal article cited in a journal clearly not its own, a
+    // preprint cited as a journal's article, a paper at another venue.
+    let wrong_journal = container.agreement == Agreement::Mismatch
+        && (preprint_of_cited || article || other_conference || preprint_at_conference);
     let located = &cited_place;
     let same = |claimed: Option<&str>, actual: Option<&str>| match (claimed, actual) {
         (Some(c), Some(a)) if !c.is_empty() && !a.is_empty() => {
@@ -738,9 +877,18 @@ pub fn assess(claim: &Claim, record: &SourceRecord) -> Assessment {
         _ => FieldCheck::UNKNOWN,
     };
     let volume = same(located.volume.as_deref(), work.volume.as_deref());
+    // A record's page with a part number ("698.1", BMJ's) is the page
+    // cited as "698".
     let page = same(
         located.page.as_deref(),
-        work.page.as_deref().map(first_page),
+        work.page.as_deref().map(first_page).map(|p| {
+            match (p.split_once('.'), located.page.as_deref()) {
+                (Some((page, part)), Some(cited)) if is_digits(part) && !cited.contains('.') => {
+                    page
+                }
+                _ => p,
+            }
+        }),
     );
 
     // Citing the exact place: volume and first page.
@@ -1090,6 +1238,26 @@ pub fn same_work(a: &SourceRecord, b: &SourceRecord) -> bool {
         _ => false,
     };
     same_first && near_years
+}
+
+/// Identifiers a BibTeX entry pasted as a reference gives in fields that
+/// name them bare: its arXiv `eprint` (`eprint = {1710.01128},
+/// archivePrefix = {arXiv}`) and `pmid`.
+fn bibtex_ids(text: &str) -> Vec<WorkId> {
+    let field = |name: &str| publication::bibtex_field(text, name);
+    let mut ids = Vec::new();
+    let archive = field("archiveprefix").or_else(|| field("eprinttype"));
+    if let Some(eprint) = field("eprint")
+        && archive
+            .as_deref()
+            .is_none_or(|a| a.eq_ignore_ascii_case("arxiv"))
+    {
+        ids.extend(format!("arxiv:{eprint}").parse::<WorkId>());
+    }
+    if let Some(pmid) = field("pmid") {
+        ids.extend(format!("pmid:{pmid}").parse::<WorkId>());
+    }
+    ids
 }
 
 /// The distinct identifiers mentioned in free text (see [`crate::id::scan`]).

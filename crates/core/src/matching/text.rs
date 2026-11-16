@@ -180,6 +180,202 @@ pub(super) fn main_title(title: &str) -> &str {
         .map_or(title, |i| title[..i].trim())
 }
 
+/// Whether a claimed title, given apart (a structured claim's), is the
+/// record's with significant words of its own put in place of the
+/// title's ("A Controlled Study of …" for "A Randomized Trial of …"):
+/// reworded, not misspelt, abbreviated or respelt.
+pub(super) fn replaces(claimed: &str, actual: &str) -> bool {
+    let claimed = significant_words(&words(unmarked(claimed)));
+    let actual = significant_words(&words(unmarked(actual)));
+    replaced(&claimed, &actual, &|_, _, _| true)
+}
+
+/// A title's words that can be replaced: not joining words, nor a letter
+/// on its own (a possessive's "s").
+fn significant_words(words: &[String]) -> Vec<String> {
+    words
+        .iter()
+        .filter(|w| significant_word(w))
+        .cloned()
+        .collect()
+}
+
+fn significant_word(w: &str) -> bool {
+    (w.chars().count() > 1 || w.chars().all(|c| c.is_ascii_digit())) && !STOPWORDS.contains(&w)
+}
+
+/// The share of a title's words kept, at least, and replaced, at most,
+/// for a title reworded: under half kept is another title, or the title
+/// not found ("Function of Insulin Resistance in Human Illness" keeps
+/// three of "Role of Insulin Resistance in Human Disease"'s five).
+const KEPT_SHARE: usize = 2;
+
+/// Whether `claimed` (a title's words, or a reference's) gives `title`'s
+/// words with some of them put in place of others: aligned on the words
+/// they share (give or take a letter), each stretch between where
+/// `claimed` and `title` both have words of their own counts a word
+/// replaced for each pair, unless the words are the same written another
+/// way ([`same_written_otherwise`]). The words of `claimed` between two
+/// it shares must run together (`together`, over indices into `claimed`:
+/// in a reference, no stop or quote between); where it runs past the
+/// title's first or last shared word, only as many of its words as the
+/// title's count, run together with it as one phrase (`together` with
+/// `edge`: no punctuation). A replacement needs half the title's words
+/// kept, at least, and half replaced, at most.
+fn replaced(
+    claimed: &[String],
+    title: &[String],
+    together: &dyn Fn(usize, usize, bool) -> bool,
+) -> bool {
+    /// Words of a stretch, at most, on either side: more is no rewording.
+    const STRETCH: usize = 3;
+    let (n, m) = (claimed.len(), title.len());
+    if m < 3 || n == 0 {
+        return false;
+    }
+    // Numbers alike only when the same: "2004" is not "2006".
+    let same = |a: &str, b: &str| {
+        a == b || (!a.chars().any(|c| c.is_ascii_digit()) && super::authors::near(a, b))
+    };
+    // Longest common subsequence, words alike as `same` says.
+    let mut table = vec![vec![0usize; m + 1]; n + 1];
+    for i in (0..n).rev() {
+        for j in (0..m).rev() {
+            table[i][j] = if same(&claimed[i], &title[j]) {
+                table[i + 1][j + 1] + 1
+            } else {
+                table[i + 1][j].max(table[i][j + 1])
+            };
+        }
+    }
+    let mut anchors: Vec<(usize, usize)> = Vec::new();
+    let (mut i, mut j) = (0, 0);
+    while i < n && j < m {
+        if same(&claimed[i], &title[j]) && table[i][j] == table[i + 1][j + 1] + 1 {
+            anchors.push((i, j));
+            i += 1;
+            j += 1;
+        } else if table[i + 1][j] >= table[i][j + 1] {
+            i += 1;
+        } else {
+            j += 1;
+        }
+    }
+    let kept = anchors.len();
+    if kept < 2 || kept * KEPT_SHARE < m {
+        return false;
+    }
+    let mut count = 0;
+    let mut stretch = |c: &[String], t: &[String]| {
+        if !c.is_empty() && !t.is_empty() && c.len() <= STRETCH && t.len() <= STRETCH {
+            count += replacements(c, t);
+        }
+    };
+    let (first, last) = (anchors[0], anchors[kept - 1]);
+    // Before the first shared word, and after the last.
+    let lead = first.1.min(first.0);
+    let from = (first.0 - lead..first.0)
+        .find(|&k| together(k, first.0, true))
+        .unwrap_or(first.0);
+    stretch(&claimed[from..first.0], &title[..first.1]);
+    let trail = (m - last.1 - 1).min(n - last.0 - 1);
+    let to = (last.0 + 1..=last.0 + trail)
+        .rev()
+        .find(|&k| together(last.0, k, true))
+        .map_or(last.0 + 1, |k| k + 1);
+    stretch(&claimed[last.0 + 1..to], &title[last.1 + 1..]);
+    for pair in anchors.windows(2) {
+        let ((ci, ti), (cj, tj)) = (pair[0], pair[1]);
+        if together(ci, cj, false) {
+            stretch(&claimed[ci + 1..cj], &title[ti + 1..tj]);
+        }
+    }
+    count > 0 && count * KEPT_SHARE <= m
+}
+
+/// Words of `c` put in place of words of `t`, once those written otherwise
+/// are paired off.
+fn replacements(c: &[String], t: &[String]) -> usize {
+    let mut c: Vec<&str> = c.iter().map(String::as_str).collect();
+    let mut t: Vec<&str> = t.iter().map(String::as_str).collect();
+    // A word split in two on one side ("mort- ality", "non small").
+    let unsplit = |parts: &mut Vec<&str>, whole: &mut Vec<&str>| {
+        let mut k = 0;
+        while k + 1 < parts.len() {
+            let joined = format!("{}{}", parts[k], parts[k + 1]);
+            if let Some(found) = whole.iter().position(|w| *w == joined) {
+                whole.remove(found);
+                parts.drain(k..k + 2);
+            } else {
+                k += 1;
+            }
+        }
+    };
+    unsplit(&mut c, &mut t);
+    unsplit(&mut t, &mut c);
+    let mut k = 0;
+    while k < c.len() {
+        if let Some(found) = t.iter().position(|w| same_written_otherwise(c[k], w)) {
+            t.remove(found);
+            c.remove(k);
+        } else {
+            k += 1;
+        }
+    }
+    c.len().min(t.len())
+}
+
+/// Number words, Roman numerals and Greek letters, as titles write them
+/// either way.
+const SPELLED: &[(&str, &[&str])] = &[
+    ("1", &["one", "i", "first"]),
+    ("2", &["two", "ii", "second"]),
+    ("3", &["three", "iii", "third"]),
+    ("4", &["four", "iv", "fourth"]),
+    ("5", &["five", "v", "fifth"]),
+    ("6", &["six", "vi"]),
+    ("7", &["seven", "vii"]),
+    ("8", &["eight", "viii"]),
+    ("9", &["nine", "ix"]),
+    ("10", &["ten", "x"]),
+    ("α", &["alpha"]),
+    ("β", &["beta"]),
+    ("γ", &["gamma"]),
+    ("δ", &["delta"]),
+    ("κ", &["kappa"]),
+    ("λ", &["lambda"]),
+    ("μ", &["mu", "micro"]),
+    ("ω", &["omega"]),
+];
+
+/// The same word written another way: abbreviated ("vs" for "versus",
+/// "intl"), shortened or extended ("program", "programme"), run together
+/// with another ("theeffect"), a number or Greek letter spelt out.
+fn same_written_otherwise(a: &str, b: &str) -> bool {
+    let (short, long) = if a.chars().count() <= b.chars().count() {
+        (a, b)
+    } else {
+        (b, a)
+    };
+    let abbreviation =
+        short.chars().count() <= 5 && long.chars().count() >= short.chars().count() + 2 && {
+            let mut rest = long.chars();
+            short.chars().next() == long.chars().next()
+                && short.chars().all(|c| rest.any(|l| l == c))
+        };
+    let within = short.chars().count() >= 4 && long.contains(short);
+    let spelled = SPELLED.iter().any(|(form, others)| {
+        (a == *form && others.contains(&b)) || (b == *form && others.contains(&a))
+    });
+    abbreviation || within || spelled
+}
+
+/// A character of a script written without spaces between words: CJK
+/// ideographs, kana.
+fn unspaced(c: char) -> bool {
+    matches!(c, '\u{3040}'..='\u{30ff}' | '\u{3400}'..='\u{4dbf}' | '\u{4e00}'..='\u{9fff}')
+}
+
 pub(super) fn dedup(mut v: Vec<String>) -> Vec<String> {
     v.sort_unstable();
     v.dedup();
@@ -242,13 +438,15 @@ impl Normalised {
         }
     }
 
-    /// The words outside the reference's links and identifiers.
-    pub(super) fn words_outside_links(&self) -> Vec<String> {
+    /// The words outside the reference's links and identifiers, and
+    /// outside `span` (a title's words) when given.
+    pub(super) fn words_outside(&self, span: Option<&Range<usize>>) -> Vec<String> {
         self.words
             .iter()
             .zip(&self.linked)
-            .filter(|(_, linked)| !**linked)
-            .map(|(w, _)| w.clone())
+            .enumerate()
+            .filter(|(i, (_, linked))| !**linked && !span.is_some_and(|s| s.contains(i)))
+            .map(|(_, (w, _))| w.clone())
             .collect()
     }
 
@@ -303,6 +501,35 @@ impl Normalised {
                 });
             substituted.then(|| differ.iter().any(|(a, b)| year(a) && year(b)))
         })
+    }
+
+    /// Whether the reference gives `title` with significant words of its
+    /// own put in place of the title's, anywhere in it and however many
+    /// together ("Likelihood Determinants Associated With …" for "Risk
+    /// Factors Associated With …", "Monte Carlo sampling approaches with
+    /// Markov chains" for "… methods using Markov chains"): the title
+    /// reworded, as [`replaces`] tells for a title given apart. Words
+    /// replaced stand in one sentence with the title's around them.
+    pub(super) fn replaces_in(&self, title: &str) -> bool {
+        let title = significant_words(&words(unmarked(title)));
+        let (at, text): (Vec<usize>, Vec<String>) = self
+            .words
+            .iter()
+            .enumerate()
+            .filter(|(i, w)| !self.linked[*i] && significant_word(w))
+            .map(|(i, w)| (i, w.clone()))
+            .unzip();
+        let together = |from: usize, to: usize, edge: bool| {
+            (at[from]..at[to]).all(|i| {
+                let gap = &self.raw[self.spans[i].end..self.spans[i + 1].start];
+                gap.chars().all(|c| {
+                    c.is_whitespace()
+                        || matches!(c, '-' | '‐' | '\'' | '’')
+                        || (!edge && matches!(c, ',' | ':' | '(' | ')'))
+                })
+            })
+        };
+        replaced(&text, &title, &together)
     }
 
     /// Whether the words `from..=to` stand in one sentence: no stop between
@@ -487,12 +714,14 @@ impl Normalised {
     /// accounted for as [`Normalised::untitled`] accounts for them: three
     /// or more are a title ("Transfection of plasmid DNA by nanocarriers"),
     /// not a journal's words the rule misses ("Int. J. Care Injured").
+    /// Chinese and Japanese, written without spaces, count a word for
+    /// each character ("化学分析仪器计量检定分析" is a title).
     pub(super) fn title_run(&self, families: &[String], journal: Option<&str>) -> usize {
         let mut longest = 0;
         let mut run = 0;
         for (word, unaccounted) in self.words.iter().zip(self.unaccounted(families, journal)) {
             if unaccounted {
-                run += 1;
+                run += word.chars().filter(|c| unspaced(*c)).count().max(1);
                 longest = longest.max(run);
             } else if !STOPWORDS.contains(&word.as_str()) {
                 run = 0;

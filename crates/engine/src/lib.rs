@@ -237,6 +237,9 @@ pub struct Engine {
     refreshed: Arc<std::sync::Mutex<Option<tokio::time::Instant>>>,
     /// When a stop at a credit cap was last checked with a refresh.
     confirmed: Arc<std::sync::Mutex<Option<tokio::time::Instant>>>,
+    /// Providers' requests go through an HTTP tape: identifiers are looked
+    /// up one per request (see [`EngineBuilder::taped`]).
+    taped: bool,
 }
 
 #[derive(Clone)]
@@ -255,6 +258,7 @@ pub struct EngineBuilder {
     credit_caps: Vec<(ProviderId, f64)>,
     prepaid_days: Option<Arc<dyn PrepaidDays>>,
     disabled: Vec<ProviderId>,
+    taped: bool,
 }
 
 impl EngineBuilder {
@@ -333,6 +337,17 @@ impl EngineBuilder {
         self
     }
 
+    /// Says every provider's requests go through an HTTP tape
+    /// ([`TapeClient`](transport::TapeClient)), so identifiers are looked
+    /// up one per request: each ID's answer, found or not, is then an
+    /// entry of its own, which replays however later batches are made up.
+    /// A batch the tape holds whole (recorded before) still replays as one.
+    /// Answers are the same either way; only the requests differ.
+    pub fn taped(mut self, taped: bool) -> Self {
+        self.taped = taped;
+        self
+    }
+
     pub fn build(mut self) -> Engine {
         self.entries.sort_by_key(|(priority, _)| *priority);
         Engine {
@@ -351,6 +366,7 @@ impl EngineBuilder {
             refreshing: Arc::default(),
             refreshed: Arc::default(),
             confirmed: Arc::default(),
+            taped: self.taped,
         }
     }
 }
@@ -444,6 +460,7 @@ impl Engine {
             credit_caps: Vec::new(),
             prepaid_days: None,
             disabled: Vec::new(),
+            taped: false,
         }
     }
 

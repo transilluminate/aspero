@@ -263,7 +263,9 @@ pub fn standard(config: StandardConfig) -> Result<Engine, Error> {
     if let Some(cache) = config.cache {
         builder = builder.cache(cache);
     }
-    builder = builder.cache_policy(config.cache_policy);
+    builder = builder
+        .cache_policy(config.cache_policy)
+        .taped(config.http_tape.is_some());
     if let Some(days) = config.prepaid_days {
         builder = builder.prepaid_days(days);
     }

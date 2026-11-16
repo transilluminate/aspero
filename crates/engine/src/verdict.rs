@@ -283,8 +283,8 @@ fn differences(claim: &Claim, c: &Candidate, known_only: bool) -> Vec<Difference
             diff(CitedField::FirstPage, first, cited)
         }),
         w.title
-            .as_deref()
-            .and_then(matching::derivative_work_kind)
+            .as_ref()
+            .and_then(|_| matching::record_derivative_kind(w))
             .filter(|_| !matching::claim_mentions_derivative(claim))
             .map(|kind| Difference {
                 kind: Some(kind),

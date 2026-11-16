@@ -36,6 +36,7 @@ use authors::{
 };
 pub use derivative::{
     WorkKind, claim_mentions_derivative, derivative_kind, derivative_work_kind, is_derivative,
+    record_derivative_kind,
 };
 use text::{Normalised, content_words, words};
 pub use text::{
@@ -1374,12 +1375,11 @@ pub fn assess(claim: &Claim, record: &SourceRecord) -> Assessment {
         confidence = confidence.min(EXTENDED_TITLE_CAP);
     }
     // A reply, correction or commentary is not the work it responds to,
-    // unless the citation says it is citing one.
+    // unless the citation says it is citing one; nor is a notice its record
+    // types as one, whatever its title ("… – RETRACTION").
     let cites_derivative = derivative::claim_derivative_kind(claim);
-    if let Some(actual) = &work_title
-        && is_derivative(actual)
-        && cites_derivative.is_none()
-    {
+    let derivative = work_title.is_some() && record_derivative_kind(work).is_some();
+    if derivative && cites_derivative.is_none() {
         confidence *= DERIVATIVE_PENALTY;
     }
     // Nor is the original a correction, reply or comment cited ("Corrigendum
@@ -1387,7 +1387,8 @@ pub fn assess(claim: &Claim, record: &SourceRecord) -> Assessment {
     // place quoted inside: plausible at most, the notice's record ranking
     // first when found. (A retraction cited isn't held to this: "retraction
     // of the gingiva" is a title's.)
-    if work_title.as_deref().is_some_and(|t| !is_derivative(t))
+    if work_title.is_some()
+        && !derivative
         && matches!(
             cites_derivative,
             Some(WorkKind::Correction | WorkKind::Reply | WorkKind::Comment)

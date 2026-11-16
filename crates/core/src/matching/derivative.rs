@@ -13,19 +13,32 @@ pub(super) const DERIVATIVE_MARKERS: &[&str] = &[
     "errata",
     "corrigendum",
     "correction",
+    "author correction",
+    "publisher correction",
     "comment on",
     "response to",
     "in response",
     "faculty opinions recommendation",
     "retraction of",
+    "retraction note",
     "expression of concern",
 ];
 
 /// Markers that are ordinary words inside a title ("differential response
-/// to corticosteroids", "correction of hyponatraemia"), so mark a
-/// derivative only where it says what it is about: at the start, and
-/// "correction" only as "Correction:" or "Correction to".
-const LEADING_MARKERS: &[&str] = &["comment on", "response to", "in response", "correction"];
+/// to corticosteroids", "correction of hyponatraemia", "a publisher
+/// correction workflow"), so mark a derivative only where it says what it
+/// is about: at the start, and "correction" only as "Correction:" or
+/// "Correction to" (Nature's and Springer's "Author Correction: …",
+/// "Publisher Correction: …").
+const LEADING_MARKERS: &[&str] = &[
+    "comment on",
+    "response to",
+    "in response",
+    "correction",
+    "author correction",
+    "publisher correction",
+    "retraction note",
+];
 
 /// Whether a title marks a derivative record: "…—Reply", "Correction to:
 /// …", "Comment on “…”", "Faculty Opinions recommendation of …".
@@ -97,12 +110,43 @@ pub fn derivative_work_kind(title: &str) -> Option<WorkKind> {
     })?;
     Some(match *marker {
         "reply" | "response to" | "in response" => WorkKind::Reply,
-        "erratum" | "errata" | "corrigendum" | "correction" => WorkKind::Correction,
+        "erratum"
+        | "errata"
+        | "corrigendum"
+        | "correction"
+        | "author correction"
+        | "publisher correction" => WorkKind::Correction,
         "comment on" => WorkKind::Comment,
-        "retraction of" => WorkKind::Retraction,
+        "retraction of" | "retraction note" => WorkKind::Retraction,
         "expression of concern" => WorkKind::ExpressionOfConcern,
         _ => WorkKind::Recommendation,
     })
+}
+
+/// What a derivative record is, by its title or, when that doesn't say,
+/// its type: a correction typed as one ([`crate::work::Work::type_as_notice`],
+/// OpenAlex's `erratum`) titled as its original. Not a `retraction`:
+/// OpenAlex types retracted articles so, and IEEE's keep their DOI under
+/// a "Notice of Retraction" title, as Elsevier's do under "RETRACTED:".
+/// A notice titled as its original with the word after a dash ("Shear and
+/// shuffle in twinning in titanium – RETRACTION", Cambridge's) is one.
+pub fn record_derivative_kind(work: &crate::work::Work) -> Option<WorkKind> {
+    let title = work.title.as_deref()?;
+    let trailing = |word: &str| {
+        let t = title.trim_end_matches(|c: char| c.is_whitespace() || c == '.');
+        t.len() > word.len()
+            && t.get(t.len() - word.len()..)
+                .is_some_and(|end| end.eq_ignore_ascii_case(word))
+            && t[..t.len() - word.len()]
+                .trim_end()
+                .ends_with(['-', '–', '—', ':'])
+    };
+    derivative_work_kind(title)
+        .or_else(|| trailing("retraction").then_some(WorkKind::Retraction))
+        .or_else(|| match &work.work_type {
+            Some(crate::work::WorkType::Other(t)) if t == "erratum" => Some(WorkKind::Correction),
+            _ => None,
+        })
 }
 
 /// Whether the claim itself cites a derivative, by the same rule as
@@ -120,10 +164,13 @@ pub(super) fn claim_derivative_kind(claim: &Claim) -> Option<WorkKind> {
         .as_deref()
         .and_then(derivative_work_kind)
         .or_else(|| {
+            // A sentence's year and quotes before it aside ("(2020)
+            // 'Author Correction: …'").
             claim
                 .text
                 .as_deref()?
                 .split(['.', '?', '!'])
+                .map(|s| s.trim_start_matches(|c: char| !c.is_alphabetic()))
                 .find_map(derivative_work_kind)
         })
 }

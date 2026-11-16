@@ -4265,3 +4265,91 @@ fn a_journal_article_cited_as_a_chapter_is_another_container() {
         assert!(a.confidence >= VERIFIED, "{claim}: {a:?}");
     }
 }
+
+#[test]
+fn a_notice_is_not_the_original_it_corrects() {
+    // holdout-4's `w:erratum-cited-as-original`: the original's title and
+    // authors at the notice's place, or with its DOI. Nature's and
+    // Springer's notices are titled "Author Correction: …", "Publisher
+    // Correction: …"; a notice's record may say what it is only by type.
+    let mut correction = article(
+        "Author Correction: Enhanced energy coupling for indirect-drive fast-ignition fusion \
+         targets",
+        &["F. Zhang", "H. B. Cai", "W. M. Zhou"],
+        2020,
+        ("Nature Physics", "16", "815-815"),
+    );
+    correction.work.work_type = Some(crate::work::WorkType::Other("erratum".into()));
+    let mut publisher = record(
+        &["doi:10.1007/s15010-026-02851-6"],
+        "Publisher Correction: Efficacy and safety of praziquantel combined with artemisinin \
+         derivatives versus praziquantel monotherapy for schistosomiasis",
+        &["Yu Yang", "Jie Meng", "Chen Li"],
+        2026,
+    );
+    publisher.work.work_type = Some(crate::work::WorkType::JournalArticle);
+    publisher.work.container_title = Some("Infection".into());
+    let mut retraction = article(
+        "Shear and shuffle in twinning in titanium – RETRACTION",
+        &["Bin Li"],
+        2016,
+        ("Journal of Materials Research", "31", "2361-2361"),
+    );
+    retraction.work.work_type = Some(crate::work::WorkType::Other("retraction".into()));
+    for (claim, record) in [
+        (
+            "Zhang, F. et al. (2020) 'Enhanced energy coupling for indirect-drive fast-ignition \
+             fusion targets', Nature Physics, 16(7), pp. 815–815.",
+            &correction,
+        ),
+        (
+            "Yang Y, Meng J, Li C, et al. Efficacy and safety of praziquantel combined with \
+             artemisinin derivatives versus praziquantel monotherapy for schistosomiasis. \
+             Infection. 2026. doi:10.1007/s15010-026-02851-6",
+            &publisher,
+        ),
+        (
+            "Li B. Shear and shuffle in twinning in titanium. Journal of Materials Research. \
+             2016;31(15):2361–2361.",
+            &retraction,
+        ),
+    ] {
+        let a = assess(&Claim::from_text(claim), record);
+        assert!(a.confidence < VERIFIED, "{claim}: {a:?}");
+        assert!(record_derivative_kind(&record.work).is_some(), "{claim}");
+    }
+    // Cited as the notice it is, it verifies.
+    let claim = Claim::from_text(
+        "Zhang, F. et al. (2020) 'Author Correction: Enhanced energy coupling for \
+         indirect-drive fast-ignition fusion targets', Nature Physics, 16(7), pp. 815–815.",
+    );
+    let a = assess(&claim, &correction);
+    assert!(a.confidence >= VERIFIED, "{a:?}");
+    // A retracted article is the work cited, however marked and typed:
+    // IEEE's keep their DOI under "Notice of Retraction", Elsevier's under
+    // "RETRACTED:", and OpenAlex types them `retraction`.
+    for title in [
+        "Notice of Retraction: Laboratorial Research on the Treatment of Multi-A/O Process to \
+         Municipal Wastewater",
+        "RETRACTED: Laboratorial Research on the Treatment of Multi-A/O Process to Municipal \
+         Wastewater",
+    ] {
+        let mut retracted = article(
+            title,
+            &["Huifang Dong", "Dapeng Deng", "Dagong Li"],
+            2011,
+            (
+                "2011 5th International Conference on Bioinformatics",
+                "1",
+                "1-4",
+            ),
+        );
+        retracted.work.work_type = Some(crate::work::WorkType::Other("retraction".into()));
+        let claim = Claim::from_text(
+            "Dong H, Deng D, Li D. Laboratorial Research on the Treatment of Multi-A/O Process to \
+             Municipal Wastewater. 2011.",
+        );
+        let a = assess(&claim, &retracted);
+        assert!(a.confidence >= VERIFIED, "{title}: {a:?}");
+    }
+}

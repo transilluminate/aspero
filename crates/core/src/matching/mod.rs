@@ -807,6 +807,25 @@ pub fn assess(claim: &Claim, record: &SourceRecord) -> Assessment {
         } else {
             container
         };
+    // A book's chapter, in no volume, cited as a journal's article: a
+    // volume with an issue ("Biogeochemical Cycles and Climate.
+    // 2019;23(5):159-175"), or a journal and volume as fields. The
+    // chapter's book, given as the journal, is the place cited, but not
+    // in that shape: plausible; another journal is another venue too.
+    // (A book series' volume, "Lecture Notes in Computer Science, vol.
+    // 9351", has no issue; a chapter cited as one, "In: …", is none.)
+    let chapter_as_article = work.work_type == Some(WorkType::Chapter)
+        && work.volume.is_none()
+        && cited_place.volume.is_some()
+        && !claim.text.as_deref().is_some_and(cites_chapter)
+        && (claim.text.as_deref().is_some_and(publication::cites_issue)
+            || (claim.container.is_some() && container.agreement != Agreement::Match));
+    let container =
+        if chapter_as_article && cites_journal && container.agreement != Agreement::Match {
+            FieldCheck::exact(false)
+        } else {
+            container
+        };
     // A conference paper cited at another conference ("… In IEEE
     // International Conference on Computer Vision (ICCV)" for CVPR's), or
     // a preprint, at none, cited in a conference's proceedings: the venue
@@ -917,7 +936,11 @@ pub fn assess(claim: &Claim, record: &SourceRecord) -> Assessment {
     // A journal article cited in a journal clearly not its own, a
     // preprint cited as a journal's article, a paper at another venue.
     let wrong_journal = container.agreement == Agreement::Mismatch
-        && (preprint_of_cited || article || other_conference || preprint_at_conference);
+        && (preprint_of_cited
+            || article
+            || other_conference
+            || preprint_at_conference
+            || chapter_as_article);
     let located = &cited_place;
     let same = |claimed: Option<&str>, actual: Option<&str>| match (claimed, actual) {
         (Some(c), Some(a)) if !c.is_empty() && !a.is_empty() => {
@@ -926,6 +949,12 @@ pub fn assess(claim: &Claim, record: &SourceRecord) -> Assessment {
         _ => FieldCheck::UNKNOWN,
     };
     let volume = same(located.volume.as_deref(), work.volume.as_deref());
+    // A chapter cited at a volume is in none: the difference to name.
+    let volume = if chapter_as_article && volume.agreement == Agreement::Unknown {
+        FieldCheck::exact(false)
+    } else {
+        volume
+    };
     // A record's page with a part number ("698.1", BMJ's) is the page
     // cited as "698".
     let page = same(
@@ -1108,6 +1137,15 @@ pub fn assess(claim: &Claim, record: &SourceRecord) -> Assessment {
                 .get(..8)
                 .is_some_and(|head| head.eq_ignore_ascii_case("@article"))
         });
+    // Nor is a book cited with a volume and issue (its title where the
+    // journal stands: "Methane Cycling and Climate. Biogeochemical Cycles
+    // and Climate. 2019;23(5):159-175" cites a chapter of it).
+    let book_as_journal = work.work_type == Some(WorkType::Book)
+        && work.volume.is_none()
+        && claim.text.as_deref().is_some_and(publication::cites_issue);
+    if chapter_as_article || (book_as_journal && ids != Agreement::Match) {
+        confidence = confidence.min(UNPLACED_CAP);
+    }
     if (journal_less || unconfirmable || book_for_article)
         && cites_journal
         && ids != Agreement::Match

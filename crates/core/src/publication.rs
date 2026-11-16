@@ -282,6 +282,29 @@ pub(crate) fn locator(text: &str) -> Locator {
     }
 }
 
+/// Whether a free-text reference gives an issue with its volume, as a
+/// journal's article is cited: Vancouver's "2019;23(5):159-175", APA's
+/// "22(2), 3–16", Chicago's "94, no. 2". A book series' volume
+/// ("Lecture Notes in Computer Science, vol. 9351") has none.
+pub(crate) fn cites_issue(text: &str) -> bool {
+    if text.trim_start().starts_with('@') {
+        return bibtex_field(text, "number").is_some() && bibtex_field(text, "volume").is_some();
+    }
+    let compact = compact(text);
+    let tokens: Vec<&str> = compact.split_whitespace().collect();
+    let Some((i, _)) = styled(&tokens) else {
+        return false;
+    };
+    let token = tokens[i];
+    let head = token.split(':').next().unwrap_or(token);
+    let head = head.rsplit(';').next().unwrap_or(head);
+    let bracketed = head.split_once('(').is_some_and(|(_, rest)| {
+        let issue = rest.split(')').next().unwrap_or("");
+        !issue.is_empty() && issue.len() <= 8 && !bracketed_year(rest.trim_end_matches([',', '.']))
+    });
+    bracketed || tokens.get(i + 1).is_some_and(|t| is_label(t, &["no"]))
+}
+
 /// The reference with the spaces that styles put around their separators
 /// dropped, so each locator is one token: "2014; 370 : 1402" →
 /// "2014;370:1402", "376 (9734)" → "376(9734)".

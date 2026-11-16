@@ -3477,3 +3477,131 @@ fn a_journal_article_cited_in_a_meetings_proceedings_is_another_venue() {
     let a = assess(&claim, &prsb);
     assert!(a.confidence >= VERIFIED, "{a:?}");
 }
+
+/// A book chapter's record, in no volume: its book as the container.
+fn chapter(title: &str, authors: &[&str], year: i16, book: &str) -> SourceRecord {
+    let mut r = record(&[], title, authors, year);
+    r.work.work_type = Some(crate::work::WorkType::Chapter);
+    r.work.container_title = Some(book.into());
+    r
+}
+
+#[test]
+fn a_chapter_cited_as_a_journals_article_is_plausible() {
+    let methane = chapter(
+        "Methane Cycling and Climate",
+        &["Han Dolman"],
+        2019,
+        "Biogeochemical Cycles and Climate",
+    );
+    let psychotherapy = chapter(
+        "Integrative Psychotherapy with Children",
+        &["Athena A. Drewes", "John W. Seymour"],
+        2019,
+        "Handbook of Psychotherapy Integration",
+    );
+    let culpability = chapter(
+        "Law, Neuroscience, and Criminal Culpability",
+        &["Lisa Claydon"],
+        2011,
+        "Law and Neuroscience",
+    );
+    let structured = Claim {
+        title: Some("Law, Neuroscience, and Criminal Culpability".into()),
+        authors: vec!["Lisa Claydon".into()],
+        year: Some(2011),
+        container: Some("Journal of Neuroscience".into()),
+        volume: Some("60".into()),
+        page: Some("141-170".into()),
+        ..Claim::default()
+    };
+    for (n, claim, record, venue) in [
+        // The book's title as the journal, with a volume and issue.
+        (
+            "h3-947",
+            Claim::from_text(
+                "Dolman H. Methane Cycling and Climate. Biogeochemical Cycles and Climate. \
+                 2019;23(5):159-175.",
+            ),
+            &methane,
+            Agreement::Match,
+        ),
+        (
+            "h3-948 (APA)",
+            Claim::from_text(
+                "Dolman, H. (2019). Methane Cycling and Climate. Biogeochemical Cycles and \
+                 Climate, 23(5), 159–175.",
+            ),
+            &methane,
+            Agreement::Match,
+        ),
+        // A real journal of the field.
+        (
+            "h3-964",
+            Claim::from_text(
+                "Drewes AA, Seymour JW. Integrative Psychotherapy with Children. Psychotherapy \
+                 Research. 2019;54(12):341-356.",
+            ),
+            &psychotherapy,
+            Agreement::Mismatch,
+        ),
+        ("h3-959", structured, &culpability, Agreement::Mismatch),
+    ] {
+        let a = assess(&claim, record);
+        assert_eq!(a.container.agreement, venue, "{n}: {a:?}");
+        assert!((PLAUSIBLE..VERIFIED).contains(&a.confidence), "{n}: {a:?}");
+    }
+    // Cited as a chapter, or in its series' volume, it verifies.
+    let mut lncs = chapter(
+        "U-Net: Convolutional Networks for Biomedical Image Segmentation",
+        &["Olaf Ronneberger", "Philipp Fischer", "Thomas Brox"],
+        2015,
+        "Lecture Notes in Computer Science",
+    );
+    lncs.work.page = Some("234-241".into());
+    for (claim, record) in [
+        (
+            "Dolman H. Methane Cycling and Climate. In: Dolman H, ed. Biogeochemical Cycles and \
+             Climate. Oxford University Press; 2019:159-175.",
+            &methane,
+        ),
+        (
+            "Ronneberger O, Fischer P, Brox T. U-Net: Convolutional Networks for Biomedical \
+             Image Segmentation. Lecture Notes in Computer Science, vol. 9351, pp. 234–241. \
+             Springer, 2015.",
+            &lncs,
+        ),
+    ] {
+        let a = assess(&Claim::from_text(claim), record);
+        assert!(a.confidence >= VERIFIED, "{claim}: {a:?}");
+    }
+    // Nor does the book, its title where the journal stands.
+    let mut book = record(
+        &[],
+        "Biogeochemical Cycles and Climate",
+        &["Han Dolman"],
+        2019,
+    );
+    book.work.work_type = Some(crate::work::WorkType::Book);
+    let a = assess(
+        &Claim::from_text(
+            "Dolman H. Methane Cycling and Climate. Biogeochemical Cycles and Climate. \
+             2019;23(5):159-175.",
+        ),
+        &book,
+    );
+    assert!(a.confidence < VERIFIED, "{a:?}");
+    let a = assess(
+        &Claim::from_text("Dolman H. Biogeochemical Cycles and Climate. Oxford: OUP; 2019."),
+        &book,
+    );
+    assert!(a.confidence >= VERIFIED, "{a:?}");
+    assert!(publication::cites_issue(
+        "Psychotherapy Research. 2019;54(12):341-356."
+    ));
+    assert!(publication::cites_issue(
+        "Psychotherapy Research, 54(12), 341–356."
+    ));
+    assert!(!publication::cites_issue("Injury 47 (2016) 797–804"));
+    assert!(!publication::cites_issue("N Engl J Med. 2017;376:2545-55."));
+}

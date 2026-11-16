@@ -125,6 +125,24 @@ fn from_counts(record: &SourceRecord) -> bool {
     record.source.as_str() == COUNTS
 }
 
+/// Scores a record against the claim with every identifier known for its
+/// work (`ids`, merged from its other records), so a claimed identifier
+/// counts whichever record of the work is kept: arXiv's DataCite record of
+/// a paper cited by its journal DOI.
+fn assess(claim: &Claim, record: &SourceRecord, ids: &[WorkId]) -> matching::Assessment {
+    let known = |id: &WorkId| record.ids.iter().any(|r| same_work_id(r, id));
+    if ids.iter().all(known) {
+        return matching::assess(claim, record);
+    }
+    let mut record = record.clone();
+    for id in ids {
+        if !record.ids.iter().any(|r| same_work_id(r, id)) {
+            record.ids.push(id.clone());
+        }
+    }
+    matching::assess(claim, &record)
+}
+
 /// Merges another record of the same work (found in `sightings`) into a
 /// candidate: its identifiers, notices and sightings, every year reported,
 /// and the record itself if it matches the claim better. Whichever record
@@ -155,8 +173,8 @@ fn absorb(
     let counts = merged_values(&mut c.record, &mut record, counts);
     add_years(&mut c.record, &pooled);
     add_years(&mut record, &pooled);
-    c.assessment = matching::assess(claim, &c.record);
-    let assessment = matching::assess(claim, &record);
+    c.assessment = assess(claim, &c.record, &c.ids);
+    let assessment = assess(claim, &record, &c.ids);
     if assessment.confidence > c.assessment.confidence {
         c.record = record;
         c.assessment = assessment;
@@ -779,17 +797,19 @@ fn settle_alternatives(claim: &Claim, report: &mut ResolveReport) -> Claim {
     }
     report.lookups.retain(|l| claim.ids.contains(&l.id));
     for c in &mut report.candidates {
-        c.assessment = matching::assess(&claim, &c.record);
+        c.assessment = assess(&claim, &c.record, &c.ids);
         c.assessment.ids = id_agreement(&claim.ids, &c.ids);
     }
     report.chosen_by_site = rank(&mut report.candidates, &claim);
     claim
 }
 
-/// Most confident first; on a tie the earliest-published (an original
-/// precedes its reprints, abstracts and corrections), then the one more
-/// providers agree on. Then the first may give way to a candidate from the
-/// claim's site's publisher ([`prefer_site`]); returns whether it did.
+/// Most confident first; on a tie the one confirming more of the journal,
+/// volume and page the claim cites (the article over a copy that can't
+/// check them), then the earliest-published (an original precedes its
+/// reprints, abstracts and corrections), then the one more providers agree
+/// on. Then the first may give way to a candidate from the claim's site's
+/// publisher ([`prefer_site`]); returns whether it did.
 fn rank(candidates: &mut [Candidate], claim: &Claim) -> bool {
     let issued = |c: &Candidate| {
         c.record.work.issued.map_or(i64::MAX, |d| {
@@ -798,10 +818,18 @@ fn rank(candidates: &mut [Candidate], claim: &Claim) -> bool {
                 + i64::from(d.day().unwrap_or(31))
         })
     };
+    let confirmed = |c: &Candidate| {
+        let a = &c.assessment;
+        [a.container, a.volume, a.page]
+            .iter()
+            .filter(|f| f.agreement == Agreement::Match)
+            .count()
+    };
     candidates.sort_by(|a, b| {
         b.assessment
             .confidence
             .total_cmp(&a.assessment.confidence)
+            .then(confirmed(b).cmp(&confirmed(a)))
             .then(issued(a).cmp(&issued(b)))
             .then(b.sightings.len().cmp(&a.sightings.len()))
     });
@@ -1318,5 +1346,25 @@ mod tests {
         let (dois, chosen) = ranked(&claim(STROKE, &[], None, Some("jamanetwork.com")), &records);
         assert_eq!(dois[0], "doi:10.1001/jama.2026.19482");
         assert!(chosen);
+    }
+
+    #[test]
+    fn the_article_outranks_a_copy_that_cant_check_its_place() {
+        // Red team (#102): Tversky & Kahneman's Science article, cited with
+        // a wrong page, against the earlier technical report.
+        let title = "Judgment under Uncertainty: Heuristics and Biases";
+        let authors = ["Amos Tversky", "Daniel Kahneman"];
+        let mut report = titled("10.21236/ad0767426", title, &authors, 1973);
+        report.work.work_type = Some(WorkType::Report);
+        let mut article = titled("10.1126/science.185.4157.1124", title, &authors, 1974);
+        article.work.container_title = Some("Science".into());
+        article.work.volume = Some("185".into());
+        article.work.page = Some("1124-1131".into());
+        let claim = Claim::from_text(
+            "Tversky A, Kahneman D. Judgment under uncertainty: heuristics and biases. Science. \
+             1974;185:1353.",
+        );
+        let (dois, _) = ranked(&claim, &[report, article]);
+        assert_eq!(dois[0], "doi:10.1126/science.185.4157.1124");
     }
 }

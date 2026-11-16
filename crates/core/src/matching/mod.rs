@@ -28,6 +28,7 @@ use crate::id::{IdKind, WorkId, starts_with_ci};
 use crate::provider::Place;
 use crate::publication::{self, first_page, journal_in, other_journal, same_journal};
 use crate::record::SourceRecord;
+use crate::work::WorkType;
 
 use authors::{
     author_overlap, byline_strangers, claimed_strangers, complete_byline, family_name, name_words,
@@ -94,6 +95,9 @@ const EXTENDED_TITLE: f64 = 0.75;
 /// Confidence ceiling then: the claim may cite another work whose title
 /// contains this one's, or this one with a subtitle its record lacks.
 const EXTENDED_TITLE_CAP: f64 = LOCATION_MISMATCH_CAP;
+/// Confidence ceiling for a work with no journal, volume or page when the
+/// claim cites a journal: a lookalike copy can't confirm it.
+const UNPLACED_CAP: f64 = LOCATION_MISMATCH_CAP;
 
 /// Verdict thresholds on confidence.
 pub const VERIFIED: f64 = 0.85;
@@ -592,7 +596,7 @@ pub fn assess(claim: &Claim, record: &SourceRecord) -> Assessment {
     // preprint cited as a journal's article.
     let wrong_journal =
         container.agreement == Agreement::Mismatch && (preprint_of_cited || article);
-    let located = cited_place;
+    let located = &cited_place;
     let same = |claimed: Option<&str>, actual: Option<&str>| match (claimed, actual) {
         (Some(c), Some(a)) if !c.is_empty() && !a.is_empty() => {
             FieldCheck::exact(c.trim().eq_ignore_ascii_case(a.trim()))
@@ -706,6 +710,33 @@ pub fn assess(claim: &Claim, record: &SourceRecord) -> Assessment {
     }
     if wrong_journal {
         confidence = confidence.min(JOURNAL_MISMATCH_CAP);
+    }
+    // A copy deposited elsewhere (Zenodo, a repository, a technical
+    // report) has the work's title, authors and year but no journal,
+    // volume or page: it can't confirm the journal cited, and it isn't the
+    // article cited there, unless the claim's identifier says it is.
+    // Preprints, books, chapters, data and software have none to give,
+    // but nor do they confirm a journal, volume and page all cited
+    // (PsycEXTRA's record of a paper Science printed).
+    let unconfirmable = cited_place.volume.is_some()
+        && cited_place.page.is_some()
+        && work.volume.is_none()
+        && work.page.is_none()
+        && container.agreement != Agreement::Match;
+    let journal_less = !matches!(
+        work.work_type,
+        Some(
+            WorkType::Preprint
+                | WorkType::Book
+                | WorkType::Chapter
+                | WorkType::Dataset
+                | WorkType::Software
+        )
+    ) && work.container_title.is_none()
+        && work.volume.is_none()
+        && work.page.is_none();
+    if (journal_less || unconfirmable) && cited_journal.is_some() && ids != Agreement::Match {
+        confidence = confidence.min(UNPLACED_CAP);
     }
     // Another edition of a book: the same title and authors, another year
     // (a 9th edition cited, a later one found). The book is right; the

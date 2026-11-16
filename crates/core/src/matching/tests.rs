@@ -51,10 +51,7 @@ fn a_messy_reference_matches_its_work_not_its_namesakes() {
     let claim =
         Claim::from_text("LeCun Y, Bengio Y, Hinton G. Deep learning. Nature. 2015;521:436-444.");
     let authors = ["Yann LeCun", "Yoshua Bengio", "Geoffrey Hinton"];
-    let right = assess(
-        &claim,
-        &record(&["10.1038/nature14539"], "Deep learning", &authors, 2015),
-    );
+    let right = assess(&claim, &lecun());
     let later = assess(
         &claim,
         &record(&["10.1145/3448250"], "Deep learning for AI", &authors, 2021),
@@ -1423,4 +1420,58 @@ fn a_journal_cited_without_volume_and_page_is_read() {
     let a = assess(&Claim::from_text(text), &gravitons);
     assert_eq!(a.container.agreement, Agreement::Unknown, "{a:?}");
     assert!(a.confidence >= VERIFIED, "{a:?}");
+}
+
+#[test]
+fn a_copy_without_journal_or_place_cannot_confirm_the_journal_cited() {
+    // Red team (#102): a Zenodo deposit of Ioannidis's essay, no journal,
+    // volume or page, verified a reference to the article in another
+    // journal.
+    let mut copy = record(
+        &["10.5281/zenodo.13525448"],
+        "Why Most Published Research Findings Are False",
+        &["John P. A. Ioannidis"],
+        2005,
+    );
+    copy.work.work_type = Some(crate::work::WorkType::JournalArticle);
+    for text in [
+        "Ioannidis JP. Why most published research findings are false. BMJ. 2005.",
+        "Ioannidis JP. Why most published research findings are false. PLoS Med. \
+         2005;2(8):e124.",
+    ] {
+        let a = assess(&Claim::from_text(text), &copy);
+        assert!(
+            (PLAUSIBLE..VERIFIED).contains(&a.confidence),
+            "{text}: {a:?}"
+        );
+    }
+    // Unless the claim's identifier names it, or no journal is cited.
+    for text in [
+        "Ioannidis JP. Why most published research findings are false. Zenodo. 2005. \
+         doi:10.5281/zenodo.13525448",
+        "Ioannidis JP. Why most published research findings are false. 2005.",
+    ] {
+        let a = assess(&Claim::from_text(text), &copy);
+        assert!(a.confidence >= VERIFIED, "{text}: {a:?}");
+    }
+    // A preprint has no journal to give.
+    let mut preprint = copy.clone();
+    preprint.work.work_type = Some(crate::work::WorkType::Preprint);
+    let text = "Ioannidis JP. Why most published research findings are false. medRxiv. 2005.";
+    assert!(assess(&Claim::from_text(text), &preprint).confidence >= VERIFIED);
+    // Nor does a record in another series, without volume or page, confirm
+    // a journal, volume and page all cited (PsycEXTRA's record of a paper
+    // Science printed).
+    let mut psycextra = record(
+        &["10.1037/e301492005-001"],
+        "Judgment Under Uncertainty: Heuristics and Biases",
+        &["Amos Tversky", "Daniel Kahneman"],
+        1974,
+    );
+    psycextra.work.work_type = Some(crate::work::WorkType::Dataset);
+    psycextra.work.container_title = Some("PsycEXTRA Dataset".into());
+    let text = "Tversky A, Kahneman D. Judgment under uncertainty: heuristics and biases. Science. \
+                1974;185:1124.";
+    let a = assess(&Claim::from_text(text), &psycextra);
+    assert!((PLAUSIBLE..VERIFIED).contains(&a.confidence), "{a:?}");
 }

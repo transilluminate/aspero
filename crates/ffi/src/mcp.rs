@@ -266,6 +266,14 @@ pub struct McpStatus {
     pub last_request_at: Option<SystemTime>,
     pub last_key_name: Option<String>,
     pub keys: Vec<McpKeyStatus>,
+    /// The UTC day, `YYYY-MM-DD`, that each key's `spentTodayUsd` is of:
+    /// keys' daily budgets are per UTC day.
+    #[uniffi(default = "")]
+    pub spend_day: String,
+    /// When that day ends (midnight UTC) and keys' spend starts again from
+    /// nothing.
+    #[uniffi(default = None)]
+    pub spend_resets_at: Option<SystemTime>,
 }
 
 #[derive(Debug, Clone, PartialEq, uniffi::Record)]
@@ -273,6 +281,12 @@ pub struct McpKeyStatus {
     pub key_id: String,
     /// Its last request since the server started.
     pub last_used_at: Option<SystemTime>,
+    /// Its engine spend today (UTC: `McpStatus.spendDay`), in US dollars,
+    /// against its `dailyBudgetUsd`: what its budget is checked against,
+    /// kept in the cache file (in memory without one), so it counts spend
+    /// before a restart too.
+    #[uniffi(default = 0.0)]
+    pub spent_today_usd: f64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error, uniffi::Error)]
@@ -432,6 +446,8 @@ impl McpServer {
         self.inner.port()
     }
 
+    /// How the server is: its sessions, and each key's last use and spend
+    /// today (a read of the cache file per key).
     pub fn status(&self) -> McpStatus {
         let s = self.inner.status();
         McpStatus {
@@ -446,8 +462,11 @@ impl McpServer {
                 .map(|k| McpKeyStatus {
                     key_id: k.key_id,
                     last_used_at: k.last_used_at.map(SystemTime::from),
+                    spent_today_usd: k.spent_today_usd,
                 })
                 .collect(),
+            spend_day: s.spend_day,
+            spend_resets_at: Some(SystemTime::from(s.spend_resets_at)),
         }
     }
 

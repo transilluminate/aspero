@@ -376,12 +376,16 @@ impl Normalised {
         })
     }
 
-    /// Four-digit numbers that look like publication years.
-    pub(super) fn years(&self) -> Vec<i16> {
+    /// Four-digit numbers that look like publication years, but for those
+    /// inside `title` where the reference gives it: "Cancer statistics,
+    /// 2020" cites no year.
+    pub(super) fn years_beside(&self, title: Option<&str>) -> Vec<i16> {
+        let span = title.and_then(|t| self.title_span(t)).unwrap_or(0..0);
         self.words
             .iter()
-            .filter(|w| w.len() == 4)
-            .filter_map(|w| w.parse::<i16>().ok())
+            .enumerate()
+            .filter(|(i, w)| w.len() == 4 && !span.contains(i))
+            .filter_map(|(_, w)| w.parse::<i16>().ok())
             .filter(|y| PLAUSIBLE_YEARS.contains(y))
             .collect()
     }

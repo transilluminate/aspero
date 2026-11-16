@@ -249,7 +249,7 @@ fn differences(claim: &Claim, c: &Candidate, known_only: bool) -> Vec<Difference
     let cited_year = match (read.year, actual_year) {
         (Some(y), _) => Some(y),
         (None, Some(actual)) => claim
-            .cited_years()
+            .cited_years_beside(w.title.as_deref())
             .into_iter()
             .min_by_key(|y| y.abs_diff(actual)),
         (None, None) => None,

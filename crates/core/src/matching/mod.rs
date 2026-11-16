@@ -255,9 +255,16 @@ impl Claim {
 
     /// The years the claim cites: its year, else those in its text.
     pub fn cited_years(&self) -> Vec<i16> {
+        self.cited_years_beside(None)
+    }
+
+    /// [`Claim::cited_years`], but for years inside `title` (a work's,
+    /// compared with the claim) where the text gives it: "Siegel RL.
+    /// Cancer statistics, 2020. 2018." cites 2018, not 2020.
+    pub fn cited_years_beside(&self, title: Option<&str>) -> Vec<i16> {
         match (self.year, &self.text) {
             (Some(year), _) => vec![year],
-            (None, Some(text)) => Normalised::new(text).years(),
+            (None, Some(text)) => Normalised::new(text).years_beside(title),
             _ => Vec::new(),
         }
     }
@@ -515,7 +522,9 @@ pub fn assess(claim: &Claim, record: &SourceRecord) -> Assessment {
         .into_iter()
         .chain(work.other_years.iter().copied())
         .collect();
-    let claimed_years = claim.cited_years();
+    // A year inside the title ("Cancer statistics, 2020") is not the year
+    // cited.
+    let claimed_years = claim.cited_years_beside(work_title.as_deref());
     let year = if actual_years.is_empty() || claimed_years.is_empty() {
         FieldCheck::UNKNOWN
     } else {

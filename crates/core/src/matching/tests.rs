@@ -1312,3 +1312,38 @@ fn a_title_cited_as_is_or_without_its_subtitle_is_the_records() {
     book.work.work_type = Some(crate::work::WorkType::JournalArticle);
     assert!(assess(&claim, &book).confidence < VERIFIED);
 }
+
+#[test]
+fn a_year_in_the_title_is_not_the_year_cited() {
+    // Red team (#102): "Cancer statistics, 2020" cited as of 2018.
+    let mut stats = placed(
+        &[],
+        "Cancer statistics, 2020",
+        &["Rebecca L. Siegel", "Kimberly D. Miller", "Ahmedin Jemal"],
+        2020,
+        ("CA: A Cancer Journal for Clinicians", "70", "7-30"),
+    );
+    stats.work.work_type = Some(crate::work::WorkType::JournalArticle);
+    for text in [
+        "Siegel RL, Miller KD, Jemal A. Cancer statistics, 2020. CA Cancer J Clin. 2018;70(1):7-30.",
+        "Siegel RL, Miller KD, Jemal A. Cancer statistics, 2020. 2017.",
+    ] {
+        let claim = Claim::from_text(text);
+        let a = assess(&claim, &stats);
+        assert_eq!(a.year.agreement, Agreement::Mismatch, "{text}");
+        assert!(a.confidence < PLAUSIBLE, "{text}: {a:?}");
+        assert!(
+            !claim
+                .cited_years_beside(stats.work.title.as_deref())
+                .contains(&2020)
+        );
+    }
+    for text in [
+        "Siegel RL, Miller KD, Jemal A. Cancer statistics, 2020. CA Cancer J Clin. 2020;70(1):7-30.",
+        "Siegel RL, Miller KD, Jemal A. Cancer statistics, 2020.",
+    ] {
+        let a = assess(&Claim::from_text(text), &stats);
+        assert_ne!(a.year.agreement, Agreement::Mismatch, "{text}");
+        assert!(a.confidence >= VERIFIED, "{text}: {a:?}");
+    }
+}

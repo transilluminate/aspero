@@ -72,8 +72,10 @@ impl std::fmt::Display for HostError {
 
 impl std::error::Error for HostError {}
 
-/// A tool call, done: for the app to show who used what.
+/// A tool call, done: for the app to show who used what. Built only by
+/// the server, so fields can be added without breaking embedders.
 #[derive(Debug, Clone, PartialEq)]
+#[non_exhaustive]
 pub struct Activity {
     pub key_name: String,
     pub tool: String,

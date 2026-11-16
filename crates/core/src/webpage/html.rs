@@ -2,7 +2,9 @@
 //! `<meta>` tags, the `<title>` and `application/ld+json` scripts. Not a
 //! parser: no tree, no error recovery beyond skipping what isn't a tag.
 //! Anything (a whole page, a `<head>`, a fragment, junk) scans; what it
-//! can't read as a tag is text and passed over.
+//! can't read as a tag is text and passed over. Also kept, for a web
+//! page's record: the `<html>` tag's `lang` and the first `<link
+//! rel="canonical">`'s `href`.
 //!
 //! Skipped: comments, `<!…>` and `<?…>` declarations, closing tags, and
 //! the contents of `<script>` (other than JSON-LD), `<style>`,
@@ -22,13 +24,18 @@ pub const MAX_JSON_LD: usize = 32;
 /// What a document says of itself.
 #[derive(Debug, Default)]
 pub(super) struct Markup {
-    /// `<meta>` tags' `name` (or `property`), lowercased, and `content`,
-    /// decoded, in document order.
+    /// `<meta>` tags' `name` (or `property`, or `http-equiv`), lowercased,
+    /// and `content`, decoded, in document order.
     pub metas: Vec<(String, String)>,
     /// The first `<title>`'s text, decoded.
     pub title: Option<String>,
     /// The JSON-LD scripts' contents, as written.
     pub json_ld: Vec<String>,
+    /// The first `<html>` tag's `lang`, decoded.
+    pub lang: Option<String>,
+    /// The first `<link rel="canonical">`'s `href`, decoded, as written
+    /// (it may be relative).
+    pub canonical: Option<String>,
 }
 
 impl Markup {
@@ -75,7 +82,10 @@ pub(super) fn read(html: &str) -> Markup {
         at = tag.end;
         match tag.name.as_str() {
             "meta" => {
-                let name = tag.attr("name").or_else(|| tag.attr("property"));
+                let name = tag
+                    .attr("name")
+                    .or_else(|| tag.attr("property"))
+                    .or_else(|| tag.attr("http-equiv"));
                 if let (Some(name), Some(content)) = (name, tag.attr("content")) {
                     markup
                         .metas
@@ -98,6 +108,16 @@ pub(super) fn read(html: &str) -> Markup {
                     markup.json_ld.push(text.to_owned());
                 }
                 at = end;
+            }
+            "html" if markup.lang.is_none() => markup.lang = tag.attr("lang").map(Cow::into_owned),
+            "link" if markup.canonical.is_none() => {
+                let canonical = tag.attr("rel").is_some_and(|rel| {
+                    rel.split_ascii_whitespace()
+                        .any(|r| r.eq_ignore_ascii_case("canonical"))
+                });
+                if canonical {
+                    markup.canonical = tag.attr("href").map(Cow::into_owned);
+                }
             }
             "style" | "textarea" | "template" => at = raw_text(html, at, &tag.name).1,
             _ => {}
@@ -394,6 +414,23 @@ mod tests {
                 ("og:title".into(), "OG".into()),
             ]
         );
+    }
+
+    #[test]
+    fn the_language_and_canonical_link() {
+        let m = read(
+            "<HTML class=\"client-nojs\" LANG=\"en-GB\" dir=ltr><head>\
+             <link rel=\"stylesheet\" href=\"/a.css\">\
+             <link rel=\"Canonical\" href=\"https://example.org/a?x=1&amp;y=2\">\
+             <link rel=canonical href=/second>\
+             <meta http-equiv=\"Content-Language\" content=\"fr\">",
+        );
+        assert_eq!(m.lang.as_deref(), Some("en-GB"));
+        assert_eq!(
+            m.canonical.as_deref(),
+            Some("https://example.org/a?x=1&y=2")
+        );
+        assert_eq!(m.metas, [("content-language".into(), "fr".into())]);
     }
 
     #[test]

@@ -13,6 +13,9 @@
 //! its `isPartOf` chain, a `PublicationVolume`'s `volumeNumber` and a
 //! `Periodical`'s `name`, never another kind's (a `WebSite`'s name is not
 //! a journal).
+//!
+//! For a web page's record ([`web`]), the main node is read the same way
+//! but of more kinds: any article, post or report, else a page.
 
 use serde_json::{Map, Value};
 
@@ -22,17 +25,145 @@ use crate::id::IdKind;
 /// Article types read.
 const ARTICLES: &[&str] = &["ScholarlyArticle", "MedicalScholarlyArticle", "Article"];
 
+/// Scholarly article types: a page giving one is a scholarly work's.
+const SCHOLARLY: &[&str] = &["ScholarlyArticle", "MedicalScholarlyArticle"];
+
+/// What a web page's main node may be, before [`PAGES`]: articles, posts
+/// and reports of any kind.
+const WEB_ARTICLES: &[&str] = &[
+    "Article",
+    "ScholarlyArticle",
+    "MedicalScholarlyArticle",
+    "NewsArticle",
+    "AnalysisNewsArticle",
+    "BackgroundNewsArticle",
+    "OpinionNewsArticle",
+    "ReportageNewsArticle",
+    "ReviewNewsArticle",
+    "BlogPosting",
+    "LiveBlogPosting",
+    "SocialMediaPosting",
+    "DiscussionForumPosting",
+    "TechArticle",
+    "Report",
+];
+
+/// Pages, for a web page's main node when no article is given.
+const PAGES: &[&str] = &[
+    "WebPage",
+    "MedicalWebPage",
+    "AboutPage",
+    "FAQPage",
+    "QAPage",
+    "ItemPage",
+    "CollectionPage",
+    "ProfilePage",
+];
+
+/// The blocks that parse as JSON.
+fn parsed(blocks: &[String]) -> impl Iterator<Item = Value> + '_ {
+    blocks
+        .iter()
+        .filter_map(|block| serde_json::from_str::<Value>(unwrapped(block)).ok())
+}
+
 /// What the first article in `blocks` says.
 pub(super) fn read(blocks: &[String]) -> Found {
-    for block in blocks {
-        let Ok(value) = serde_json::from_str::<Value>(unwrapped(block)) else {
-            continue;
-        };
-        if let Some(article) = article(&value) {
-            return fields(article);
+    parsed(blocks)
+        .find_map(|value| find(&value, ARTICLES).map(fields))
+        .unwrap_or_default()
+}
+
+/// Whether `blocks` give a `ScholarlyArticle` or `MedicalScholarlyArticle`
+/// where an article is read.
+pub(super) fn scholarly(blocks: &[String]) -> bool {
+    parsed(blocks).any(|value| find(&value, SCHOLARLY).is_some())
+}
+
+/// What a web page's JSON-LD says of it: from its main node (the first
+/// article of any kind, else the first page, where an article is read),
+/// and its website.
+#[derive(Debug, Default)]
+pub(super) struct WebLd {
+    /// An article's `name`, else its `headline` (see [`title`]).
+    pub title: Option<String>,
+    /// A page's `name`, else its `headline`, when no article is given:
+    /// less sure, as sites name pages by their template ("Detail").
+    pub page_title: Option<String>,
+    /// People only: `Person` authors, untyped ones with a given or family
+    /// name, and names written as strings.
+    pub authors: Vec<String>,
+    /// The organisations named as authors, or as the publisher: not
+    /// people, wherever else they're named.
+    pub organisations: Vec<String>,
+    pub published: Option<String>,
+    pub updated: Option<String>,
+    pub url: Option<String>,
+    pub language: Option<String>,
+    /// The `WebSite` the main node is part of, else the first at a
+    /// block's top or in its `@graph`: its name.
+    pub website: Option<String>,
+    /// The main node's publisher's name.
+    pub publisher: Option<String>,
+}
+
+/// What `blocks` say of the page: see [`WebLd`].
+pub(super) fn web(blocks: &[String]) -> WebLd {
+    let values: Vec<Value> = parsed(blocks).collect();
+    let mut ld = WebLd::default();
+    let article = values.iter().find_map(|v| find(v, WEB_ARTICLES));
+    let main = article.or_else(|| values.iter().find_map(|v| find(v, PAGES)));
+    if let Some(main) = main {
+        if article.is_some() {
+            ld.title = title(main);
+        } else {
+            ld.page_title = title(main);
         }
+        for author in main.get("author").map(each).unwrap_or_default() {
+            match author {
+                Value::Object(node) if is_person(node) => {
+                    if let Some(name) = person_name(node) {
+                        add_author(&mut ld.authors, &name);
+                    }
+                }
+                Value::Object(node) => ld.organisations.extend(node.get("name").and_then(text)),
+                other => {
+                    if let Some(name) = text(other) {
+                        add_author(&mut ld.authors, &name);
+                    }
+                }
+            }
+        }
+        ld.published = main.get("datePublished").and_then(text);
+        ld.updated = main.get("dateModified").and_then(text);
+        ld.url = main
+            .get("url")
+            .map(each)
+            .and_then(|urls| urls.iter().find_map(text));
+        ld.language = main.get("inLanguage").and_then(language);
+        ld.publisher = main.get("publisher").map(each).and_then(|publishers| {
+            publishers.iter().find_map(|p| match p {
+                Value::Object(node) => node.get("name").and_then(text),
+                other => text(other),
+            })
+        });
+        ld.organisations.extend(ld.publisher.clone());
+        ld.website = main.get("isPartOf").map(each).and_then(|parts| {
+            parts.iter().find_map(|p| match p {
+                Value::Object(node) if is_type(node, &["WebSite"]) => {
+                    node.get("name").and_then(text)
+                }
+                _ => None,
+            })
+        });
     }
-    Found::default()
+    ld.website = ld.website.or_else(|| {
+        values
+            .iter()
+            .find_map(|v| find(v, &["WebSite"]))
+            .and_then(|site| site.get("name").and_then(text))
+    });
+    ld
 }
 
 /// A script's JSON, without the CDATA or comment wrapping old pages give
@@ -48,24 +179,24 @@ fn unwrapped(block: &str) -> &str {
     s
 }
 
-/// The first article at `value`'s top level, in its `@graph`, or as a
-/// page's `mainEntity`.
-fn article(value: &Value) -> Option<&Map<String, Value>> {
+/// The first node of one of `types` at `value`'s top level, in its
+/// `@graph`, or as a page's `mainEntity`.
+fn find<'a>(value: &'a Value, types: &[&str]) -> Option<&'a Map<String, Value>> {
     match value {
-        Value::Array(items) => items.iter().find_map(article),
+        Value::Array(items) => items.iter().find_map(|v| find(v, types)),
         Value::Object(node) => {
-            if is_type(node, ARTICLES) {
+            if is_type(node, types) {
                 return Some(node);
             }
             if let Some(graph) = node.get("@graph")
-                && let Some(found) = article(graph)
+                && let Some(found) = find(graph, types)
             {
                 return Some(found);
             }
             match node.get("mainEntity") {
-                Some(Value::Object(main)) if is_type(main, ARTICLES) => Some(main),
+                Some(Value::Object(main)) if is_type(main, types) => Some(main),
                 Some(Value::Array(mains)) => mains.iter().find_map(|m| match m {
-                    Value::Object(main) if is_type(main, ARTICLES) => Some(main),
+                    Value::Object(main) if is_type(main, types) => Some(main),
                     _ => None,
                 }),
                 _ => None,
@@ -118,6 +249,36 @@ fn title(node: &Map<String, Value>) -> Option<String> {
         .or_else(|| node.get("headline").and_then(text))
 }
 
+/// Whether an author node is a person: typed `Person`, or untyped with a
+/// given or family name.
+fn is_person(node: &Map<String, Value>) -> bool {
+    if node.contains_key("@type") {
+        is_type(node, &["Person"])
+    } else {
+        node.contains_key("givenName") || node.contains_key("familyName")
+    }
+}
+
+/// A person's name: `name`, else the given and family names.
+fn person_name(person: &Map<String, Value>) -> Option<String> {
+    person.get("name").and_then(text).or_else(|| {
+        let given = person.get("givenName").and_then(text);
+        let family = person.get("familyName").and_then(text)?;
+        Some(match given {
+            Some(given) => format!("{given} {family}"),
+            None => family,
+        })
+    })
+}
+
+/// `inLanguage`: a tag, or a `Language`'s `alternateName` (its tag).
+fn language(value: &Value) -> Option<String> {
+    each(value).iter().find_map(|v| match v {
+        Value::Object(node) => node.get("alternateName").and_then(text),
+        other => text(other),
+    })
+}
+
 fn fields(article: &Map<String, Value>) -> Found {
     let source = PageSource::JsonLd;
     let mut found = Found::default();
@@ -148,14 +309,7 @@ fn fields(article: &Map<String, Value>) -> Found {
     found.title = title(article);
     for author in article.get("author").map(each).unwrap_or_default() {
         let name = match author {
-            Value::Object(person) => person.get("name").and_then(text).or_else(|| {
-                let given = person.get("givenName").and_then(text);
-                let family = person.get("familyName").and_then(text)?;
-                Some(match given {
-                    Some(given) => format!("{given} {family}"),
-                    None => family,
-                })
-            }),
+            Value::Object(person) => person_name(person),
             other => text(other),
         };
         if let Some(name) = name {

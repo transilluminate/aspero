@@ -14,6 +14,9 @@
 //!   them (Cell Press's `Title: Cell`);
 //! - the address's name: `JAMA Network` on `jamanetwork.com`, `The
 //!   Lancet` on `thelancet.com`;
+//! - a name the page gives its own site (`og:site_name`, JSON-LD's
+//!   website or publisher), exactly but for case and punctuation (see
+//!   [`title_named`]);
 //! - `Proceedings of …` (ACM's conference pages);
 //! - a year, or names ending in one (Wiley's and Sage's `- Smith - 2020
 //!   -`, `- Smith, Jones, 2020`);
@@ -305,19 +308,82 @@ pub(super) fn title_from(
     min_words: usize,
     min_chars: usize,
 ) -> Option<String> {
+    title_named(raw, url, &[], min_words, min_chars)
+}
+
+/// [`title_from`], where a segment is the site's too when it is one of
+/// `names`, the names the page gives its own site (`og:site_name`,
+/// JSON-LD's publisher or website), as written but for case and
+/// punctuation.
+pub(super) fn title_named(
+    raw: &str,
+    url: &str,
+    names: &[String],
+    min_words: usize,
+    min_chars: usize,
+) -> Option<String> {
     let tidy = super::tidy(raw)?;
-    let labels = host_labels(url);
-    let stripped = strip(&tidy, &labels);
+    let own = SiteNames {
+        labels: host_labels(url),
+        names: names
+            .iter()
+            .map(|n| fold(n))
+            .filter(|n| !n.is_empty())
+            .collect(),
+    };
+    let stripped = strip(&tidy, &own);
     is_title(&stripped, min_words, min_chars).then_some(stripped)
 }
 
+/// The site's name as a page title writes it: its last segment after a
+/// separator, or its first before ` | `, when that names the address's
+/// host ("Wikipedia" of "Sepsis - Wikipedia" on `en.wikipedia.org`).
+pub(super) fn site_in_title(raw: &str, url: &str) -> Option<String> {
+    let tidy = super::tidy(raw)?;
+    let labels = host_labels(url);
+    let last = SEPARATORS
+        .iter()
+        .filter_map(|sep| tidy.rfind(sep).map(|at| &tidy[at + sep.len()..]))
+        .min_by_key(|segment| segment.len());
+    let first = tidy.split_once(" | ").map(|(site, _)| site);
+    [last, first]
+        .into_iter()
+        .flatten()
+        .map(str::trim)
+        .find(|s| names_host(s, &labels))
+        .map(str::to_owned)
+}
+
+/// What names the page's own site: its host's labels and the names the
+/// page gives it, folded ([`fold`]).
+struct SiteNames {
+    labels: Vec<String>,
+    names: Vec<String>,
+}
+
+impl SiteNames {
+    /// Whether `segment` names the site: the host ([`names_host`]), or one
+    /// of the page's names for it exactly.
+    fn named(&self, segment: &str) -> bool {
+        names_host(segment, &self.labels) || self.names.contains(&fold(segment))
+    }
+}
+
+/// `s`'s letters and digits, lowercased: "JAMA Network" is `jamanetwork`.
+fn fold(s: &str) -> String {
+    s.chars()
+        .filter(|c| c.is_alphanumeric())
+        .flat_map(char::to_lowercase)
+        .collect()
+}
+
 /// `title` without site prefixes and suffixes.
-fn strip(title: &str, labels: &[String]) -> String {
+fn strip(title: &str, own: &SiteNames) -> String {
     let mut t = title.trim();
     for _ in 0..8 {
         let before = t;
-        t = strip_prefix(t, labels).trim();
-        t = strip_suffix(t, labels).trim();
+        t = strip_prefix(t, own).trim();
+        t = strip_suffix(t, own).trim();
         if t == before {
             break;
         }
@@ -326,7 +392,7 @@ fn strip(title: &str, labels: &[String]) -> String {
 }
 
 /// `title` without one site prefix, if it has one.
-fn strip_prefix<'a>(title: &'a str, labels: &[String]) -> &'a str {
+fn strip_prefix<'a>(title: &'a str, own: &SiteNames) -> &'a str {
     for furniture in [
         "(pdf) ",
         "[pdf] ",
@@ -353,7 +419,7 @@ fn strip_prefix<'a>(title: &'a str, labels: &[String]) -> &'a str {
     }
     for sep in [" | ", " - ", " — ", " – "] {
         if let Some((site, rest)) = title.split_once(sep)
-            && (known_site(site) || names_host(site, labels))
+            && (known_site(site) || own.named(site))
             && words(rest) >= 1
         {
             return rest;
@@ -368,9 +434,19 @@ fn strip_prefix<'a>(title: &'a str, labels: &[String]) -> &'a str {
 }
 
 /// `title` without one site suffix, if it has one.
-fn strip_suffix<'a>(title: &'a str, labels: &[String]) -> &'a str {
+fn strip_suffix<'a>(title: &'a str, own: &SiteNames) -> &'a str {
     if let Some(rest) = strip_suffix_ci(title, " on jstor") {
         return rest;
+    }
+    // The page's own name for its site, whole, though it holds a
+    // separator itself ("Mozilla Hacks – the Web developer blog").
+    for sep in SEPARATORS {
+        for (at, _) in title.match_indices(sep) {
+            let (head, tail) = (&title[..at], &title[at + sep.len()..]);
+            if !head.trim().is_empty() && own.names.contains(&fold(tail)) {
+                return head;
+            }
+        }
     }
     // The last separator wins: "A – B | Site" ends with "Site".
     let last = SEPARATORS
@@ -379,7 +455,7 @@ fn strip_suffix<'a>(title: &'a str, labels: &[String]) -> &'a str {
         .max_by_key(|&(at, _)| at);
     if let Some((at, len)) = last {
         let (head, segment) = (&title[..at], title[at + len..].trim());
-        if site_segment(segment, head, labels) {
+        if site_segment(segment, head, own) {
             return head;
         }
     }
@@ -394,11 +470,11 @@ fn strip_suffix<'a>(title: &'a str, labels: &[String]) -> &'a str {
 }
 
 /// Whether `segment`, after a separator ending `head`, is the site's.
-fn site_segment(segment: &str, head: &str, labels: &[String]) -> bool {
+fn site_segment(segment: &str, head: &str, own: &SiteNames) -> bool {
     if head.trim().is_empty() {
         return false;
     }
-    if known_site(segment) || names_host(segment, labels) || dated(segment) {
+    if known_site(segment) || own.named(segment) || dated(segment) {
         return true;
     }
     // ACM's "| Proceedings of the 2023 CHI Conference on …".
@@ -452,11 +528,7 @@ fn known_site(s: &str) -> bool {
 /// in one, a label of four characters at least ("JAMA Network" on
 /// `jamanetwork.com`, "PLOS One" on `journals.plos.org`).
 fn names_host(segment: &str, labels: &[String]) -> bool {
-    let key: String = segment
-        .chars()
-        .filter(|c| c.is_alphanumeric())
-        .flat_map(char::to_lowercase)
-        .collect();
+    let key = fold(segment);
     key.len() >= 3
         && words(segment) <= 5
         && labels.iter().any(|l| {

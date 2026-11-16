@@ -61,6 +61,13 @@ pub struct Work {
     /// them is a citation of this work.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub other_years: Vec<i16>,
+    /// When the work was read at its `url`: a web page's access date, as
+    /// the caller gives it (CSL `accessed`, BibTeX `urldate`, RIS `Y2`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub accessed: Option<PartialDate>,
+    /// The work's language, as a language tag (`en`, `en-GB`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub language: Option<String>,
 }
 
 /// An editorial notice about a work: retraction, correction, expression of
@@ -570,6 +577,9 @@ pub enum WorkType {
     Dataset,
     Software,
     Review,
+    /// CSL `webpage`: a page cited as itself, not as a scholarly work (see
+    /// [`crate::webpage::WebPage`]).
+    WebPage,
     Other(String),
 }
 
@@ -587,6 +597,7 @@ impl WorkType {
             WorkType::Dataset => "dataset",
             WorkType::Software => "software",
             WorkType::Review => "review",
+            WorkType::WebPage => "webpage",
             WorkType::Other(s) => s,
         }
     }
@@ -605,13 +616,13 @@ impl WorkType {
             WorkType::Dataset => "dataset",
             WorkType::Software => "software",
             WorkType::Review => "review",
+            WorkType::WebPage => "web page",
             WorkType::Other(s) => match s.as_str() {
                 "article-magazine" => "magazine article",
                 "article-newspaper" => "newspaper article",
                 "entry-dictionary" => "dictionary entry",
                 "entry-encyclopedia" => "encyclopedia entry",
                 "post-weblog" => "blog post",
-                "webpage" => "web page",
                 "retraction" => "retraction notice",
                 "erratum" => "correction notice",
                 other => return other.replace(['-', '_'], " "),
@@ -633,6 +644,7 @@ impl WorkType {
             "dataset" => WorkType::Dataset,
             "software" => WorkType::Software,
             "review" => WorkType::Review,
+            "webpage" => WorkType::WebPage,
             other => WorkType::Other(other.to_owned()),
         }
     }

@@ -8,7 +8,7 @@ use rmcp::model::{Tool, ToolAnnotations};
 use serde_json::{Map, Value};
 
 use super::StartError;
-use crate::{Caller, Scope};
+use crate::{Caller, Scope, ToolErrorKind};
 
 /// A tool the app serves, as it declares it.
 #[derive(Debug, Clone, PartialEq)]
@@ -72,8 +72,10 @@ impl std::fmt::Display for HostError {
 
 impl std::error::Error for HostError {}
 
-/// A tool call, done: for the app to show who used what.
+/// A tool call, done: for the app to show who used what. Built only by
+/// the server, so fields can be added without breaking embedders.
 #[derive(Debug, Clone, PartialEq)]
+#[non_exhaustive]
 pub struct Activity {
     pub key_name: String,
     pub tool: String,
@@ -83,6 +85,25 @@ pub struct Activity {
     pub is_error: bool,
     /// What the call spent, in USD: host tools cost nothing.
     pub cost_usd: f64,
+    /// The error's kind, when `is_error`: a host tool's error's
+    /// ([`HostError`]: invalid arguments, not found, refused, failed), or
+    /// `Forbidden`, `InvalidArguments` (a required field missing),
+    /// `Timeout` or `Failed` (not a JSON object).
+    pub error: Option<ToolErrorKind>,
+    /// The error's message, whole: the summary's without "error: ".
+    pub error_message: Option<String>,
+    /// What an engine tool was asked, as given, at most 500 characters:
+    /// `search`'s keywords or its query tree in a line (`title:sepsis AND
+    /// years:2018–`), `search_supports`' tree, `lookup`'s identifiers and
+    /// `verify`'s citations joined with "; ", `citing_works`' and
+    /// `references`' identifier, `identify`'s title hint, title or first
+    /// line. `None` for host tools: the app words its own.
+    pub query: Option<String>,
+    /// How many came back: the works on a search's page (`search`,
+    /// `citing_works`, `references`), the works looked up, the citations
+    /// verified, or the one work identified. `None` for errors, host tools
+    /// and `search_supports`.
+    pub count: Option<u64>,
 }
 
 /// The embedding app: its tools, served through aspero's protocol, auth and

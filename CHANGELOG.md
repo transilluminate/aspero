@@ -1,5 +1,23 @@
 # Changelog
 
+## Unreleased
+
+Added:
+
+- MCP activity as data beside its summary (#100): `http::Activity` and
+  Swift's `McpActivity` have `error` (the kind, when it failed: Swift's
+  new `McpErrorKind`, from `invalidArguments`, `notFound`, `forbidden`
+  and `unsupported`, the agent's own doing, to `unavailable`,
+  `throttled`, `auth` and the app's `timeout`, with `other` last for
+  kinds added later), `errorMessage` (the whole message, without
+  "error: "), `query` (what an engine tool was asked, as given: the
+  keywords or the query tree in a line, `title:sepsis AND years:2018–`,
+  identifiers or citations joined with "; ", at most 500 characters) and
+  `count` (how many came back: works found, looked up, verified,
+  references listed). An app tool's `query` and `count` are empty. The
+  summary is as it was; the new fields default to `nil`, so Swift code
+  building an `McpActivity` still compiles.
+
 ## 0.25.0
 
 Added:

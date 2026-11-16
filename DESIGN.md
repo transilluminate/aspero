@@ -982,6 +982,22 @@ CLI builds without it and serves stdio only) and, over it, the FFI's
   line; "error: …"), whether it failed, and its cost, on a thread of its
   own, in order, never holding up a request. Up to 256 wait for the app;
   while it's that far behind, more are dropped (they're informational).
+  The same as data (#100), built with the summary from the same outcome,
+  so the app can word it itself and tell the agent's mistakes from
+  trouble elsewhere: `error`, the kind (`McpErrorKind`, mirroring
+  `ToolErrorKind` case for case, with `other` last for kinds added later;
+  an app tool's `HostToolError` keeps its kind, a missing required field
+  is `invalidArguments`, a lacking scope `forbidden`, no answer in time
+  `timeout`, an answer not a JSON object `failed`); `errorMessage`, the
+  whole message without "error: "; `query`, what an engine tool was
+  asked, as given (keywords, or a query tree in a line: `title:sepsis AND
+  (journal:"Lancet" OR journal:"BMJ") AND years:2018–`; identifiers or
+  citations joined with "; ", fields as `ClaimInput::describe` writes
+  them; `identify`'s title hint, title or first line), at most 500
+  characters, even when refused; and `count`, how many came back (a
+  search page's works, works looked up, citations verified, one work
+  identified). An app tool's `query` and `count` are empty: the app words
+  its own tools. All four are additive, defaulting to `nil` in Swift.
 
 **Threat model.** The server is for agents on the same machine, acting
 for the user. Loopback only: nothing off the machine can connect. Every

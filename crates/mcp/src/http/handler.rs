@@ -68,6 +68,7 @@ impl Handler {
     ) -> (Result<CallToolResult, ErrorData>, Activity) {
         let k = &key.key;
         let said = engine_summary(name, &arguments);
+        let query = engine_query(name, &arguments);
         let arguments = Value::Object(arguments);
         let spends = self.shared.tools.spec(name).is_some_and(|s| s.spends);
         // The key's sessions' paid calls in flight hold their estimates, as
@@ -98,16 +99,11 @@ impl Handler {
                 (result, cost)
             }
         };
-        let activity = Activity {
-            key_name: k.name.clone(),
-            tool: name.into(),
-            summary: match &result {
-                Ok(_) => said,
-                Err(e) => error_summary(&e.message),
-            },
-            is_error: result.is_err(),
-            cost_usd: cost,
+        let outcome = match &result {
+            Ok(output) => Ok((said, engine_count(name, &output.structured))),
+            Err(e) => Err(e),
         };
+        let activity = activity(k, name, query, outcome, cost);
         (engine_result(session, name, result), activity)
     }
 
@@ -144,14 +140,8 @@ impl Handler {
         arguments: Map<String, Value>,
     ) -> (CallToolResult, Activity) {
         let k = &key.key;
-        let activity = |summary: String, is_error: bool| Activity {
-            key_name: k.name.clone(),
-            tool: name.into(),
-            summary,
-            is_error,
-            cost_usd: 0.0,
-        };
-        let fail = |e: ToolError| (tool_error(&e), activity(error_summary(&e.message), true));
+        // The app words its own tools: no query or count.
+        let fail = |e: ToolError| (tool_error(&e), activity(k, name, None, Err(&e), 0.0));
         if !k.scopes.contains(&scope) {
             return fail(lacks(name, scope));
         }
@@ -207,7 +197,7 @@ impl Handler {
                     let mut result =
                         CallToolResult::success(vec![ContentBlock::text(output.summary)]);
                     result.structured_content = Some(structured);
-                    (result, activity(first, false))
+                    (result, activity(k, name, None, Ok((first, None)), 0.0))
                 }
                 _ => fail(ToolError::new(
                     ToolErrorKind::Failed,
@@ -387,6 +377,32 @@ fn host_message(e: &HostError) -> String {
     }
 }
 
+/// An activity, its summary and its fields from the same outcome (the
+/// summary and count, or the error), so they can't disagree.
+fn activity(
+    key: &super::Key,
+    tool: &str,
+    query: Option<String>,
+    outcome: Result<(String, Option<u64>), &ToolError>,
+    cost_usd: f64,
+) -> Activity {
+    let (summary, count, error) = match outcome {
+        Ok((summary, count)) => (summary, count, None),
+        Err(e) => (error_summary(&e.message), None, Some(e)),
+    };
+    Activity {
+        key_name: key.name.clone(),
+        tool: tool.into(),
+        summary,
+        is_error: error.is_some(),
+        cost_usd,
+        error: error.map(|e| e.kind),
+        error_message: error.map(|e| e.message.trim().to_owned()),
+        query,
+        count,
+    }
+}
+
 /// "error: " and the message's first line, cut to a few words' length.
 fn error_summary(message: &str) -> String {
     format!("error: {}", clip(message.lines().next().unwrap_or(""), 80))
@@ -440,6 +456,133 @@ pub(crate) fn engine_summary(name: &str, arguments: &Map<String, Value>) -> Stri
         "citing_works" => format!("found works citing {}", id()),
         "references" => format!("listed the references of {}", id()),
         _ => format!("called {name}"),
+    }
+}
+
+/// Most characters of an activity's query.
+const QUERY_CHARS: usize = 500;
+
+/// What an engine tool was asked, as given, from its arguments: `search`'s
+/// keywords or tree, identifiers and citations joined with "; ".
+fn engine_query(name: &str, arguments: &Map<String, Value>) -> Option<String> {
+    let text = |key: &str| arguments.get(key).and_then(Value::as_str).map(String::from);
+    let tree = || arguments.get("query").map(|q| tree_line(q, false));
+    let joined = |items: Option<&Value>, line: fn(&Value) -> String| {
+        items
+            .and_then(Value::as_array)
+            .map(|items| items.iter().map(line).collect::<Vec<_>>().join("; "))
+    };
+    let query = match name {
+        "search" => text("text").or_else(tree),
+        "search_supports" => tree(),
+        "lookup" => joined(arguments.get("ids"), as_given),
+        "verify" => arguments
+            .get("citation")
+            .map(citation_line)
+            .or_else(|| joined(arguments.get("citations"), citation_line)),
+        "identify" => ["title_hint", "title"]
+            .into_iter()
+            .filter_map(text)
+            .find(|t| !t.trim().is_empty())
+            .or_else(|| {
+                text("text")?
+                    .lines()
+                    .map(str::trim)
+                    .find(|l| !l.is_empty())
+                    .map(String::from)
+            }),
+        "citing_works" | "references" => text("id"),
+        _ => None,
+    };
+    query
+        .map(|q| clip(&q, QUERY_CHARS))
+        .filter(|q| !q.is_empty())
+}
+
+/// How many came back, from an engine tool's result: works, lookups,
+/// verdicts.
+fn engine_count(name: &str, structured: &Value) -> Option<u64> {
+    let len = |key: &str| structured[key].as_array().map(|a| a.len() as u64);
+    match name {
+        "search" | "citing_works" | "references" => len("hits"),
+        "lookup" | "verify" => len("results"),
+        "identify" => Some(1),
+        _ => None,
+    }
+}
+
+/// A string as it is; anything else as JSON.
+fn as_given(v: &Value) -> String {
+    match v {
+        Value::String(s) => s.clone(),
+        other => other.to_string(),
+    }
+}
+
+/// A citation as given: its text, or its fields in a line.
+fn citation_line(citation: &Value) -> String {
+    match serde_json::from_value::<aspero_json::ClaimInput>(citation.clone()) {
+        Ok(fields) => match &fields.text {
+            Some(text) => text.clone(),
+            None => fields.describe(),
+        },
+        _ => as_given(citation),
+    }
+}
+
+/// A query tree in a line, as written: `title:sepsis AND (journal:"Lancet"
+/// OR journal:"BMJ") AND NOT title:neonatal AND years:2018–`. A node it
+/// can't read is shown as JSON.
+fn tree_line(node: &Value, nested: bool) -> String {
+    let Value::Object(map) = node else {
+        return node.to_string();
+    };
+    let mut keys = map.keys().filter(|k| *k != "phrase");
+    let (Some(key), None) = (keys.next(), keys.next()) else {
+        return node.to_string();
+    };
+    let value = &map[key.as_str()];
+    let phrase = map.get("phrase") == Some(&Value::Bool(true));
+    let bracket = |line: String, many: bool| {
+        if nested && many {
+            format!("({line})")
+        } else {
+            line
+        }
+    };
+    let group = |items: &[Value], op: &str| {
+        items
+            .iter()
+            .map(|n| tree_line(n, true))
+            .collect::<Vec<_>>()
+            .join(op)
+    };
+    match (key.as_str(), value) {
+        ("all", Value::Array(items)) => bracket(group(items, " AND "), items.len() > 1),
+        ("any", Value::Array(items)) => bracket(group(items, " OR "), items.len() > 1),
+        ("none", Value::Array(items)) => match items.as_slice() {
+            [one] => format!("NOT {}", tree_line(one, true)),
+            _ => format!("NOT ({})", group(items, " OR ")),
+        },
+        (_, Value::String(s)) => {
+            let many = s.split_whitespace().nth(1).is_some();
+            let words = if phrase {
+                format!("\"{s}\"")
+            } else if many && (nested || key != "keywords") {
+                format!("({s})")
+            } else {
+                s.clone()
+            };
+            match key.as_str() {
+                "keywords" => words,
+                _ => format!("{key}:{words}"),
+            }
+        }
+        ("years", Value::Object(range)) => {
+            let year = |end: &str| range.get(end).map(as_given).unwrap_or_default();
+            format!("years:{}–{}", year("from"), year("to"))
+        }
+        (_, value) => format!("{key}:{}", as_given(value)),
     }
 }
 
@@ -513,5 +656,84 @@ mod tests {
             error_summary(&format!("{}\nmore", "x".repeat(100))),
             format!("error: {}…", "x".repeat(80))
         );
+    }
+
+    #[test]
+    fn an_engine_calls_query_is_what_was_asked_in_a_line() {
+        let asked = |name: &str, v: Value| engine_query(name, &args(v));
+        assert_eq!(
+            asked(
+                "search",
+                json!({"query": {"all": [
+                    {"title": "sepsis"},
+                    {"any": [{"journal": "Lancet", "phrase": true}, {"journal": "BMJ", "phrase": true}]},
+                    {"none": [{"title": "neonatal"}]},
+                    {"keywords": "lactate clearance"},
+                    {"years": {"from": 2018}},
+                    {"not_retracted": true},
+                ]}})
+            )
+            .as_deref(),
+            Some(
+                "title:sepsis AND (journal:\"Lancet\" OR journal:\"BMJ\") AND NOT title:neonatal \
+                 AND (lactate clearance) AND years:2018– AND not_retracted:true"
+            )
+        );
+        assert_eq!(
+            asked(
+                "search_supports",
+                json!({"query": {"none": [{"author": "Smith J"}, {"years": 2020}, {"x": [1]}]}})
+            )
+            .as_deref(),
+            Some("NOT (author:(Smith J) OR years:2020 OR x:[1])")
+        );
+        assert_eq!(
+            asked("search", json!({"query": {"keywords": "deep learning"}})).as_deref(),
+            Some("deep learning")
+        );
+        assert_eq!(
+            asked(
+                "verify",
+                json!({"citation": {"doi": "10.1/x", "year": 2015}})
+            )
+            .as_deref(),
+            Some("2015. 10.1/x")
+        );
+        assert_eq!(
+            asked(
+                "identify",
+                json!({"text": "\n  Journal of Things\nA title", "title_hint": " "})
+            )
+            .as_deref(),
+            Some("Journal of Things")
+        );
+        assert_eq!(
+            asked(
+                "identify",
+                json!({"text": "Journal of Things", "title_hint": "", "title": "A title"})
+            )
+            .as_deref(),
+            Some("A title")
+        );
+        assert_eq!(
+            asked("references", json!({"id": "10.1/x"})).as_deref(),
+            Some("10.1/x")
+        );
+        assert_eq!(
+            asked("lookup", json!({"ids": ["x".repeat(400), "y".repeat(400)]})),
+            Some(format!("{}; {}…", "x".repeat(400), "y".repeat(98)))
+        );
+        assert_eq!(asked("search", json!({})), None);
+        assert_eq!(asked("lookup", json!({"ids": []})), None);
+    }
+
+    #[test]
+    fn an_engine_calls_count_is_how_many_came_back() {
+        let hits = json!({"hits": [{}, {}], "results": [{}]});
+        assert_eq!(engine_count("search", &hits), Some(2));
+        assert_eq!(engine_count("references", &hits), Some(2));
+        assert_eq!(engine_count("verify", &hits), Some(1));
+        assert_eq!(engine_count("identify", &json!({})), Some(1));
+        assert_eq!(engine_count("search_supports", &hits), None);
     }
 }

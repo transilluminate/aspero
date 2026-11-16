@@ -8,7 +8,7 @@ use std::sync::Arc;
 use std::time::SystemTime;
 
 use aspero_mcp::http::{self, HttpConfig, HttpServer, Ledger, MemoryLedger, StartError};
-use aspero_mcp::{Caller, Scope, Tools};
+use aspero_mcp::{Caller, Scope, ToolErrorKind, Tools};
 
 use crate::Aspero;
 
@@ -99,6 +99,70 @@ pub struct McpCaller {
     pub scopes: Vec<McpScope>,
 }
 
+/// Why a tool call failed: the agent's own doing (`invalidArguments`,
+/// `notFound`, `forbidden`, `unsupported`, `budgetSpent`) or trouble
+/// elsewhere (`unavailable`, `throttled`, `auth`, `protocol`, the app's
+/// `timeout`, `refused`, `failed`). New kinds may be added (`other`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Enum)]
+pub enum McpErrorKind {
+    /// No such tool (a protocol error: no activity is reported for it).
+    UnknownTool,
+    /// The arguments are wrong, or an app tool's required field is missing;
+    /// or the app threw `invalidArguments`.
+    InvalidArguments,
+    /// The source can't do this (a query tree it can't say).
+    Unsupported,
+    /// Nothing found (`identify`), or the app threw `notFound`.
+    NotFound,
+    /// The session's budget, or the key's daily one, is spent.
+    BudgetSpent,
+    /// The key lacks the tool's scope.
+    Forbidden,
+    /// A provider's rate limit or own budget (OpenAlex's daily one).
+    Throttled,
+    /// A provider rejected aspero's credentials.
+    Auth,
+    /// Providers failed (network, timeouts, server errors).
+    Unavailable,
+    /// A provider answered unexpectedly.
+    Protocol,
+    /// A call outside a session.
+    NoSession,
+    /// The app didn't answer one of its tools in time: whether it did
+    /// anything is unknown.
+    Timeout,
+    /// The app threw `refused`.
+    Refused,
+    /// The app threw `failed` (or something else), or answered with
+    /// something other than a JSON object.
+    Failed,
+    /// A kind added since: read `errorMessage`. Last, so the cases before
+    /// keep their places.
+    Other,
+}
+
+impl From<ToolErrorKind> for McpErrorKind {
+    fn from(kind: ToolErrorKind) -> Self {
+        match kind {
+            ToolErrorKind::UnknownTool => McpErrorKind::UnknownTool,
+            ToolErrorKind::InvalidArguments => McpErrorKind::InvalidArguments,
+            ToolErrorKind::Unsupported => McpErrorKind::Unsupported,
+            ToolErrorKind::NotFound => McpErrorKind::NotFound,
+            ToolErrorKind::BudgetSpent => McpErrorKind::BudgetSpent,
+            ToolErrorKind::Forbidden => McpErrorKind::Forbidden,
+            ToolErrorKind::Throttled => McpErrorKind::Throttled,
+            ToolErrorKind::Auth => McpErrorKind::Auth,
+            ToolErrorKind::Unavailable => McpErrorKind::Unavailable,
+            ToolErrorKind::Protocol => McpErrorKind::Protocol,
+            ToolErrorKind::NoSession => McpErrorKind::NoSession,
+            ToolErrorKind::Timeout => McpErrorKind::Timeout,
+            ToolErrorKind::Refused => McpErrorKind::Refused,
+            ToolErrorKind::Failed => McpErrorKind::Failed,
+            _ => McpErrorKind::Other,
+        }
+    }
+}
+
 /// A tool call, done.
 #[derive(Debug, Clone, PartialEq, uniffi::Record)]
 pub struct McpActivity {
@@ -110,6 +174,23 @@ pub struct McpActivity {
     pub is_error: bool,
     /// What it spent, in US dollars; the app's tools cost nothing.
     pub cost_usd: f64,
+    /// The error's kind, when `is_error`.
+    #[uniffi(default = None)]
+    pub error: Option<McpErrorKind>,
+    /// The error's message, whole: the summary's without "error: ".
+    #[uniffi(default = None)]
+    pub error_message: Option<String>,
+    /// What an engine tool was asked, as given, at most 500 characters:
+    /// `search`'s keywords or its query tree in a line (`title:sepsis AND
+    /// years:2018–`), identifiers or citations joined with "; ", `identify`'s
+    /// title hint, title or first line. `nil` for the app's tools.
+    #[uniffi(default = None)]
+    pub query: Option<String>,
+    /// How many came back: works on a search's page, works looked up,
+    /// citations verified, the one work identified. `nil` for errors, the
+    /// app's tools and `search_supports`.
+    #[uniffi(default = None)]
+    pub count: Option<u64>,
 }
 
 /// The app, to the MCP server: its tools, and what agents did.
@@ -274,6 +355,10 @@ impl http::Host for ForeignHost {
             summary: a.summary,
             is_error: a.is_error,
             cost_usd: a.cost_usd,
+            error: a.error.map(Into::into),
+            error_message: a.error_message,
+            query: a.query,
+            count: a.count,
         });
     }
 }
@@ -400,6 +485,48 @@ mod tests {
         ] {
             let attribute = format!("#[uniffi(default = {default})]\n    pub {field},");
             assert!(source.contains(&attribute), "{attribute}");
+        }
+    }
+
+    /// Every kind aspero-mcp has now is named, none left to `Other`: the
+    /// kinds are read from its source, so a new one fails here until it's
+    /// mirrored.
+    #[test]
+    fn every_tool_error_kind_has_its_own_case() {
+        let source = include_str!("../../mcp/src/tools.rs");
+        let body = source
+            .split_once("pub enum ToolErrorKind {")
+            .and_then(|(_, rest)| rest.split_once("\n}"))
+            .expect("ToolErrorKind in aspero-mcp")
+            .0;
+        let declared: Vec<&str> = body
+            .lines()
+            .map(str::trim)
+            .filter(|l| !l.starts_with("//") && !l.is_empty())
+            .map(|l| l.trim_end_matches(','))
+            .collect();
+        let kinds = [
+            ToolErrorKind::UnknownTool,
+            ToolErrorKind::InvalidArguments,
+            ToolErrorKind::Unsupported,
+            ToolErrorKind::NotFound,
+            ToolErrorKind::BudgetSpent,
+            ToolErrorKind::Forbidden,
+            ToolErrorKind::Throttled,
+            ToolErrorKind::Auth,
+            ToolErrorKind::Unavailable,
+            ToolErrorKind::Protocol,
+            ToolErrorKind::NoSession,
+            ToolErrorKind::Timeout,
+            ToolErrorKind::Refused,
+            ToolErrorKind::Failed,
+        ];
+        let named: Vec<String> = kinds.iter().map(|k| format!("{k:?}")).collect();
+        assert_eq!(declared, named);
+        for kind in kinds {
+            let mirrored = McpErrorKind::from(kind);
+            assert_ne!(mirrored, McpErrorKind::Other, "{kind:?}");
+            assert_eq!(format!("{mirrored:?}"), format!("{kind:?}"));
         }
     }
 }

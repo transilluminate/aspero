@@ -6,8 +6,8 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use aspero_ffi::mcp::{
-    HostTool, HostToolError, HostToolResult, McpActivity, McpCaller, McpError, McpHost, McpKey,
-    McpScope, McpServer, McpServerConfig,
+    HostTool, HostToolError, HostToolResult, McpActivity, McpCaller, McpError, McpErrorKind,
+    McpHost, McpKey, McpScope, McpServer, McpServerConfig,
 };
 use aspero_ffi::{Aspero, Config};
 use serde_json::{Value, json};
@@ -230,6 +230,31 @@ fn an_app_serves_its_tools_to_an_agent() {
             "no recent works",
             "error: limit must be at least 1",
             "checked whether a search is supported"
+        ]
+    );
+    // The same as data, for the app to word.
+    let fields: Vec<_> = activity
+        .iter()
+        .map(|a| {
+            (
+                a.error,
+                a.error_message.as_deref(),
+                a.query.as_deref(),
+                a.count,
+            )
+        })
+        .collect();
+    assert_eq!(
+        fields,
+        [
+            (None, None, None, None),
+            (
+                Some(McpErrorKind::InvalidArguments),
+                Some("limit must be at least 1"),
+                None,
+                None
+            ),
+            (None, None, Some("title:sepsis"), None),
         ]
     );
     drop(server);

@@ -4,9 +4,11 @@
 default:
     @just --list
 
-# Format check, lints and tests, as CI runs them.
+# Format check, navigability gates, lints and tests, as CI runs them.
 check:
     cargo fmt --all --check
+    scripts/file-sizes.py
+    scripts/doc-paths.py
     cargo clippy --workspace --all-targets --all-features -- -D warnings
     cargo test --workspace --all-features
     cargo check -p aspero-engine --no-default-features

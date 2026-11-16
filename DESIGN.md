@@ -1721,6 +1721,13 @@ its container; different schema versions would rebuild each other's).
 
 - Licence MIT OR Apache-2.0; edition 2024 on current stable, no MSRV yet.
 - Conventional commits; small, focused changes; clippy and rustfmt clean.
+- Navigable by grep and this file (`bench/nav-dogfood.md`), so `just check`
+  and CI hold three gates: no source file over 1,000 lines before its
+  tests unless `scripts/file-sizes.allow` gives a reason
+  (`scripts/file-sizes.py`); no function over 200 lines without a local
+  `#[allow(clippy::too_many_lines)]` and a reason (`clippy.toml`); and no
+  path or DESIGN section cited in the docs or comments that isn't there
+  (`scripts/doc-paths.py`). Split by concern before allow-listing.
 - Tests: unit tests beside code, property tests for identifiers, fixture
   replay for providers, paused-time tests for retries, pacing and
   concurrency, the live benchmark for scoring. Fuzz targets (`fuzz/`, its

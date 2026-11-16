@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+Added:
+
+- Developer: an HTTP record/replay tape (`ASPERO_HTTP_TAPE`,
+  `ASPERO_HTTP_TAPE_MODE=replay-only`), on by default for `verify_bench`
+  and `scripts/redteam.py`: each distinct request is paid for once and
+  replayed free after, offline if asked (DESIGN "HTTP tape").
+
 ## 0.27.0
 
 Added:

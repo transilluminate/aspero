@@ -41,7 +41,7 @@ crates/
   providers/   one crate per source, each behind an engine feature:
                openalex, crossref, datacite, doi (doi.org), europepmc,
                openlibrary
-  store/       disposable SQLite answer cache
+  store/       disposable SQLite answer cache; the benchmarks' HTTP tape
   bib/         BibTeX/BibLaTeX (via the `biblatex` crate), RIS, CSL-JSON →
                claims, and .docx citation fields (`docx` feature: Zotero,
                Mendeley); works → BibTeX, RIS, CSL-JSON (one writer, also
@@ -514,9 +514,46 @@ red-team cases (`scripts/issue-to-case.py`).
 
 **Benchmark**: `bench/citations.jsonl` (known-answer citations, optionally
 requiring a specific match or retraction flag), run live by
-`cargo run -p aspero-engine --example verify_bench` through
-`target/bench-cache`: the first run costs ~$0.035, re-runs are free. Add a
-case for every new failure mode found in the wild.
+`cargo run -p aspero-engine --example verify_bench` through an HTTP tape
+(below): the first run costs ~$0.035, re-runs are free. Add a case for
+every new failure mode found in the wild.
+
+**HTTP tape** (a developer tool; not in `--help`): `ASPERO_HTTP_TAPE=<file>`
+puts a `TapeClient` (engine `transport`) in front of every provider's
+client, over a SQLite file of its own (store `SqliteTape`: `tape(key,
+method, url, body, status, headers, response, recorded_at)`), so benchmark
+and red-team runs pay for each distinct request once, ever, and are
+reproducible. A request on the tape is replayed; one that isn't is sent,
+and recorded if its answer is data: a 2xx, or a 404 (a meaningful "not
+found") unless it says a budget is spent; never a 429, 5xx, other error or
+transport failure, nor OpenAlex's `/rate-limit` (live state).
+`ASPERO_HTTP_TAPE_MODE=replay-only` sends nothing: a miss fails as
+`Offline`, logged "not on tape" (fully offline runs). The key is the
+method, the URL normalised (query parameters sorted; `api_key`, `key`,
+`mailto`, `email`, tokens dropped), the request headers that can change
+the answer (`accept`; never `authorization`, `user-agent` or other
+credentials) and the body. The tape stores the normalised URL, and
+redacts what a response echoes of a key or contact address (the user
+agent's included), so it never holds either and can be shared. Replays
+skip pacing (the tape wraps the paced client), arrive as recorded
+(`received_at` is `recorded_at`), and cost nothing: their `x-ratelimit-*`
+headers are dropped and a recorded cost reads 0, so they count towards no
+spend (usage, MCP sessions) and move no daily cap; misses sent count as
+usual. A daily cap is checked before the tape is asked, so on a day past
+it, record mode stops paid searches even where they're taped;
+replay-only knows no budget and isn't capped. The harnesses default to a
+tape: `verify_bench` to `target/bench-tape.sqlite` (`ASPERO_HTTP_TAPE`
+overrides; `off` for the old `target/bench-cache`), `scripts/redteam.py`
+to `target/redteam-tape.sqlite` (`--tape`, `--no-tape`, `--replay-only`).
+With a tape, each run starts from an empty answer cache (the tape is
+below it): the answer cache would add nothing but a dependence on its
+own age, while an empty one keeps the requests a first run makes
+(batched prefetches, then claims), so runs differ only by code.
+`just tape-stats` (`scripts/tape.py`) shows entries, statuses, size and
+recorded cost per host; `scripts/tape.py export` writes a self-contained
+copy (or copy the file while nothing uses it) and `import` merges one
+tape into another. The tape is durable: its table is never dropped, and
+a change to key normalisation only turns old entries into misses.
 
 **Identify** names the work a document is from its first page: none of
 the page's identifiers is taken on trust (pages print related articles,

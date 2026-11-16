@@ -21,6 +21,12 @@ fix:
 bench:
     cargo run -q -p aspero-engine --example verify_bench -- bench/citations.jsonl
 
+# Entries, statuses, size and recorded cost per host of the HTTP tapes
+# (the bench's and red team's, or those named); scripts/tape.py also
+# exports and merges them.
+tape-stats *tapes:
+    scripts/tape.py stats {{tapes}}
+
 # Throughput of `scan` on generated documents, or the cases matching a filter.
 scan-bench filter="":
     cargo bench -q -p aspero-core --bench scan -- {{filter}}

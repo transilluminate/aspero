@@ -4,12 +4,20 @@
     scripts/redteam.py [corpus.jsonl] [--bin target/release/aspero]
                        [--results target/redteam/results.json] [--rescore]
                        [--category c:wrong-journal] [--failures]
+                       [--tape target/redteam-tape.sqlite | --no-tape]
+                       [--replay-only]
 
 Each corpus line is a bench case (`claim`, `expect`, `why`, optional `ids`,
 `retracted`) plus `category` and `real`. The claims go to the release CLI in
-one batch (`aspero verify - --format json`), through a dedicated cache
-(`target/redteam-cache`, so re-runs are free), with today's OpenAlex spend
-capped (`ASPERO_OPENALEX_CAP_USD`, 0.75 unless set). `OPENALEX_API_KEY` and
+one batch (`aspero verify - --format json`), through an HTTP tape
+(`ASPERO_HTTP_TAPE`, `target/redteam-tape.sqlite` unless `--tape`), so each
+distinct request is paid for once, ever, and re-runs replay it, with
+today's OpenAlex spend capped (`ASPERO_OPENALEX_CAP_USD`, 0.75 unless set).
+With the tape each run starts from an empty answer cache, so it asks what a
+first run asks and its results depend only on the tape and the code;
+`--replay-only` runs offline (a request not on the tape fails, unsent).
+`--no-tape` runs live through the dedicated cache `target/redteam-cache`
+instead (re-runs within its lifetimes free). `OPENALEX_API_KEY` and
 `ASPERO_MAILTO` come from the environment, as for the bench.
 
 Prints a confusion table (category x verdict) and the headline numbers:
@@ -26,6 +34,7 @@ import json
 import os
 import subprocess
 import sys
+import tempfile
 from collections import Counter, defaultdict
 from pathlib import Path
 
@@ -43,15 +52,25 @@ def claim_line(claim):
     return json.dumps(claim, ensure_ascii=False)
 
 
-def run(cases, binary, cache_dir):
+def run(cases, binary, cache_dir, tape, replay_only):
     env = dict(os.environ)
     env.setdefault("ASPERO_OPENALEX_CAP_USD", "0.75")
-    env["ASPERO_CACHE_DIR"] = str(cache_dir)
+    env.pop("ASPERO_HTTP_TAPE_MODE", None)
     stdin = "\n".join(claim_line(c["claim"]) for c in cases) + "\n"
-    proc = subprocess.run(
-        [str(binary), "verify", "-", "--format", "json"],
-        input=stdin, capture_output=True, text=True, env=env, check=False,
-    )
+    with tempfile.TemporaryDirectory(prefix="aspero-redteam-") as fresh:
+        if tape:
+            env["ASPERO_HTTP_TAPE"] = str(tape)
+            if replay_only:
+                env["ASPERO_HTTP_TAPE_MODE"] = "replay-only"
+            # A fresh answer cache: the tape sits below it.
+            env["ASPERO_CACHE_DIR"] = fresh
+        else:
+            env["ASPERO_HTTP_TAPE"] = "off"
+            env["ASPERO_CACHE_DIR"] = str(cache_dir)
+        proc = subprocess.run(
+            [str(binary), "verify", "-", "--format", "json"],
+            input=stdin, capture_output=True, text=True, env=env, check=False,
+        )
     if not proc.stdout.strip():
         sys.exit(f"aspero failed (exit {proc.returncode}): {proc.stderr[-2000:]}")
     doc = json.loads(proc.stdout)
@@ -198,12 +217,20 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("corpus", nargs="?", default=ROOT / "bench/redteam/corpus.jsonl", type=Path)
     ap.add_argument("--bin", default=ROOT / "target/release/aspero", type=Path)
-    ap.add_argument("--cache-dir", default=ROOT / "target/redteam-cache", type=Path)
+    ap.add_argument("--cache-dir", default=ROOT / "target/redteam-cache", type=Path,
+                    help="answer cache, with --no-tape")
+    ap.add_argument("--tape", default=ROOT / "target/redteam-tape.sqlite", type=Path,
+                    help="HTTP tape: requests recorded once, replayed after")
+    ap.add_argument("--no-tape", action="store_true", help="run live through --cache-dir")
+    ap.add_argument("--replay-only", action="store_true",
+                    help="offline: a request not on the tape fails, unsent")
     ap.add_argument("--results", default=ROOT / "target/redteam/results.json", type=Path)
     ap.add_argument("--rescore", action="store_true", help="score saved results, run nothing")
     ap.add_argument("--category", action="append", help="only these categories (prefix match)")
     ap.add_argument("--failures", action="store_true", help="list every failure")
     args = ap.parse_args()
+    if args.no_tape and args.replay_only:
+        ap.error("--replay-only needs the tape")
 
     cases = [json.loads(l) for l in args.corpus.read_text().splitlines() if l.strip()]
     if args.category:
@@ -216,7 +243,8 @@ def main():
     else:
         if not args.bin.exists():
             sys.exit(f"{args.bin} missing: cargo build --release -p aspero")
-        results, usage = run(cases, args.bin, args.cache_dir)
+        tape = None if args.no_tape else args.tape
+        results, usage = run(cases, args.bin, args.cache_dir, tape, args.replay_only)
         args.results.parent.mkdir(parents=True, exist_ok=True)
         args.results.write_text(json.dumps({"results": results, "usage": usage}))
     false_verified = report(cases, results, usage, args.failures)

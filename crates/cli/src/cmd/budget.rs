@@ -25,9 +25,10 @@ pub async fn run(engine: &Engine, out: Out) -> Result<Exit, Failure> {
         }
         for (provider, budget) in &budgets {
             let no_key = keyless && provider.as_str() == "openalex";
+            let spendable = engine.spendable_today(provider, budget);
             println!(
                 "{provider}: {}",
-                line(budget, no_key, caps(engine, provider))
+                line(budget, no_key, caps(engine, provider), spendable)
             );
         }
     } else {
@@ -52,8 +53,21 @@ pub async fn run(engine: &Engine, out: Out) -> Result<Exit, Failure> {
                 put("prepaid_spent_today_usd", b.prepaid_spent_today);
                 put("credit_cap_usd", credit_cap);
                 put("prepaid_remaining_usd", b.prepaid_remaining);
+                let spendable = engine.spendable_today(provider, b);
+                put("spendable_today_usd", spendable);
+                put("search_price_usd", b.search_price());
                 if let Some(t) = b.prepaid_expires_at {
                     row.insert("prepaid_expires_at".into(), json!(t.to_string()));
+                }
+                if let Some(n) = searches_left(b.search_price(), spendable) {
+                    row.insert("searches_left_today".into(), json!(n));
+                }
+                if let Some(prices) = b.prices {
+                    let prices: Map<String, Value> = prices
+                        .iter()
+                        .map(|(k, usd)| (k.into(), json!(usd)))
+                        .collect();
+                    row.insert("prices_usd".into(), Value::Object(prices));
                 }
                 if let Some(t) = b.resets_at {
                     row.insert("resets_at".into(), json!(t.to_string()));
@@ -97,11 +111,53 @@ fn caps(engine: &Engine, provider: &aspero_core::ProviderId) -> (Option<f64>, Op
     )
 }
 
+/// How many searches `spendable` (USD) pays for at `price` each, rounded
+/// down; `None` when either is unknown, or searches are free.
+// Floored and non-negative; a float cast saturates past u64::MAX.
+#[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+fn searches_left(price: Option<f64>, spendable: Option<f64>) -> Option<u64> {
+    let price = price.filter(|p| *p > 0.0)?;
+    // A millionth over, so $0.85 at $0.001 is 850, not 849.
+    Some((spendable? / price + 1e-6).max(0.0).floor() as u64)
+}
+
+/// A price in USD with as many places as it needs, at least two: "$0.001",
+/// "$0.01", "$1.00".
+fn price(usd: f64) -> String {
+    let text = format!("{usd:.6}");
+    let text = text.trim_end_matches('0');
+    let places = text.split_once('.').map_or(0, |(_, p)| p.len());
+    format!("${text}{}", "0".repeat(2usize.saturating_sub(places)))
+}
+
 /// "free allowance $0.0498 of $1.00 used today (cap $0.50), resets 00:00
 /// UTC; credit $0.0300 spent today (cap $0.25), $4.97 left, expires
-/// 2027-02-14", "(no key)" after "today" when OpenAlex has none. Both
-/// figures count everything using the key.
+/// 2027-02-14; searches $0.001 each, about 850 left today", "(no key)"
+/// after "today" when OpenAlex has none. Both figures count everything
+/// using the key; the searches left are what paid calls may still spend
+/// today (`spendable`: [`Engine::spendable_today`]) at the search price.
 fn line(
+    b: &Budget,
+    no_key: bool,
+    (allowance_cap, credit_cap): (Option<f64>, Option<f64>),
+    spendable: Option<f64>,
+) -> String {
+    let mut text = spend(b, no_key, (allowance_cap, credit_cap));
+    match (b.search_price(), searches_left(b.search_price(), spendable)) {
+        (Some(p), _) if p <= 0.0 => text.push_str("; searches free"),
+        (Some(p), Some(n)) => {
+            let _ = write!(text, "; searches {} each, about {n} left today", price(p));
+        }
+        (Some(p), None) => {
+            let _ = write!(text, "; searches {} each", price(p));
+        }
+        (None, _) => {}
+    }
+    text
+}
+
+/// The day's allowance and credit, as [`line`] says them.
+fn spend(
     b: &Budget,
     no_key: bool,
     (allowance_cap, credit_cap): (Option<f64>, Option<f64>),
@@ -161,6 +217,7 @@ mod tests {
     #[test]
     fn lines_say_what_is_used_of_the_day() {
         const NONE: (Option<f64>, Option<f64>) = (None, None);
+        let line = |b: &Budget, no_key, caps| line(b, no_key, caps, None);
         assert_eq!(
             line(&budget(Some(1.0), Some(0.9502), Some(0.0)), false, NONE),
             "free allowance $0.0498 of $1.00 used today, resets 00:00 UTC"
@@ -239,11 +296,49 @@ mod tests {
         };
         assert_eq!(provider.as_str(), "openalex");
         assert_eq!((budget.limit, budget.remaining), (Some(0.1), Some(0.0774)));
+        let said = line(budget, true, (None, None), None);
         assert!(
-            line(budget, true, (None, None))
-                .starts_with("free allowance $0.0226 of $0.10 used today (no key), resets "),
-            "{}",
-            line(budget, true, (None, None))
+            said.starts_with("free allowance $0.0226 of $0.10 used today (no key), resets "),
+            "{said}"
+        );
+    }
+
+    /// With `/rate-limit`'s prices, a line says the search's and how many
+    /// what's spendable today pays for.
+    #[test]
+    fn lines_say_how_many_searches_are_left() {
+        let mut prices = aspero_core::Prices::default();
+        prices.search = Some(0.001);
+        prices.list = Some(0.0001);
+        let mut b = budget(Some(1.0), Some(0.85), Some(0.0));
+        b.prices = Some(prices);
+        assert_eq!(
+            line(&b, false, (None, Some(0.25)), Some(0.85)),
+            "free allowance $0.1500 of $1.00 used today, resets 00:00 UTC; \
+             no prepaid credit (cap $0.25 a day); searches $0.001 each, about 850 left today"
+        );
+        // Unknown spendable: the price alone. No price: as before.
+        assert!(line(&b, false, (None, None), None).ends_with("; searches $0.001 each"));
+        b.prices = None;
+        assert!(line(&b, false, (None, None), Some(0.85)).ends_with("resets 00:00 UTC"));
+        // Free searches say so.
+        prices.search = Some(0.0);
+        b.prices = Some(prices);
+        assert!(line(&b, false, (None, None), Some(0.85)).ends_with("; searches free"));
+
+        assert_eq!(searches_left(Some(0.001), Some(0.85)), Some(850));
+        assert_eq!(searches_left(Some(0.001), Some(0.0)), Some(0));
+        assert_eq!(searches_left(Some(0.001), None), None);
+        assert_eq!(searches_left(None, Some(0.85)), None);
+        assert_eq!(
+            [
+                price(0.001),
+                price(0.0001),
+                price(0.01),
+                price(1.0),
+                price(0.25)
+            ],
+            ["$0.001", "$0.0001", "$0.01", "$1.00", "$0.25"]
         );
     }
 }

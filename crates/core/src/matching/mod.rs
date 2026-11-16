@@ -508,25 +508,33 @@ pub fn assess(claim: &Claim, record: &SourceRecord) -> Assessment {
         _ => FieldCheck::UNKNOWN,
     };
 
+    // Where the record's title stands in free text: what precedes it is the
+    // byline, what follows the journal and place.
+    let title_span = match (&claim.title, &work_title, &text) {
+        (None, Some(actual), Some(text)) => text.title_span(actual),
+        _ => None,
+    };
     let authors = if families.is_empty() {
         FieldCheck::UNKNOWN
     } else if !claim.authors.is_empty() {
         FieldCheck::scored(author_overlap(&claim.authors, &families))
     } else if let Some(text) = &text {
         // A reference that names no one ("Injury 47 (2016) 797–804", a
-        // pasted title) doesn't name others.
+        // pasted title) doesn't name others. One whose byline names
+        // people, as any style writes them ("F. Eskdale-Mora", "Nadler,
+        // Steven.", BibTeX's author), none of them the record's, does.
+        let others = || {
+            authors::names_given(&text.raw)
+                || byline(text, work_title.as_deref(), title_span.as_ref()).is_some_and(|b| {
+                    byline_strangers(&b, &work.authors, work.container_title.as_deref())
+                })
+        };
         match text.author_coverage(&families) {
-            0.0 if !claim.text.as_deref().is_some_and(authors::names_given) => FieldCheck::UNKNOWN,
+            0.0 if !others() => FieldCheck::UNKNOWN,
             coverage => FieldCheck::scored(coverage),
         }
     } else {
         FieldCheck::UNKNOWN
-    };
-    // Where the record's title stands in free text: what precedes it is the
-    // byline, what follows the journal and place.
-    let title_span = match (&claim.title, &work_title, &text) {
-        (None, Some(actual), Some(text)) => text.title_span(actual),
-        _ => None,
     };
     // Names the claim gives that the record's byline lacks: invented
     // co-authors beside a real first author. Not a match, whoever is first.

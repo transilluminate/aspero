@@ -134,8 +134,9 @@ pub(super) fn claimed_strangers(claimed: &[String], authors: &[Person]) -> bool 
 /// Lancet").
 pub(super) fn byline_strangers(byline: &str, authors: &[Person], journal: Option<&str>) -> bool {
     let mut tokens: Vec<(String, &str)> = Vec::new();
+    let mut spans = Vec::new();
     for (word, span) in spanned_words(byline) {
-        let raw = &byline[span];
+        let raw = &byline[span.clone()];
         if raw.chars().next().is_some_and(char::is_lowercase)
             && !BYLINE_WORDS.contains(&word.as_str())
             && !is_particle(&word)
@@ -143,7 +144,14 @@ pub(super) fn byline_strangers(byline: &str, authors: &[Person], journal: Option
             break;
         }
         tokens.push((word, raw));
+        spans.push(span);
     }
+    // A family name, its initials after a comma: "Harrowgate, O.".
+    let initialled = |i: usize| {
+        tokens.get(i + 1).is_some_and(|(_, raw)| {
+            byline[spans[i].end..spans[i + 1].start].contains(',') && is_initials(raw)
+        })
+    };
     if tokens.iter().any(|(w, _)| is_body_word(w)) {
         return false;
     }
@@ -185,11 +193,12 @@ pub(super) fn byline_strangers(byline: &str, authors: &[Person], journal: Option
             return false;
         }
         // A given name written out ("Jumper, John"), within a word or two
-        // of its family name.
+        // of its family name; not a family name with initials of its own.
         let first = word.chars().next().unwrap_or(' ');
-        let given = (i.saturating_sub(2)..(i + 3).min(tokens.len()))
-            .filter(|&j| j != i)
-            .any(|j| initials_at(j).is_some_and(|ini| ini.is_empty() || ini.contains(first)));
+        let given = !initialled(i)
+            && (i.saturating_sub(2)..(i + 3).min(tokens.len()))
+                .filter(|&j| j != i)
+                .any(|j| initials_at(j).is_some_and(|ini| ini.is_empty() || ini.contains(first)));
         !given
     })
 }

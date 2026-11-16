@@ -1085,6 +1085,20 @@ fn invented_co_authors_are_not_an_author_match() {
             "{text}: {a:?}"
         );
     }
+    // A co-author with initials of their own is no given name beside the
+    // next family name (holdout-1 #425: "Harrowgate, O., & Palmer, H.",
+    // Palmer's given name Humphrey).
+    let mut burrell = record(
+        &[],
+        "Analogy: A Study of Qualification and Argument in Theology",
+        &["David B. Burrell", "Humphrey Palmer"],
+        1976,
+    );
+    burrell.work.work_type = Some(crate::work::WorkType::JournalArticle);
+    let text = "Burrell, D., Harrowgate, O., & Palmer, H. (1976). Analogy: A Study of \
+                Qualification and Argument in Theology. The Philosophical Review, 85(1), 107.";
+    let a = assess(&Claim::from_text(text), &burrell);
+    assert_eq!(a.authors.agreement, Agreement::Partial, "{text}");
     // Structured: one of two claimed authors invented.
     let claim = Claim {
         title: Some("Fibrinolysis for patients with intermediate-risk pulmonary embolism".into()),
@@ -1095,6 +1109,78 @@ fn invented_co_authors_are_not_an_author_match() {
     let a = assess(&claim, &peitho());
     assert_eq!(a.authors.agreement, Agreement::Partial);
     assert!((PLAUSIBLE..VERIFIED).contains(&a.confidence), "{a:?}");
+}
+
+#[test]
+fn a_byline_naming_none_of_the_records_authors_differs() {
+    // Holdout-1: names written as IEEE ("F. Eskdale-Mora"), MLA ("Nadler,
+    // Steven.") and BibTeX (`author`) do, none the record's: different
+    // authors, not none given (#384, #543, #561).
+    let baer = placed(
+        &[],
+        "Nonlinear regression and the solution of simultaneous equations",
+        &["Robert M. Baer"],
+        1962,
+        ("Communications of the ACM", "5", "397-398"),
+    );
+    let mysticism = placed(
+        &[],
+        "A Philosophical Study of Mysticism",
+        &["Irl Goldwin Whitchurch", "Charles A. Bennett"],
+        1924,
+        ("The Philosophical Review", "33", "406"),
+    );
+    let figueroa = placed(
+        &[],
+        "Maximum Entropy Context Models for Ranking Biographical Answers to Open-Domain \
+         Definition Questions",
+        &["Alejandro Figueroa", "John Atkinson"],
+        2011,
+        (
+            "Proceedings of the AAAI Conference on Artificial Intelligence",
+            "25",
+            "1173-1179",
+        ),
+    );
+    for (text, record) in [
+        (
+            "F. Eskdale-Mora, “Nonlinear regression and the solution of simultaneous \
+             equations,” Commun. ACM, vol. 5, no. 7, pp. 397-398, 1962.",
+            &baer,
+        ),
+        (
+            "Nadler, Steven. “A Philosophical Study of Mysticism.” The Philosophical Review, \
+             vol. 33, no. 4, 1924, p. 406.",
+            &mysticism,
+        ),
+        (
+            "@article{li2011, author = {Li, Haoyang and Bai, Li}, title = {Maximum Entropy \
+             Context Models for Ranking Biographical Answers to Open-Domain Definition \
+             Questions}, journal = {Proceedings of the AAAI Conference on Artificial \
+             Intelligence}, year = {2011}, volume = {25}, pages = {1173--1179}}",
+            &figueroa,
+        ),
+    ] {
+        let a = assess(&Claim::from_text(text), record);
+        assert_eq!(a.authors.agreement, Agreement::Mismatch, "{text}");
+        assert!(a.confidence < VERIFIED, "{text}: {a:?}");
+    }
+    // Their own authors still verify.
+    for (text, record) in [
+        (
+            "R. M. Baer, “Nonlinear regression and the solution of simultaneous equations,” \
+             Commun. ACM, vol. 5, no. 7, pp. 397-398, 1962.",
+            &baer,
+        ),
+        (
+            "Whitchurch, Irl Goldwin. “A Philosophical Study of Mysticism.” The Philosophical \
+             Review, vol. 33, no. 4, 1924, p. 406.",
+            &mysticism,
+        ),
+    ] {
+        let a = assess(&Claim::from_text(text), record);
+        assert!(a.confidence >= VERIFIED, "{text}: {a:?}");
+    }
 }
 
 #[test]

@@ -107,7 +107,9 @@ pub use standard::EuropePmcConfig;
 pub use standard::OpenAlexConfig;
 #[cfg(feature = "openlibrary")]
 pub use standard::OpenLibraryConfig;
-pub use standard::{SOURCES, SourcesError, StandardConfig, source_name, standard};
+pub use standard::{
+    DEFAULT_OPENALEX_CREDIT_CAP_USD, SOURCES, SourcesError, StandardConfig, source_name, standard,
+};
 pub use verdict::{CitedField, Difference, Reason, Verdict, Verification, describe_update};
 pub use versions::VersionsReport;
 
@@ -119,8 +121,8 @@ use aspero_core::{
     SourceRecord, Usage,
 };
 pub use aspero_store::{
-    Cache, Direction, Edges, Pacing, SqliteCache, SqliteTape, Stats as CacheStats, StoreError,
-    megabytes,
+    Cache, Direction, Edges, Pacing, PrepaidDay, PrepaidDays, SqliteCache, SqliteTape,
+    Stats as CacheStats, StoreError, megabytes,
 };
 pub use inputs::{Extras, InputLookup, InputsReport, Looked};
 use jiff::Timestamp;
@@ -225,6 +227,8 @@ pub struct Engine {
     budgets: Arc<Budgets>,
     /// Daily caps on providers' spend (see [`cap`]).
     caps: Arc<Vec<(ProviderId, f64)>>,
+    /// Daily caps on providers' prepaid credit spend (see [`cap`]).
+    credit_caps: Arc<Vec<(ProviderId, f64)>>,
     /// Providers turned off: named in a search, they say so.
     disabled: Arc<Vec<ProviderId>>,
     /// One free budget refresh at a time, for the caps.
@@ -246,6 +250,8 @@ pub struct EngineBuilder {
     cache_policy: CachePolicy,
     clock: Clock,
     caps: Vec<(ProviderId, f64)>,
+    credit_caps: Vec<(ProviderId, f64)>,
+    prepaid_days: Option<Arc<dyn PrepaidDays>>,
     disabled: Vec<ProviderId>,
 }
 
@@ -304,6 +310,27 @@ impl EngineBuilder {
         self
     }
 
+    /// Once `provider`'s daily allowance is used up (by anything using the
+    /// key), lets its paid calls go on, spending prepaid credit, only while
+    /// the credit spent today is under `usd` (0: never spend credit); until
+    /// then, [`daily_cap`](Self::daily_cap) still applies. Without one, a
+    /// used-up allowance is held to the allowance's cap, as before. See
+    /// [`cap`](crate::cap) and [`Error::BudgetCapped`].
+    pub fn daily_credit_cap(mut self, provider: ProviderId, usd: f64) -> Self {
+        self.credit_caps.retain(|(p, _)| *p != provider);
+        self.credit_caps.push((provider, usd));
+        self
+    }
+
+    /// Where each day's prepaid balances are kept, to tell the credit
+    /// spent today ([`Budget::prepaid_spent_today`]) the same in every
+    /// process sharing it, and across restarts; usually the cache file.
+    /// Without one, each engine keeps its own.
+    pub fn prepaid_days(mut self, days: Arc<dyn PrepaidDays>) -> Self {
+        self.prepaid_days = Some(days);
+        self
+    }
+
     pub fn build(mut self) -> Engine {
         self.entries.sort_by_key(|(priority, _)| *priority);
         Engine {
@@ -315,8 +342,9 @@ impl EngineBuilder {
             options: CallOptions::default(),
             inflight: Arc::default(),
             health: Arc::default(),
-            budgets: Arc::default(),
+            budgets: Arc::new(Budgets::new(self.prepaid_days)),
             caps: Arc::new(self.caps),
+            credit_caps: Arc::new(self.credit_caps),
             disabled: Arc::new(self.disabled),
             refreshing: Arc::default(),
             refreshed: Arc::default(),
@@ -410,6 +438,8 @@ impl Engine {
             cache_policy: CachePolicy::default(),
             clock: Timestamp::now,
             caps: Vec::new(),
+            credit_caps: Vec::new(),
+            prepaid_days: None,
             disabled: Vec::new(),
         }
     }

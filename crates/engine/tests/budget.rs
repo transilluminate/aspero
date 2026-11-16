@@ -53,6 +53,53 @@ async fn with_a_key_refreshing_asks_rate_limit_for_free() {
     );
     assert_eq!(budget.seen_at, FIXTURE_TIME);
     assert_eq!(engine.budgets(), budgets, "remembered");
+    // No credit: none spent, and no expiry.
+    assert_eq!(budget.prepaid_spent_today, Some(0.0));
+    assert_eq!(budget.prepaid_expires_at, None);
+}
+
+/// With credit, `/rate-limit` says when it expires; the day's first
+/// balance is where today's credit spend starts, and a search's headers
+/// then tell what it spent.
+#[tokio::test]
+async fn credit_spent_today_counts_from_the_days_first_balance() {
+    let spent_a_search = response(
+        200,
+        &[
+            ("x-ratelimit-cost-usd", "0.001"),
+            ("x-ratelimit-limit-usd", "1"),
+            ("x-ratelimit-remaining-usd", "0"),
+            ("x-ratelimit-prepaid-remaining-usd", "9.8841"),
+            ("x-ratelimit-reset", "3600"),
+        ],
+        &String::from_utf8(recorded("works_search").body).unwrap(),
+    );
+    let (engine, _) = engine(
+        Some("test-key"),
+        vec![recorded("rate_limit_prepaid"), spent_a_search],
+    );
+    let budget = engine.refresh_budgets().await[0].1;
+    assert_eq!(budget.prepaid_remaining, Some(9.8851));
+    assert_eq!(
+        budget.prepaid_spent_today,
+        Some(0.0),
+        "the day's first sighting"
+    );
+    assert_eq!(
+        budget.prepaid_expires_at,
+        Some("2027-02-14T12:08:05Z".parse().unwrap())
+    );
+    engine
+        .search(Some("openalex"), &SearchQuery::new("deep learning"))
+        .await
+        .unwrap();
+    let budget = engine.budgets()[0].1;
+    assert_eq!(budget.prepaid_spent_today, Some(0.001));
+    assert_eq!(
+        budget.prepaid_expires_at,
+        Some("2027-02-14T12:08:05Z".parse().unwrap()),
+        "kept: headers don't say it"
+    );
 }
 
 #[tokio::test]
@@ -90,7 +137,7 @@ fn failing_at_no_allowance(prepaid: &str) -> HttpResponse {
             ("x-ratelimit-limit-usd", "1"),
             ("x-ratelimit-remaining-usd", "0"),
             ("x-ratelimit-prepaid-remaining-usd", prepaid),
-            ("x-ratelimit-reset", "3600"),
+            ("x-ratelimit-reset", "43200"),
         ],
         "",
     )

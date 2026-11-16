@@ -8,6 +8,42 @@ Added:
   `ASPERO_HTTP_TAPE_MODE=replay-only`), on by default for `verify_bench`
   and `scripts/redteam.py`: each distinct request is paid for once and
   replayed free after, offline if asked (DESIGN "HTTP tape").
+- A daily cap on OpenAlex prepaid credit (#110), beside the allowance's:
+  `openalex_daily_credit_cap_usd` (engine `StandardConfig`,
+  `EngineBuilder::daily_credit_cap`; FFI `Config.openalexDailyCreditCapUsd`,
+  nil for the default; CLI `--openalex-credit-cap-usd` /
+  `ASPERO_OPENALEX_CREDIT_CAP_USD`). Once the free allowance is all used
+  (by anything using the key), paid calls go on, spending credit, while
+  the credit spent today is under it; until then the allowance cap holds
+  the rest of the allowance back. 0 never spends credit (DESIGN
+  "Resilience").
+- Which cap stopped a call: `Error::BudgetCapped` gains `which`
+  (`CapKind::Allowance` or `Credit`), FFI `BudgetCap.capKind`
+  (`BudgetCapKind.allowance` / `.credit`), with `capUsd`/`spentUsd` the
+  cap reached and what's spent against it; a credit stop reads "stopped at
+  today's credit cap of $1.00 ($1.02 of credit spent today)".
+- Credit spent today and the credit's expiry on `Budget`:
+  `prepaid_spent_today` / `prepaid_expires_at` (FFI
+  `prepaidSpentTodayUsd`, `prepaidExpiresAt`; `aspero budget` JSON
+  `prepaid_spent_today_usd`, `prepaid_expires_at`, and `allowance_cap_usd`,
+  `credit_cap_usd`). OpenAlex doesn't report the spend: it's the day's
+  first balance seen, kept in the cache file so every process and restart
+  agrees, less the balance now, a top-up raising the start; a day first
+  seen part-way through undercounts. `Usage.prepaid_expires_at` from
+  `/rate-limit`, read as JavaScript prints a date (or ISO).
+
+Changed:
+
+- OpenAlex prepaid credit is now capped at $0.25 a day by default
+  (before, it was spent freely once the allowance was gone, unless an
+  allowance cap at or under the allowance stopped every paid call). Set
+  `--openalex-credit-cap-usd` (or the config field) to allow more, or 0 to
+  spend none. With a key, the first paid call of a process now asks
+  `/rate-limit` (free) first, as an allowance cap already did. The
+  benchmark and `scripts/redteam.py` set their own credit cap, $5.
+- `aspero budget` says both caps in their terms: "free allowance $0.0498
+  of $1.00 used today (cap $0.50), resets 00:00 UTC; credit $0.0300 spent
+  today (cap $0.25), $4.97 left, expires 2027-02-14".
 
 Fixed:
 

@@ -1207,6 +1207,26 @@ fn a_daily_cap_must_be_an_amount() {
     }
 }
 
+/// nil is the $0.25 default; 0 turns credit off; there's no unlimited.
+#[test]
+fn a_daily_credit_cap_must_be_an_amount() {
+    assert_eq!(Config::default().openalex_daily_credit_cap_usd, None);
+    for cap in [-0.5, f64::NAN, f64::INFINITY] {
+        let made = Aspero::new(Config {
+            openalex_daily_credit_cap_usd: Some(cap),
+            ..Config::default()
+        });
+        assert!(matches!(made, Err(AsperoError::Setup(_))), "{cap}");
+    }
+    for cap in [0.0, 5.0] {
+        let config = Config {
+            openalex_daily_credit_cap_usd: Some(cap),
+            ..Config::default()
+        };
+        assert!(Aspero::new(config).is_ok());
+    }
+}
+
 #[test]
 fn without_a_key_refreshing_budgets_asks_nothing() {
     let handle = aspero(None);

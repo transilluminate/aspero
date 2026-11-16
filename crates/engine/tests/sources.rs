@@ -23,6 +23,27 @@ fn names(engine: &aspero_engine::Engine) -> Vec<String> {
     engine.providers().map(|p| p.id().to_string()).collect()
 }
 
+/// Credit is capped at $0.25 a day unless set: 0 turns it off, more
+/// allows more; there's no unlimited. The allowance has no cap unless set.
+#[test]
+fn openalex_credit_is_capped_by_default() {
+    let openalex = aspero_core::ProviderId::from_static("openalex");
+    let engine = standard(StandardConfig::all(None)).unwrap();
+    assert_eq!(engine.daily_credit_cap(&openalex), Some(0.25));
+    assert_eq!(
+        aspero_engine::DEFAULT_OPENALEX_CREDIT_CAP_USD,
+        0.25,
+        "as documented"
+    );
+    assert_eq!(engine.daily_cap(&openalex), None);
+    for set in [0.0, 5.0] {
+        let mut config = StandardConfig::all(None);
+        config.openalex_daily_credit_cap_usd = Some(set);
+        let engine = standard(config).unwrap();
+        assert_eq!(engine.daily_credit_cap(&openalex), Some(set));
+    }
+}
+
 #[test]
 fn sources_turned_off_are_never_built() {
     let mut config = StandardConfig::all(None);

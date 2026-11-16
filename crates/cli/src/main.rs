@@ -173,11 +173,13 @@ fn engine(
     let mut config = StandardConfig::all(env("OPENALEX_API_KEY").map(SecretString::from));
     config.mailto = env("ASPERO_MAILTO");
     config.openalex_daily_cap_usd = global.openalex_daily_cap_usd().map_err(Failure::usage)?;
+    config.openalex_daily_credit_cap_usd = global.openalex_credit_cap_usd;
     config.cache_policy = global.cache_policy();
     config
         .disable(&global.without)
         .map_err(|e| Failure::usage(format!("--without: {e}")))?;
     config.pacing = file.clone().map(|c| c as _);
+    config.prepaid_days = file.clone().map(|c| c as _);
     config.cache = file.filter(|_| !no_cache).map(|c| c as _);
     // A developer tool for benchmark runs (DESIGN "Benchmark"), so not in
     // `--help`: ASPERO_HTTP_TAPE, ASPERO_HTTP_TAPE_MODE.

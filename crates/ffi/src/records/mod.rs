@@ -204,17 +204,22 @@ mod tests {
         let unknown = Budget::new(&openalex, &b).capped(&engine, &openalex, &b);
         assert_eq!(unknown.spendable_today_usd, None);
         assert_eq!(unknown.credit_cap_usd, Some(0.25));
-        // The allowance gone: what's left of the day's credit cap.
+        assert_eq!(unknown.credit_spent_today_here_usd, None);
+        // The allowance gone: what's left of the day's credit cap, less
+        // the credit spent here, whatever other tools spent on the key.
         b.limit = Some(1.0);
         b.remaining = Some(0.0);
         b.prepaid_remaining = Some(5.0);
-        b.prepaid_spent_today = Some(0.10);
+        b.prepaid_spent_today = Some(3.0);
+        b.credit_spent_today_here = Some(0.10);
         let capped = Budget::new(&openalex, &b).capped(&engine, &openalex, &b);
         assert_eq!(
             capped.spendable_today_usd,
             engine.spendable_today(&openalex, &b)
         );
         assert_eq!(capped.spendable_today_usd, Some(0.15));
+        assert_eq!(capped.prepaid_spent_today_usd, Some(3.0));
+        assert_eq!(capped.credit_spent_today_here_usd, Some(0.10));
     }
 
     #[test]

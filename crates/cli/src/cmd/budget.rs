@@ -35,50 +35,58 @@ pub async fn run(engine: &Engine, out: Out) -> Result<Exit, Failure> {
         let list: Vec<Value> = budgets
             .iter()
             .map(|(provider, b)| {
-                let mut row = Map::new();
-                row.insert("provider".into(), json!(provider));
-                if keyless && provider.as_str() == "openalex" {
-                    row.insert("key".into(), json!(false));
-                }
-                let mut put = |k: &str, v: Option<f64>| {
-                    if let Some(v) = v {
-                        row.insert(k.into(), json!(v));
-                    }
-                };
-                let (allowance_cap, credit_cap) = caps(engine, provider);
-                put("limit_usd", b.limit);
-                put("spent_usd", b.used());
-                put("remaining_usd", b.remaining);
-                put("allowance_cap_usd", allowance_cap);
-                put("prepaid_spent_today_usd", b.prepaid_spent_today);
-                put("credit_cap_usd", credit_cap);
-                put("prepaid_remaining_usd", b.prepaid_remaining);
-                let spendable = engine.spendable_today(provider, b);
-                put("spendable_today_usd", spendable);
-                put("search_price_usd", b.search_price());
-                if let Some(t) = b.prepaid_expires_at {
-                    row.insert("prepaid_expires_at".into(), json!(t.to_string()));
-                }
-                if let Some(n) = searches_left(b.search_price(), spendable) {
-                    row.insert("searches_left_today".into(), json!(n));
-                }
-                if let Some(prices) = b.prices {
-                    let prices: Map<String, Value> = prices
-                        .iter()
-                        .map(|(k, usd)| (k.into(), json!(usd)))
-                        .collect();
-                    row.insert("prices_usd".into(), Value::Object(prices));
-                }
-                if let Some(t) = b.resets_at {
-                    row.insert("resets_at".into(), json!(t.to_string()));
-                }
-                row.insert("seen_at".into(), json!(b.seen_at.to_string()));
-                Value::Object(row)
+                let no_key = keyless && provider.as_str() == "openalex";
+                row(engine, provider, b, no_key)
             })
             .collect();
         print(&json!({ "budgets": list }));
     }
     Ok(Exit::Ok)
+}
+
+/// A provider's budget as JSON, under `engine`'s caps; `"key": false`
+/// where OpenAlex has none (`no_key`).
+fn row(engine: &Engine, provider: &aspero_core::ProviderId, b: &Budget, no_key: bool) -> Value {
+    let mut row = Map::new();
+    row.insert("provider".into(), json!(provider));
+    if no_key {
+        row.insert("key".into(), json!(false));
+    }
+    let mut put = |k: &str, v: Option<f64>| {
+        if let Some(v) = v {
+            row.insert(k.into(), json!(v));
+        }
+    };
+    let (allowance_cap, credit_cap) = caps(engine, provider);
+    put("limit_usd", b.limit);
+    put("spent_usd", b.used());
+    put("remaining_usd", b.remaining);
+    put("allowance_cap_usd", allowance_cap);
+    put("prepaid_spent_today_usd", b.prepaid_spent_today);
+    put("credit_spent_today_here_usd", b.credit_spent_today_here);
+    put("credit_cap_usd", credit_cap);
+    put("prepaid_remaining_usd", b.prepaid_remaining);
+    let spendable = engine.spendable_today(provider, b);
+    put("spendable_today_usd", spendable);
+    put("search_price_usd", b.search_price());
+    if let Some(t) = b.prepaid_expires_at {
+        row.insert("prepaid_expires_at".into(), json!(t.to_string()));
+    }
+    if let Some(n) = searches_left(b.search_price(), spendable) {
+        row.insert("searches_left_today".into(), json!(n));
+    }
+    if let Some(prices) = b.prices {
+        let prices: Map<String, Value> = prices
+            .iter()
+            .map(|(k, usd)| (k.into(), json!(usd)))
+            .collect();
+        row.insert("prices_usd".into(), Value::Object(prices));
+    }
+    if let Some(t) = b.resets_at {
+        row.insert("resets_at".into(), json!(t.to_string()));
+    }
+    row.insert("seen_at".into(), json!(b.seen_at.to_string()));
+    Value::Object(row)
 }
 
 /// Each provider's budget, refreshed: with an OpenAlex key, its free
@@ -131,11 +139,14 @@ fn price(usd: f64) -> String {
 }
 
 /// "free allowance $0.0498 of $1.00 used today (cap $0.50), resets 00:00
-/// UTC; credit $0.0300 spent today (cap $0.25), $4.97 left, expires
-/// 2027-02-14; searches $0.001 each, about 850 left today", "(no key)"
-/// after "today" when OpenAlex has none. Both figures count everything
-/// using the key; the searches left are what paid calls may still spend
-/// today (`spendable`: [`Engine::spendable_today`]) at the search price.
+/// UTC; credit $0.0300 spent today, $0.0100 here (cap $0.25), $4.97 left,
+/// expires 2027-02-14; searches $0.001 each, about 850 left today", "(no
+/// key)" after "today" when OpenAlex has none. The allowance's use and the
+/// credit spent today count everything using the key; the credit spent
+/// "here", which the credit cap counts, only calls made through aspero
+/// sharing this cache file. The searches left are what paid calls may
+/// still spend today (`spendable`: [`Engine::spendable_today`]) at the
+/// search price.
 fn line(
     b: &Budget,
     no_key: bool,
@@ -179,7 +190,8 @@ fn spend(
     }
     let balance = b.prepaid_remaining.filter(|p| *p > 0.0);
     let spent = b.prepaid_spent_today.filter(|s| *s > 0.0);
-    if balance.is_none() && spent.is_none() {
+    let here = b.credit_spent_today_here.filter(|s| *s > 0.0);
+    if balance.is_none() && spent.is_none() && here.is_none() {
         if let Some(cap) = credit_cap {
             let _ = write!(text, "; no prepaid credit (cap ${cap:.2} a day)");
         }
@@ -187,8 +199,9 @@ fn spend(
     }
     let _ = write!(
         text,
-        "; credit ${:.4} spent today",
-        b.prepaid_spent_today.unwrap_or(0.0)
+        "; credit ${:.4} spent today, ${:.4} here",
+        b.prepaid_spent_today.unwrap_or(0.0),
+        here.unwrap_or(0.0)
     );
     if let Some(cap) = credit_cap {
         let _ = write!(text, " (cap ${cap:.2})");
@@ -233,16 +246,17 @@ mod tests {
         );
         let mut credit = budget(Some(1.0), Some(0.0), Some(4.97));
         credit.prepaid_spent_today = Some(0.03);
+        credit.credit_spent_today_here = Some(0.01);
         credit.prepaid_expires_at = Some("2027-02-14T12:08:05Z".parse().unwrap());
         assert_eq!(
             line(&credit, false, (None, Some(0.25))),
             "free allowance $1.0000 of $1.00 used today, resets 00:00 UTC; \
-             credit $0.0300 spent today (cap $0.25), $4.97 left, expires 2027-02-14"
+             credit $0.0300 spent today, $0.0100 here (cap $0.25), $4.97 left, expires 2027-02-14"
         );
         assert_eq!(
             line(&budget(Some(1.0), Some(0.0), Some(5.0)), false, NONE),
             "free allowance $1.0000 of $1.00 used today, resets 00:00 UTC; \
-             credit $0.0000 spent today, $5.00 left"
+             credit $0.0000 spent today, $0.0000 here, $5.00 left"
         );
         let remaining_only = budget(None, Some(0.5), None);
         assert_eq!(
@@ -253,6 +267,29 @@ mod tests {
             line(&budget(Some(0.1), Some(0.0847), None), true, NONE),
             "free allowance $0.0153 of $0.10 used today (no key), resets 00:00 UTC"
         );
+    }
+
+    /// JSON says the credit spent on the key and here apart, and what's
+    /// spendable counts the cap against what was spent here.
+    #[test]
+    fn json_says_the_credit_spent_here_beside_the_keys() {
+        let openalex = aspero_core::ProviderId::from_static("openalex");
+        let engine = Engine::builder()
+            .daily_credit_cap(openalex.clone(), 0.25)
+            .build();
+        let mut b = budget(Some(1.0), Some(0.0), Some(4.97));
+        b.prepaid_spent_today = Some(3.0);
+        b.credit_spent_today_here = Some(0.05);
+        let json = row(&engine, &openalex, &b, false);
+        assert_eq!(json["prepaid_spent_today_usd"], json!(3.0));
+        assert_eq!(json["credit_spent_today_here_usd"], json!(0.05));
+        assert_eq!(json["credit_cap_usd"], json!(0.25));
+        assert_eq!(json["spendable_today_usd"], json!(0.2));
+        assert!(json.get("key").is_none());
+        b.credit_spent_today_here = None;
+        let json = row(&engine, &openalex, &b, true);
+        assert!(json.get("credit_spent_today_here_usd").is_none());
+        assert_eq!(json["key"], json!(false));
     }
 
     /// Without a key, one free lookup (past the cache), as OpenAlex

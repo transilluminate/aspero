@@ -9,6 +9,13 @@
 //! without one, by the engine alone). Like the allowance's use it counts
 //! everything using the key, but only from the day's first sighting: a
 //! day first seen part-way through, after credit was spent, undercounts.
+//!
+//! The credit spent "here", which a daily credit cap counts, is what calls
+//! made through this engine, and any other sharing its store (the cache
+//! file), were charged once the allowance was used up: each response's
+//! cost, as far as it went past the allowance left before it
+//! ([`credit_part`]), added up per budget day in the store
+//! ([`PrepaidDays::add_credit_here`]; without one, by the engine alone).
 
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -43,6 +50,15 @@ pub struct Budget {
     /// the period, it misses what was spent before. `None` where no
     /// balance is known this period.
     pub prepaid_spent_today: Option<f64>,
+    /// Prepaid credit charged in the current period (OpenAlex: today, in
+    /// USD) to calls made "here": through this engine and any other
+    /// sharing its store ([`EngineBuilder::prepaid_days`](crate::EngineBuilder::prepaid_days),
+    /// usually the cache file), not other tools using the key. What the
+    /// daily credit cap counts. Each paid call's cost once the allowance
+    /// is used up (the part past what was left of it, where that's known);
+    /// replayed responses cost nothing. `None` until the provider reports
+    /// a budget.
+    pub credit_spent_today_here: Option<f64>,
     /// When the prepaid balance expires, where the provider says
     /// (OpenAlex: `/rate-limit` only).
     pub prepaid_expires_at: Option<Timestamp>,
@@ -62,6 +78,7 @@ impl Budget {
             prepaid_remaining: None,
             seen_at,
             prepaid_spent_today: None,
+            credit_spent_today_here: None,
             prepaid_expires_at: None,
             prices: None,
         }
@@ -97,12 +114,43 @@ fn budget_day(resets_at: Option<Timestamp>, now: Timestamp) -> String {
     at.to_zoned(jiff::tz::TimeZone::UTC).date().to_string()
 }
 
+/// The part of a call's `cost` that was prepaid credit, to a millionth,
+/// given the allowance left after it (`after`, its response's) and the
+/// least seen left before it in the budget day (`before`). OpenAlex spends
+/// the allowance first, so a cost is credit only once the allowance is
+/// gone (either says none left): past `before`, where that's known (the
+/// call that used the allowance up), else all of it. A `before` higher
+/// than the truth (other tools spent since; a stale server) counts that
+/// one call's credit short; nothing seen before a call that finds the
+/// allowance gone counts it all, its allowance part included.
+pub(crate) fn credit_part(cost: Option<f64>, after: Option<f64>, before: Option<f64>) -> f64 {
+    let Some(cost) = cost.filter(|c| *c > 0.0) else {
+        return 0.0;
+    };
+    let gone = |left: Option<f64>| left.is_some_and(|l| l < 1e-6);
+    if !gone(after) && !gone(before) {
+        return 0.0;
+    }
+    let left = before.map_or(0.0, |l| l.max(0.0));
+    ((cost - left).max(0.0) * 1e6).round() / 1e6
+}
+
+/// Per provider and budget day, a figure kept in this engine.
+type Daily<T> = Mutex<Vec<(ProviderId, String, T)>>;
+
 pub(crate) struct Budgets {
     all: Mutex<Vec<(ProviderId, Budget)>>,
-    /// Each day's prepaid balances, shared with other processes.
+    /// Each day's prepaid balances, and the credit spent here, shared with
+    /// other processes.
     prepaid_days: Option<Arc<dyn PrepaidDays>>,
-    /// The same, for this engine alone: without a store, or while it fails.
-    own_days: Mutex<Vec<(ProviderId, String, PrepaidDay)>>,
+    /// The balances for this engine alone: without a store, or while it
+    /// fails.
+    own_days: Daily<PrepaidDay>,
+    /// The credit this engine spent: without a store, or while it fails.
+    own_credit: Daily<f64>,
+    /// The least allowance left each provider's responses said today: a
+    /// call's cost past it is credit ([`credit_part`]).
+    least_left: Daily<f64>,
 }
 
 impl Budgets {
@@ -111,6 +159,8 @@ impl Budgets {
             all: Mutex::default(),
             prepaid_days,
             own_days: Mutex::default(),
+            own_credit: Mutex::default(),
+            least_left: Mutex::default(),
         }
     }
 
@@ -125,21 +175,23 @@ impl Budgets {
         error: Option<&Error>,
         now: Timestamp,
     ) {
-        let (remaining, resets_at, limit, prepaid, expires, bought, prices) = match (usage, error) {
-            (Some(u), _) => (
-                u.remaining,
-                u.resets_at,
-                u.limit,
-                u.prepaid_remaining,
-                u.prepaid_expires_at,
-                u.prepaid_bought,
-                u.prices,
-            ),
-            (None, Some(Error::QuotaExhausted { resets_at })) => {
-                (Some(0.0), *resets_at, None, None, None, None, None)
-            }
-            _ => return,
-        };
+        let (cost, remaining, resets_at, limit, prepaid, expires, bought, prices) =
+            match (usage, error) {
+                (Some(u), _) => (
+                    u.cost,
+                    u.remaining,
+                    u.resets_at,
+                    u.limit,
+                    u.prepaid_remaining,
+                    u.prepaid_expires_at,
+                    u.prepaid_bought,
+                    u.prices,
+                ),
+                (None, Some(Error::QuotaExhausted { resets_at })) => {
+                    (None, Some(0.0), *resets_at, None, None, None, None, None)
+                }
+                _ => return,
+            };
         if remaining.is_none()
             && resets_at.is_none()
             && limit.is_none()
@@ -149,9 +201,10 @@ impl Budgets {
             return;
         }
         // Before the budgets' lock: it may wait on the file.
-        let day = prepaid.map(|balance| {
-            self.see_prepaid(provider, &budget_day(resets_at, now), balance, bought, now)
-        });
+        let today = budget_day(resets_at, now);
+        let credit = self.credit_charged(provider, &today, cost, remaining);
+        let here = self.spend_here(provider, &today, credit);
+        let day = prepaid.map(|balance| self.see_prepaid(provider, &today, balance, bought, now));
         let spent = day.map(|d| d.spent_usd());
         let prepaid = day.map(|d| d.last_usd);
         let mut all = lock(&self.all);
@@ -166,6 +219,7 @@ impl Budgets {
             prepaid_spent_today: spent.or(known
                 .filter(still_today)
                 .and_then(|k| k.prepaid_spent_today)),
+            credit_spent_today_here: Some(here),
             prepaid_expires_at: expires.or(known.and_then(|k| k.prepaid_expires_at)),
             prices: prices.or(known.and_then(|k| k.prices)),
         };
@@ -210,6 +264,74 @@ impl Budgets {
         seen
     }
 
+    /// The credit a call to `provider` was charged on `day`, given its
+    /// `cost` and the allowance its response said was `left`
+    /// ([`credit_part`]), which then lowers the least seen left.
+    fn credit_charged(
+        &self,
+        provider: &ProviderId,
+        day: &str,
+        cost: Option<f64>,
+        left: Option<f64>,
+    ) -> f64 {
+        let mut least = lock(&self.least_left);
+        least.retain(|(p, d, _)| p != provider || d == day);
+        let known = least.iter_mut().find(|(p, _, _)| p == provider);
+        let before = known.as_ref().map(|(_, _, l)| *l);
+        let credit = credit_part(cost, left, before);
+        match (known, left) {
+            (Some((_, _, l)), Some(left)) => *l = l.min(left),
+            (None, Some(left)) => least.push((provider.clone(), day.to_owned(), left)),
+            _ => {}
+        }
+        credit
+    }
+
+    /// Adds `usd` of credit spent here to `provider`'s `day`, and returns
+    /// the day's total: from the shared store, or, without one or if it
+    /// fails, this engine's own.
+    fn spend_here(&self, provider: &ProviderId, day: &str, usd: f64) -> f64 {
+        let own = {
+            let mut own = lock(&self.own_credit);
+            own.retain(|(p, d, _)| p != provider || d == day);
+            if let Some((_, _, total)) = own.iter_mut().find(|(p, _, _)| p == provider) {
+                *total = ((*total + usd) * 1e6).round() / 1e6;
+                *total
+            } else {
+                own.push((provider.clone(), day.to_owned(), usd));
+                usd
+            }
+        };
+        if let Some(days) = &self.prepaid_days {
+            let shared = if usd > 0.0 {
+                days.add_credit_here(provider.as_str(), day, usd)
+            } else {
+                days.credit_here(provider.as_str(), day)
+            };
+            match shared {
+                Ok(total) => return total,
+                Err(e) => tracing::warn!(
+                    target: "aspero::budget",
+                    provider = %provider, error = %e,
+                    "couldn't share the credit spent here; keeping it in this process"
+                ),
+            }
+        }
+        own
+    }
+
+    /// The credit spent here on `provider`'s budget day ending at
+    /// `resets_at`, as it stands now (other engines sharing the store may
+    /// have spent since this one's last response).
+    pub(crate) fn spent_here(
+        &self,
+        provider: &ProviderId,
+        resets_at: Option<Timestamp>,
+        now: Timestamp,
+    ) -> f64 {
+        self.spend_here(provider, &budget_day(resets_at, now), 0.0)
+    }
+
     pub(crate) fn all(&self) -> Vec<(ProviderId, Budget)> {
         lock(&self.all).clone()
     }
@@ -248,5 +370,57 @@ impl Engine {
                 provider = %entry.provider.id(), error = %e, "couldn't ask the budget"
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A cost is credit only once the allowance is gone: all of it, or
+    /// for the call that used the allowance up, the part past what was
+    /// left before it.
+    #[test]
+    fn a_call_is_charged_credit_once_the_allowance_is_gone() {
+        let search = Some(0.001);
+        // The allowance left after: none of it credit.
+        assert_eq!(credit_part(search, Some(0.5), Some(0.501)), 0.0);
+        assert_eq!(credit_part(search, Some(0.5), None), 0.0);
+        // Gone, and gone before: all of it.
+        assert_eq!(credit_part(search, Some(0.0), Some(0.0)), 0.001);
+        // Gone, nothing seen before: all of it, its allowance part too.
+        assert_eq!(credit_part(search, Some(0.0), None), 0.001);
+        // The call that used it up: past what was left.
+        assert_eq!(credit_part(search, Some(0.0), Some(0.0004)), 0.0006);
+        assert_eq!(credit_part(search, Some(0.0), Some(0.001)), 0.0);
+        assert_eq!(credit_part(search, Some(0.0), Some(0.3)), 0.0);
+        // Seen gone before, a stale server saying some left: credit.
+        assert_eq!(credit_part(search, Some(0.2), Some(0.0)), 0.001);
+        // Free calls, and replays (cost 0), are never credit.
+        assert_eq!(credit_part(Some(0.0), Some(0.0), Some(0.0)), 0.0);
+        assert_eq!(credit_part(None, Some(0.0), Some(0.0)), 0.0);
+    }
+
+    /// The least allowance seen left in the day is what the next call's
+    /// cost is counted past, whatever order responses come in.
+    #[test]
+    fn credit_is_counted_past_the_least_allowance_seen_today() {
+        let budgets = Budgets::new(None);
+        let openalex = ProviderId::from_static("openalex");
+        let day = "2026-11-16";
+        let charged = |cost, left| budgets.credit_charged(&openalex, day, Some(cost), Some(left));
+        assert_eq!(charged(0.0, 0.0004), 0.0, "a refresh");
+        assert_eq!(charged(0.001, 0.0), 0.0006);
+        assert_eq!(charged(0.001, 0.0), 0.001);
+        assert_eq!(charged(0.001, 0.5), 0.001, "a stale server");
+        assert_eq!(budgets.spend_here(&openalex, day, 0.0016), 0.0016);
+        assert_eq!(budgets.spend_here(&openalex, day, 0.001), 0.0026);
+        // A new day starts afresh.
+        let next = "2026-11-17";
+        assert_eq!(
+            budgets.credit_charged(&openalex, next, Some(0.001), Some(0.9)),
+            0.0
+        );
+        assert_eq!(budgets.spend_here(&openalex, next, 0.0), 0.0);
     }
 }

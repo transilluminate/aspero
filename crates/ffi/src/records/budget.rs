@@ -13,10 +13,10 @@ pub struct BudgetCap {
     /// The cap reached in US dollars: `Config.openalexDailyCapUsd`, or for
     /// `capKind` `.credit`, `Config.openalexDailyCreditCapUsd`.
     pub cap_usd: f64,
-    /// Spent today against that cap in US dollars, by everything using the
-    /// key: the allowance's use as the provider reports it, or for
-    /// `.credit`, the prepaid credit spent today
-    /// (`Budget.prepaidSpentTodayUsd`).
+    /// Spent today against that cap in US dollars: the allowance's use as
+    /// the provider reports it, by everything using the key; or for
+    /// `.credit`, the prepaid credit spent today through aspero here
+    /// (`Budget.creditSpentTodayHereUsd`), not other tools using the key.
     pub spent_usd: f64,
     /// When the provider's budget resets (OpenAlex: midnight UTC).
     pub resets_at: Option<SystemTime>,
@@ -33,7 +33,7 @@ pub enum BudgetCapKind {
     /// reached with some of the allowance left, or, with no credit cap,
     /// once it's used up.
     Allowance,
-    /// The cap on prepaid credit spent today
+    /// The cap on prepaid credit spent today through aspero here
     /// (`Config.openalexDailyCreditCapUsd`), once the allowance is used
     /// up.
     Credit,
@@ -122,10 +122,19 @@ pub struct Budget {
     /// day's first balance seen (by anything sharing the cache), raised by
     /// any top-up since, less the balance now. OpenAlex doesn't say it, so
     /// a day first seen part-way through misses what was spent before.
-    /// Against `Config.openalexDailyCreditCapUsd`. `None` where no balance
-    /// is known today.
+    /// For show: `Config.openalexDailyCreditCapUsd` counts
+    /// `creditSpentTodayHereUsd`. `None` where no balance is known today.
     #[uniffi(default = None)]
     pub prepaid_spent_today_usd: Option<f64>,
+    /// Prepaid credit spent today, in US dollars, "here": charged to calls
+    /// made through aspero sharing this cache (`Config.cacheDir`: this app,
+    /// and the CLI or MCP server if they share it), not other tools using
+    /// the key. Each paid call's cost once the allowance is used up.
+    /// Against `Config.openalexDailyCreditCapUsd`: OpenAlex gives one key
+    /// per account, shared by scripts and other tools, so their credit
+    /// never stops this app. `nil` until the provider reports a budget.
+    #[uniffi(default = None)]
+    pub credit_spent_today_here_usd: Option<f64>,
     /// When the prepaid balance expires, where the provider says (OpenAlex:
     /// asked by `refreshBudgets` with a key).
     #[uniffi(default = None)]
@@ -143,9 +152,10 @@ pub struct Budget {
     #[uniffi(default = [])]
     pub prices: Vec<BudgetPrice>,
     /// What this engine's paid calls may still spend today, in US dollars,
-    /// under both caps, counting everything using the key: the allowance
-    /// left up to `Config.openalexDailyCapUsd`, then, once paid calls would
-    /// use the allowance up, the credit left up to `creditCapUsd`. As
+    /// under both caps: the allowance left (counting everything using the
+    /// key) up to `Config.openalexDailyCapUsd`, then, once paid calls would
+    /// use the allowance up, the credit left, up to `creditCapUsd` less
+    /// `creditSpentTodayHereUsd`. As
     /// `aspero budget` counts it; over `searchPriceUsd`, the searches left.
     /// `nil` when the allowance left is unknown.
     #[uniffi(default = None)]
@@ -175,6 +185,7 @@ impl Budget {
             limit_usd: b.limit,
             prepaid_remaining_usd: b.prepaid_remaining,
             prepaid_spent_today_usd: b.prepaid_spent_today,
+            credit_spent_today_here_usd: b.credit_spent_today_here,
             prepaid_expires_at: b.prepaid_expires_at.map(time),
             search_price_usd: b.search_price(),
             prices: b

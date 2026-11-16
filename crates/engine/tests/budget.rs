@@ -55,6 +55,7 @@ async fn with_a_key_refreshing_asks_rate_limit_for_free() {
     assert_eq!(engine.budgets(), budgets, "remembered");
     // No credit: none spent, and no expiry.
     assert_eq!(budget.prepaid_spent_today, Some(0.0));
+    assert_eq!(budget.credit_spent_today_here, Some(0.0));
     assert_eq!(budget.prepaid_expires_at, None);
     // What each kind of call costs.
     assert_eq!(budget.search_price(), Some(0.001));
@@ -98,6 +99,8 @@ async fn credit_spent_today_counts_from_the_days_first_balance() {
         .unwrap();
     let budget = engine.budgets()[0].1;
     assert_eq!(budget.prepaid_spent_today, Some(0.001));
+    // The allowance gone, the search's cost was credit spent here.
+    assert_eq!(budget.credit_spent_today_here, Some(0.001));
     assert_eq!(
         budget.prepaid_expires_at,
         Some("2027-02-14T12:08:05Z".parse().unwrap()),

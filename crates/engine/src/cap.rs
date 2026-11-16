@@ -4,17 +4,23 @@
 //!
 //! The day's use is the provider's own figure (`limit − remaining`, from
 //! every response's headers or a free refresh), so it counts everything
-//! using the key: other apps, scripts, other processes. So does the credit
-//! spent today, told from the prepaid balance (see [`Budget`]). Before a
-//! paid call ([`reached`]):
+//! using the key: other apps, scripts, other processes. The credit cap
+//! counts only the credit spent "here": charged to calls made through this
+//! engine and any other sharing its store
+//! ([`Budget::credit_spent_today_here`]). OpenAlex gives one key per
+//! account, shared by a researcher's scripts and apps, so a cap counting
+//! everything on the key would stop a caller that spent nothing; the
+//! allowance's cap is about leaving the rest of the day's allowance to
+//! those other tools, so it counts them. Before a paid call ([`reached`]):
 //!
 //! - **Allowance left**: the call goes ahead while the day's use is under
 //!   the allowance's cap ([`daily_cap`](Engine::daily_cap)); past it, it
 //!   stops, holding the rest of the allowance back for other tools.
 //! - **Allowance used up** (nothing left, by whatever used it), with a
 //!   credit cap ([`daily_credit_cap`](Engine::daily_credit_cap)): the call
-//!   goes ahead, spending credit, while the credit spent today is under
-//!   it, whatever the allowance's cap; a cap of 0 never spends credit.
+//!   goes ahead, spending credit, while the credit spent here today is
+//!   under it, whatever the allowance's cap; a cap of 0 never spends
+//!   credit.
 //! - **Allowance used up, no credit cap** (only an engine built without
 //!   [`standard`](crate::standard), which always sets one, $0.25 unless
 //!   configured): as before credit had a cap of its own. The day's use tops out at the allowance, so an allowance cap
@@ -61,7 +67,7 @@ impl Caps {
 
 /// The cap a paid call would pass, with the cap and what's spent against
 /// it, given the day so far: the allowance's use (`used`), whether it's
-/// used up, and the credit spent today (unknown: none).
+/// used up, and the credit spent here today (unknown: none).
 pub(crate) fn reached(
     caps: Caps,
     used: f64,
@@ -85,7 +91,7 @@ pub(crate) fn reached(
 /// decides: the allowance left, held to its cap; then, if paid calls would
 /// use the allowance up (its cap at or above it, or it's used up already),
 /// the prepaid credit left, held to the credit cap less the credit spent
-/// today (unknown: none). Without a credit cap, credit only where the
+/// here today (unknown: none). Without a credit cap, credit only where the
 /// allowance's cap is above the allowance, or there's none. `None` when
 /// the allowance left is unknown; the day's use unknown counts as none.
 pub(crate) fn spendable(caps: Caps, b: &Budget) -> Option<f64> {
@@ -98,7 +104,7 @@ pub(crate) fn spendable(caps: Caps, b: &Budget) -> Option<f64> {
     let balance = b.prepaid_remaining.unwrap_or(0.0).max(0.0);
     let credit = match caps.credit {
         Some(cap) if used_up || caps.allowance.is_none_or(|a| a >= used + remaining) => {
-            balance.min((cap - b.prepaid_spent_today.unwrap_or(0.0)).max(0.0))
+            balance.min((cap - b.credit_spent_today_here.unwrap_or(0.0)).max(0.0))
         }
         None if caps.allowance.is_none_or(|a| a > used + remaining) => balance,
         _ => 0.0,
@@ -110,9 +116,10 @@ impl Engine {
     /// What `provider`'s paid calls may still spend today, given `budget`
     /// (as [`budgets`](Self::budgets) has it) and the caps set here: the
     /// allowance left, up to its cap, then the prepaid credit left, up to
-    /// the credit cap, once paid calls would use the allowance up. Like
-    /// the caps, it counts everything using the key. `None` when the
-    /// allowance left is unknown.
+    /// the credit cap less the credit spent here today, once paid calls
+    /// would use the allowance up. Like the caps, the allowance counts
+    /// everything using the key, the credit only what was spent here.
+    /// `None` when the allowance left is unknown.
     pub fn spendable_today(&self, provider: &ProviderId, budget: &Budget) -> Option<f64> {
         spendable(self.caps(provider), budget)
     }
@@ -168,31 +175,12 @@ impl Engine {
             let due = lock(&self.refreshed).is_none_or(|at| at.elapsed() >= REFRESH_AGAIN);
             if self.today(&provider).is_none() && due {
                 self.quick_refresh(entry).await;
-                let now = Some(tokio::time::Instant::now());
-                match self.today(&provider) {
-                    None => *lock(&self.refreshed) = now,
-                    // Just asked: no need to ask again to confirm a stop.
-                    Some(_) => *lock(&self.confirmed) = now,
+                if self.today(&provider).is_none() {
+                    *lock(&self.refreshed) = Some(tokio::time::Instant::now());
                 }
             }
         }
-        let mut stop = self.reached_today(&provider, caps);
-        // Credit spent today is told mostly from responses' headers, whose
-        // balances may be stale: before stopping at the credit cap, ask
-        // the provider's own word (free; once a minute at most).
-        if matches!(stop, Some((CapKind::Credit, _, _, _)))
-            && entry.provider.capabilities().budget_status
-            && !self.options.offline
-        {
-            let _one = self.refreshing.lock().await;
-            let due = lock(&self.confirmed).is_none_or(|at| at.elapsed() >= REFRESH_AGAIN);
-            if due {
-                self.quick_refresh(entry).await;
-                *lock(&self.confirmed) = Some(tokio::time::Instant::now());
-            }
-            stop = self.reached_today(&provider, caps);
-        }
-        match stop {
+        match self.reached_today(&provider, caps) {
             Some((which, cap, used, resets_at)) => {
                 tracing::info!(
                     target: "aspero::budget",
@@ -211,7 +199,9 @@ impl Engine {
     }
 
     /// The cap the provider's day has reached, if any, with the cap,
-    /// what's spent against it, and when the day resets.
+    /// what's spent against it, and when the day resets. The credit spent
+    /// here is read again where it decides: other engines sharing the
+    /// store may have spent since this one's last response.
     fn reached_today(
         &self,
         provider: &ProviderId,
@@ -219,7 +209,15 @@ impl Engine {
     ) -> Option<(CapKind, f64, f64, Option<jiff::Timestamp>)> {
         let budget = self.today(provider)?;
         let (used, used_up) = (budget.used()?, budget.allowance_used_up()?);
-        let (which, cap, used) = reached(caps, used, used_up, budget.prepaid_spent_today)?;
+        let here = if used_up && caps.credit.is_some() {
+            Some(
+                self.budgets
+                    .spent_here(provider, budget.resets_at, (self.clock)()),
+            )
+        } else {
+            budget.credit_spent_today_here
+        };
+        let (which, cap, used) = reached(caps, used, used_up, here)?;
         Some((which, cap, used, budget.resets_at))
     }
 
@@ -323,7 +321,9 @@ mod tests {
             b.limit = Some(1.0);
             b.remaining = remaining;
             b.prepaid_remaining = prepaid;
-            b.prepaid_spent_today = spent;
+            b.credit_spent_today_here = spent;
+            // Other tools' credit on the key counts for nothing here.
+            b.prepaid_spent_today = Some(100.0);
             b
         };
         let spend = |c, b: &Budget| spendable(c, b);

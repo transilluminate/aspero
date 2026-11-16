@@ -37,8 +37,9 @@ INVENTED = ("a:", "e:", "f:", "i:")
 
 def claim_line(claim):
     if isinstance(claim, str):
-        assert "\n" not in claim, claim
-        return claim
+        # One claim per line: text with line breaks (copied from a PDF)
+        # goes as a JSON claim, its breaks kept.
+        return json.dumps({"text": claim}, ensure_ascii=False) if "\n" in claim else claim
     return json.dumps(claim, ensure_ascii=False)
 
 

@@ -72,6 +72,9 @@ const PLACED_YEAR_OFF: f64 = 0.8;
 const NO_EVIDENCE_CAP: f64 = 0.5;
 /// Another edition of a cited book: plausible, with the year a difference.
 const EDITION: f64 = PLAUSIBLE;
+/// A dataset's or software's version, its identifier claimed, cited with
+/// another year: plausible, with the year a difference.
+const VERSION: f64 = PLAUSIBLE;
 /// Content words below which a title found inside free text is short: one
 /// or two words turn up in any text ("Aspero", "Deep learning").
 const SHORT_TITLE_WORDS: usize = 3;
@@ -808,14 +811,35 @@ pub fn assess(claim: &Claim, record: &SourceRecord) -> Assessment {
     // (a 9th edition cited, a later one found). The book is right; the
     // year, or a publisher given as its container, is a difference. A
     // chapter cited in the book is not the book: its authors found may be
-    // the book's editors.
-    if work.work_type == Some(crate::work::WorkType::Book)
+    // the book's editors. A book cited with its publisher, found reprinted
+    // whole as a chapter of a reader (Bourdieu's "Distinction" in a 2018
+    // collection), is another edition too.
+    let cites_book = text.as_ref().is_some_and(|t| {
+        t.words.iter().any(|w| {
+            matches!(
+                w.as_str(),
+                "press" | "publisher" | "publishers" | "publishing" | "books" | "verlag"
+            )
+        })
+    });
+    if (work.work_type == Some(WorkType::Book)
+        || (work.work_type == Some(WorkType::Chapter) && cites_book))
         && (title.agreement == Agreement::Match || extended)
         && authors.score.is_some_and(|s| s >= CORROBORATING_AUTHORS)
         && year.agreement == Agreement::Mismatch
         && !claim.text.as_deref().is_some_and(cites_chapter)
     {
         confidence = confidence.max(EDITION);
+    }
+    // A dataset's or software's record carries its latest version's date:
+    // the claimed identifier and title name it, whatever year is cited
+    // (MIMIC-III's DOI, cited as of 2016, registered in 2023).
+    if matches!(work.work_type, Some(WorkType::Dataset | WorkType::Software))
+        && ids == Agreement::Match
+        && title.agreement == Agreement::Match
+        && year.agreement == Agreement::Mismatch
+    {
+        confidence = confidence.max(VERSION);
     }
     // Authors the work doesn't have are an error in the citation, and a
     // tell of invented references, whatever else agrees.

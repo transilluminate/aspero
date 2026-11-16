@@ -1596,3 +1596,40 @@ fn a_preprint_and_a_journal_article_are_other_versions_of_each_other() {
         );
     }
 }
+
+#[test]
+fn reprints_and_versions_cited_with_another_year_are_plausible() {
+    // Red team (#102) real misses: a book reprinted whole in a reader, and
+    // a dataset whose DOI's record carries its latest version's year.
+    let mut reprint = record(
+        &["10.4324/9781315680347-10"],
+        "Distinction: A Social Critique of the Judgement of Taste",
+        &["Pierre Bourdieu"],
+        2018,
+    );
+    reprint.work.work_type = Some(crate::work::WorkType::Chapter);
+    let text = "Bourdieu P. Distinction: A Social Critique of the Judgement of Taste. Cambridge, \
+                MA: Harvard University Press; 1984.";
+    let a = assess(&Claim::from_text(text), &reprint);
+    assert_eq!(a.year.agreement, Agreement::Mismatch);
+    assert!((PLAUSIBLE..VERIFIED).contains(&a.confidence), "{a:?}");
+    // Not a chapter cited as an article with the wrong year.
+    let text = "Bourdieu P. Distinction: a social critique of the judgement of taste. Soc Sci Inf. \
+                1984;13:1-20.";
+    assert!(assess(&Claim::from_text(text), &reprint).confidence < PLAUSIBLE);
+
+    let mut mimic = record(
+        &["10.13026/c2xw26"],
+        "MIMIC-III Clinical Database",
+        &["Alistair Johnson", "Tom Pollard", "Roger Mark"],
+        2023,
+    );
+    mimic.work.work_type = Some(crate::work::WorkType::Dataset);
+    let text = "Johnson A, Pollard T, Mark R. MIMIC-III Clinical Database (version 1.4). PhysioNet. \
+                2016. doi:10.13026/C2XW26";
+    let a = assess(&Claim::from_text(text), &mimic);
+    assert!((PLAUSIBLE..VERIFIED).contains(&a.confidence), "{a:?}");
+    // Without the identifier, the year still tells another version.
+    let text = "Johnson A, Pollard T, Mark R. MIMIC-III Clinical Database. PhysioNet. 2016.";
+    assert!(assess(&Claim::from_text(text), &mimic).confidence < PLAUSIBLE);
+}

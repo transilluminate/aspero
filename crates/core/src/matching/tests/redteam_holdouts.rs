@@ -3,6 +3,8 @@
 
 use super::*;
 
+// One table of regression cases, a few lines each.
+#[allow(clippy::too_many_lines)]
 #[test]
 fn second_held_out_red_team_failures_stay_fixed() {
     // Minimised false VERIFIEDs from bench/redteam/holdout-2.jsonl (round

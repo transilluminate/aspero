@@ -13,8 +13,8 @@ must not be cited, indexed or attributed to anyone.
 ## Verdict policy
 
 What each kind of citation should get, from DESIGN ("Resolve, verify and
-check") and `crates/core/src/matching/mod.rs` (verified ≥ 0.85, plausible
-≥ 0.6).
+check") and `crates/core/src/matching/caps.rs` (verified ≥ 0.85,
+plausible ≥ 0.6).
 
 | Citation | Should get |
 |---|---|
@@ -155,7 +155,7 @@ does hold.
 
 Each failure pattern below got a rule (see DESIGN, "Resolve, verify and
 check", and CHANGELOG), tested offline first (`red_team_minimised_failures_stay_fixed`
-and one test per rule in `crates/core/src/matching/tests.rs`).
+and one test per rule in `crates/core/src/matching/tests/`).
 No corpus label was changed. `scripts/redteam.py` now prints the agreed
 acceptance criteria:
 
@@ -238,7 +238,7 @@ verified its original; now plausible), and the known-answer bench at
 The 29 false VERIFIEDs, by what let them through (each rule in DESIGN,
 "Resolve, verify and check"; minimised in
 `held_out_red_team_failures_stay_fixed` and the per-rule tests in
-`crates/core/src/matching/tests.rs` and `crates/core/src/publication.rs`):
+`crates/core/src/matching/tests/` and `crates/core/src/publication/`):
 
 | Pattern | Cases | Example | Rule now |
 |---|---|---|---|
@@ -316,7 +316,7 @@ verify now. The known-answer bench passes 49/49.
 The 39 false VERIFIEDs, by what let them through (each rule in DESIGN,
 "Resolve, verify and check"; minimised in
 `second_held_out_red_team_failures_stay_fixed`, the per-rule tests beside
-it in `crates/core/src/matching/tests.rs`, and in `publication.rs`,
+it in `crates/core/src/matching/tests/`, and in `publication/`,
 `tagged.rs`, `work.rs`):
 
 | Pattern | Cases | Example | Rule now |
@@ -398,8 +398,8 @@ verified and accepted unchanged (142/155, 351/382, 388/441; 152, 376,
 | Research Square | 885 | `… An Open Research Agenda. Research Square.` | a preprint server |
 
 Minimised in `third_held_out_red_team_failures_stay_fixed` and the
-per-rule tests beside it (`crates/core/src/matching/tests.rs`), and in
-`crates/json/src/claim.rs`, `crates/engine/src/resolve.rs` and
+per-rule tests beside it (`crates/core/src/matching/tests/`), and in
+`crates/json/src/claim.rs`, `crates/engine/src/resolve/` and
 `transport.rs`.
 
 The 7 claims refused as `invalid` ("claim has no text, title, authors or
@@ -472,8 +472,8 @@ unverifiable for answers no cache or tape holds, as before these fixes.
 | Erratum cited as the original | 6/22 → 1 | the original's title at an "Author Correction:"'s place | "Author/Publisher Correction:", a correction's type, "– RETRACTION": a notice |
 
 Minimised in `fourth_held_out_red_team_failures_stay_fixed` and the
-per-rule tests beside it (`crates/core/src/matching/tests.rs`,
-`publication.rs`, `crates/engine/src/resolve.rs`). The tests encoding
+per-rule tests beside it (`crates/core/src/matching/tests/`,
+`publication/`, `crates/engine/src/resolve/`). The tests encoding
 0.20.1's leniency for a name inside another
 (`another_journal_is_clearly_another`: "Lancet Infect Dis" for The
 Lancet was "possibly a sister journal, possibly the same") now hold

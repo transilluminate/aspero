@@ -245,6 +245,9 @@ impl Engine {
     /// (see the module's notes). Estimating, it counts the pages it would
     /// read (exactly, from the works' `cited_by_count`s and the cache) and
     /// the coupling pages and lookups (a ceiling).
+    // One pipeline (plan, share out the budget, read, count, rank, look up),
+    // each stage reading the locals of the last; split, they'd travel as a struct.
+    #[allow(clippy::too_many_lines)]
     pub(super) async fn related(
         &self,
         entry: &Entry,

@@ -30,9 +30,6 @@ return_self_not_must_use = "allow"
 # boilerplate section on every fallible function.
 missing_errors_doc = "allow"
 missing_panics_doc = "allow"
-# The long functions are match tables or linear pipelines; splitting them
-# hides the flow.
-too_many_lines = "allow"
 # Pairs like `doi`/`dois` and `left`/`right` are the clearest names.
 similar_names = "allow"
 # Names that repeat their module (`id::IdError`) read better where used.

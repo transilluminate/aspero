@@ -79,16 +79,19 @@ the turn cap). $0.87 for the 28 runs.
 - **Worst: journal-read** (8 and 11 calls, 348 and 417 grep lines, 56k
   and 121k tokens). The question's words are everywhere: `journal`
   matched 170 files and `verify` 67. The model then grepped `journal`
-  file by file. The answer, `cited_journal`/`cited_journals`, is
-  `pub(crate)` near line 1,370 of `publication.rs` (2,560 lines, mostly
-  about journal names), behind `Claim::cited_container` in
-  `matching/mod.rs`. Run 2 detoured through `verdict.rs` and `journal_in`
-  first. Neither run's searches narrowed to `publication.rs` until the
-  end, so its waste is the highest.
+  file by file. The answer, `cited_journal`/`cited_journals`, was
+  `pub(crate)` near line 1,370 of the `publication` module (then one
+  2,560-line file, mostly about journal names; now
+  `crates/core/src/publication/cited_journal.rs`), behind
+  `Claim::cited_container` (then in `matching/mod.rs`, now
+  `matching/claim.rs`). Run 2 detoured through `verdict.rs` and
+  `journal_in` first. Neither run's searches narrowed to the publication
+  module until the end, so its waste is the highest.
 - **ffi-verification** (254 and 178 grep lines): `Verification` isn't
   named for what it is (no `Result`/`Record` suffix). `verif` matched 104
-  files, and the model listed every `struct|fn|const` in the 3,188-line
-  `records.rs` (147 lines) to find it.
+  files, and the model listed every `struct|fn|const` in the FFI's
+  records module (then one 3,188-line file; the listing was 147 lines) to
+  find it. It is now in `crates/ffi/src/records/verify.rs`.
 - **json-verify** (4 wasted searches both runs): grepping for
   `VerifyResult`, `serde` or `rename` found nothing, because the JSON shape
   is built by hand with `json!` in `crates/json/src/verify.rs`. One run

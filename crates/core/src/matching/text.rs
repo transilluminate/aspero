@@ -716,10 +716,51 @@ impl Normalised {
     /// not a journal's words the rule misses ("Int. J. Care Injured").
     /// Chinese and Japanese, written without spaces, count a word for
     /// each character ("化学分析仪器计量检定分析" is a title).
+    /// The journal's words count where it stands, its longest run: the
+    /// same words in the title before ("The contribution of growth hormone
+    /// in fetal design. Growth Hormone & IGF Research.") are the title's.
     pub(super) fn title_run(&self, families: &[String], journal: Option<&str>) -> usize {
+        let mut unaccounted = self.unaccounted(families, None);
+        if let Some(journal) = journal.map(crate::publication::significant) {
+            let named: Vec<bool> = self
+                .words
+                .iter()
+                .map(|w| crate::publication::journal_word(w, &journal))
+                .collect();
+            // Runs of the journal's words, joining words within them.
+            let mut runs: Vec<(usize, usize, usize)> = Vec::new();
+            let mut i = 0;
+            while i < self.words.len() {
+                if !named[i] {
+                    i += 1;
+                    continue;
+                }
+                let (start, mut end, mut count) = (i, i + 1, 1);
+                let mut j = i + 1;
+                while j < self.words.len()
+                    && (named[j] || STOPWORDS.contains(&self.words[j].as_str()))
+                {
+                    if named[j] {
+                        end = j + 1;
+                        count += 1;
+                    }
+                    j += 1;
+                }
+                runs.push((start, end, count));
+                i = end;
+            }
+            let longest = runs.iter().map(|r| r.2).max().unwrap_or(0);
+            for &(start, end, count) in &runs {
+                if count == longest {
+                    for (k, u) in unaccounted.iter_mut().enumerate().take(end).skip(start) {
+                        *u = *u && !named[k];
+                    }
+                }
+            }
+        }
         let mut longest = 0;
         let mut run = 0;
-        for (word, unaccounted) in self.words.iter().zip(self.unaccounted(families, journal)) {
+        for (word, unaccounted) in self.words.iter().zip(unaccounted) {
             if unaccounted {
                 run += word.chars().filter(|c| unspaced(*c)).count().max(1);
                 longest = longest.max(run);

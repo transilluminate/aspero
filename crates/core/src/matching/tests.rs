@@ -3644,3 +3644,29 @@ fn an_identified_work_with_other_authors_is_plausible() {
     bare.page = None;
     assert!(assess(&bare, &ruff).confidence < PLAUSIBLE);
 }
+
+#[test]
+fn a_journals_words_in_the_title_are_the_titles() {
+    // h3-594: a reworded title whose words are the journal's too, at the
+    // work's place with its DOI, was read as no title at all.
+    let mut gh = placed(
+        &["doi:10.1016/s1096-6374(02)00018-7"],
+        "The role of growth hormone in fetal development",
+        &["Michael J. Waters", "P. L. Kaye"],
+        2002,
+        ("Growth Hormone & IGF Research", "12", "137-146"),
+    );
+    gh.work.work_type = Some(crate::work::WorkType::JournalArticle);
+    let reworded = Claim::from_text(
+        "27. Waters MJ, Kaye PL. The contribution of growth hormone in fetal design. Growth \
+         Hormone & IGF Research. 2002;12(3):137-146. doi:10.1016/s1096-6374(02)00018-7",
+    );
+    let a = assess(&reworded, &gh);
+    assert_ne!(a.title.agreement, Agreement::Unknown, "{a:?}");
+    assert!(a.confidence < VERIFIED, "{a:?}");
+    // Without a title, the journal's words are the journal's.
+    let titleless =
+        Claim::from_text("Waters MJ, Kaye PL. Growth Hormone & IGF Research. 2002;12(3):137-146.");
+    let a = assess(&titleless, &gh);
+    assert!(a.confidence >= VERIFIED, "{a:?}");
+}

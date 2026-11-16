@@ -506,15 +506,15 @@ impl Engine {
         titles = distinct(titles);
         titles.truncate(MAX_TITLE_SEARCHES);
         // No hit pointed to the title (a conference paper without a DOI, a
-        // book Crossref lacks): the cleaned-up keywords, and the title the
-        // reference's shape suggests.
-        let keywords = titles.is_empty();
-        if keywords
+        // book Crossref lacks): the title the reference's shape suggests,
+        // else the cleaned-up keywords (a bare title ranks far better).
+        if titles.is_empty()
             && claim.title.is_none()
             && let Some(title) = claim.text.as_deref().and_then(matching::probable_title)
         {
             titles.push(title);
         }
+        let keywords = titles.is_empty();
         let mut jobs: Vec<(ProviderId, SearchQuery, Via)> = Vec::new();
         for provider in self.searchers(false) {
             if keywords && let Some(text) = &claim.text {

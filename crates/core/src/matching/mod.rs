@@ -1087,6 +1087,18 @@ pub fn assess(claim: &Claim, record: &SourceRecord) -> Assessment {
     {
         confidence = confidence.max(PLACED_YEAR_WRONG);
     }
+    // The claimed identifier with the whole title and the place name the
+    // work: authors that differ are the citation's error, or a record's
+    // garbled byline ("Ruff, Paul Jurica, Ronald M" as one name).
+    // Plausible, the authors to check; never verified.
+    if ids == Agreement::Match
+        && located
+        && title.agreement == Agreement::Match
+        && authors.agreement == Agreement::Mismatch
+        && year.agreement != Agreement::Mismatch
+    {
+        confidence = confidence.max(PLAUSIBLE);
+    }
     // A wrong volume or page is an error in the citation, and tells an
     // original from the letters and corrections in the same journal.
     if [volume, page]

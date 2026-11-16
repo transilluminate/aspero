@@ -3605,3 +3605,42 @@ fn a_chapter_cited_as_a_journals_article_is_plausible() {
     assert!(!publication::cites_issue("Injury 47 (2016) 797–804"));
     assert!(!publication::cites_issue("N Engl J Med. 2017;376:2545-55."));
 }
+
+#[test]
+fn an_identified_work_with_other_authors_is_plausible() {
+    // h3-138: the record's byline garbled into one name, cited as the
+    // record gives it; h3-622: every author invented. The DOI, title and
+    // place name the work: plausible, never verified, nor a mismatch.
+    let mut ruff = placed(
+        &["doi:10.1080/026990599120963"],
+        "In search of a unified definition for mild traumatic brain injury",
+        &["Ronald M. Ruff, Paul Jurica"],
+        1999,
+        ("Brain Injury", "13", "943-952"),
+    );
+    ruff.work.work_type = Some(crate::work::WorkType::JournalArticle);
+    let claim = |authors: &[&str]| Claim {
+        title: Some("In search of a unified definition for mild traumatic brain injury".into()),
+        authors: authors.iter().map(|a| (*a).to_owned()).collect(),
+        container: Some("Brain Injury".into()),
+        volume: Some("13".into()),
+        page: Some("943-952".into()),
+        ids: vec!["doi:10.1080/026990599120963".parse().unwrap()],
+        ..Claim::default()
+    };
+    for authors in [
+        &["Ruff, Paul Jurica, Ronald M"][..],
+        &["Mervimbe, Maren L."],
+    ] {
+        let a = assess(&claim(authors), &ruff);
+        assert!(
+            (PLAUSIBLE..VERIFIED).contains(&a.confidence),
+            "{authors:?}: {a:?}"
+        );
+    }
+    // Without the place, other authors still differ.
+    let mut bare = claim(&["Mervimbe, Maren L."]);
+    bare.volume = None;
+    bare.page = None;
+    assert!(assess(&bare, &ruff).confidence < PLAUSIBLE);
+}

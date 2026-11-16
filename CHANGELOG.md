@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+Added:
+
+- `Budget.spendableTodayUsd`: what this engine's paid calls may still
+  spend today under both caps, as `aspero budget` counts it
+  (`Engine::spendable_today`), and `Budget.creditCapUsd`, the credit cap
+  in force ($0.25 when unset), so callers needn't repeat the policy.
+
 ## 0.28.1
 
 Added:

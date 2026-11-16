@@ -1304,6 +1304,19 @@ pub struct Budget {
     /// its `/rate-limit` names them), in a fixed order; empty until then.
     #[uniffi(default = [])]
     pub prices: Vec<BudgetPrice>,
+    /// What this engine's paid calls may still spend today, in US dollars,
+    /// under both caps, counting everything using the key: the allowance
+    /// left up to `Config.openalexDailyCapUsd`, then, once paid calls would
+    /// use the allowance up, the credit left up to `creditCapUsd`. As
+    /// `aspero budget` counts it; over `searchPriceUsd`, the searches left.
+    /// `nil` when the allowance left is unknown.
+    #[uniffi(default = None)]
+    pub spendable_today_usd: Option<f64>,
+    /// The cap on prepaid credit spent today in force, in US dollars:
+    /// `Config.openalexDailyCreditCapUsd`, or aspero's default ($0.25)
+    /// when that's unset. `nil` for a provider without one.
+    #[uniffi(default = None)]
+    pub credit_cap_usd: Option<f64>,
 }
 
 /// What one kind of call costs.
@@ -1335,7 +1348,21 @@ impl Budget {
                     usd,
                 })
                 .collect(),
+            spendable_today_usd: None,
+            credit_cap_usd: None,
         }
+    }
+
+    /// With what `engine`'s caps leave spendable today, and its credit cap.
+    pub(crate) fn capped(
+        mut self,
+        engine: &engine::Engine,
+        provider: &aspero_core::ProviderId,
+        b: &engine::Budget,
+    ) -> Self {
+        self.spendable_today_usd = engine.spendable_today(provider, b);
+        self.credit_cap_usd = engine.daily_credit_cap(provider);
+        self
     }
 }
 
@@ -2881,6 +2908,29 @@ mod tests {
         assert_eq!(used[0].limit_usd, Some(1.0));
         assert_eq!(used[0].prepaid_remaining_usd, Some(4.5));
         assert_eq!(used[0].remaining_usd, None);
+    }
+
+    #[test]
+    fn a_budget_says_what_the_caps_leave_spendable() {
+        let openalex = ProviderId::from_static("openalex");
+        let engine = engine::Engine::builder()
+            .daily_credit_cap(openalex.clone(), 0.25)
+            .build();
+        let mut b = engine::Budget::new(jiff::Timestamp::UNIX_EPOCH);
+        let unknown = Budget::new(&openalex, &b).capped(&engine, &openalex, &b);
+        assert_eq!(unknown.spendable_today_usd, None);
+        assert_eq!(unknown.credit_cap_usd, Some(0.25));
+        // The allowance gone: what's left of the day's credit cap.
+        b.limit = Some(1.0);
+        b.remaining = Some(0.0);
+        b.prepaid_remaining = Some(5.0);
+        b.prepaid_spent_today = Some(0.10);
+        let capped = Budget::new(&openalex, &b).capped(&engine, &openalex, &b);
+        assert_eq!(
+            capped.spendable_today_usd,
+            engine.spendable_today(&openalex, &b)
+        );
+        assert_eq!(capped.spendable_today_usd, Some(0.15));
     }
 
     #[test]

@@ -379,7 +379,8 @@ const JOURNAL_WORDS: usize = 16;
 /// (2015)"), each capitalised (or a joining word: "of", "&"), back to the
 /// end of the sentence before (the title's, or "et al.") or the start of
 /// the text. Abbreviations with stops ("J. Am. Chem. Soc.") are read too,
-/// back to a sentence ending in a lowercase word.
+/// back to a sentence ending in a lowercase word; a title ending in a
+/// capitalised word ("… in Wuhan, China. Lancet. 2020;395:497") is not one.
 ///
 /// `None` when anything is unusual: a labelled locator ("vol. 3"), a
 /// publisher in the locator ("Springer; 2010:12-30"), a lowercase or
@@ -407,20 +408,36 @@ pub(crate) fn cited_journal(text: &str) -> Option<String> {
     }
     let last = *tokens[..end].last()?;
     // The journal's last word, with the stop or comma ending it.
-    let ending = last.strip_suffix(['.', ',']);
-    let last_word = ending.unwrap_or(last);
+    let last_word = last.strip_suffix(['.', ',']).unwrap_or(last);
     if !name_word(last_word) || is_stopword(last_word) {
         return None;
     }
-    let mut k = end - 1;
-    // Abbreviated with stops: the word before ends with one too. The name
-    // is kept as printed, stops and all.
+    // Abbreviated with stops: the word before ends with one too. Or it's
+    // the end of a title in title case ("… with AlphaFold. Science.
+    // 2021;596:583", "… Wuhan, China. Lancet. 2020;395:497"): read
+    // undotted, back to it.
     let dotted = last.ends_with('.')
-        && k > 0
-        && tokens[k - 1]
+        && end > 1
+        && tokens[end - 2]
             .strip_suffix('.')
             .is_some_and(|w| name_word(w) && capitalised(w));
-    let mut words = vec![if dotted { last } else { last_word }];
+    dotted
+        .then(|| read_journal(&tokens, end, true))
+        .flatten()
+        .or_else(|| read_journal(&tokens, end, false))
+}
+
+/// The journal whose last word is `tokens[end - 1]`, read back to the
+/// sentence before ([`cited_journal`]). `dotted`: abbreviated with stops,
+/// the name kept as printed, stops and all.
+fn read_journal(tokens: &[&str], end: usize, dotted: bool) -> Option<String> {
+    let last = tokens[end - 1];
+    let mut k = end - 1;
+    let mut words = vec![if dotted {
+        last
+    } else {
+        last.strip_suffix(['.', ',']).unwrap_or(last)
+    }];
     while k > 0 {
         let t = tokens[k - 1];
         let stopped = t.strip_suffix('.');
@@ -707,6 +724,16 @@ mod tests {
                 "J. Am. Chem. Soc.",
             ),
             ("Smith J. Is it safe? eLife. 2020;9:e1234.", "eLife"),
+            // A title ending in a capitalised word is not a dotted name.
+            (
+                "Huang C, Wang Y, Li X, et al. Clinical features of patients infected with 2019 novel coronavirus in Wuhan, China. Lancet. 2020;395(10223):497-506.",
+                "Lancet",
+            ),
+            (
+                "Jumper J, et al. Highly accurate protein structure prediction with AlphaFold. Science. 2021;596(7873):583-589.",
+                "Science",
+            ),
+            ("Smith J. Deep Learning. Nature. 2015;521:436.", "Nature"),
         ] {
             assert_eq!(cited_journal(text).as_deref(), Some(journal), "{text}");
         }
@@ -725,6 +752,7 @@ mod tests {
             // A dotted name that may have begun earlier.
             "Injury, Int. J. Care Injured 47 (2016) 797–804",
             "Attention Is All You Need. Environ. Sci. Technol. 2021;146:106274.",
+            "Doe J. Water in New York City. J. Am. Chem. Soc. 2001;123:45-50.",
             // Lowercase or punctuated words: sentence-case names, notes.
             "Smith J. Title. Journal of clinical medicine. 2020;9:12-20.",
             "Smith J. Title. Lancet (London, England). 2020;395:12-20.",

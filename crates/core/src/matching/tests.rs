@@ -1347,3 +1347,27 @@ fn a_year_in_the_title_is_not_the_year_cited() {
         assert!(a.confidence >= VERIFIED, "{text}: {a:?}");
     }
 }
+
+#[test]
+fn a_journal_after_a_capitalised_title_end_is_read() {
+    // Red team (#102): "… Wuhan, China. Lancet." read as a dotted name
+    // that may have begun earlier, so no journal, and the wrong one passed.
+    let mut wang = placed(
+        &[],
+        "Clinical Characteristics of 138 Hospitalized Patients With 2019 Novel \
+         Coronavirus–Infected Pneumonia in Wuhan, China",
+        &["Dawei Wang", "Bo Hu", "Chang Hu"],
+        2020,
+        ("JAMA", "323", "1061-1069"),
+    );
+    wang.work.work_type = Some(crate::work::WorkType::JournalArticle);
+    let text = "Wang D, Hu B, Hu C, et al. Clinical characteristics of 138 hospitalized patients \
+                with 2019 novel coronavirus-infected pneumonia in Wuhan, China. Lancet. \
+                2020;323(11):1061-1069.";
+    let a = assess(&Claim::from_text(text), &wang);
+    assert_eq!(a.container.agreement, Agreement::Mismatch, "{a:?}");
+    assert!((PLAUSIBLE..VERIFIED).contains(&a.confidence), "{a:?}");
+    let a = assess(&Claim::from_text(text.replace("Lancet", "JAMA")), &wang);
+    assert_eq!(a.container.agreement, Agreement::Match, "{a:?}");
+    assert!(a.confidence >= VERIFIED, "{a:?}");
+}

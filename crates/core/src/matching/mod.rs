@@ -543,7 +543,15 @@ pub fn assess(claim: &Claim, record: &SourceRecord) -> Assessment {
     // Only a journal article's journal is held against a citation: books'
     // series, proceedings and repositories go by many names.
     let article = work.work_type == Some(crate::work::WorkType::JournalArticle);
-    let cited_journal = claim.cited_container();
+    // A journal read from text that is the work's own title, in title case
+    // ("… Hooper D. Hot Gravitons From Kerr Black Holes. 2020."), is none.
+    let title_words = work_title.as_deref().map(words).unwrap_or_default();
+    let cited_journal = claim.cited_container().filter(|cited| {
+        claim.container.is_some()
+            || !publication::significant(cited)
+                .iter()
+                .all(|w| title_words.contains(w))
+    });
     let cited_place = claim.locator();
     // A reference giving a journal, volume and page cites the published
     // article; a preprint of it (in no journal, at no volume) is another

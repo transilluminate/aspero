@@ -1371,3 +1371,56 @@ fn a_journal_after_a_capitalised_title_end_is_read() {
     assert_eq!(a.container.agreement, Agreement::Match, "{a:?}");
     assert!(a.confidence >= VERIFIED, "{a:?}");
 }
+
+#[test]
+fn a_journal_cited_without_volume_and_page_is_read() {
+    // Red team (#102): "… JAMA. 2020." gave no journal, so the wrong one
+    // passed; with the year one off as well, two small errors verified.
+    let lstm = {
+        let mut r = placed(
+            &[],
+            "Long Short-Term Memory",
+            &["Sepp Hochreiter", "Jürgen Schmidhuber"],
+            1997,
+            ("Neural Computation", "9", "1735-1780"),
+        );
+        r.work.work_type = Some(crate::work::WorkType::JournalArticle);
+        r
+    };
+    for text in [
+        "Hochreiter S, Schmidhuber J. Long short-term memory. Neural Netw. 1997.",
+        "Hochreiter S, Schmidhuber J. Long short-term memory. Neural Netw. 1998.",
+        "S. Hochreiter and J. Schmidhuber, \"Long short-term memory,\" Neural Networks, vol. 9, \
+         1997.",
+        "Hochreiter, S. and Schmidhuber, J. (1997) 'Long short-term memory', Neural Networks.",
+    ] {
+        let a = assess(&Claim::from_text(text), &lstm);
+        assert_eq!(a.container.agreement, Agreement::Mismatch, "{text}");
+        assert!(
+            (PLAUSIBLE..VERIFIED).contains(&a.confidence),
+            "{text}: {a:?}"
+        );
+    }
+    for text in [
+        "Hochreiter S, Schmidhuber J. Long short-term memory. Neural Comput. 1997.",
+        "S. Hochreiter and J. Schmidhuber, \"Long short-term memory,\" Neural Computation, vol. 9, \
+         1997.",
+    ] {
+        let a = assess(&Claim::from_text(text), &lstm);
+        assert_eq!(a.container.agreement, Agreement::Match, "{text}");
+        assert!(a.confidence >= VERIFIED, "{text}: {a:?}");
+    }
+    // A title in title case before the year is the title, not a journal.
+    let mut gravitons = placed(
+        &[],
+        "Hot Gravitons From Kerr Black Holes",
+        &["Dan Hooper", "Gordan Krnjaic"],
+        2020,
+        ("Physical Review D", "101", "1"),
+    );
+    gravitons.work.work_type = Some(crate::work::WorkType::JournalArticle);
+    let text = "Hooper D, Krnjaic G. Hot Gravitons From Kerr Black Holes. 2020.";
+    let a = assess(&Claim::from_text(text), &gravitons);
+    assert_eq!(a.container.agreement, Agreement::Unknown, "{a:?}");
+    assert!(a.confidence >= VERIFIED, "{a:?}");
+}

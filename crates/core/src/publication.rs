@@ -375,15 +375,24 @@ const JOURNAL_WORDS: usize = 16;
 /// The journal a free-text reference cites, when it can be told with
 /// confidence: the words right before a styled locator (Vancouver
 /// "Environ Sci Technol. 2021;146:106274", APA "Environmental Science &
-/// Technology, 146, 106274", running headers "Nature 521, 436–444
-/// (2015)"), each capitalised (or a joining word: "of", "&"), back to the
-/// end of the sentence before (the title's, or "et al.") or the start of
-/// the text. Abbreviations with stops ("J. Am. Chem. Soc.") are read too,
-/// back to a sentence ending in a lowercase word; a title ending in a
-/// capitalised word ("… in Wuhan, China. Lancet. 2020;395:497") is not one.
+/// Technology, 146, 106274", Harvard "'Title', Cell, 145(5), pp. 646-674",
+/// running headers "Nature 521, 436–444 (2015)"), each capitalised (or a
+/// joining word: "of", "&"), back to the end of the sentence before (the
+/// title's, or "et al.") or the start of the text. Abbreviations with stops
+/// ("J. Am. Chem. Soc.") are read too, back to a sentence ending in a
+/// lowercase word; a title ending in a capitalised word ("… in Wuhan,
+/// China. Lancet. 2020;395:497") is not one.
 ///
-/// `None` when anything is unusual: a labelled locator ("vol. 3"), a
-/// publisher in the locator ("Springer; 2010:12-30"), a lowercase or
+/// Without a styled locator, only after a title that has clearly ended (a
+/// sentence's stop, or a closing quote): before the year ending the
+/// reference ("… Wuhan, China. JAMA. 2020."), its links ("… Polya.
+/// Journal of Applied Physiology. `https://doi.org/…`"), or a labelled
+/// locator (IEEE "\"…,\" Journal of Clinical Investigation, vol. 8, p.
+/// 109", "JAMA, no. 10223"); or ending the reference after a quoted title
+/// (Harvard "'…', Chest.").
+///
+/// `None` when anything is unusual: a publisher in the locator ("Springer;
+/// 2010:12-30") or before the year ("MIT Press; 2016."), a lowercase or
 /// numbered word, punctuation inside the name, or a run of dotted
 /// abbreviations that may have begun earlier ("Injury, Int. J. Care
 /// Injured 47 (2016)"). A journal misread would be called another journal,
@@ -391,25 +400,35 @@ const JOURNAL_WORDS: usize = 16;
 pub(crate) fn cited_journal(text: &str) -> Option<String> {
     let compact = compact(text);
     let tokens: Vec<&str> = compact.split_whitespace().collect();
-    let (at, found) = styled(&tokens)?;
-    // "Springer;2010:12-30": a publisher, not a year, before the volume;
-    // "Proceedings of X. 2016:770-778": a year, not a volume.
-    let head = tokens[at].split([';', ':', '(', ',']).next().unwrap_or("");
-    let semicolon = tokens[at].contains(';');
-    if (semicolon && !is_digits(head) && !is_month(head))
-        || (!semicolon && found.volume.as_deref().is_some_and(is_year))
-    {
-        return None;
-    }
+    let (at, after) = match styled(&tokens) {
+        Some((at, found)) => {
+            // "Springer;2010:12-30": a publisher, not a year, before the
+            // volume; "Proceedings of X. 2016:770-778": a year, not a volume.
+            let head = tokens[at].split([';', ':', '(', ',']).next().unwrap_or("");
+            let semicolon = tokens[at].contains(';');
+            if (semicolon && !is_digits(head) && !is_month(head))
+                || (!semicolon && found.volume.as_deref().is_some_and(is_year))
+            {
+                return None;
+            }
+            (at, After::Anything)
+        }
+        None => unstyled_end(&tokens)?,
+    };
     // The date between journal and locator: "N Engl J Med. 2017 Jun 29;376…".
     let mut end = at;
     while end > 0 && is_date_word(tokens[end - 1]) {
         end -= 1;
     }
     let last = *tokens[..end].last()?;
-    // The journal's last word, with the stop or comma ending it.
-    let last_word = last.strip_suffix(['.', ',']).unwrap_or(last);
-    if !name_word(last_word) || is_stopword(last_word) {
+    // The journal's last word, with the stop or comma ending it (always,
+    // without a styled locator).
+    let ending = last.strip_suffix(['.', ',']);
+    let last_word = ending.unwrap_or(last);
+    if !name_word(last_word)
+        || is_stopword(last_word)
+        || (after != After::Anything && ending.is_none())
+    {
         return None;
     }
     // Abbreviated with stops: the word before ends with one too. Or it's
@@ -422,15 +441,75 @@ pub(crate) fn cited_journal(text: &str) -> Option<String> {
             .strip_suffix('.')
             .is_some_and(|w| name_word(w) && capitalised(w));
     dotted
-        .then(|| read_journal(&tokens, end, true))
+        .then(|| read_journal(&tokens, end, true, after))
         .flatten()
-        .or_else(|| read_journal(&tokens, end, false))
+        .or_else(|| read_journal(&tokens, end, false, after))
+}
+
+/// What a journal read from a reference must follow.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum After {
+    /// Anything, or nothing: before a styled locator, a running header
+    /// ("Injury 47 (2016) 797–804") is all journal.
+    Anything,
+    /// The title, ended by a stop or a closing quote.
+    Title,
+    /// A quoted title (Harvard's "'…', Chest.").
+    Quoted,
+}
+
+/// Where the journal ends in a reference without a styled locator, and
+/// what it must follow ([`cited_journal`]).
+fn unstyled_end(tokens: &[&str]) -> Option<(usize, After)> {
+    // Labelled: "Journal of Clinical Investigation, vol. 8, p. 109".
+    let label = |t: &&str| {
+        matches!(
+            t.trim_end_matches(['.', ',']).to_ascii_lowercase().as_str(),
+            "vol" | "volume" | "no" | "pp" | "p"
+        )
+    };
+    if let Some(i) = tokens.iter().position(label) {
+        return (i > 0 && tokens[i - 1].ends_with(',')).then_some((i, After::Title));
+    }
+    // The links ending it, then the year: "JAMA. 2020. doi:10.1001/…".
+    let mut end = tokens.len();
+    while end > 0 && is_link(tokens[end - 1]) {
+        end -= 1;
+    }
+    let mut dated = end;
+    while dated > 0 && is_date_word(tokens[dated - 1]) {
+        dated -= 1;
+    }
+    let year = tokens[dated..end]
+        .iter()
+        .any(|t| is_year(t.trim_matches(|c: char| !c.is_alphanumeric())));
+    Some(if year {
+        (dated, After::Title)
+    } else if end < tokens.len() {
+        (end, After::Title)
+    } else {
+        (end, After::Quoted)
+    })
+}
+
+/// A link or identifier ending a reference: a DOI, URL, PMID or arXiv ID.
+fn is_link(t: &str) -> bool {
+    ["doi", "http", "www.", "pmid", "pmcid", "arxiv", "isbn"]
+        .iter()
+        .any(|p| starts_with_ci(t, p))
+}
+
+/// A word closing a quoted title: `tool',`, `C-fibers,"`, `graphs,”`.
+fn closes_quote(t: &str) -> bool {
+    t.trim_end_matches([',', '.'])
+        .ends_with(['\'', '’', '"', '”'])
 }
 
 /// The journal whose last word is `tokens[end - 1]`, read back to the
-/// sentence before ([`cited_journal`]). `dotted`: abbreviated with stops,
-/// the name kept as printed, stops and all.
-fn read_journal(tokens: &[&str], end: usize, dotted: bool) -> Option<String> {
+/// sentence before ([`cited_journal`]), following what `after` says.
+/// `dotted`: abbreviated with stops, the name kept as printed, stops and
+/// all.
+fn read_journal(tokens: &[&str], end: usize, dotted: bool, after: After) -> Option<String> {
     let last = tokens[end - 1];
     let mut k = end - 1;
     let mut words = vec![if dotted {
@@ -438,14 +517,21 @@ fn read_journal(tokens: &[&str], end: usize, dotted: bool) -> Option<String> {
     } else {
         last.strip_suffix(['.', ',']).unwrap_or(last)
     }];
+    // What ended the name: a closing quote (true) or a stop (false).
+    let mut ended = None;
     while k > 0 {
         let t = tokens[k - 1];
         let stopped = t.strip_suffix('.');
+        if closes_quote(t) {
+            ended = Some(true);
+            break;
+        }
         if dotted {
             let abbreviated = stopped.is_some_and(|w| name_word(w) && capitalised(w));
             if abbreviated || t == "&" || is_stopword(t) {
                 words.push(t);
             } else if sentence_end(t) && !capitalised(t) {
+                ended = Some(false);
                 break;
             } else {
                 return None;
@@ -460,6 +546,7 @@ fn read_journal(tokens: &[&str], end: usize, dotted: bool) -> Option<String> {
             if abbreviation {
                 return None;
             }
+            ended = Some(false);
             break;
         } else {
             return None;
@@ -468,6 +555,14 @@ fn read_journal(tokens: &[&str], end: usize, dotted: bool) -> Option<String> {
             return None;
         }
         k -= 1;
+    }
+    let follows = match after {
+        After::Anything => true,
+        After::Title => ended.is_some(),
+        After::Quoted => ended == Some(true),
+    };
+    if !follows {
+        return None;
     }
     words.reverse();
     // A name begins with a name's word ("The", "eLife"), not "of" or "&".
@@ -734,6 +829,36 @@ mod tests {
                 "Science",
             ),
             ("Smith J. Deep Learning. Nature. 2015;521:436.", "Nature"),
+            // No styled locator: before the year ending the reference, its
+            // links, or a labelled locator, after a title that has ended.
+            (
+                "Huang C, et al. Clinical features of patients infected with 2019 novel coronavirus in Wuhan, China. JAMA. 2020.",
+                "JAMA",
+            ),
+            (
+                "Hochreiter S, Schmidhuber J. Long short-term memory. Neural Netw. 1998.",
+                "Neural Netw",
+            ),
+            (
+                "Mahat DB. Use of conditioned media. J Clin Invest. 2016 Mar 3. doi:10.1172/x",
+                "J Clin Invest",
+            ),
+            (
+                "Pratiwi, N. Y., & Hidayat, W. (2020). Kesulitan Siswa Madrasah Ibtidaiyah pada Materi Pecahan Berdasarkan Langkah Polya. Journal of Applied Physiology. https://doi.org/10.33603/jnpm.v4i2.3476",
+                "Journal of Applied Physiology",
+            ),
+            (
+                "A. Neishabouri, \"Saltatory conduction in unmyelinated axons,\" Journal of Clinical Investigation, vol. 8, p. 109, 2014.",
+                "Journal of Clinical Investigation",
+            ),
+            (
+                "C. Huang et al., \"Clinical features of patients in Wuhan, China,\" JAMA, no. 10223, 2020.",
+                "JAMA",
+            ),
+            (
+                "Byrd, J.C. et al. (2003) 'A phase II study of cladribine: results from CALGB Study 9211', Chest.",
+                "Chest",
+            ),
         ] {
             assert_eq!(cited_journal(text).as_deref(), Some(journal), "{text}");
         }
@@ -757,6 +882,14 @@ mod tests {
             "Smith J. Title. Journal of clinical medicine. 2020;9:12-20.",
             "Smith J. Title. Lancet (London, England). 2020;395:12-20.",
             "Smith J, Jones K, N Engl J Med 2017;376:2545",
+            // Without a styled locator, nothing that may be the title, a
+            // publisher or a name.
+            "Smith J. Deep learning in medicine. 2020.",
+            "Landsman K. I Am a Strange Loop. 2007.",
+            "Kahneman D. Thinking, Fast and Slow. New York: Farrar, Straus and Giroux; 2011.",
+            "Smith J. Some title. Nature.",
+            "Ji J, Chen W. Mitigating Deceptive Alignment via Self-Monitoring. 2025. arXiv:2505.18807",
+            "Huang et al. described in The Lancet (2020) — \"Clinical features of patients\".",
         ] {
             assert_eq!(cited_journal(text), None, "{text}");
         }

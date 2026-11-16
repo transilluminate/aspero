@@ -143,11 +143,22 @@ pub(crate) fn journal_word(word: &str, full: &[String]) -> bool {
 }
 
 /// A journal name's words that tell it apart, normalised.
+/// The article "A" inside a name ("CA: A Cancer Journal for Clinicians",
+/// abbreviated "CA Cancer J Clin") is left out too; a series letter
+/// ("Physical Review A", "Acta Crystallographica Section A: …") isn't.
 pub(crate) fn significant(name: &str) -> Vec<String> {
-    normalise(name)
-        .split(' ')
-        .filter(|w| !w.is_empty() && !JOURNAL_STOPWORDS.contains(w))
-        .map(str::to_owned)
+    let norm = normalise(name);
+    let words: Vec<&str> = norm.split(' ').filter(|w| !w.is_empty()).collect();
+    let article = |i: usize| {
+        words[i] == "a"
+            && i + 1 < words.len()
+            && !(i > 0 && STRUCTURAL_WORDS.contains(&words[i - 1]))
+    };
+    words
+        .iter()
+        .enumerate()
+        .filter(|&(i, w)| !JOURNAL_STOPWORDS.contains(w) && !article(i))
+        .map(|(_, w)| (*w).to_owned())
         .collect()
 }
 
@@ -744,6 +755,10 @@ mod tests {
                 "Cochrane Database of Systematic Reviews",
             ),
             ("Circulation", "Circulation"),
+            // The article "A" inside a name (app pre-test, #102).
+            ("CA Cancer J Clin", "CA: A Cancer Journal for Clinicians"),
+            ("CA Cancer J Clin", "CA A Cancer Journal for Clinicians"),
+            ("Phys Rev A", "Physical Review A"),
         ] {
             assert!(same_journal(a, b), "{a} ↔ {b}");
         }
@@ -1002,6 +1017,8 @@ mod tests {
             // abbreviation lacks.
             ("Am J Med", "American Journal of Emergency Medicine"),
             ("Ann Surg", "Annals of Thoracic Surgery"),
+            // A series letter is not an article.
+            ("Phys Rev A", "Physical Review B"),
             (
                 "J Am Coll Cardiol",
                 "Journal of the American College of Surgeons",

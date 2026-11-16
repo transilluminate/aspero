@@ -68,8 +68,10 @@ const PLACED: f64 = 0.9;
 /// plausible.
 const PLACED_YEAR_OFF: f64 = 0.8;
 /// The title, authors, volume and first page agreeing with the year two or
-/// more off: plausible, the year to check.
-const PLACED_YEAR_WRONG: f64 = PLAUSIBLE;
+/// more off: plausible, the year to check, and as high as a partial match
+/// can be (a partial title with another page is capped there too), so
+/// that the work confirming more of the citation ranks first.
+const PLACED_YEAR_WRONG: f64 = PLACED_YEAR_OFF;
 /// Title score, a mismatch, for another title of a series: the title's
 /// own year replaced ([`text::Normalised::substitutes_in`]).
 const OTHER_IN_SERIES: f64 = 0.3;

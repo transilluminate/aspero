@@ -3245,3 +3245,235 @@ fn a_title_reworded_with_synonyms_is_not_the_records() {
         assert!(!text::replaces(claimed, actual), "{claimed}");
     }
 }
+
+#[test]
+fn a_paper_cited_at_another_meeting_is_told_by_its_subject() {
+    // h3-890, h3-896, h3-912: no named conference on either side.
+    let cite = |authors: &str, title: &str, venue: &str| {
+        Claim::from_text(format!("{authors}. {title}. In {venue}"))
+    };
+    for (n, claim, record) in [
+        (
+            "h3-890",
+            cite(
+                "MacCallum, K., & Parsons, D. (2017)",
+                "Evaluating a Mobile Toolkit for Designing Mobile Learning Activities",
+                "Proceedings of the 2nd International Workshop on User Interface Test \
+                 Automation (pp. 1–6).",
+            ),
+            proceedings(
+                "Evaluating a Mobile Toolkit for Designing Mobile Learning Activities",
+                &["Kathryn MacCallum", "David Parsons"],
+                2017,
+                "Proceedings of the 16th World Conference on Mobile and Contextual Learning",
+                "1-6",
+            ),
+        ),
+        (
+            "h3-896",
+            cite(
+                "James Kennedy, Paul Baxter, and Tony Belpaeme. 2015",
+                "The Robot Who Tried Too Hard",
+                "The 26th International ACM SIGACCESS Conference on Computers and \
+                 Accessibility (ASSETS '15). 67–74.",
+            ),
+            proceedings(
+                "The Robot Who Tried Too Hard",
+                &["James Kennedy", "Paul Baxter", "Tony Belpaeme"],
+                2015,
+                "Proceedings of the Tenth Annual ACM/IEEE International Conference on \
+                 Human-Robot Interaction",
+                "67-74",
+            ),
+        ),
+        (
+            "h3-912",
+            cite(
+                "Xiaoyu Wang, Eric Bier, Thomas Butkiewicz, William Ribarsky, and Wenwen Dou. \
+                 2011",
+                "Designing visual analytics systems for organizational environments",
+                "Interaction Design and Children (IDC '11). 1–9.",
+            ),
+            proceedings(
+                "Designing visual analytics systems for organizational environments",
+                &[
+                    "Xiaoyu Wang",
+                    "Eric Bier",
+                    "Thomas Butkiewicz",
+                    "William Ribarsky",
+                    "Wenwen Dou",
+                ],
+                2011,
+                "Proceedings of the 2011 Visual Information Communication - International \
+                 Symposium",
+                "1-9",
+            ),
+        ),
+    ] {
+        let a = assess(&claim, &record);
+        assert_eq!(a.container.agreement, Agreement::Mismatch, "{n}: {a:?}");
+        assert!((PLAUSIBLE..VERIFIED).contains(&a.confidence), "{n}: {a:?}");
+    }
+
+    // Names compared by subject, acronyms and furniture aside.
+    for (cited, actual, expected) in [
+        (
+            "Proceedings of the 9th International Conference on Information Communication \
+             and Management (ICICM 2013). 129–130.",
+            "Proceedings of the 2013 Conference on the Theory of Information Retrieval",
+            Some(false),
+        ),
+        (
+            "Fifteenth ACM Conference on Recommender Systems (RecSys '26). 1803–1820.",
+            "Proceedings of the 31st International Conference on Intelligent User Interfaces",
+            Some(false),
+        ),
+        (
+            "Companion of the 2025 ACM/IEEE International Conference on Human-Robot \
+             Interaction (HRI '25). 544–548.",
+            "Proceedings of the 2025 International Conference on Artificial Intelligence and \
+             Smart Manufacturing",
+            Some(false),
+        ),
+        // An acronym alone, against a name with its own.
+        (
+            "RecSys '26",
+            "CUI 2021 - 3rd Conference on Conversational User Interfaces",
+            Some(false),
+        ),
+        // The same meeting, written otherwise.
+        (
+            "Proc. IEEE Int. Conf. Robot. Autom., pp. 1–6",
+            "2015 IEEE International Conference on Robotics and Automation (ICRA)",
+            Some(true),
+        ),
+        (
+            "Proceedings of the 2019 CHI Conference on Human Factors in Computing Systems \
+             (CHI '19). Association for Computing Machinery, New York, NY, USA, 1–12.",
+            "Proceedings of the 2019 CHI Conference on Human Factors in Computing Systems",
+            Some(true),
+        ),
+        (
+            "IEEE/RSJ Int. Conf. Intell. Robots Syst. (IROS)",
+            "2021 IEEE/RSJ International Conference on Intelligent Robots and Systems (IROS)",
+            Some(true),
+        ),
+        (
+            "HRI '15",
+            "Proceedings of the Tenth Annual ACM/IEEE International Conference on \
+             Human-Robot Interaction (HRI)",
+            Some(true),
+        ),
+        // An acronym against a name without one: can't be told.
+        (
+            "ASSETS '15",
+            "Proceedings of the 17th International ACM SIGACCESS Conference on Computers & \
+             Accessibility",
+            None,
+        ),
+        (
+            "Proc. UIST",
+            "Proceedings of the 28th Annual ACM Symposium on User Interface Software & \
+             Technology",
+            None,
+        ),
+    ] {
+        assert_eq!(
+            publication::proceedings_agree(cited, actual),
+            expected,
+            "{cited} | {actual}"
+        );
+    }
+
+    // Cited at its own meeting, however written, it still verifies.
+    let hri = proceedings(
+        "The Robot Who Tried Too Hard",
+        &["James Kennedy", "Paul Baxter", "Tony Belpaeme"],
+        2015,
+        "Proceedings of the Tenth Annual ACM/IEEE International Conference on Human-Robot \
+         Interaction",
+        "67-74",
+    );
+    for venue in [
+        "Proceedings of the Tenth Annual ACM/IEEE International Conference on Human-Robot \
+         Interaction (HRI '15). 67–74.",
+        "Proc. ACM/IEEE Int. Conf. Human-Robot Interaction, pp. 67–74, 2015.",
+        "HRI '15. 67–74.",
+    ] {
+        let claim = cite(
+            "James Kennedy, Paul Baxter, and Tony Belpaeme. 2015",
+            "The Robot Who Tried Too Hard",
+            venue,
+        );
+        let a = assess(&claim, &hri);
+        assert!(a.confidence >= VERIFIED, "{venue}: {a:?}");
+    }
+    // A journal called "Proceedings of …" is held as a journal.
+    let pnas = article(
+        "Neural networks and physical systems with emergent collective computational abilities",
+        &["J J Hopfield"],
+        1982,
+        (
+            "Proceedings of the National Academy of Sciences",
+            "79",
+            "2554-2558",
+        ),
+    );
+    let a = assess(
+        &Claim::from_text(
+            "Hopfield JJ. Neural networks and physical systems with emergent collective \
+             computational abilities. Proc Natl Acad Sci U S A. 1982;79(8):2554-8.",
+        ),
+        &pnas,
+    );
+    assert!(a.confidence >= VERIFIED, "{a:?}");
+}
+
+#[test]
+fn a_journal_article_cited_in_a_meetings_proceedings_is_another_venue() {
+    // h3-908: the HRI paper's namesake in a journal, found for a citation
+    // of a symposium's proceedings.
+    let journal = article(
+        "Is a Robot better than Video for Initiating Remote Social Connections among Children?",
+        &["Nuri Kim", "Jeonghye Han", "Wendy Ju"],
+        2014,
+        (
+            "Journal of Institute of Control, Robotics and Systems",
+            "20",
+            "208-209",
+        ),
+    );
+    let claim = Claim::from_text(
+        "Kim, N., Han, J., & Ju, W. (2014). Is a robot better than video for initiating remote \
+         social connections among children? In Proceedings of the 8th International Symposium \
+         on Visual Information Communication and Interaction (pp. 208–209).",
+    );
+    let a = assess(&claim, &journal);
+    assert_eq!(a.container.agreement, Agreement::Mismatch, "{a:?}");
+    assert!((PLAUSIBLE..VERIFIED).contains(&a.confidence), "{a:?}");
+    // Cited in its journal, it verifies.
+    let claim = Claim::from_text(
+        "Kim, N., Han, J., & Ju, W. (2014). Is a robot better than video for initiating remote \
+         social connections among children? Journal of Institute of Control, Robotics and \
+         Systems, 20, 208–209.",
+    );
+    let a = assess(&claim, &journal);
+    assert!(a.confidence >= VERIFIED, "{a:?}");
+    // A journal called "Proceedings of …", abbreviated, isn't a meeting.
+    let prsb = article(
+        "Rapid evolution of a sexually selected trait",
+        &["Alice Smith-Holloway"],
+        2003,
+        (
+            "Proceedings of the Royal Society B: Biological Sciences",
+            "270",
+            "1234-1240",
+        ),
+    );
+    let claim = Claim::from_text(
+        "Smith-Holloway A. Rapid evolution of a sexually selected trait. In Proc. R. Soc. B \
+         270, 1234–1240 (2003).",
+    );
+    let a = assess(&claim, &prsb);
+    assert!(a.confidence >= VERIFIED, "{a:?}");
+}

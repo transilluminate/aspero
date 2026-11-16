@@ -931,6 +931,10 @@ fn prefer_site(candidates: &mut [Candidate], claim: &Claim) -> bool {
 /// a record in the same journal leaves out (Crossref's BMC records give no
 /// article number; Europe PMC's do), so a wrong one cited is seen.
 fn add_place(record: &mut SourceRecord, other: &SourceRecord) {
+    let same_version = record.ids.iter().any(|x| {
+        matches!(x.kind(), IdKind::Doi | IdKind::Pmid)
+            && other.ids.iter().any(|y| same_work_id(x, y))
+    });
     let (w, o) = (&mut record.work, &other.work);
     if w.work_type == Some(WorkType::Preprint) {
         return;
@@ -939,6 +943,27 @@ fn add_place(record: &mut SourceRecord, other: &SourceRecord) {
         w.container_title.clone_from(&o.container_title);
         w.volume.clone_from(&o.volume);
         w.page.clone_from(&o.page);
+        return;
+    }
+    // A record of the same version (a DOI or PMID shared) that gives its
+    // pages but not its venue (OpenAlex's of an ACM paper, "37–42" in no
+    // proceedings) is in the other's, where its numbers don't contradict:
+    // a venue cited is checked whichever record is kept.
+    let agree = |a: &Option<String>, b: &Option<String>| match (a, b) {
+        (Some(a), Some(b)) => aspero_core::publication::first_page(a)
+            .eq_ignore_ascii_case(aspero_core::publication::first_page(b)),
+        _ => true,
+    };
+    if w.container_title.is_none()
+        && o.container_title.is_some()
+        && same_version
+        && agree(&w.volume, &o.volume)
+        && agree(&w.page, &o.page)
+    {
+        w.container_title.clone_from(&o.container_title);
+        if w.volume.is_none() {
+            w.volume.clone_from(&o.volume);
+        }
         return;
     }
     let same_journal = match (&w.container_title, &o.container_title) {
@@ -1430,6 +1455,31 @@ mod tests {
         assert_eq!(kept.work.page, None, "another journal's page");
         add_place(&mut crossref, &europepmc);
         assert_eq!(crossref.work.page.as_deref(), Some("279"));
+        // OpenAlex's record of an ACM paper gives its pages, not its
+        // proceedings; Crossref's gives them (holdout-3 #894: cited at
+        // another meeting, verified by OpenAlex's).
+        let title = "Mobile Agents for Mobile Games";
+        let mut openalex = titled("10.1145/2751496.2751500", title, &[], 2015);
+        openalex.work.page = Some("37-42".into());
+        let mut crossref = openalex.clone();
+        crossref.work.page = None;
+        crossref.work.container_title =
+            Some("Proceedings of the 2nd Workshop on Mobile Gaming".into());
+        let mut elsewhere = openalex.clone();
+        add_place(&mut openalex, &crossref);
+        assert_eq!(
+            openalex.work.container_title.as_deref(),
+            Some("Proceedings of the 2nd Workshop on Mobile Gaming")
+        );
+        // Not another version's, nor at other pages.
+        let mut other_version = crossref.clone();
+        other_version.ids = vec!["doi:10.1145/9999999.9999999".parse().unwrap()];
+        add_place(&mut elsewhere, &other_version);
+        assert_eq!(elsewhere.work.container_title, None);
+        let mut moved = crossref.clone();
+        moved.work.page = Some("101".into());
+        add_place(&mut elsewhere, &moved);
+        assert_eq!(elsewhere.work.container_title, None);
     }
 
     #[test]

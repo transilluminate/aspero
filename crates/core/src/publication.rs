@@ -619,6 +619,251 @@ pub(crate) fn proceedings(venue: &str) -> bool {
         })
 }
 
+/// Words of a proceedings' name that say what kind of meeting, who holds
+/// it and when, not what it is about: "Proceedings of the 16th Annual
+/// ACM/IEEE International Conference on …", "Companion of the …", and the
+/// furniture a reference puts after it ("pp.", "eds.").
+const PROCEEDINGS_BOILERPLATE: &[&str] = &[
+    "proceedings",
+    "proceeding",
+    "proc",
+    "procs",
+    "companion",
+    "conference",
+    "conferences",
+    "conf",
+    "symposium",
+    "symposia",
+    "symp",
+    "workshop",
+    "workshops",
+    "wksp",
+    "congress",
+    "meeting",
+    "colloquium",
+    "summit",
+    "forum",
+    "annual",
+    "annu",
+    "international",
+    "int",
+    "intl",
+    "world",
+    "joint",
+    "acm",
+    "ieee",
+    "cvf",
+    "rsj",
+    "ifip",
+    "siam",
+    "spie",
+    "usenix",
+    "edition",
+    "ed",
+    "eds",
+    "editor",
+    "editors",
+    "vol",
+    "volume",
+    "pp",
+    "page",
+    "pages",
+    "part",
+    "extended",
+    "abstracts",
+    "adjunct",
+    "papers",
+    "poster",
+    "posters",
+    "demo",
+    "demos",
+    "track",
+    "session",
+    "series",
+    "held",
+    "th",
+    "st",
+    "nd",
+    "rd",
+    "a",
+    "an",
+    "at",
+    "to",
+    "with",
+];
+
+/// Ordinals spelt out, as editions are: "Tenth Annual …".
+const ORDINALS: &[&str] = &[
+    "first",
+    "second",
+    "third",
+    "fourth",
+    "fifth",
+    "sixth",
+    "seventh",
+    "eighth",
+    "ninth",
+    "tenth",
+    "eleventh",
+    "twelfth",
+    "thirteenth",
+    "fourteenth",
+    "fifteenth",
+    "sixteenth",
+    "seventeenth",
+    "eighteenth",
+    "nineteenth",
+    "twentieth",
+    "thirtieth",
+    "fortieth",
+    "fiftieth",
+    "twenty",
+    "thirty",
+    "forty",
+    "fifty",
+    "sixty",
+];
+
+/// Capitalised tokens that name a publisher, place or numeral, not a
+/// conference.
+const NOT_ACRONYMS: &[&str] = &[
+    "acm", "ieee", "cvf", "rsj", "ifip", "siam", "spie", "usenix", "usa", "ny", "uk", "lncs", "pp",
+    "ii", "iii", "iv", "vi", "vii", "viii", "ix", "xi", "xii", "eds",
+];
+
+/// A proceedings' name as words of its subject and acronyms: "Proceedings
+/// of the Tenth Annual ACM/IEEE International Conference on Human-Robot
+/// Interaction (HRI '15)" is about "human robot interaction", "HRI". A
+/// special interest group (SIGCHI, SIGACCESS) holds a meeting; its name is
+/// neither.
+struct Subject {
+    words: Vec<String>,
+    acronyms: Vec<String>,
+}
+
+impl Subject {
+    fn new(name: &str) -> Subject {
+        let tokens: Vec<&str> = name
+            .split(|c: char| !c.is_alphanumeric())
+            .filter(|t| !t.is_empty())
+            .collect();
+        let alphabetic: Vec<&&str> = tokens
+            .iter()
+            .filter(|t| t.chars().all(char::is_alphabetic) && t.chars().count() > 3)
+            .collect();
+        // A name in capitals throughout has words, not acronyms.
+        let shouting = alphabetic.len() >= 3
+            && alphabetic
+                .iter()
+                .filter(|t| t.chars().all(char::is_uppercase))
+                .count()
+                * 2
+                > alphabetic.len();
+        let mut acronyms: Vec<String> = Vec::new();
+        if !shouting {
+            for t in &tokens {
+                let t = t.trim_end_matches(|c: char| c.is_ascii_digit());
+                let upper = t.chars().filter(char::is_ascii_uppercase).count();
+                let lower = t.to_ascii_lowercase();
+                if upper >= 2
+                    && (2..=12).contains(&t.len())
+                    && t.chars().all(|c| c.is_ascii_alphabetic())
+                    && !NOT_ACRONYMS.contains(&lower.as_str())
+                    && !lower.starts_with("sig")
+                    && !acronyms.contains(&lower)
+                {
+                    acronyms.push(lower);
+                }
+            }
+        }
+        let words = normalise(name)
+            .split(' ')
+            .filter(|w| w.chars().count() > 1)
+            .filter(|w| !w.chars().any(|c| c.is_ascii_digit()))
+            .filter(|w| {
+                !JOURNAL_STOPWORDS.contains(w)
+                    && !PROCEEDINGS_BOILERPLATE.contains(w)
+                    && !ORDINALS.contains(w)
+                    && !w.starts_with("sig")
+                    && !acronyms.iter().any(|a| a == w)
+            })
+            .map(str::to_owned)
+            .fold(Vec::new(), |mut words, w| {
+                if !words.contains(&w) {
+                    words.push(w);
+                }
+                words
+            });
+        Subject { words, acronyms }
+    }
+}
+
+/// One subject word for another, or for its abbreviation or plural:
+/// "Robot." for "Robotics", "Computers" for "Computer".
+fn same_subject_word(a: &str, b: &str) -> bool {
+    let (short, long) = if a.len() <= b.len() { (a, b) } else { (b, a) };
+    short == long || (short.len() >= 3 && long.starts_with(short))
+}
+
+/// Whether a proceedings cited is the record's, by what each is about:
+/// `Some(true)` when they share an acronym or most of the record's
+/// subject, `Some(false)` when they're clearly about different things
+/// ("… Workshop on User Interface Test Automation" for "… World Conference
+/// on Mobile and Contextual Learning", or "`RecSys '26`" alone for a name
+/// whose own acronym is "IUI"), `None` when it can't be told (an acronym
+/// against a name without one: "ASSETS" for "… Conference on Computers and
+/// Accessibility"). `cited` may run on into what a reference puts after
+/// the venue (pages, a publisher): words there only make a mismatch less
+/// likely.
+pub(crate) fn proceedings_agree(cited: &str, actual: &str) -> Option<bool> {
+    let (cited, actual) = (Subject::new(cited), Subject::new(actual));
+    let same_acronym =
+        |a: &String, b: &String| a == b || a.ends_with(b.as_str()) || b.ends_with(a.as_str());
+    if cited
+        .acronyms
+        .iter()
+        .any(|c| actual.acronyms.iter().any(|a| same_acronym(c, a)))
+    {
+        return Some(true);
+    }
+    if cited.words.is_empty() {
+        return (!cited.acronyms.is_empty() && !actual.acronyms.is_empty()).then_some(false);
+    }
+    if actual.words.is_empty() {
+        return None;
+    }
+    let shared = actual
+        .words
+        .iter()
+        .filter(|a| cited.words.iter().any(|c| same_subject_word(c, a)))
+        .count();
+    if shared * 2 >= actual.words.len() {
+        Some(true)
+    } else if shared * 3 <= actual.words.len() {
+        Some(false)
+    } else {
+        None
+    }
+}
+
+/// Whether a venue's name is a meeting's, as a record's container: "…
+/// Conference on …", "Companion of …", and with `proceedings` "Proceedings
+/// of …" too (journals are called that: the Royal Society's).
+pub(crate) fn meeting_name(venue: &str, proceedings: bool) -> bool {
+    normalise(venue).split(' ').any(|w| {
+        matches!(
+            w,
+            "conference"
+                | "symposium"
+                | "workshop"
+                | "workshops"
+                | "congress"
+                | "companion"
+                | "colloquium"
+        ) || (proceedings && w == "proceedings")
+    })
+}
+
 /// Words at most a journal's name runs to ("Proceedings of the National
 /// Academy of Sciences of the United States of America").
 const JOURNAL_WORDS: usize = 16;

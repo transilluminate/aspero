@@ -853,6 +853,55 @@ pub fn assess(claim: &Claim, record: &SourceRecord) -> Assessment {
     let confirmed = cited_conferences
         .iter()
         .any(|c| own_conferences.contains(c));
+    // Any other meeting by what it's about, its name's furniture aside
+    // ("Proceedings of the 2nd International Workshop on User Interface
+    // Test Automation" for "… 16th World Conference on Mobile and
+    // Contextual Learning"): a venue the claim gives, or its text gives
+    // after the title, as a meeting's ("In …", "Proceedings of …"),
+    // against a record's proceedings (not a journal called "Proceedings
+    // of …").
+    let given_venue = claim.container.is_some()
+        || title_span.is_some()
+        || text
+            .as_ref()
+            .is_some_and(|t| t.raw.trim_start().starts_with('@'));
+    let meeting_cited = venue.as_deref().is_some_and(|v| {
+        let v = v.trim_start_matches(|c: char| !c.is_alphanumeric());
+        claim.container.is_some()
+            || publication::proceedings(v)
+            || v.starts_with("In ")
+            || v.starts_with("in ")
+            || v.starts_with("In:")
+    });
+    // A journal's article cited in a meeting's proceedings ("In
+    // Proceedings of the 8th International Symposium on …") is another
+    // version, if any, of the paper cited.
+    let in_proceedings = |v: &str| {
+        let v = v.trim_start_matches(|c: char| !c.is_alphanumeric());
+        (v.starts_with("In ") || v.starts_with("In:")) && publication::proceedings(v)
+    };
+    let other_meeting = !other_conference
+        && !confirmed
+        && given_venue
+        && meeting_cited
+        && container.agreement != Agreement::Match
+        && !preprint
+        && match (venue.as_deref(), work.container_title.as_deref()) {
+            // Journals called "Proceedings of …" (the Royal Society's) go
+            // by abbreviations this can't tell.
+            (Some(cited), Some(actual))
+                if work.work_type == Some(WorkType::JournalArticle)
+                    && !publication::meeting_name(actual, true) =>
+            {
+                claim.container.is_none() && in_proceedings(cited)
+            }
+            (Some(cited), Some(actual)) => {
+                publication::meeting_name(actual, work.work_type != Some(WorkType::JournalArticle))
+                    && publication::proceedings_agree(cited, actual) == Some(false)
+            }
+            _ => false,
+        };
+    let other_conference = other_conference || other_meeting;
     let preprint_at_conference = preprint
         && posted
         && !confirmed

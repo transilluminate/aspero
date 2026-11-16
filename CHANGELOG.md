@@ -4,6 +4,14 @@
 
 Added:
 
+- References pasted as a Wikipedia citation template (`{{cite journal
+  |last1=… |title=… |journal=… |doi=…}}`, any `cite …` or `citation`), an
+  RIS record (its lines run together on one, or not) or an EndNote record
+  (`%0 Journal Article %A … %T …`) are read as their fields, a structured
+  claim, wherever a reference is taken (`verify`'s arguments and stdin,
+  MCP, the apps). A stdin line starting with `{{` was refused as invalid
+  JSON; one starting with `{` that isn't meant as JSON is a reference
+  now too.
 - Developer: an HTTP record/replay tape (`ASPERO_HTTP_TAPE`,
   `ASPERO_HTTP_TAPE_MODE=replay-only`), on by default for `verify_bench`
   and `scripts/redteam.py`: each distinct request is paid for once and
@@ -52,6 +60,47 @@ Fixed:
   once the day's allowance is used up while prepaid credit is left:
   OpenAlex spends the credit then, so only no credit left either (or its
   `not_enough_credits`) is a spent budget.
+
+Fixed (from a second held-out red team, `bench/redteam/holdout-2.jsonl`,
+replayed offline from the tape of round 2's run: wrong citations verified
+fell from 39 of 399 to 2, 87 claims needing requests the tape lacks; real
+ones mismatched or not found fell from 19 to 9 of 441):
+
+- A conference paper cited at another conference (CVPR's at ICCV, KDD's
+  at ICML) is plausible, the venue named: the major conferences are told
+  by acronym or name, the record's by its proceedings or IEEE DOI. A
+  preprint server's copy cited in a conference's proceedings can't
+  confirm the conference: plausible, as a copy can't confirm a journal.
+  Real NeurIPS or ICML citations whose only record is arXiv's are
+  plausible too.
+- A title with words swapped for others anywhere in it, several
+  together ("Likelihood Determinants" for "Risk Factors", "A Controlled
+  Study" for "A Randomized Trial"), in free text or a structured claim,
+  is plausible at most; spelling, abbreviations, numbers spelt out and
+  words broken at a line's end still match.
+- More locators and journals are read: MLA's `77.4 (2005): 1321-1373`,
+  Harvard's `pp.58-63` and `p.054433`, IEEE's `Art. no. 615`, prose's "the
+  2007 … paper in Psychol Sci (…)", and dotted names after a title in
+  title case ending in a short abbreviation (`… Creation. Psychol. Sci.
+  5, 14`), each reading weighed.
+- Invented co-authors beside a real first author are caught where the
+  record gives a family name in capitals (`Seok-Bae LEE`), and next to
+  Vancouver initials (`Rangel TR, Thalubrecht HL, …`).
+- A journal word inside the work's title isn't the journal cited
+  (`… monitoring autophagy. bioRxiv [Preprint]`), and a record OpenAlex
+  types a preprint but in a journal PubMed indexes is that journal's
+  article, so either cited as a preprint is plausible.
+- A Chinese or Japanese title is a title given, however few spaces: one
+  at another work's journal, volume and page is no longer verified.
+- A BibTeX entry's arXiv `eprint` and `pmid` are identifiers claimed, so
+  an unassigned arXiv ID there is checked.
+- A record a provider gives for an identifier it doesn't list (OpenAlex
+  answers a Zenodo version's DOI with the concept's record) carries it:
+  the version's DOI no longer "does not exist".
+- An inverted name in a record (`Lubrano, Emanuele`, DataCite's) is split
+  as one; a claimed double-barrelled name an author's record shortens
+  (`Hirschi-Santelmo` for Hirschi) and an organisation among a structured
+  claim's authors are no strangers; BMJ's page `698.1` is page 698.
 
 Fixed (from a held-out red team 0.27.0's fixes never saw,
 `bench/redteam/holdout-1.jsonl`: wrong citations verified fell from 29

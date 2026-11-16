@@ -101,9 +101,20 @@ def retraction_flagged(result):
 
 
 def id_form(work_id):
-    """One spelling of an identifier: an ISBN-10 as its ISBN-13, a DOI
-    without a version suffix (PsyArXiv's `osf.io/f8hqa_v1`)."""
-    i = work_id.lower().replace("-", "") if work_id.lower().startswith("isbn:") else work_id.lower()
+    """One spelling of an identifier: labelled and lower case (a bare
+    `10.…` a DOI, `PMID:`/`arXiv:` as aspero writes them), an ISBN-10 as
+    its ISBN-13, a DOI without a version suffix (PsyArXiv's
+    `osf.io/f8hqa_v1`)."""
+    i = work_id.strip().lower()
+    for prefix in ("https://doi.org/", "http://doi.org/", "https://dx.doi.org/"):
+        if i.startswith(prefix):
+            i = i[len(prefix):]
+    if i.startswith("10."):
+        i = "doi:" + i
+    if re.fullmatch(r"ol\d+[wm]", i):
+        i = "openlibrary:" + i
+    if i.startswith("isbn:"):
+        i = i.replace("-", "")
     if i.startswith("isbn:") and len(i) == 15:
         core = "978" + i[5:14]
         check = (10 - sum(int(d) * (1 if k % 2 == 0 else 3) for k, d in enumerate(core)) % 10) % 10
@@ -143,8 +154,12 @@ def judge(case, result):
         # A plausible verdict naming the fields to check.
         "names_field": bool((result.get("reason") or {}).get("differs")),
     }
-    if case.get("ids") and verdict in ("verified", "plausible") and real:
-        row["wrong_work"] = not ({id_form(i) for i in case["ids"]} & matched_ids(result))
+    # Open Library's work IDs are none aspero's records carry: they can't
+    # tell the work apart.
+    cited = {id_form(i) for i in case.get("ids") or []}
+    comparable = {i for i in cited if not i.startswith("openlibrary:")}
+    if comparable and verdict in ("verified", "plausible") and real:
+        row["wrong_work"] = not (comparable & matched_ids(result))
     return row
 
 
@@ -173,6 +188,10 @@ def criteria(wrong, real, retracted):
     ]
     print("\nAcceptance criteria:")
     for name, picked, pool, op, bound in checks:
+        if not pool:
+            # Nothing to measure (a corpus without retracted works).
+            print(f"  n/a   {name:<44} {'0/0':>16}  {op} {bound:.0%}")
+            continue
         got = share(picked, pool)
         ok = got <= bound if op == "<=" else got >= bound
         print(f"  {'PASS' if ok else 'FAIL'}  {name:<44} {pct(len(picked), len(pool)):>16}  {op} {bound:.0%}")

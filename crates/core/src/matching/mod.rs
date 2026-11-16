@@ -444,6 +444,39 @@ fn cites_chapter(text: &str) -> bool {
     })
 }
 
+/// Whether a reference cites its work in an edited book: "In" (or "in"
+/// after a comma or quote, Harvard's) and then its editors ("In: Jones K,
+/// Smith P, editors. …", "in Jones, K. (eds) …", "In K. Jones (Ed.), …",
+/// "edited by", "Hrsg."); an edition ("2nd ed.") is none.
+fn cites_edited_book(text: &str) -> bool {
+    let tokens: Vec<&str> = text.split_whitespace().collect();
+    let editors = |i: usize| {
+        let t = tokens[i]
+            .trim_matches(|c: char| !c.is_alphabetic())
+            .to_lowercase();
+        // "2nd ed.", "Revised ed.": an edition.
+        let edition = i > 0 && {
+            let before = tokens[i - 1].trim_end_matches(['.', ',']).to_lowercase();
+            let ordinal = before.trim_start_matches(|c: char| c.is_ascii_digit());
+            (ordinal.len() < before.len() && matches!(ordinal, "st" | "nd" | "rd" | "th" | "d"))
+                || matches!(
+                    before.as_str(),
+                    "first" | "second" | "third" | "fourth" | "fifth" | "revised" | "rev" | "new"
+                )
+        };
+        matches!(
+            t.as_str(),
+            "eds" | "editor" | "editors" | "edited" | "hrsg" | "éd" | "éds" | "coord"
+        ) || (t == "ed" && !edition)
+    };
+    tokens.iter().enumerate().any(|(i, t)| {
+        let opens = *t == "In:"
+            || *t == "In"
+            || (*t == "in" && i > 0 && tokens[i - 1].ends_with([',', '\'', '’', '"', '”']));
+        opens && (i + 1..tokens.len().min(i + 16)).any(editors)
+    })
+}
+
 /// A free-text reference's byline: a BibTeX entry's author field, else
 /// its text before the record's title (at `span`). When the title is cited
 /// otherwise, up to the first of the title's words or the first sentence's
@@ -931,6 +964,19 @@ pub fn assess(claim: &Claim, record: &SourceRecord) -> Assessment {
     // cited isn't confirmed, unless the claimed identifier says which
     // version is meant.
     let venue = cited_venue(claim, text.as_ref(), title_span.as_ref());
+    // A journal's article cited as a chapter of an edited book ("In:
+    // Corvaro IR, Mirkrand P, editors. Handbook of Nurse-Midwifery"): the
+    // reverse, another container (a meeting's proceedings aside, and a
+    // series named as its journal: "In: …, editor. Methods in Enzymology").
+    let article_as_chapter = article
+        && container.agreement != Agreement::Match
+        && claim.text.as_deref().is_some_and(cites_edited_book)
+        && !venue.as_deref().is_some_and(publication::proceedings);
+    let container = if article_as_chapter {
+        FieldCheck::exact(false)
+    } else {
+        container
+    };
     let cited_conferences: Vec<usize> = venue.as_deref().map_or_else(Vec::new, |v| {
         let in_title = work_title
             .as_deref()
@@ -1055,6 +1101,7 @@ pub fn assess(claim: &Claim, record: &SourceRecord) -> Assessment {
     let wrong_journal = container.agreement == Agreement::Mismatch
         && (preprint_of_cited
             || preprint_id_cited
+            || article_as_chapter
             || article
             || other_conference
             || preprint_at_conference

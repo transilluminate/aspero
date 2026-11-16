@@ -4192,3 +4192,76 @@ fn a_preprint_cited_as_its_journal_version_is_another_version() {
     );
     assert!(assess(&claim, &record).confidence >= VERIFIED);
 }
+
+#[test]
+fn a_journal_article_cited_as_a_chapter_is_another_container() {
+    // holdout-4's `w:article-as-chapter`: a journal's article cited in an
+    // edited book, the reverse of round 4's chapter cited as an article.
+    let midwifery = article(
+        "The use of amnioinfusion in nurse-midwifery practice",
+        &["Barbara Snell"],
+        1993,
+        ("Journal of Nurse-Midwifery", "38", "S62-S71"),
+    );
+    let forensic = article(
+        "Nurses and Medicolegal Death Investigation",
+        &["Stacy A. Drake", "Yijiong Yang"],
+        2020,
+        ("Journal of Forensic Nursing", "16", "207-214"),
+    );
+    let ecology = article(
+        "Concerning the Ecology of Urtica Dioica L.",
+        &["J. D. Ivins"],
+        1952,
+        ("Journal of Ecology", "40", "380"),
+    );
+    for (claim, record) in [
+        (
+            "SNELL B. The use of amnioinfusion in nurse-midwifery practice. In: Corvaro IR, \
+             Mirkrand P, editors. Handbook of Nurse-Midwifery. Elsevier BV; 1993. p. S62-S71.",
+            &midwifery,
+        ),
+        (
+            "Drake, S.A. et al. (2020) 'Nurses and Medicolegal Death Investigation', in \
+             Korvanne, E.T., Grathwell, A. (eds) Handbook of Forensic Nursing. Ovid \
+             Technologies (Wolters Kluwer Health). pp. 207–214.",
+            &forensic,
+        ),
+        (
+            "Ivins (1952). Concerning the Ecology of Urtica Dioica L. In E. Ulmova, O. S. \
+             Grathquist (Eds.), Handbook of Ecology (pp. 380). JSTOR.",
+            &ecology,
+        ),
+    ] {
+        let a = assess(&Claim::from_text(claim), record);
+        assert_eq!(a.container.agreement, Agreement::Mismatch, "{claim}: {a:?}");
+        assert!(
+            (PLAUSIBLE..VERIFIED).contains(&a.confidence),
+            "{claim}: {a:?}"
+        );
+    }
+    // In its journal, or in a series' volume of that name, it verifies; so
+    // does an edition's "2nd ed." or a prose "in".
+    let mut enzymology = article(
+        "Purification of membrane proteins",
+        &["Jane Doe-Alvarez"],
+        1990,
+        ("Methods in Enzymology", "182", "253-264"),
+    );
+    enzymology.work.work_type = Some(crate::work::WorkType::JournalArticle);
+    for (claim, record) in [
+        (
+            "Snell B. The use of amnioinfusion in nurse-midwifery practice. J Nurse Midwifery. \
+             1993;38:S62-S71.",
+            &midwifery,
+        ),
+        (
+            "Doe-Alvarez J. Purification of membrane proteins. In: Deutscher MP, editor. \
+             Methods in Enzymology. Vol 182. 1990. p. 253-264.",
+            &enzymology,
+        ),
+    ] {
+        let a = assess(&Claim::from_text(claim), record);
+        assert!(a.confidence >= VERIFIED, "{claim}: {a:?}");
+    }
+}

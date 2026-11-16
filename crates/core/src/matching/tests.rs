@@ -1676,3 +1676,31 @@ fn reprints_and_versions_cited_with_another_year_are_plausible() {
     let text = "Johnson A, Pollard T, Mark R. MIMIC-III Clinical Database. PhysioNet. 2016.";
     assert!(assess(&Claim::from_text(text), &mimic).confidence < PLAUSIBLE);
 }
+
+#[test]
+fn a_title_with_a_word_replaced_is_not_the_records() {
+    // Red team (#102): another drug's trial at RECOVERY's place verified.
+    let mut recovery = placed(
+        &[],
+        "Dexamethasone in Hospitalized Patients with Covid-19",
+        &["Peter Horby", "Wei Shen Lim", "Jonathan R. Emberson"],
+        2021,
+        ("New England Journal of Medicine", "384", "693-704"),
+    );
+    recovery.work.work_type = Some(crate::work::WorkType::JournalArticle);
+    let text = "Horby P, Lim WS, Emberson JR, et al. Hydroxychloroquine in hospitalized patients \
+                with Covid-19. N Engl J Med. 2021;384(8):693-704.";
+    let a = assess(&Claim::from_text(text), &recovery);
+    assert_eq!(a.title.agreement, Agreement::Partial, "{a:?}");
+    assert!((PLAUSIBLE..VERIFIED).contains(&a.confidence), "{a:?}");
+    // A misspelt or respelt word is the same title.
+    for text in [
+        "Horby P, Lim WS, Emberson JR, et al. Dexamethazone in hospitalized patients with \
+         Covid-19. N Engl J Med. 2021;384(8):693-704.",
+        "Horby P, Lim WS, Emberson JR, et al. Dexamethasone in hospitalized patients with \
+         Covid-19. N Engl J Med. 2021;384(8):693-704.",
+    ] {
+        let a = assess(&Claim::from_text(text), &recovery);
+        assert!(a.confidence >= VERIFIED, "{text}: {a:?}");
+    }
+}

@@ -555,6 +555,15 @@ pub fn assess(claim: &Claim, record: &SourceRecord) -> Assessment {
         Some(s) if extended => FieldCheck::scored(s.min(EXTENDED_TITLE)),
         _ => title,
     };
+    // Or with a word put in place of one of its own (not misspelt):
+    // "Hydroxychloroquine in hospitalized patients with Covid-19" at the
+    // place of "Dexamethasone in …".
+    let substituted = title.agreement == Agreement::Partial
+        && title_span.is_none()
+        && work_title
+            .as_deref()
+            .zip(text.as_ref())
+            .is_some_and(|(actual, text)| text.substitutes_in(actual));
 
     let actual_years: Vec<i16> = work
         .issued
@@ -847,8 +856,9 @@ pub fn assess(claim: &Claim, record: &SourceRecord) -> Assessment {
     if strangers {
         confidence = confidence.min(STRANGERS_CAP);
     }
-    // So is a title with words the work's lacks, whatever else agrees.
-    if extended {
+    // So is a title with words the work's lacks, or one of its own
+    // replaced, whatever else agrees.
+    if extended || substituted {
         confidence = confidence.min(EXTENDED_TITLE_CAP);
     }
     // A reply, correction or commentary is not the work it responds to,

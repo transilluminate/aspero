@@ -225,6 +225,29 @@ impl Normalised {
         })
     }
 
+    /// Whether the reference gives `title` with a word or two put in place
+    /// of its own, not misspelt ("Hydroxychloroquine in hospitalized
+    /// patients with Covid-19" for "Dexamethasone in …"): another title
+    /// built on this one's, as an invented reference's often is.
+    pub(super) fn substitutes_in(&self, title: &str) -> bool {
+        let title = words(unmarked(title));
+        let n = title.len();
+        if n < 3 || self.words.len() < n {
+            return false;
+        }
+        self.words.windows(n).any(|run| {
+            let differ: Vec<(&String, &String)> =
+                run.iter().zip(&title).filter(|(a, b)| a != b).collect();
+            !differ.is_empty()
+                && differ.len() * 4 <= n.max(4)
+                && differ.iter().all(|(a, b)| {
+                    !super::authors::near(a, b)
+                        && !STOPWORDS.contains(&a.as_str())
+                        && !STOPWORDS.contains(&b.as_str())
+                })
+        })
+    }
+
     /// The words from `from` on that run together as written: joined by
     /// spaces or a word's own hyphens and apostrophes, up to punctuation.
     fn run_from(&self, from: usize) -> Range<usize> {

@@ -79,7 +79,7 @@ pub(super) fn name_words(authors: &[Person]) -> Vec<String> {
 
 /// The same name, give or take a letter (two in a long name):
 /// transliteration ("schoelkopf" for "scholkopf"), a typo.
-fn near(a: &str, b: &str) -> bool {
+pub(super) fn near(a: &str, b: &str) -> bool {
     if a == b {
         return true;
     }

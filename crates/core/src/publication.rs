@@ -245,9 +245,17 @@ pub(crate) struct Locator {
 
 /// The volume and first page in a free-text reference, from the common
 /// styles: Vancouver ("2017;376(26):2545-55"), APA ("376(26), 2545–2555",
-/// or without an issue "Journal Name, 146, 106274.") and labelled ("vol.
-/// 376, pp. 2545–2555").
+/// or without an issue "Journal Name, 146, 106274."), Harvard ("376(26),
+/// pp. 2545–2555"), Nature ("Nature 530, 484 (2016)"), labelled ("vol.
+/// 376, pp. 2545–2555") and a BibTeX entry's fields.
 pub(crate) fn locator(text: &str) -> Locator {
+    if text.trim_start().starts_with('@') {
+        // BibTeX: its fields.
+        return Locator {
+            volume: bibtex_field(text, "volume").and_then(|v| volume_number(&v)),
+            page: bibtex_field(text, "pages").and_then(|p| page_number(&p)),
+        };
+    }
     let compact = compact(text);
     let tokens: Vec<&str> = compact.split_whitespace().collect();
     match styled(&tokens) {
@@ -298,11 +306,14 @@ fn styled(tokens: &[&str]) -> Option<(usize, Locator)> {
                 return Some((i, at(volume, page)));
             }
         }
+        // Harvard labels the pages: "Cell, 144(5), pp. 646-674".
+        let labelled_page = is_page_label(tokens.get(i + 1).copied().unwrap_or(""));
+        let page_at = if labelled_page { i + 2 } else { i + 1 };
         // APA: volume(issue), page[–end]
         if tokens[i].ends_with(',')
             && token.contains('(')
             && let Some(volume) = volume_number(token)
-            && let Some(page) = tokens.get(i + 1).and_then(|p| page_number(p))
+            && let Some(page) = tokens.get(page_at).and_then(|p| page_number(p))
         {
             return Some((i, at(volume, page)));
         }
@@ -318,11 +329,13 @@ fn styled(tokens: &[&str]) -> Option<(usize, Locator)> {
         {
             return Some((i, at(volume, page)));
         }
+        // Nature's single page, "Nature 530, 484 (2016)", only right after
+        // the journal's word.
         if tokens[i].ends_with(',')
             && let Some(volume) = volume_number(token)
             && let Some((pages, year)) = next_page.and_then(|p| p.split_once('('))
             && bracketed_year(year)
-            && ranged(pages)
+            && (ranged(pages) || (i > 0 && name_word(tokens[i - 1])))
             && let Some(page) = page_number(pages)
         {
             return Some((i, at(volume, page)));
@@ -330,17 +343,18 @@ fn styled(tokens: &[&str]) -> Option<(usize, Locator)> {
         // APA without an issue: "Journal Name, 146, 106274." Bare numbers
         // after commas are common, so only right after a word and its
         // comma (the journal), not a year, and with the page ending the
-        // reference or followed by its link.
+        // reference or followed by its link, or labelled ("pp.").
         if tokens[i].ends_with(',')
             && let Some(volume) = volume_number(token).filter(|v| !is_year(v))
             && i > 0
             && tokens[i - 1]
                 .strip_suffix(',')
                 .is_some_and(|w| !w.is_empty() && w.chars().all(char::is_alphabetic))
-            && let Some(page) = tokens.get(i + 1).and_then(|p| page_number(p))
-            && (tokens[i + 1].ends_with('.')
+            && let Some(page) = tokens.get(page_at).and_then(|p| page_number(p))
+            && (labelled_page
+                || tokens[page_at].ends_with('.')
                 || tokens
-                    .get(i + 2)
+                    .get(page_at + 1)
                     .is_none_or(|t| starts_with_ci(t, "doi") || starts_with_ci(t, "http")))
         {
             return Some((i, at(volume, page)));
@@ -398,6 +412,10 @@ const JOURNAL_WORDS: usize = 16;
 /// Injured 47 (2016)"). A journal misread would be called another journal,
 /// so better none.
 pub(crate) fn cited_journal(text: &str) -> Option<String> {
+    if text.trim_start().starts_with('@') {
+        // BibTeX: its journal field.
+        return bibtex_field(text, "journal");
+    }
     let compact = compact(text);
     let tokens: Vec<&str> = compact.split_whitespace().collect();
     let (at, after) = match styled(&tokens) {
@@ -490,6 +508,14 @@ fn unstyled_end(tokens: &[&str]) -> Option<(usize, After)> {
     } else {
         (end, After::Quoted)
     })
+}
+
+/// "pp." or "p.", before a page.
+fn is_page_label(t: &str) -> bool {
+    matches!(
+        t.trim_end_matches(['.', ',']).to_ascii_lowercase().as_str(),
+        "pp" | "p"
+    )
 }
 
 /// A link or identifier ending a reference: a DOI, URL, PMID or arXiv ID.
@@ -754,6 +780,26 @@ mod tests {
             loc("47", "797")
         );
         assert_eq!(locator("Nature 521, 436–444 (2015)"), loc("521", "436"));
+        // Red team (#102): Nature's single page, Harvard's "pp.", BibTeX.
+        assert_eq!(
+            locator("Silver, D. et al. Mastering the game of Go. Nature 530, 484 (2016)."),
+            loc("530", "484")
+        );
+        assert_eq!(
+            locator("Hanahan, D. (2011) 'Hallmarks of cancer', Cell, 144(5), pp. 646-674."),
+            loc("144", "646")
+        );
+        assert_eq!(
+            locator("LeCun, Y. (2015) 'Deep learning', Nature, 521, pp. 436-444."),
+            loc("521", "436")
+        );
+        assert_eq!(
+            locator(
+                "@article{j, author = {Jumper, John}, title = {Highly accurate {AlphaFold}}, \
+                 journal = {Nature}, year = {2021}, volume = {597}, pages = {583--589}}"
+            ),
+            loc("597", "583")
+        );
         // A bracketed year without a page range: no place.
         assert_eq!(locator("Smith 47 (2016) 797 patients"), Locator::default());
         assert_eq!(
@@ -829,6 +875,15 @@ mod tests {
                 "Science",
             ),
             ("Smith J. Deep Learning. Nature. 2015;521:436.", "Nature"),
+            // Harvard: a quoted title, "pp." before the pages; BibTeX.
+            (
+                "Altschul, S.F. et al. (1990) 'Basic local alignment search tool', Journal of Molecular Biology, 215(3), pp. 403-410.",
+                "Journal of Molecular Biology",
+            ),
+            (
+                "@article{p, author = {Pereira, Sueli}, title = {Conectando alunos}, journal = {Revista Foco}, year = {2024}}",
+                "Revista Foco",
+            ),
             // No styled locator: before the year ending the reference, its
             // links, or a labelled locator, after a title that has ended.
             (

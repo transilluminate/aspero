@@ -1516,3 +1516,44 @@ fn another_title_at_the_right_place_is_a_different_title() {
         assert!(a.confidence >= VERIFIED, "{text}: {a:?}");
     }
 }
+
+#[test]
+fn bibtex_harvard_and_single_page_locators_are_checked() {
+    // Red team (#102): the wrong numbers went unread in these styles.
+    let bibtex = |volume: &str| {
+        format!(
+            "@article{{l, author = {{LeCun, Yann and Bengio, Yoshua}}, title = {{Deep learning}}, \
+             journal = {{Nature}}, year = {{2015}}, volume = {{{volume}}}, pages = {{436--444}}}}"
+        )
+    };
+    for (text, right) in [
+        (bibtex("521"), true),
+        (bibtex("597"), false),
+        (
+            "LeCun, Y., Bengio, Y. & Hinton, G. Deep learning. Nature 521, 436 (2015).".to_owned(),
+            true,
+        ),
+        (
+            "LeCun, Y., Bengio, Y. & Hinton, G. Deep learning. Nature 521, 999 (2015).".to_owned(),
+            false,
+        ),
+        (
+            "LeCun, Y. et al. (2015) 'Deep learning', Nature, 521, pp. 436-444.".to_owned(),
+            true,
+        ),
+        (
+            "LeCun, Y. et al. (2015) 'Deep learning', Science, 521, pp. 436-444.".to_owned(),
+            false,
+        ),
+    ] {
+        let a = assess(&Claim::from_text(&text), &lecun());
+        if right {
+            assert!(a.confidence >= VERIFIED, "{text}: {a:?}");
+        } else {
+            assert!(
+                (PLAUSIBLE..VERIFIED).contains(&a.confidence),
+                "{text}: {a:?}"
+            );
+        }
+    }
+}

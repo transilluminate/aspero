@@ -278,6 +278,8 @@ pub(super) fn author_overlap(claimed: &[String], families: &[String]) -> f64 {
 /// Whether a reference names authors: "et al", or a family name followed
 /// by initials ("Laan DV", "Smith, J."). A family name is never followed by
 /// a full stop, so "Int. J. Care Injured" in a running header isn't one.
+/// One in capitals is set off as a name ("SMITH JA,", "DUPONT, J."), not
+/// two words of a title in capitals ("WOMEN ON ORAL").
 pub(super) fn names_given(text: &str) -> bool {
     if normalise(text).contains("et al") {
         return true;
@@ -290,6 +292,7 @@ pub(super) fn names_given(text: &str) -> bool {
             .chars()
             .filter(|c| *c != '.')
             .collect();
+        let capitals = !family.chars().any(char::is_lowercase);
         !w[0].ends_with('.')
             && family.chars().count() >= 2
             && family.chars().next().is_some_and(char::is_uppercase)
@@ -298,6 +301,7 @@ pub(super) fn names_given(text: &str) -> bool {
                 .all(|c| c.is_alphabetic() || matches!(c, '-' | '\''))
             && (1..=3).contains(&initials.chars().count())
             && initials.chars().all(char::is_uppercase)
+            && (!capitals || w[1].ends_with(['.', ',', ';']))
     })
 }
 

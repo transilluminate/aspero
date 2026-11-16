@@ -517,6 +517,19 @@ fn title_and_year_alone_cannot_verify() {
         ),
     );
     assert!(letter.confidence < VERIFIED && article.confidence >= VERIFIED);
+    // A title in capitals names no one ("WOMEN ON ORAL" isn't a family
+    // name and initials; holdout-1 #382): title and year, plausible.
+    let title = "THE α-FETOPROTEIN TEST IN PREGNANT WOMEN, WOMEN ON ORAL CONTRACEPTIVES, NEWBORN \
+                 BABIES, AND PYRIDOXINE-DEPRIVED BABOONS";
+    let a = assess(
+        &Claim::from_text(format!("“{title}”, 1970.")),
+        &record(&[], title, &["J. M. Foy", "C. R. Wood"], 1970),
+    );
+    assert_eq!(a.authors.agreement, Agreement::Unknown, "{a:?}");
+    assert!((PLAUSIBLE..VERIFIED).contains(&a.confidence), "{a:?}");
+    // Capitals with initials as references write them still name people.
+    assert!(authors::names_given("SMITH JA, JONES B. A title. 2020."));
+    assert!(authors::names_given("DUPONT, J. Un titre. 2020."));
 }
 
 #[test]

@@ -912,6 +912,25 @@ it high, an overcount of the staleness. `Budget::prepaid_expires_at` (FFI
 (Coordinated Universal Time)", ISO also read); headers don't carry it, so
 it's kept from the last refresh.
 
+**Prices** (`Budget::prices`, a `Prices` of OpenAlex's kinds of call:
+`singleton`, `list`, `search`, `search_rerank`, `rerank_extra`, `content`,
+`semantic`, `text`; `Budget::search_price`) are `/rate-limit`'s
+`endpoint_costs_usd` (`Usage.prices`), so only with a key; headers don't
+carry them, so they're kept from the last refresh. A fixed struct, not a
+map, so `Usage` and `Budget` stay `Copy`: a kind OpenAlex adds is left out
+until named. FFI `Budget.searchPriceUsd` and `prices: [BudgetPrice
+{endpoint, usd}]`; `aspero budget` JSON `search_price_usd`, `prices_usd`.
+**What's spendable today** (`Engine::spendable_today`; `aspero budget`
+`spendable_today_usd`) follows `cap::reached`: the allowance left, held to
+the allowance cap (`cap − used`); then, if paid calls would use the
+allowance up (its cap at or above the allowance, or it's used up already),
+the prepaid balance, held to the credit cap less the credit spent today;
+without a credit cap, the whole balance only where the allowance cap is
+above the allowance or unset. Divided by the search price and rounded
+down, it's `aspero budget`'s "searches $0.001 each, about 850 left today"
+(`searches_left_today`): an estimate, since it counts everything using the
+key and lookups spend from the same budget.
+
 Pacing is **shared across processes** through the cache file: each
 request claims its provider's next slot in a `pacing` table (one write
 transaction), so parallel agents keep to one rate between them, even with
@@ -1085,7 +1104,7 @@ CLI builds without it and serves stdio only) and, over it, the FFI's
   `dailyBudgetUsd` ($1). Then `setKeys` (at once), `hostToolsChanged`
   (re-reads the host's tools; throws on a clash, keeping the old ones),
   `port`, `status` (running, port, open sessions, the last request and
-  its key's name, each key's last use) and `stop` (ends the sessions and
+  its key's name, each key's last use and spend today) and `stop` (ends the sessions and
   frees the port before returning). The app implements `McpHost`:
   `tools()` (each a `HostTool`: name, title, description, input and
   output JSON Schemas, scope), `async call(name, arguments, caller)`
@@ -1159,7 +1178,14 @@ CLI builds without it and serves stdio only) and, over it, the FFI's
   keep it; days over a month old are pruned), so restarts don't reset it;
   in memory without a cache. A spend that can't be read refuses the
   key's paid calls; one that can't be written is kept in memory, counted,
-  and written with the key's next spend or check.
+  and written with the key's next spend or check. `status` says each
+  key's spend today (`McpKeyStatus.spentTodayUsd`): the same ledger
+  figure plus the unrecorded, as the budget is checked against, read
+  without writing (a read of the cache file per key; a figure it can't
+  read counts as $0, logged), so "$0.12 of its $0.50 today" agrees with
+  the refusal. The day is the UTC day (`McpStatus.spendDay`,
+  `YYYY-MM-DD`), ending at `spendResetsAt` (midnight UTC), when every
+  key's spend starts again from nothing.
 - **Activity.** After every tool call (engine or app, success, error or
   refusal), the app's `activity` gets the key's name, the tool, a few
   words ("searched ‘lactate clearance’", "looked up 3 works", "verified 2
@@ -1218,7 +1244,8 @@ given CSL style, with `citation_styles`, `style_project` and
 (citation links, related works among them), and
 for settings `budgets` (as last
 reported: free), `refresh_budgets` (OpenAlex's `/rate-limit` with a key,
-free; nothing asked without one), `check_openalex_key` (one free lookup), `cache_stats`,
+free; nothing asked without one; also each kind of call's price,
+`Budget.prices`, `searchPriceUsd`), `check_openalex_key` (one free lookup), `cache_stats`,
 `clear_cache` and `unavailable`. Network calls take a `Patience` (batch,
 interactive, offline, fresh).
 They return typed records (`Lookup`, `Verification`, `Work`, …), mirrors

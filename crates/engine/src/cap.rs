@@ -1,44 +1,105 @@
-//! A caller's daily cap on a provider's spend (OpenAlex's, in USD).
+//! A caller's daily caps on a provider's spend (OpenAlex's, in USD): one on
+//! its daily allowance, and one on the prepaid credit it spends once the
+//! allowance is used up.
 //!
 //! The day's use is the provider's own figure (`limit − remaining`, from
 //! every response's headers or a free refresh), so it counts everything
-//! using the key: other apps, scripts, other processes. Once it reaches
-//! the cap, paid calls stop until the budget resets: searches fail with
-//! [`Error::BudgetCapped`] (and fall back like any failure: a stale cached
-//! page, the next provider in a check), and lookups go
+//! using the key: other apps, scripts, other processes. So does the credit
+//! spent today, told from the prepaid balance (see [`Budget`]). Before a
+//! paid call ([`reached`]):
+//!
+//! - **Allowance left**: the call goes ahead while the day's use is under
+//!   the allowance's cap ([`daily_cap`](Engine::daily_cap)); past it, it
+//!   stops, holding the rest of the allowance back for other tools.
+//! - **Allowance used up** (nothing left, by whatever used it), with a
+//!   credit cap ([`daily_credit_cap`](Engine::daily_credit_cap)): the call
+//!   goes ahead, spending credit, while the credit spent today is under
+//!   it, whatever the allowance's cap; a cap of 0 never spends credit.
+//! - **Allowance used up, no credit cap** (only an engine built without
+//!   [`standard`](crate::standard), which always sets one, $0.25 unless
+//!   configured): as before credit had a cap of its own. The day's use tops out at the allowance, so an allowance cap
+//!   at or under it stops the call (no credit is spent); one above it, or
+//!   none, never does (credit is spent until it's gone).
+//!
+//! A reached cap stops paid calls until the budget resets: searches fail
+//! with [`Error::BudgetCapped`], saying which cap ([`CapKind`]), and fall
+//! back like any failure (a stale cached page, the next provider in a
+//! check), and lookups go
 //! [`max_free_batch`](aspero_core::Capabilities::max_free_batch) IDs at a
 //! time, which costs nothing, or fall back where none is free.
 //!
 //! Use unknown (no response seen yet today): with a key, one free
 //! refresh is asked first (OpenAlex's `/rate-limit`), so a day already
-//! past the cap stops at once; without one, or if the refresh fails, the
-//! call is taken as under the cap and the cap applies from its response
-//! on. Either way a call is checked before it's sent and its cost known
-//! only after, so the last call (or calls in flight together) can pass
-//! the cap by their own cost.
+//! past a cap stops at once; without one, or if the refresh fails, the
+//! call is taken as under the caps and they apply from its response on.
+//! Either way a call is checked before it's sent and its cost known only
+//! after, so the last call (or calls in flight together) can pass a cap
+//! by their own cost.
 
 use std::time::Duration;
 
-use aspero_core::{Error, ProviderId, Response};
-use jiff::Timestamp;
+use aspero_core::{CapKind, Error, ProviderId, Response};
 
-use crate::{CallOptions, Engine, Entry, lock};
+use crate::{Budget, CallOptions, Engine, Entry, lock};
 
 /// After a refresh that couldn't say the day's use, how long before
 /// another is tried.
 const REFRESH_AGAIN: Duration = Duration::from_secs(60);
 
+/// A provider's caps, in USD.
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub(crate) struct Caps {
+    pub allowance: Option<f64>,
+    pub credit: Option<f64>,
+}
+
+impl Caps {
+    fn any(self) -> bool {
+        self.allowance.is_some() || self.credit.is_some()
+    }
+}
+
+/// The cap a paid call would pass, with the cap and what's spent against
+/// it, given the day so far: the allowance's use (`used`), whether it's
+/// used up, and the credit spent today (unknown: none).
+pub(crate) fn reached(
+    caps: Caps,
+    used: f64,
+    used_up: bool,
+    credit_spent: Option<f64>,
+) -> Option<(CapKind, f64, f64)> {
+    match caps.credit {
+        Some(cap) if used_up => {
+            let spent = credit_spent.unwrap_or(0.0);
+            (spent >= cap).then_some((CapKind::Credit, cap, spent))
+        }
+        _ => caps
+            .allowance
+            .filter(|cap| used >= *cap)
+            .map(|cap| (CapKind::Allowance, cap, used)),
+    }
+}
+
 impl Engine {
-    /// The daily cap set on `provider`, if any.
+    /// The daily cap set on `provider`'s allowance, if any.
     pub fn daily_cap(&self, provider: &ProviderId) -> Option<f64> {
-        self.caps
-            .iter()
-            .find(|(p, _)| p == provider)
-            .map(|(_, cap)| *cap)
+        find(&self.caps, provider)
+    }
+
+    /// The daily cap set on `provider`'s prepaid credit spend, if any.
+    pub fn daily_credit_cap(&self, provider: &ProviderId) -> Option<f64> {
+        find(&self.credit_caps, provider)
+    }
+
+    fn caps(&self, provider: &ProviderId) -> Caps {
+        Caps {
+            allowance: self.daily_cap(provider),
+            credit: self.daily_credit_cap(provider),
+        }
     }
 
     /// Runs a call that costs: refused with [`Error::BudgetCapped`] once
-    /// the provider's day has reached its cap.
+    /// the provider's day has reached a cap.
     pub(crate) async fn call_paid<T, F, Fut>(
         &self,
         entry: &Entry,
@@ -52,15 +113,16 @@ impl Engine {
         self.call(entry, op).await
     }
 
-    /// `Err(BudgetCapped)` when `entry`'s provider has a cap and its day's
-    /// use has reached it; a day of unknown use is refreshed first where
-    /// that's free.
+    /// `Err(BudgetCapped)` when `entry`'s provider has caps and its day has
+    /// reached one; a day of unknown use is refreshed first where that's
+    /// free.
     pub(crate) async fn check_cap(&self, entry: &Entry) -> Result<(), Error> {
         let provider = entry.provider.id();
-        let Some(cap) = self.daily_cap(&provider) else {
+        let caps = self.caps(&provider);
+        if !caps.any() {
             return Ok(());
-        };
-        if self.used_today(&provider).is_none()
+        }
+        if self.today(&provider).is_none()
             && entry.provider.capabilities().budget_status
             && !self.options.offline
         {
@@ -68,37 +130,45 @@ impl Engine {
             // answer.
             let _one = self.refreshing.lock().await;
             let due = lock(&self.refreshed).is_none_or(|at| at.elapsed() >= REFRESH_AGAIN);
-            if self.used_today(&provider).is_none() && due {
+            if self.today(&provider).is_none() && due {
                 let quick = CallOptions {
                     deadline: Some(Duration::from_secs(5)),
                     max_retries: Some(0),
                     ..self.options
                 };
                 self.with_options(quick).refresh_budget(entry).await;
-                if self.used_today(&provider).is_none() {
+                if self.today(&provider).is_none() {
                     *lock(&self.refreshed) = Some(tokio::time::Instant::now());
                 }
             }
         }
-        match self.used_today(&provider) {
-            Some((used, resets_at)) if used >= cap => {
+        let Some(budget) = self.today(&provider) else {
+            return Ok(());
+        };
+        let (Some(used), Some(used_up)) = (budget.used(), budget.allowance_used_up()) else {
+            return Ok(());
+        };
+        match reached(caps, used, used_up, budget.prepaid_spent_today) {
+            Some((which, cap, used)) => {
                 tracing::info!(
                     target: "aspero::budget",
-                    provider = %provider, cap, used, "paid call stopped at the daily cap"
+                    provider = %provider, cap, used, which = which.as_str(),
+                    "paid call stopped at a daily cap"
                 );
                 Err(Error::BudgetCapped {
                     cap,
                     used,
-                    resets_at,
+                    resets_at: budget.resets_at,
+                    which,
                 })
             }
-            _ => Ok(()),
+            None => Ok(()),
         }
     }
 
-    /// The provider's use today as last reported, and when it resets;
+    /// The provider's budget as last reported, if its use today is known;
     /// `None` when unknown, or the budget has reset since.
-    fn used_today(&self, provider: &ProviderId) -> Option<(f64, Option<Timestamp>)> {
+    fn today(&self, provider: &ProviderId) -> Option<Budget> {
         let now = (self.clock)();
         let (_, budget) = self
             .budgets
@@ -108,6 +178,71 @@ impl Engine {
         if budget.resets_at.is_some_and(|r| now >= r) {
             return None;
         }
-        Some((budget.used()?, budget.resets_at))
+        budget.used().map(|_| budget)
+    }
+}
+
+fn find(caps: &[(ProviderId, f64)], provider: &ProviderId) -> Option<f64> {
+    caps.iter()
+        .find(|(p, _)| p == provider)
+        .map(|(_, cap)| *cap)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Every case of the decision: allowance under or over its cap, used
+    /// up or not, and a credit cap of none, 0, or some, under or over.
+    #[test]
+    fn which_cap_a_paid_call_reaches() {
+        let caps = |allowance, credit| Caps { allowance, credit };
+        let go = None;
+        let allowance = |cap, used| Some((CapKind::Allowance, cap, used));
+        let credit = |cap, spent| Some((CapKind::Credit, cap, spent));
+
+        // Allowance left: its cap decides, whatever the credit's.
+        for credit_cap in [None, Some(0.0), Some(1.0)] {
+            assert_eq!(
+                reached(caps(Some(0.5), credit_cap), 0.4, false, Some(3.0)),
+                go
+            );
+            assert_eq!(
+                reached(caps(Some(0.5), credit_cap), 0.6, false, Some(0.0)),
+                allowance(0.5, 0.6),
+                "past the allowance's cap, the rest of it is held back"
+            );
+            assert_eq!(reached(caps(None, credit_cap), 0.9, false, None), go);
+        }
+
+        // Used up, with a credit cap: the credit spent today decides,
+        // whatever the allowance's cap.
+        for allowance_cap in [None, Some(0.5), Some(1.0), Some(2.0)] {
+            let c = |credit_cap| caps(allowance_cap, Some(credit_cap));
+            assert_eq!(reached(c(1.0), 1.0, true, Some(0.25)), go);
+            assert_eq!(reached(c(1.0), 1.0, true, None), go, "none seen: none");
+            assert_eq!(reached(c(1.0), 1.0, true, Some(1.02)), credit(1.0, 1.02));
+            assert_eq!(reached(c(1.0), 1.0, true, Some(1.0)), credit(1.0, 1.0));
+            assert_eq!(
+                reached(c(0.0), 1.0, true, Some(0.0)),
+                credit(0.0, 0.0),
+                "0 never spends credit"
+            );
+            assert_eq!(reached(c(0.0), 1.0, true, None), credit(0.0, 0.0));
+        }
+
+        // Used up, no credit cap: as before, the allowance's cap, which
+        // the day's use (topping out at the allowance) reaches only at or
+        // under the allowance.
+        assert_eq!(reached(caps(None, None), 1.0, true, Some(5.0)), go);
+        assert_eq!(
+            reached(caps(Some(0.5), None), 1.0, true, Some(0.0)),
+            allowance(0.5, 1.0)
+        );
+        assert_eq!(
+            reached(caps(Some(1.0), None), 1.0, true, Some(0.0)),
+            allowance(1.0, 1.0)
+        );
+        assert_eq!(reached(caps(Some(2.0), None), 1.0, true, Some(5.0)), go);
     }
 }

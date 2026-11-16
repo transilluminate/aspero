@@ -748,10 +748,11 @@ Two SQLite stores, split by whether data can be refetched:
   two are settings (#74): `StandardConfig::cache_policy`, FFI
   `Config.cache_found_days` / `cache_not_found_days` (defaults 7 and 1;
   0 asks every time), CLI `--cache-found-days` / `--cache-not-found-days`
-  (and `ASPERO_CACHE_*`); the rest stay as they are. Two tables are
+  (and `ASPERO_CACHE_*`); the rest stay as they are. Three tables are
   accounting rather than answers, so rebuilds, `clear` and eviction keep
-  them: the `pacing` slots, and `mcp_spend`, each MCP key's engine spend
-  per UTC day (see Agents (MCP)).
+  them: the `pacing` slots, `mcp_spend`, each MCP key's engine spend
+  per UTC day (see Agents (MCP)), and `prepaid_day`, each provider's
+  prepaid balance over a budget day (see Resilience, the credit cap).
 - **Size** (#74): `Stats::bytes` (FFI `CacheStats.bytes`, `aspero cache
   stats`) is the database's `page_count × page_size`, the file on disk
   once the WAL is checkpointed (SQLite does so every 4 MB or so; the WAL
@@ -840,6 +841,63 @@ only after, so the last call, or calls in flight together, can pass the
 cap by their own cost. The cap is no part of health: free calls go on,
 and `unavailable` doesn't list it.
 
+OpenAlex also sells **prepaid credit**, spent only once the day's free
+allowance is used up (`daily_used_usd` tops out at the allowance: it
+doesn't count credit). A second cap holds the credit spent in a day
+(#110): `EngineBuilder::daily_credit_cap`, `StandardConfig`/FFI
+`openalex_daily_credit_cap_usd`, CLI `--openalex-credit-cap-usd` /
+`ASPERO_OPENALEX_CREDIT_CAP_USD`. Unset, it's $0.25 a day
+(`DEFAULT_OPENALEX_CREDIT_CAP_USD`; FFI `nil`); 0 never spends credit; more
+allows more, and there's no unlimited setting. Before a paid call, with
+"used" and "spent" always counting everything using the key:
+
+1. free allowance used today < the allowance cap: go, on the allowance;
+2. allowance cap ≤ used < the allowance: stop (the rest is held back for
+   other tools);
+3. the allowance all gone (by anything) and credit spent today < the
+   credit cap: go, on credit, up to the cap;
+4. the allowance gone and credit spent today ≥ the credit cap: stop until
+   the reset.
+
+So with an allowance cap below the allowance, a caller never takes the key
+into credit itself; only other tools can. "All gone" is nothing left to a
+millionth. A stop is `BudgetCapped` with `which` (`CapKind::Allowance` or
+`Credit`; FFI `BudgetCap.capKind`, `cap_usd`/`spent_usd` the cap reached
+and what's spent against it), worded "stopped at today's credit cap of
+$1.00 ($1.02 of credit spent today)". Two overshoots are known: a call is
+checked before it's sent and its cost known only after, so the last call
+(or calls in flight together) can pass a cap by their own cost; and other
+tools' spending is seen only in the next response, so one call can land
+on credit even with a credit cap of 0. An engine built without a credit
+cap (`EngineBuilder` alone, not `standard`) holds a used-up allowance to
+the allowance cap only, as before #110: the day's use tops out at the
+allowance, so a cap at or under it spends no credit and one above it (or
+none) spends credit freely. With either cap set and the day's use unknown,
+the first paid call is preceded by the free refresh above, so with the
+default credit cap a keyed process asks `/rate-limit` once before its
+first paid call.
+
+**Credit spent today** (`Budget::prepaid_spent_today`, FFI
+`prepaidSpentTodayUsd`, `aspero budget` `prepaid_spent_today_usd`) isn't
+reported by OpenAlex, so it's told from the balance every response and
+refresh carries: the first balance seen in the budget day (the UTC day
+ending at `resets_at`, an hour back so a reset read a moment past midnight
+names the day before), raised by any top-up since, less the latest. A
+rise of a cent or more is a top-up; a smaller rise, or a sighting older
+than the latest, is responses arriving out of order and changes nothing.
+The day is kept in the cache file's `prepaid_day (provider, day,
+start_usd, last_usd, seen_at)` (`PrepaidDays`; one write transaction a
+sighting; a week kept), so every process sharing it (CLI, MCP, the app)
+and every restart tells the same figure, counting everything using the
+key from the day's first sighting by any of them; without a file, each
+engine keeps its own. Like the allowance's use it counts everything
+using the key, but a day first seen part-way through misses what was
+spent before: an undercount, accepted. `Budget::prepaid_expires_at` (FFI
+`prepaidExpiresAt`) is `/rate-limit`'s `prepaid_expires_at`, a JavaScript
+`Date` printed as a string ("Sun Feb 14 2027 12:08:05 GMT+0000
+(Coordinated Universal Time)", ISO also read); headers don't carry it, so
+it's kept from the last refresh.
+
 Pacing is **shared across processes** through the cache file: each
 request claims its provider's next slot in a `pacing` table (one write
 transaction), so parallel agents keep to one rate between them, even with
@@ -870,6 +928,11 @@ fixture recorded with different parameters once hid a ranking bug.
   alone, past the cache (free; limit $0.10, checked 2026-11-14), and
   reads the budget from its headers. Its body echoes the key's first and
   last three characters, masked in the fixture.
+  A failing response is a spent budget (`QuotaExhausted`, which stops
+  OpenAlex until the reset) when its body says `not_enough_credits`, or
+  `-remaining-usd` is 0 with no `-prepaid-remaining-usd` left: credit is
+  spent once the allowance is used up, so with credit left a failure is
+  what its status says (a 429 rate limit, a server fault).
   404s are HTML. Lists take up to 200 a page (`per-page`); filters OR up to
   100 values; `select` trims works to the fields named (citing works:
   `id,publication_year,referenced_works`, about 3 KB a work). Batch

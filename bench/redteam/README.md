@@ -88,7 +88,10 @@ scripts/redteam.py --rescore --failures      # re-score the saved results
 
 Claims go to `aspero verify - --format json` in one batch through
 `target/redteam-cache`, with OpenAlex capped at $0.75/day unless
-`ASPERO_OPENALEX_CAP_USD` says otherwise. The first run cost $0.30 of
+`ASPERO_OPENALEX_CAP_USD` says otherwise and, once the allowance is used
+up, prepaid credit at $5/day unless `ASPERO_OPENALEX_CREDIT_CAP_USD` says
+otherwise (aspero's own default, $0.25, could stop a run part-way). The
+first run cost $0.30 of
 OpenAlex searches; re-runs within the cache TTLs are free. It prints the
 acceptance criteria (each PASS or FAIL) after the table. Exit 1 if any
 fabricated or wrong citation verified.

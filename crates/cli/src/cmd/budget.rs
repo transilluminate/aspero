@@ -25,7 +25,10 @@ pub async fn run(engine: &Engine, out: Out) -> Result<Exit, Failure> {
         }
         for (provider, budget) in &budgets {
             let no_key = keyless && provider.as_str() == "openalex";
-            println!("{provider}: {}", line(budget, no_key));
+            println!(
+                "{provider}: {}",
+                line(budget, no_key, caps(engine, provider))
+            );
         }
     } else {
         let list: Vec<Value> = budgets
@@ -41,10 +44,17 @@ pub async fn run(engine: &Engine, out: Out) -> Result<Exit, Failure> {
                         row.insert(k.into(), json!(v));
                     }
                 };
+                let (allowance_cap, credit_cap) = caps(engine, provider);
                 put("limit_usd", b.limit);
                 put("spent_usd", b.used());
                 put("remaining_usd", b.remaining);
+                put("allowance_cap_usd", allowance_cap);
+                put("prepaid_spent_today_usd", b.prepaid_spent_today);
+                put("credit_cap_usd", credit_cap);
                 put("prepaid_remaining_usd", b.prepaid_remaining);
+                if let Some(t) = b.prepaid_expires_at {
+                    row.insert("prepaid_expires_at".into(), json!(t.to_string()));
+                }
                 if let Some(t) = b.resets_at {
                     row.insert("resets_at".into(), json!(t.to_string()));
                 }
@@ -79,21 +89,58 @@ async fn budgets(engine: &Engine) -> (Vec<(aspero_core::ProviderId, Budget)>, bo
     (budgets, keyless)
 }
 
-/// "$0.0498 of $1.00 used today, resets 00:00 UTC; $5.00 prepaid left",
-/// "(no key)" after "today" when OpenAlex has none.
-fn line(b: &Budget, no_key: bool) -> String {
+/// The engine's caps on `provider`: its allowance's, and its credit's.
+fn caps(engine: &Engine, provider: &aspero_core::ProviderId) -> (Option<f64>, Option<f64>) {
+    (
+        engine.daily_cap(provider),
+        engine.daily_credit_cap(provider),
+    )
+}
+
+/// "free allowance $0.0498 of $1.00 used today (cap $0.50), resets 00:00
+/// UTC; credit $0.0300 spent today (cap $0.25), $4.97 left, expires
+/// 2027-02-14", "(no key)" after "today" when OpenAlex has none. Both
+/// figures count everything using the key.
+fn line(
+    b: &Budget,
+    no_key: bool,
+    (allowance_cap, credit_cap): (Option<f64>, Option<f64>),
+) -> String {
     let key = if no_key { " (no key)" } else { "" };
     let mut text = match (b.used(), b.limit, b.remaining) {
-        (Some(used), Some(limit), _) => format!("${used:.4} of ${limit:.2} used today{key}"),
-        (_, _, Some(left)) => format!("${left:.4} left today{key}"),
+        (Some(used), Some(limit), _) => {
+            format!("free allowance ${used:.4} of ${limit:.2} used today{key}")
+        }
+        (_, _, Some(left)) => format!("free allowance ${left:.4} left today{key}"),
         _ => "budget unknown".to_owned(),
     };
+    if let Some(cap) = allowance_cap {
+        let _ = write!(text, " (cap ${cap:.2})");
+    }
     if let Some(t) = b.resets_at {
         let at = t.to_zoned(jiff::tz::TimeZone::UTC);
         let _ = write!(text, ", resets {} UTC", at.strftime("%H:%M"));
     }
-    if let Some(prepaid) = b.prepaid_remaining.filter(|p| *p > 0.0) {
-        let _ = write!(text, "; ${prepaid:.2} prepaid left");
+    let balance = b.prepaid_remaining.filter(|p| *p > 0.0);
+    let spent = b.prepaid_spent_today.filter(|s| *s > 0.0);
+    if balance.is_none() && spent.is_none() {
+        if let Some(cap) = credit_cap {
+            let _ = write!(text, "; no prepaid credit (cap ${cap:.2} a day)");
+        }
+        return text;
+    }
+    let _ = write!(
+        text,
+        "; credit ${:.4} spent today",
+        b.prepaid_spent_today.unwrap_or(0.0)
+    );
+    if let Some(cap) = credit_cap {
+        let _ = write!(text, " (cap ${cap:.2})");
+    }
+    let _ = write!(text, ", ${:.2} left", balance.unwrap_or(0.0));
+    if let Some(t) = b.prepaid_expires_at {
+        let on = t.to_zoned(jiff::tz::TimeZone::UTC);
+        let _ = write!(text, ", expires {}", on.strftime("%Y-%m-%d"));
     }
     text
 }
@@ -113,22 +160,41 @@ mod tests {
 
     #[test]
     fn lines_say_what_is_used_of_the_day() {
+        const NONE: (Option<f64>, Option<f64>) = (None, None);
         assert_eq!(
-            line(&budget(Some(1.0), Some(0.9502), Some(0.0)), false),
-            "$0.0498 of $1.00 used today, resets 00:00 UTC"
+            line(&budget(Some(1.0), Some(0.9502), Some(0.0)), false, NONE),
+            "free allowance $0.0498 of $1.00 used today, resets 00:00 UTC"
         );
         assert_eq!(
-            line(&budget(Some(1.0), Some(0.0), Some(5.0)), false),
-            "$1.0000 of $1.00 used today, resets 00:00 UTC; $5.00 prepaid left"
+            line(
+                &budget(Some(1.0), Some(0.9502), Some(0.0)),
+                false,
+                (Some(0.5), Some(0.25))
+            ),
+            "free allowance $0.0498 of $1.00 used today (cap $0.50), resets 00:00 UTC; \
+             no prepaid credit (cap $0.25 a day)"
+        );
+        let mut credit = budget(Some(1.0), Some(0.0), Some(4.97));
+        credit.prepaid_spent_today = Some(0.03);
+        credit.prepaid_expires_at = Some("2027-02-14T12:08:05Z".parse().unwrap());
+        assert_eq!(
+            line(&credit, false, (None, Some(0.25))),
+            "free allowance $1.0000 of $1.00 used today, resets 00:00 UTC; \
+             credit $0.0300 spent today (cap $0.25), $4.97 left, expires 2027-02-14"
+        );
+        assert_eq!(
+            line(&budget(Some(1.0), Some(0.0), Some(5.0)), false, NONE),
+            "free allowance $1.0000 of $1.00 used today, resets 00:00 UTC; \
+             credit $0.0000 spent today, $5.00 left"
         );
         let remaining_only = budget(None, Some(0.5), None);
         assert_eq!(
-            line(&remaining_only, false),
-            "$0.5000 left today, resets 00:00 UTC"
+            line(&remaining_only, false, NONE),
+            "free allowance $0.5000 left today, resets 00:00 UTC"
         );
         assert_eq!(
-            line(&budget(Some(0.1), Some(0.0847), None), true),
-            "$0.0153 of $0.10 used today (no key), resets 00:00 UTC"
+            line(&budget(Some(0.1), Some(0.0847), None), true, NONE),
+            "free allowance $0.0153 of $0.10 used today (no key), resets 00:00 UTC"
         );
     }
 
@@ -174,9 +240,10 @@ mod tests {
         assert_eq!(provider.as_str(), "openalex");
         assert_eq!((budget.limit, budget.remaining), (Some(0.1), Some(0.0774)));
         assert!(
-            line(budget, true).starts_with("$0.0226 of $0.10 used today (no key), resets "),
+            line(budget, true, (None, None))
+                .starts_with("free allowance $0.0226 of $0.10 used today (no key), resets "),
             "{}",
-            line(budget, true)
+            line(budget, true, (None, None))
         );
     }
 }

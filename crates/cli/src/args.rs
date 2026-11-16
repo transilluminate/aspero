@@ -25,6 +25,7 @@ Environment:
   ASPERO_MAILTO     contact address for polite API pools (Crossref)
   ASPERO_CACHE_DIR  where to keep the answer cache (default: platform cache dir)
   ASPERO_OPENALEX_CAP_USD  --openalex-cap-usd; ASPERO_OPENALEX_CAP still read
+  ASPERO_OPENALEX_CREDIT_CAP_USD  --openalex-credit-cap-usd (default 0.25)
   ASPERO_DISABLED_SOURCES  --without
   ASPERO_CACHE_FOUND_DAYS, ASPERO_CACHE_NOT_FOUND_DAYS, ASPERO_CACHE_MAX_MB
                     --cache-found-days, --cache-not-found-days, --cache-max-mb
@@ -150,7 +151,8 @@ pub struct Global {
     /// use, as OpenAlex reports it for the key (shared with anything else
     /// using it), reaches this many USD, until midnight UTC. Lookups (free)
     /// go on, checks fall back to the free sources, and a search that needs
-    /// OpenAlex fails (exit 5). `aspero budget` shows today's use.
+    /// OpenAlex fails (exit 5). `aspero budget` shows today's use;
+    /// `aspero budget --help` the four cases with the credit cap.
     #[arg(
         long,
         global = true,
@@ -162,6 +164,21 @@ pub struct Global {
         hide_short_help = true
     )]
     pub openalex_cap_usd: Option<f64>,
+
+    /// Once OpenAlex's free allowance is all used today (by anything using
+    /// the key), spend prepaid credit only while the credit spent today
+    /// (by anything using the key) is under this many USD; then stop until
+    /// midnight UTC (exit 5). 0 never spends credit. Default: 0.25.
+    #[arg(
+        long,
+        global = true,
+        value_name = "USD",
+        env = "ASPERO_OPENALEX_CREDIT_CAP_USD",
+        value_parser = cap,
+        help_heading = "Sources and budget",
+        hide_short_help = true
+    )]
+    pub openalex_credit_cap_usd: Option<f64>,
 
     /// Sources never to ask, for lookups, checks or searches: openalex,
     /// crossref, datacite, doi, europepmc, openlibrary (comma-separated or
@@ -743,17 +760,39 @@ when stdin closes.")]
         budget: f64,
     },
 
-    /// Show what's used and left of OpenAlex's daily budget.
+    /// Show what's used and left of OpenAlex's daily allowance and credit.
     #[command(after_help = "\
 With OPENALEX_API_KEY set, asks OpenAlex's /rate-limit, which costs nothing:
-  openalex: $0.0498 of $1.00 used today, resets 00:00 UTC
+  openalex: free allowance $0.0498 of $1.00 used today (cap $0.50), resets
+  00:00 UTC; credit $0.0300 spent today (cap $0.25), $4.97 left, expires
+  2027-02-14
 
 Without a key, /rate-limit doesn't answer, so one work is looked up alone,
 past the cache (free), and its response's headers say the budget:
-  openalex: $0.0153 of $0.10 used today (no key), resets 00:00 UTC
+  openalex: free allowance $0.0153 of $0.10 used today (no key), resets
+  00:00 UTC; no prepaid credit (cap $0.25 a day)
 JSON: {\"budgets\": [{\"provider\", \"limit_usd\", \"spent_usd\",
-\"remaining_usd\", \"prepaid_remaining_usd\", \"resets_at\", \"seen_at\"}]}, and
-\"key\": false without one.
+\"remaining_usd\", \"allowance_cap_usd\", \"prepaid_spent_today_usd\",
+\"credit_cap_usd\", \"prepaid_remaining_usd\", \"prepaid_expires_at\",
+\"resets_at\", \"seen_at\"}]}, and \"key\": false without one.
+
+Paid calls (searches, batch lookups), with \"used\" and \"spent\" counting
+everything using the key, not just aspero:
+  a. free allowance used today < --openalex-cap-usd: the allowance is used
+  b. --openalex-cap-usd <= used < the allowance: stop (the rest is held
+     back for other tools)
+  c. the allowance all gone (by anything) and credit spent today <
+     --openalex-credit-cap-usd (default $0.25): credit is used, to the cap
+  d. the allowance gone and credit spent today >= the credit cap: stop
+     until the reset (midnight UTC)
+With an allowance cap below the allowance, aspero never takes the key into
+credit itself; only other tools can. A stop is exit 5; free lookups go on.
+Two overshoots: a call is checked before it's sent and its cost known only
+after, so the last call (or calls in flight together) can pass a cap by
+their own cost; and other tools' spending shows only in the next response,
+so one call can land on credit even with a credit cap of 0. Credit spent
+today is told from the balance (OpenAlex doesn't say it): if the day's
+first balance is seen part-way through, what was spent before is missed.
 
 Examples:
   aspero budget
@@ -1024,6 +1063,22 @@ mod tests {
         assert_eq!(old.global.openalex_cap_usd, Some(0.25));
         for bad in ["-1", "half", "inf"] {
             let error = parse(&["--openalex-cap-usd", bad, "search", "x"]).expect_err(bad);
+            assert_eq!(error.exit_code(), 2);
+        }
+    }
+
+    #[test]
+    fn the_credit_cap_is_an_amount_and_unset_by_default() {
+        let unset = parse(&["search", "x"]).unwrap();
+        if std::env::var_os("ASPERO_OPENALEX_CREDIT_CAP_USD").is_none() {
+            assert_eq!(unset.global.openalex_credit_cap_usd, None);
+        }
+        let cli = parse(&["--openalex-credit-cap-usd", "1.5", "search", "x"]).unwrap();
+        assert_eq!(cli.global.openalex_credit_cap_usd, Some(1.5));
+        let off = parse(&["search", "x", "--openalex-credit-cap-usd", "0"]).unwrap();
+        assert_eq!(off.global.openalex_credit_cap_usd, Some(0.0));
+        for bad in ["-1", "unlimited", "inf"] {
+            let error = parse(&["--openalex-credit-cap-usd", bad, "search", "x"]).expect_err(bad);
             assert_eq!(error.exit_code(), 2);
         }
     }

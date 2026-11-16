@@ -217,8 +217,9 @@ scripts/       fixture recorders, one per provider
   don't say. The caller has the page's markup (its `<head>` and JSON-LD
   scripts will do), or often only its address and the title a browser
   gave it (a window's, a shared page's or a dropped link's); aspero never
-  fetches a page, and the function is pure (no network, no clock). Read, each claim field from the
-  first that gives it: Highwire `citation_*` tags (DOI, PMID, PMCID, arXiv,
+  fetches a page, and the function is pure (no network, no clock). Read,
+  each claim field from the first that gives it: Highwire `citation_*`
+  tags (DOI, PMID, PMCID, arXiv,
   PII, ISBN; title; each author; journal, else its abbreviation, the
   conference or the book; volume; first and last page; the year of the
   publication date, else `citation_date`, else the online date), PRISM
@@ -241,9 +242,9 @@ scripts/       fixture recorders, one per provider
   host: a wrong one makes `verify` report a journal mismatch and cap at
   plausible. The host is the claim's `site` instead (lower case, `www.`
   dropped; always, identifiers or not), a hint of the publisher (see
-  Resolve, verify and check: Sites). Authors keep page order and their written form ("Last,
-  First" or "First Last", as claims take them), blanks and "et al."
-  dropped, at most 50.
+  Resolve, verify and check: Sites). Authors keep page order and their
+  written form ("Last, First" or "First Last", as claims take them),
+  blanks and "et al." dropped, at most 50.
   - The markup is read by a small hand-written scanner, not a parser
     (and no new dependency): tags and attributes in any quoting and case,
     values entity-decoded (`&amp;`, `&#39;`, `&#x2019;`, common named
@@ -273,7 +274,6 @@ scripts/       fixture recorders, one per provider
     page ("Just a moment...", "Page not found"), a site's name alone, an
     address or identifier; and a given title (a dragged link's name) at
     least three words and 15 characters, a page's own two words.
-- **Scanning** (`id::scan`, `aspero scan`) finds every identifier
 - **Scanning** (`id::scan`, `aspero scan`) finds every identifier
   mentioned in a document, with its position and text as written; which
   mentions matter is the caller's call. Shapes that prose imitates (bare

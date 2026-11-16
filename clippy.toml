@@ -17,3 +17,7 @@ doc-valid-idents = [
     "NeurIPS",
     "..",
 ]
+
+# Functions over this many lines fail `too_many_lines`; the few that are one
+# table or one pipeline carry a local allow saying why.
+too-many-lines-threshold = 200

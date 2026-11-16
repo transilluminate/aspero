@@ -33,6 +33,10 @@ fn is_url(title: &str) -> bool {
 }
 
 /// Scores how well `record` matches `claim`.
+// The caps and floors apply in order, each reading what the ones before
+// left; splitting them up hides that order. Follow-up: move the cap/floor
+// tail into `caps.rs` as one function over the field checks.
+#[allow(clippy::too_many_lines)]
 pub fn assess(claim: &Claim, record: &SourceRecord) -> Assessment {
     let work = &record.work;
     // A BibTeX entry's accents read as letters (`Veli{\v{c}}kovi{\'c}`).

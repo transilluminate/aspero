@@ -1704,3 +1704,294 @@ fn a_title_with_a_word_replaced_is_not_the_records() {
         assert!(a.confidence >= VERIFIED, "{text}: {a:?}");
     }
 }
+
+/// A journal article's record for the red-team table.
+fn article(title: &str, authors: &[&str], year: i16, at: (&str, &str, &str)) -> SourceRecord {
+    let mut r = placed(&[], title, authors, year, at);
+    r.work.work_type = Some(crate::work::WorkType::JournalArticle);
+    r
+}
+
+#[test]
+fn red_team_minimised_failures_stay_fixed() {
+    // Minimised false VERIFIEDs from bench/redteam/failures.jsonl (#102),
+    // against the records they verified: none may verify now. Each with
+    // its id there.
+    let nature = |title: &str, authors: &[&str], year, volume, pages| {
+        article(title, authors, year, ("Nature", volume, pages))
+    };
+    let alphafold = nature(
+        "Highly accurate protein structure prediction with AlphaFold",
+        &["John Jumper", "Richard Evans", "Alexander Pritzel"],
+        2021,
+        "596",
+        "583-589",
+    );
+    let lstm = article(
+        "Long Short-Term Memory",
+        &["Sepp Hochreiter", "Jürgen Schmidhuber"],
+        1997,
+        ("Neural Computation", "9", "1735-1780"),
+    );
+    let colchicine = article(
+        "Efficacy and Safety of Low-Dose Colchicine after Myocardial Infarction",
+        &["Jean-Claude Tardif", "Simon Kouz", "David D. Waters"],
+        2019,
+        ("New England Journal of Medicine", "381", "2497-2505"),
+    );
+    let huang = article(
+        "Clinical features of patients infected with 2019 novel coronavirus in Wuhan, China",
+        &["Chaolin Huang", "Yeming Wang", "Xingwang Li"],
+        2020,
+        ("The Lancet", "395", "497-506"),
+    );
+    let mut zenodo = record(
+        &["10.5281/zenodo.13525448"],
+        "Why Most Published Research Findings Are False",
+        &["John P. A. Ioannidis"],
+        2005,
+    );
+    zenodo.work.work_type = Some(crate::work::WorkType::JournalArticle);
+    let mut arxiv = record(
+        &["arxiv:2410.02479"],
+        "Cross-Embodiment Dexterous Grasping with Reinforcement Learning",
+        &["Haoqi Yuan", "Bohan Zhou"],
+        2024,
+    );
+    arxiv.work.work_type = Some(crate::work::WorkType::Preprint);
+    let cases: Vec<(&str, Claim, SourceRecord)> = vec![
+        (
+            "corpus-174",
+            Claim::from_text(
+                "Tuyls K, Rourke-Ellison D. Evolutionary game theory and multi-agent \
+                 reinforcement learning. 2005.",
+            ),
+            article(
+                "Evolutionary game theory and multi-agent reinforcement learning",
+                &["Karl Tuyls", "Ann Nowé"],
+                2005,
+                ("The Knowledge Engineering Review", "20", "63-90"),
+            ),
+        ),
+        (
+            "adv-18",
+            Claim::from_text(format!(
+                "Rivers E, Smith J, Patel R, et al. {EGDT}. N Engl J Med. 2001;345(19):1368-77."
+            )),
+            egdt(),
+        ),
+        (
+            "adv-21",
+            Claim {
+                title: Some(
+                    "Fibrinolysis for patients with intermediate-risk pulmonary embolism".into(),
+                ),
+                authors: vec!["Meyer, G.".into(), "Smith, J.".into()],
+                year: Some(2014),
+                ..Claim::default()
+            },
+            peitho(),
+        ),
+        (
+            "adv-01",
+            Claim::from_text(
+                "LeCun Y, Bengio Y, Hinton G. Deep learning for medical image analysis. Nature. \
+                 2015;521:436-444.",
+            ),
+            lecun(),
+        ),
+        (
+            "adv-13",
+            Claim {
+                title: Some("Deep learning: a primer for clinicians".into()),
+                authors: vec!["LeCun, Y.".into(), "Bengio, Y.".into(), "Hinton, G.".into()],
+                year: Some(2015),
+                container: Some("Nature".into()),
+                ..Claim::default()
+            },
+            lecun(),
+        ),
+        (
+            "adv-12",
+            Claim::from_text(
+                "Hanahan D, Weinberg RA. Hallmarks of cancer: the next generation of targeted \
+                 therapies. Cell. 2011;144(5):646-674.",
+            ),
+            hallmarks(),
+        ),
+        (
+            "adv-08",
+            Claim::from_text(
+                "Jumper J, Evans R, Pritzel A, et al. Highly accurate protein structure \
+                 prediction with AlphaFold enables structure-based drug discovery. Nature. 2021.",
+            ),
+            alphafold.clone(),
+        ),
+        (
+            "adv-33",
+            Claim::from_text(
+                "Siegel RL, Miller KD, Jemal A. Cancer statistics, 2020. CA Cancer J Clin. \
+                 2018;70(1):7-30.",
+            ),
+            article(
+                "Cancer statistics, 2020",
+                &["Rebecca L. Siegel", "Kimberly D. Miller", "Ahmedin Jemal"],
+                2020,
+                ("CA: A Cancer Journal for Clinicians", "70", "7-30"),
+            ),
+        ),
+        (
+            "adv-39",
+            Claim::from_text(
+                "Hindricks G, Potpara T, Dagres N, et al. 2020 ESC Guidelines for the diagnosis \
+                 and management of atrial fibrillation developed in collaboration with the \
+                 European Association for Cardio-Thoracic Surgery (EACTS). Eur Heart J. 2017.",
+            ),
+            article(
+                "2020 ESC Guidelines for the diagnosis and management of atrial fibrillation \
+                 developed in collaboration with the European Association for Cardio-Thoracic \
+                 Surgery (EACTS)",
+                &["Gerhard Hindricks", "Tatjana Potpara", "Nikolaos Dagres"],
+                2020,
+                ("European Heart Journal", "42", "373-498"),
+            ),
+        ),
+        (
+            "adv-27",
+            Claim::from_text(
+                "Jumper J, Evans R, Pritzel A, et al. Highly accurate protein structure \
+                 prediction with AlphaFold. Science. 2021;596(7873):583-589.",
+            ),
+            alphafold.clone(),
+        ),
+        (
+            "corpus-203",
+            Claim::from_text(
+                "Huang C, et al. Clinical features of patients infected with 2019 novel \
+                 coronavirus in Wuhan, China. JAMA. 2020.",
+            ),
+            huang,
+        ),
+        (
+            "adv-56",
+            Claim::from_text(
+                "Hochreiter S, Schmidhuber J. Long short-term memory. Neural Netw. 1998.",
+            ),
+            lstm.clone(),
+        ),
+        (
+            "corpus-202",
+            Claim::from_text(
+                "Altschul, S.F. et al. (1990) 'Basic local alignment search tool', American \
+                 Journal of Epidemiology, 215(3), pp. 403-410.",
+            ),
+            article(
+                "Basic local alignment search tool",
+                &["Stephen F. Altschul", "Warren Gish", "Webb Miller"],
+                1990,
+                ("Journal of Molecular Biology", "215", "403-410"),
+            ),
+        ),
+        (
+            "adv-52",
+            Claim::from_text(
+                "Silver, D. et al. Mastering the game of Go with deep neural networks and tree \
+                 search. Nature 530, 484 (2016).",
+            ),
+            nature(
+                "Mastering the game of Go with deep neural networks and tree search",
+                &["David Silver", "Aja Huang", "Chris J. Maddison"],
+                2016,
+                "529",
+                "484-489",
+            ),
+        ),
+        (
+            "adv-53",
+            Claim::from_text(
+                "@article{jumper2021, author = {Jumper, John and Evans, Richard}, title = \
+                 {Highly accurate protein structure prediction with {AlphaFold}}, journal = \
+                 {Nature}, year = {2021}, volume = {597}, pages = {583--589}}",
+            ),
+            alphafold,
+        ),
+        (
+            "corpus-219",
+            Claim::from_text(
+                "Niwa T. Transfection of plasmid DNA by nanocarriers. J Microbiol Methods. \
+                 2005;61:251.",
+            ),
+            article(
+                "Lytic enzyme, labiase for a broad range of Gram-positive bacteria",
+                &["Tomoko Niwa", "Yoshiaki Kawamura"],
+                2005,
+                ("Journal of Microbiological Methods", "61", "251-260"),
+            ),
+        ),
+        (
+            "adv-44",
+            Claim::from_text(
+                "Horby P, Lim WS, Emberson JR, et al. Hydroxychloroquine in hospitalized \
+                 patients with Covid-19. N Engl J Med. 2021;384(8):693-704.",
+            ),
+            article(
+                "Dexamethasone in Hospitalized Patients with Covid-19",
+                &["Peter Horby", "Wei Shen Lim", "Jonathan R. Emberson"],
+                2021,
+                ("New England Journal of Medicine", "384", "693-704"),
+            ),
+        ),
+        (
+            "adv-57",
+            Claim::from_text(
+                "Ioannidis JP. Why most published research findings are false. BMJ. 2006.",
+            ),
+            zenodo,
+        ),
+        (
+            "corpus-271",
+            Claim::from_text(
+                "Yuan H. Cross-embodiment dexterous grasping with reinforcement learning. \
+                 Science Robotics. 2024.",
+            ),
+            arxiv,
+        ),
+        (
+            "corpus-277",
+            Claim::from_text(
+                "Tardif JC. Efficacy and safety of low-dose colchicine after myocardial \
+                 infarction. medRxiv. 2019.",
+            ),
+            colchicine.clone(),
+        ),
+        (
+            "corpus-275",
+            Claim::from_text("Hochreiter S. Long short-term memory. arXiv preprint. 1997."),
+            lstm,
+        ),
+    ];
+    for (id, claim, record) in &cases {
+        let a = assess(claim, record);
+        assert!(a.confidence < VERIFIED, "{id}: {a:?}");
+    }
+    // The same works cited right still verify.
+    for (text, record) in [
+        (
+            "Tardif JC, Kouz S, Waters DD, et al. Efficacy and safety of low-dose colchicine \
+             after myocardial infarction. N Engl J Med. 2019;381(26):2497-2505.",
+            colchicine,
+        ),
+        (
+            "Hanahan D, Weinberg RA. Hallmarks of cancer: the next generation. Cell. \
+             2011;144(5):646-674.",
+            hallmarks(),
+        ),
+        (
+            "LeCun, Y., Bengio, Y. & Hinton, G. Deep learning. Nature 521, 436–444 (2015).",
+            lecun(),
+        ),
+    ] {
+        let a = assess(&Claim::from_text(text), &record);
+        assert!(a.confidence >= VERIFIED, "{text}: {a:?}");
+    }
+}

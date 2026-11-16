@@ -30,7 +30,15 @@ Primary users are agents driving the CLI, then humans.
 - **Keep WASM possible** for `core` and providers: no tokio, no clock, no
   disk I/O there.
 - **Standalone.** Optional producers (text extraction, embeddings) plug into
-  generic seams; they are never dependencies.
+  generic seams; they are never dependencies. Those seams (full text, a
+  durable store of derived data) are designed with their first producer
+  in hand, not ahead of it.
+- **Work identifiers are a contract.** Callers store canonical `kind:value`
+  strings durably and join on them, so a change to an identifier's
+  canonical form (its normalisation or display) or to the ranking in
+  `id::canonical` is a breaking change: it needs a migration story (old
+  form to new, for stored keys) and a minor version, not only a changelog
+  line. Property tests pin that display re-parses to itself.
 
 ## Architecture
 

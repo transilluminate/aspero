@@ -300,6 +300,10 @@ impl WorkId {
 /// The identifier a work is best known by, the same whichever of its
 /// identifiers it was found through: a DOI (other than arXiv's DataCite
 /// one), then arXiv, PMID, PMCID, ISBN, NBK, PII, any DOI, any other.
+///
+/// A contract: callers store these as keys, so changing the ranking (or
+/// any identifier's canonical form) needs a migration story and a minor
+/// version (DESIGN, Principles).
 pub fn canonical(ids: &[WorkId]) -> Option<&WorkId> {
     let arxiv_doi = |id: &&WorkId| matches!(id, WorkId::Doi(d) if d.is_arxiv());
     let of = |kind: IdKind| ids.iter().find(move |id| id.kind() == kind);

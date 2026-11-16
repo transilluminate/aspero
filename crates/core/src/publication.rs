@@ -836,8 +836,11 @@ pub(crate) fn conferences(name: &str) -> Vec<usize> {
         .filter(|t| !t.is_empty())
         .collect();
     let acronym = |a: &str| {
-        tokens.iter().any(|t| {
+        tokens.iter().enumerate().any(|(i, t)| {
             let t = t.trim_end_matches(|c: char| c.is_ascii_digit());
+            if holds_meeting(&tokens, i) {
+                return false;
+            }
             if WORDLIKE_ACRONYMS.contains(&a) {
                 t.eq_ignore_ascii_case(a) && t.chars().all(|c| c.is_ascii_uppercase())
             } else {
@@ -858,6 +861,34 @@ pub(crate) fn conferences(name: &str) -> Vec<usize> {
         .filter(|(_, (acronyms, phrase))| acronyms.iter().any(|a| acronym(a)) || named(phrase))
         .map(|(i, _)| i)
         .collect()
+}
+
+/// Whether the acronym at `tokens[i]` names who holds a meeting rather
+/// than the meeting: a society before its other conferences ("the
+/// International AAAI Conference on Web and Social Media" is ICWSM, not
+/// AAAI's conference), a conference before its workshops ("ICML Workshop
+/// on …").
+fn holds_meeting(tokens: &[&str], i: usize) -> bool {
+    let meeting = |t: &&str| {
+        [
+            "conference",
+            "symposium",
+            "workshop",
+            "workshops",
+            "congress",
+            "meeting",
+            "colloquium",
+        ]
+        .iter()
+        .any(|m| t.eq_ignore_ascii_case(m))
+    };
+    match tokens.get(i + 1) {
+        Some(next) if meeting(next) => true,
+        Some(next) if next.eq_ignore_ascii_case("international") => {
+            tokens.get(i + 2).is_some_and(meeting)
+        }
+        _ => false,
+    }
 }
 
 /// Whether a venue cited is a conference's or a workshop's proceedings:
@@ -981,7 +1012,8 @@ const ORDINALS: &[&str] = &[
 /// conference.
 const NOT_ACRONYMS: &[&str] = &[
     "acm", "ieee", "cvf", "rsj", "ifip", "siam", "spie", "usenix", "usa", "ny", "uk", "lncs", "pp",
-    "ii", "iii", "iv", "vi", "vii", "viii", "ix", "xi", "xii", "eds",
+    "ii", "iii", "iv", "vi", "vii", "viii", "ix", "xi", "xii", "eds", "lnai", "lnbi", "ccis",
+    "pmlr", "ceur", "lipics", "eptcs", "oasics", "jmlr", "aisc", "doi", "isbn", "issn",
 ];
 
 /// A proceedings' name as words of its subject and acronyms: "Proceedings
@@ -992,6 +1024,9 @@ const NOT_ACRONYMS: &[&str] = &[
 struct Subject {
     words: Vec<String>,
     acronyms: Vec<String>,
+    /// The name's words, lower-cased, numbers aside: what an acronym of
+    /// the name is made of ([`Subject::fits`]).
+    letters: Vec<Vec<char>>,
 }
 
 impl Subject {
@@ -999,6 +1034,17 @@ impl Subject {
         let tokens: Vec<&str> = name
             .split(|c: char| !c.is_alphanumeric())
             .filter(|t| !t.is_empty())
+            .collect();
+        let letters: Vec<Vec<char>> = tokens
+            .iter()
+            .filter(|t| t.chars().next().is_some_and(char::is_alphabetic))
+            .map(|t| t.chars().flat_map(char::to_lowercase).collect())
+            .collect();
+        // A society before its other meetings ("International AAAI
+        // Conference on Web and Social Media") names neither.
+        let holders: Vec<String> = (0..tokens.len())
+            .filter(|&i| holds_meeting(&tokens, i))
+            .map(|i| tokens[i].to_ascii_lowercase())
             .collect();
         let alphabetic: Vec<&&str> = tokens
             .iter()
@@ -1014,11 +1060,12 @@ impl Subject {
                 > alphabetic.len();
         let mut acronyms: Vec<String> = Vec::new();
         if !shouting {
-            for t in &tokens {
+            for (i, t) in tokens.iter().enumerate() {
                 let t = t.trim_end_matches(|c: char| c.is_ascii_digit());
                 let upper = t.chars().filter(char::is_ascii_uppercase).count();
                 let lower = t.to_ascii_lowercase();
                 if upper >= 2
+                    && !holds_meeting(&tokens, i)
                     && (2..=12).contains(&t.len())
                     && t.chars().all(|c| c.is_ascii_alphabetic())
                     && !NOT_ACRONYMS.contains(&lower.as_str())
@@ -1039,6 +1086,7 @@ impl Subject {
                     && !ORDINALS.contains(w)
                     && !w.starts_with("sig")
                     && !acronyms.iter().any(|a| a == w)
+                    && !holders.iter().any(|h| h == w)
             })
             .map(str::to_owned)
             .fold(Vec::new(), |mut words, w| {
@@ -1047,7 +1095,57 @@ impl Subject {
                 }
                 words
             });
-        Subject { words, acronyms }
+        Subject {
+            words,
+            acronyms,
+            letters,
+        }
+    }
+
+    /// Whether `acronym` could be this name's: its letters in order, each
+    /// word giving its initial and, after it, any of its letters ("mwscas"
+    /// of "Midwest Symposium on Circuits and Systems", "aies" of
+    /// "AAAI/ACM Conference on AI, Ethics, and Society"; not "icecs" of
+    /// "International Symposium on Circuits and Systems").
+    fn fits(&self, acronym: &str) -> bool {
+        // From the acronym's `k`th letter, in word `word` after its letter
+        // `at` (none begun: `None`); states that failed are remembered.
+        type State = (usize, usize, Option<usize>);
+        fn from(
+            acronym: &[char],
+            words: &[Vec<char>],
+            (k, word, at): State,
+            failed: &mut std::collections::HashSet<State>,
+        ) -> bool {
+            let Some(&c) = acronym.get(k) else {
+                return true;
+            };
+            if failed.contains(&(k, word, at)) {
+                return false;
+            }
+            // On in the word begun, after the letter used last.
+            let within = at.is_some_and(|at| {
+                (at + 1..words[word].len()).any(|i| {
+                    words[word][i] == c && from(acronym, words, (k + 1, word, Some(i)), failed)
+                })
+            });
+            let found = within
+                || (word + usize::from(at.is_some())..words.len()).any(|w| {
+                    words[w].first() == Some(&c)
+                        && from(acronym, words, (k + 1, w, Some(0)), failed)
+                });
+            if !found {
+                failed.insert((k, word, at));
+            }
+            found
+        }
+        let acronym: Vec<char> = acronym.chars().collect();
+        from(
+            &acronym,
+            &self.letters,
+            (0, 0, None),
+            &mut std::collections::HashSet::new(),
+        )
     }
 }
 
@@ -1090,8 +1188,14 @@ pub(crate) fn proceedings_agree(cited: &str, actual: &str) -> Option<bool> {
         .iter()
         .filter(|a| cited.words.iter().any(|c| same_subject_word(c, a)))
         .count();
+    // Named by an acronym the record's name can't make: another meeting
+    // of the same field and society, its words shared ("… Conference on
+    // Electronics, Circuits and Systems (ICECS)" for the "… Midwest
+    // Symposium on Circuits and Systems", "(ICMR '25)" for "… Conference
+    // on Multimedia in Asia").
+    let foreign = !cited.acronyms.is_empty() && !cited.acronyms.iter().any(|c| actual.fits(c));
     if shared * 2 >= actual.words.len() {
-        Some(true)
+        Some(!foreign)
     } else if shared * 3 <= actual.words.len() {
         Some(false)
     } else {

@@ -948,6 +948,24 @@ pub fn assess(claim: &Claim, record: &SourceRecord) -> Assessment {
         && !confirmed
         && venue.as_deref().is_some_and(publication::proceedings)
         && id_agreement(&claim.ids, &record.ids) != Agreement::Match;
+    // Nor can a copy in no venue at all (a repository's typed an article,
+    // a talk's video record at DataCite), cited as a meeting's: "in Proc.
+    // 2010 IEEE International Conference on Robotics and Automation (ICRA)"
+    // for an IROS paper's copy. A conference paper's record without its
+    // proceedings' name is in one, if unnamed.
+    let unplaced_at_meeting = !confirmed
+        && work.container_title.is_none()
+        && work.volume.is_none()
+        && work.page.is_none()
+        && matches!(
+            work.work_type,
+            Some(WorkType::JournalArticle | WorkType::Preprint | WorkType::Other(_))
+        )
+        && given_venue
+        && meeting_cited
+        && venue.as_deref().is_some_and(publication::proceedings)
+        && id_agreement(&claim.ids, &record.ids) != Agreement::Match;
+    let preprint_at_conference = preprint_at_conference || unplaced_at_meeting;
     let container = if other_conference
         || (preprint_at_conference && container.agreement != Agreement::Match)
     {

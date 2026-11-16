@@ -3938,3 +3938,183 @@ fn fourth_held_out_red_team_failures_stay_fixed() {
         assert!(a.confidence >= VERIFIED, "{claim}: {a:?}");
     }
 }
+
+#[test]
+fn a_meeting_of_the_same_society_cited_is_another_venue() {
+    // holdout-4's `w:conference-same-society`: another meeting of the
+    // society holding the record's (AAAI's ICWSM for its AAAI conference),
+    // or of its field, sharing words with it.
+    let mut aaai = proceedings(
+        "Sparsity-Guided Holistic Explanation for LLMs with Interpretable Inference-Time \
+         Intervention",
+        &["Zhen Tan", "Tianlong Chen", "Zhenyu Zhang"],
+        2024,
+        "Proceedings of the AAAI Conference on Artificial Intelligence",
+        "21619-21627",
+    );
+    // OpenAlex types AAAI's proceedings as a journal's articles.
+    aaai.work.work_type = Some(crate::work::WorkType::JournalArticle);
+    aaai.work.volume = Some("38".into());
+    let mut icwsm = proceedings(
+        "Link Me Baby One More Time: Social Music Discovery on Spotify",
+        &["Shazia Babul", "Desislava Hristova", "Antonio Lima"],
+        2025,
+        "Proceedings of the International AAAI Conference on Web and Social Media",
+        "146-159",
+    );
+    icwsm.work.work_type = Some(crate::work::WorkType::JournalArticle);
+    let mwscas = proceedings(
+        "Micropower class AB CMOS current conveyor based on quasi-floating gate techniques",
+        &["A. J. Lopez-Martin", "L. Acosta", "J. M. Algueta"],
+        2009,
+        "2009 52nd IEEE International Midwest Symposium on Circuits and Systems",
+        "140-143",
+    );
+    let iscas = proceedings(
+        "All-digital frequency and clock synthesis architectures from a signals and systems \
+         perspective, current state and future directions",
+        &["P. P. Sotiriadis"],
+        2010,
+        "Proceedings of 2010 IEEE International Symposium on Circuits and Systems",
+        "233-236",
+    );
+    let mm_asia = proceedings(
+        "PMCMatcher: A Parallel Multi-Scale Cascaded Transformer-Based Network for Multimodal \
+         Feature Matching",
+        &["Yun Liao", "Jiayi Lyu", "Junhui Liu"],
+        2025,
+        "Proceedings of the 7th ACM International Conference on Multimedia in Asia",
+        "1-8",
+    );
+    // A repository's copy: no venue, volume or page.
+    let mut copy = record(
+        &["doi:10.5445/ir/1000029612"],
+        "Towards Social Integration of Humanoid Robots by Conversational Concept Learning",
+        &["F. Kraft", "K. Kilgour", "R. Saam"],
+        2011,
+    );
+    copy.work.work_type = Some(crate::work::WorkType::JournalArticle);
+    // A talk's record at DataCite (Underline's), typed an article.
+    let mut talk = record(
+        &["doi:10.48448/z49g-ka35"],
+        "Attack On Prompt: Backdoor Attack in Prompt-Based Continual Learning",
+        &["Thien Trang Nguyen Vu", "Anh Tuan Tran", "Nhat Ho"],
+        2025,
+    );
+    talk.work.work_type = Some(crate::work::WorkType::Preprint);
+    for (n, claim, record) in [
+        (
+            "h4-784",
+            "T. Nguyen, A. Tran, and N. Ho, \"Attack on Prompt: Backdoor Attack in Prompt-Based \
+             Continual Learning,\" in Proceedings of the International AAAI Conference on Web \
+             and Social Media (ICWSM-25), 2025, pp. 19686–19694.",
+            &talk,
+        ),
+        (
+            "h4-771",
+            "Tan, Z., Chen, T., and Zhang, Z. 2024. Sparsity-Guided Holistic Explanation for \
+             LLMs with Interpretable Inference-Time Intervention. In Proceedings of the \
+             International AAAI Conference on Web and Social Media (ICWSM-24), 21619–21627.",
+            &aaai,
+        ),
+        (
+            "h4-793",
+            "Babul, S., Hristova, D., and Lima, A. 2025. Link Me Baby One More Time: Social \
+             Music Discovery on Spotify. In Proceedings of the AAAI Conference on Artificial \
+             Intelligence (AAAI-25), 146–159.",
+            &icwsm,
+        ),
+        (
+            "h4-776",
+            "A. J. Lopez-Martin, L. Acosta, and J. M. Algueta, \"Micropower class AB CMOS \
+             current conveyor based on quasi-floating gate techniques,\" in Proc. 2009 IEEE \
+             International Conference on Electronics, Circuits and Systems (ICECS), 2009, pp. \
+             140–143.",
+            &mwscas,
+        ),
+        (
+            "h4-788",
+            "P. P. Sotiriadis, \"All-digital frequency and clock synthesis architectures from a \
+             signals and systems perspective, current state and future directions,\" in Proc. \
+             2010 IEEE International Conference on Electronics, Circuits and Systems (ICECS), \
+             2010, pp. 233–236.",
+            &iscas,
+        ),
+        (
+            "h4-780",
+            "@inproceedings{liao2025, author = {Liao, Yun and Lyu, Jiayi and Liu, Junhui}, title \
+             = {PMCMatcher: A Parallel Multi-Scale Cascaded Transformer-Based Network for \
+             Multimodal Feature Matching}, booktitle = {Proceedings of the 2025 International \
+             Conference on Multimedia Retrieval (ICMR '25)}, year = {2025}, pages = {1--8}}",
+            &mm_asia,
+        ),
+        (
+            "h4-792",
+            "F. Kraft, K. Kilgour, and R. Saam, \"Towards social integration of humanoid robots \
+             by conversational concept learning,\" in Proc. 2010 IEEE International Conference \
+             on Robotics and Automation (ICRA), 2010, pp. 352–357.",
+            &copy,
+        ),
+    ] {
+        let a = assess(&Claim::from_text(claim), record);
+        assert_eq!(a.container.agreement, Agreement::Mismatch, "{n}: {a:?}");
+        assert!((PLAUSIBLE..VERIFIED).contains(&a.confidence), "{n}: {a:?}");
+    }
+    // At their own meetings, however written, they verify.
+    for (claim, record) in [
+        (
+            "Tan, Z., Chen, T., and Zhang, Z. 2024. Sparsity-Guided Holistic Explanation for \
+             LLMs with Interpretable Inference-Time Intervention. In Proceedings of the AAAI \
+             Conference on Artificial Intelligence (AAAI-24), 21619–21627.",
+            &aaai,
+        ),
+        (
+            "Babul, S., Hristova, D., and Lima, A. 2025. Link Me Baby One More Time: Social \
+             Music Discovery on Spotify. In Proceedings of the International AAAI Conference \
+             on Web and Social Media (ICWSM-25), 146–159.",
+            &icwsm,
+        ),
+        (
+            "A. J. Lopez-Martin, L. Acosta, and J. M. Algueta, \"Micropower class AB CMOS \
+             current conveyor based on quasi-floating gate techniques,\" in Proc. 52nd IEEE \
+             International Midwest Symposium on Circuits and Systems (MWSCAS), 2009, pp. \
+             140–143.",
+            &mwscas,
+        ),
+        (
+            "P. P. Sotiriadis, \"All-digital frequency and clock synthesis architectures from a \
+             signals and systems perspective, current state and future directions,\" in Proc. \
+             2010 IEEE International Symposium on Circuits and Systems (ISCAS), 2010, pp. \
+             233–236.",
+            &iscas,
+        ),
+    ] {
+        let a = assess(&Claim::from_text(claim), record);
+        assert!(a.confidence >= VERIFIED, "{claim}: {a:?}");
+    }
+    // An acronym the name can make, its letters among its words' initials.
+    for (cited, actual, expected) in [
+        (
+            "Proceedings of the 2019 AAAI/ACM Conference on AI, Ethics, and Society (AIES '19)",
+            "Proceedings of the AAAI/ACM Conference on AI, Ethics, and Society",
+            Some(true),
+        ),
+        (
+            "Proceedings of the 2nd Conference on Causal Learning and Reasoning, PMLR 213",
+            "Conference on Causal Learning and Reasoning",
+            Some(true),
+        ),
+        (
+            "Proceedings of the International AAAI Conference on Web and Social Media \
+             (ICWSM-22)",
+            "Proceedings of the AAAI Conference on Artificial Intelligence",
+            Some(false),
+        ),
+    ] {
+        assert_eq!(
+            publication::proceedings_agree(cited, actual),
+            expected,
+            "{cited} | {actual}"
+        );
+    }
+}

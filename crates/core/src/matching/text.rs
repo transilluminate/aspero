@@ -229,23 +229,69 @@ impl Normalised {
     /// of its own, not misspelt ("Hydroxychloroquine in hospitalized
     /// patients with Covid-19" for "Dexamethasone in …"): another title
     /// built on this one's, as an invented reference's often is.
-    pub(super) fn substitutes_in(&self, title: &str) -> bool {
+    /// `Some(true)` when a year was put in place of the title's own
+    /// ("Cancer statistics, 2020" for "Cancer statistics, 2018"): another
+    /// title of a series.
+    pub(super) fn substitutes_in(&self, title: &str) -> Option<bool> {
         let title = words(unmarked(title));
         let n = title.len();
         if n < 3 || self.words.len() < n {
-            return false;
+            return None;
         }
-        self.words.windows(n).any(|run| {
+        let year = |w: &str| w.len() == 4 && w.parse().is_ok_and(|y| PLAUSIBLE_YEARS.contains(&y));
+        self.words.windows(n).enumerate().find_map(|(at, run)| {
             let differ: Vec<(&String, &String)> =
                 run.iter().zip(&title).filter(|(a, b)| a != b).collect();
-            !differ.is_empty()
+            let substituted = !differ.is_empty()
+                && self.one_sentence(at, at + n - 1)
                 && differ.len() * 4 <= n.max(4)
                 && differ.iter().all(|(a, b)| {
                     !super::authors::near(a, b)
                         && !STOPWORDS.contains(&a.as_str())
                         && !STOPWORDS.contains(&b.as_str())
-                })
+                });
+            substituted.then(|| differ.iter().any(|(a, b)| year(a) && year(b)))
         })
+    }
+
+    /// Whether the words `from..=to` stand in one sentence: no stop between
+    /// them ("… septic shock. JAMA" runs into the journal).
+    fn one_sentence(&self, from: usize, to: usize) -> bool {
+        (from..to).all(|i| {
+            let gap = &self.raw[self.spans[i].end..self.spans[i + 1].start];
+            !gap.contains(['.', '?', '!', ';'])
+        })
+    }
+
+    /// Whether the reference gives `title`'s words in order with words of
+    /// its own among them ("… for Sepsis and Septic Shock in Adults and
+    /// Children (Sepsis-3)" for "… Septic Shock (Sepsis-3)"): another
+    /// title. Joining words inserted don't count, nor words dropped (a
+    /// title shortened is the same title).
+    pub(super) fn inserts_in(&self, title: &str) -> bool {
+        /// Words inserted, at most, before the title is taken as not there.
+        const GAP: usize = 8;
+        let title = words(unmarked(title));
+        if content_words(&title.join(" ")).len() < super::SHORT_TITLE_WORDS {
+            return false;
+        }
+        (0..self.words.len())
+            .filter(|&i| self.words[i] == title[0])
+            .any(|start| {
+                let (mut j, mut inserted, mut end) = (1, 0, start);
+                for (k, word) in self.words.iter().enumerate().skip(start + 1) {
+                    if j == title.len() || inserted > GAP {
+                        break;
+                    }
+                    if *word == title[j] {
+                        j += 1;
+                        end = k;
+                    } else if !STOPWORDS.contains(&word.as_str()) {
+                        inserted += 1;
+                    }
+                }
+                j == title.len() && (1..=GAP).contains(&inserted) && self.one_sentence(start, end)
+            })
     }
 
     /// The words from `from` on that run together as written: joined by

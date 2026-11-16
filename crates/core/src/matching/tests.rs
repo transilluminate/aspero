@@ -1371,13 +1371,36 @@ fn a_year_in_the_title_is_not_the_year_cited() {
         let claim = Claim::from_text(text);
         let a = assess(&claim, &stats);
         assert_eq!(a.year.agreement, Agreement::Mismatch, "{text}");
-        assert!(a.confidence < PLAUSIBLE, "{text}: {a:?}");
+        assert!(a.confidence < VERIFIED, "{text}: {a:?}");
         assert!(
             !claim
                 .cited_years_beside(stats.work.title.as_deref())
                 .contains(&2020)
         );
     }
+    // Its title (year and all), journal, volume and pages name it: the
+    // year cited is the citation's error, plausible. The 2018 report, the
+    // year cited and in its title, is another title.
+    let text = "Siegel RL, Miller KD, Jemal A. Cancer statistics, 2020. CA Cancer J Clin. 2018;70(1):7-30.";
+    let a2020 = assess(&Claim::from_text(text), &stats);
+    assert!(
+        (PLAUSIBLE..VERIFIED).contains(&a2020.confidence),
+        "{a2020:?}"
+    );
+    let mut stats2018 = placed(
+        &[],
+        "Cancer statistics, 2018",
+        &["Rebecca L. Siegel", "Kimberly D. Miller", "Ahmedin Jemal"],
+        2018,
+        ("CA: A Cancer Journal for Clinicians", "68", "7-30"),
+    );
+    stats2018.work.work_type = Some(crate::work::WorkType::JournalArticle);
+    let a2018 = assess(&Claim::from_text(text), &stats2018);
+    assert_ne!(a2018.title.agreement, Agreement::Match, "{a2018:?}");
+    assert!(a2018.confidence < PLAUSIBLE, "{a2018:?}");
+    // Without the place, the year alone decides.
+    let text = "Siegel RL, Miller KD, Jemal A. Cancer statistics, 2020. 2017.";
+    assert!(assess(&Claim::from_text(text), &stats).confidence < PLAUSIBLE);
     for text in [
         "Siegel RL, Miller KD, Jemal A. Cancer statistics, 2020. CA Cancer J Clin. 2020;70(1):7-30.",
         "Siegel RL, Miller KD, Jemal A. Cancer statistics, 2020.",
@@ -1678,6 +1701,44 @@ fn reprints_and_versions_cited_with_another_year_are_plausible() {
 }
 
 #[test]
+fn a_title_with_words_inserted_is_not_the_records() {
+    // App pre-test: words inserted in the middle of a real title.
+    let sepsis3 = article(
+        "The Third International Consensus Definitions for Sepsis and Septic Shock (Sepsis-3)",
+        &[
+            "Mervyn Singer",
+            "Clifford S. Deutschman",
+            "Christopher Warren Seymour",
+        ],
+        2016,
+        ("JAMA", "315", "801-810"),
+    );
+    let cite = |title: &str| {
+        Claim::from_text(format!(
+            "Singer M, Deutschman CS, Seymour CW, et al. {title}. JAMA. 2016;315(8):801-810."
+        ))
+    };
+    let a = assess(
+        &cite(
+            "The Third International Consensus Definitions for Sepsis and Septic Shock in Adults \
+             and Children (Sepsis-3)",
+        ),
+        &sepsis3,
+    );
+    assert_eq!(a.title.agreement, Agreement::Partial, "{a:?}");
+    assert!((PLAUSIBLE..VERIFIED).contains(&a.confidence), "{a:?}");
+    // Words dropped, or the title as it is: the same title.
+    for title in [
+        "The Third International Consensus Definitions for Sepsis and Septic Shock (Sepsis-3)",
+        "The third international consensus definitions for sepsis and septic shock",
+        "Third International Consensus Definitions for Sepsis (Sepsis-3)",
+    ] {
+        let a = assess(&cite(title), &sepsis3);
+        assert!(a.confidence >= VERIFIED, "{title}: {a:?}");
+    }
+}
+
+#[test]
 fn a_title_with_a_word_replaced_is_not_the_records() {
     // Red team (#102): another drug's trial at RECOVERY's place verified.
     let mut recovery = placed(
@@ -1968,6 +2029,41 @@ fn red_team_minimised_failures_stay_fixed() {
             "corpus-275",
             Claim::from_text("Hochreiter S. Long short-term memory. arXiv preprint. 1997."),
             lstm,
+        ),
+        // The app's pre-test of the fixes: the report of the year cited
+        // chosen over the one titled, volume and pages; words inserted
+        // inside a title.
+        (
+            "app-cancer-statistics",
+            Claim::from_text(
+                "Siegel RL, Miller KD, Jemal A. Cancer statistics, 2020. CA Cancer J Clin. \
+                 2018;70(1):7-30.",
+            ),
+            article(
+                "Cancer statistics, 2018",
+                &["Rebecca L. Siegel", "Kimberly D. Miller", "Ahmedin Jemal"],
+                2018,
+                ("CA: A Cancer Journal for Clinicians", "68", "7-30"),
+            ),
+        ),
+        (
+            "app-sepsis-3",
+            Claim::from_text(
+                "Singer M, Deutschman CS, Seymour CW, et al. The Third International Consensus \
+                 Definitions for Sepsis and Septic Shock in Adults and Children (Sepsis-3). JAMA. \
+                 2016;315(8):801-810.",
+            ),
+            article(
+                "The Third International Consensus Definitions for Sepsis and Septic Shock \
+                 (Sepsis-3)",
+                &[
+                    "Mervyn Singer",
+                    "Clifford S. Deutschman",
+                    "Christopher Warren Seymour",
+                ],
+                2016,
+                ("JAMA", "315", "801-810"),
+            ),
         ),
     ];
     for (id, claim, record) in &cases {

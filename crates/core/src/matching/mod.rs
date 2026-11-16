@@ -67,6 +67,12 @@ const PLACED: f64 = 0.9;
 /// The same with the year off by one (online first, then in print):
 /// plausible.
 const PLACED_YEAR_OFF: f64 = 0.8;
+/// The title, authors, volume and first page agreeing with the year two or
+/// more off: plausible, the year to check.
+const PLACED_YEAR_WRONG: f64 = PLAUSIBLE;
+/// Title score, a mismatch, for another title of a series: the title's
+/// own year replaced ([`text::Normalised::substitutes_in`]).
+const OTHER_IN_SERIES: f64 = 0.3;
 /// Confidence ceiling, below plausible, without evidence of which work is
 /// cited: only a year or journal agreeing, or a short title found inside
 /// free text.
@@ -558,12 +564,24 @@ pub fn assess(claim: &Claim, record: &SourceRecord) -> Assessment {
     // Or with a word put in place of one of its own (not misspelt):
     // "Hydroxychloroquine in hospitalized patients with Covid-19" at the
     // place of "Dexamethasone in …".
-    let substituted = title.agreement == Agreement::Partial
-        && title_span.is_none()
-        && work_title
-            .as_deref()
-            .zip(text.as_ref())
-            .is_some_and(|(actual, text)| text.substitutes_in(actual));
+    // A year put in place of the title's own is another title of a series
+    // ("Cancer statistics, 2020" isn't the 2018 report, whatever year is
+    // cited). Or with words of its own inserted ("… Septic Shock in Adults
+    // and Children (Sepsis-3)"); words dropped are a title shortened.
+    let found = matches!(title.agreement, Agreement::Match | Agreement::Partial);
+    let reworded = match (&work_title, &text) {
+        (Some(actual), Some(text)) if found && title_span.is_none() && claim.title.is_none() => {
+            text.substitutes_in(actual)
+                .or_else(|| text.inserts_in(actual).then_some(false))
+        }
+        _ => None,
+    };
+    let substituted = reworded.is_some();
+    let title = match (title.score, reworded) {
+        (Some(s), Some(true)) => FieldCheck::scored(s.min(OTHER_IN_SERIES)),
+        (Some(s), Some(false)) => FieldCheck::scored(s.min(EXTENDED_TITLE)),
+        _ => title,
+    };
 
     let actual_years: Vec<i16> = work
         .issued
@@ -772,6 +790,18 @@ pub fn assess(claim: &Claim, record: &SourceRecord) -> Assessment {
             Agreement::Mismatch => 0.0,
         };
         confidence = confidence.max(floor);
+    }
+    // The whole title (a year in it too), the authors, volume and first
+    // page name the work, a year two or more off notwithstanding: the
+    // year is the citation's error ("Cancer statistics, 2020 … 2018;70:7"),
+    // plausible, and ranks this work over the one of the year cited.
+    if located
+        && title.agreement == Agreement::Match
+        && authors.agreement == Agreement::Match
+        && container.agreement != Agreement::Mismatch
+        && year.agreement == Agreement::Mismatch
+    {
+        confidence = confidence.max(PLACED_YEAR_WRONG);
     }
     // A wrong volume or page is an error in the citation, and tells an
     // original from the letters and corrections in the same journal.

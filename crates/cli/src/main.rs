@@ -16,7 +16,9 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 use std::sync::Arc;
 
-use aspero_engine::{CallOptions, Engine, SecretString, SqliteCache, StandardConfig, standard};
+use aspero_engine::{
+    CallOptions, Engine, HttpTape, SecretString, SqliteCache, StandardConfig, standard,
+};
 use clap::Parser;
 use serde_json::json;
 
@@ -177,6 +179,9 @@ fn engine(
         .map_err(|e| Failure::usage(format!("--without: {e}")))?;
     config.pacing = file.clone().map(|c| c as _);
     config.cache = file.filter(|_| !no_cache).map(|c| c as _);
+    // A developer tool for benchmark runs (DESIGN "Benchmark"), so not in
+    // `--help`: ASPERO_HTTP_TAPE, ASPERO_HTTP_TAPE_MODE.
+    config.http_tape = HttpTape::from_env().map_err(|e| Failure::usage(e.to_string()))?;
     standard(config).map_err(|e| Failure {
         exit: Exit::Internal,
         message: format!("could not set up HTTP client: {e}"),

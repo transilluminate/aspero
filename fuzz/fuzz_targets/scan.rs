@@ -20,6 +20,9 @@ fuzz_target!(|data: &[u8]| {
         // when that reads it at all: a DOI inside another piece
         // (`see:10.…`, a link on an unknown host) or spaced out is found
         // by `scan` alone (and read whole by `Claim::from_input`).
+        if written.contains(char::is_whitespace) {
+            continue;
+        }
         if let Ok(parsed) = written.parse::<WorkId>() {
             assert_eq!(parsed, m.id, "{written:?} in {text:?}");
         }

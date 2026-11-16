@@ -293,6 +293,9 @@ fn find(text: &str, found: &mut Vec<(WorkId, Range<usize>)>, broken: &mut Vec<Br
             continue;
         }
         last = Some((piece.end, None));
+        // A piece with its own prefix (`doi:…`) is its own label: one
+        // before it (`doi, doi:10.…`) isn't part of the mention.
+        let label = label.filter(|_| !prefixed(cleaned));
         let labelled =
             label.and_then(|(kind, at)| Some((WorkId::parse_as(kind, cleaned).ok()?, at)));
         if let Some((id, at)) = labelled {
@@ -1011,6 +1014,20 @@ mod tests {
                 "doi:10.1056/nejmoa1302097".into(),
                 "DOI: 10.1056/NEJMoa1302097"
             )]
+        );
+    }
+
+    #[test]
+    fn a_prefixed_id_after_a_label_is_its_own_mention() {
+        assert_eq!(
+            found("doi, doi:10.1056/NEJMoa1302097 and see PMID pmid:30252312"),
+            [
+                (
+                    "doi:10.1056/nejmoa1302097".into(),
+                    "doi:10.1056/NEJMoa1302097"
+                ),
+                ("pmid:30252312".into(), "pmid:30252312"),
+            ]
         );
     }
 

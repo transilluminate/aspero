@@ -83,7 +83,11 @@ def judge(case, result):
         "category": case["category"],
         "verdict": verdict,
         "ok": verdict in case["expect"],
-        "false_verified": not real and not retracted_case and verdict == "verified",
+        # Verified where the policy allows it (a year one off) isn't false.
+        "false_verified": not real
+        and not retracted_case
+        and verdict == "verified"
+        and "verified" not in case["expect"],
         "unflagged_retraction": retracted_case
         and verdict in ("verified", "plausible") and not flagged,
         "real_miss": real and verdict not in ("verified", "plausible"),

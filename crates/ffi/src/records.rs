@@ -79,6 +79,13 @@ pub struct Work {
     pub fetched_at: SystemTime,
     /// Everything known, as the JSON contract's full `work`.
     pub json: String,
+    /// When the work was read at its `url`, ISO 8601: a web page's
+    /// access date (`webPageWork`'s), exported and cited with it.
+    #[uniffi(default = None)]
+    pub accessed: Option<String>,
+    /// The work's language, as a language tag (`en`, `en-GB`).
+    #[uniffi(default = None)]
+    pub language: Option<String>,
 }
 
 impl Work {
@@ -119,6 +126,8 @@ impl Work {
             cited_by_count: w.cited_by_count,
             fetched_at: time(record.fetched_at),
             json: aspero_json::work(record, true).to_string(),
+            accessed: w.accessed.map(|d| d.to_string()),
+            language: w.language.clone(),
         }
     }
 
@@ -1119,11 +1128,23 @@ pub struct PageClaim {
     /// read from the page's address.
     pub ids: Vec<Mention>,
     /// The work as the page describes it, its identifiers included, ready
-    /// for `verify`; `nil` with no identifier and no title.
+    /// for `verify`; `nil` with no identifier and no title, and for a web
+    /// page (`kind` `webPage`), which has no work to verify.
     pub claim: Option<Claim>,
     /// What answered: the first vocabulary, in priority order, that gave
     /// an identifier or the title; `url` when nothing did.
     pub source: PageSource,
+    /// Whether the page shows a scholarly work (verify `claim`) or is a
+    /// web page to cite as itself (`webPage`). Always set by
+    /// `claimFromPage`; optional only so a `PageClaim` made by hand needn't
+    /// give it.
+    #[uniffi(default = None)]
+    pub kind: Option<PageKind>,
+    /// The page as a web page, to cite as itself (`webPageWork`): always
+    /// for `kind` `webPage`, and for a work's page with a title too, so
+    /// the page can be cited when its work isn't found.
+    #[uniffi(default = None)]
+    pub web_page: Option<WebPage>,
 }
 
 impl From<&aspero_core::PageClaim> for PageClaim {
@@ -1136,7 +1157,84 @@ impl From<&aspero_core::PageClaim> for PageClaim {
                 .collect(),
             claim: p.claim.as_ref().map(|c| Claim::read(c, None)),
             source: p.source.into(),
+            kind: Some(p.kind.into()),
+            web_page: p.web_page.as_ref().map(Into::into),
         }
+    }
+}
+
+/// Whether a page shows a scholarly work or is a web page.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Enum)]
+pub enum PageKind {
+    /// A scholarly work's page: it gives an identifier, citation tags or
+    /// a scholarly article in JSON-LD, or is on a publisher's site; or no
+    /// markup was given to tell. Verify `claim`.
+    Work,
+    /// Any other page with a title: a web page, cited as itself
+    /// (`webPage`).
+    WebPage,
+}
+
+impl From<aspero_core::PageKind> for PageKind {
+    fn from(kind: aspero_core::PageKind) -> Self {
+        match kind {
+            aspero_core::PageKind::WebPage => PageKind::WebPage,
+            // `PageKind` is non-exhaustive: a work's page is the fallback.
+            _ => PageKind::Work,
+        }
+    }
+}
+
+/// A web page, as a citation of it needs (`claimFromPage`'s `webPage`):
+/// export or cite it through `webPageWork`. Dates ISO 8601 as precise as
+/// the page gives them.
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct WebPage {
+    /// As the page gives it, but for its site's own name.
+    pub title: Option<String>,
+    /// The website's name ("Wikipedia", "BBC News"), else its host.
+    pub site: Option<String>,
+    /// The canonical address, normalised: without its fragment or
+    /// tracking parameters (`utm_*`, `fbclid`, …).
+    pub url: String,
+    /// `url:` and `url`: the same page shared twice is the same key.
+    pub key: String,
+    /// People only, in page order, as written.
+    pub authors: Vec<String>,
+    pub published: Option<String>,
+    pub updated: Option<String>,
+    /// A language tag: `en`, `en-GB`.
+    pub language: Option<String>,
+}
+
+impl From<&aspero_core::WebPage> for WebPage {
+    fn from(p: &aspero_core::WebPage) -> Self {
+        WebPage {
+            title: p.title.clone(),
+            site: p.site.clone(),
+            url: p.url.clone(),
+            key: p.key.clone(),
+            authors: p.authors.clone(),
+            published: p.published.map(|d| d.to_string()),
+            updated: p.updated.map(|d| d.to_string()),
+            language: p.language.clone(),
+        }
+    }
+}
+
+impl WebPage {
+    /// The core page, dates that don't parse left out.
+    pub(crate) fn to_core(&self) -> aspero_core::WebPage {
+        let mut p = aspero_core::WebPage::default();
+        p.title.clone_from(&self.title);
+        p.site.clone_from(&self.site);
+        p.url.clone_from(&self.url);
+        p.key.clone_from(&self.key);
+        p.authors.clone_from(&self.authors);
+        p.published = self.published.as_deref().and_then(|d| d.parse().ok());
+        p.updated = self.updated.as_deref().and_then(|d| d.parse().ok());
+        p.language.clone_from(&self.language);
+        p
     }
 }
 
@@ -2054,6 +2152,8 @@ impl Work {
         w.page.clone_from(&self.page);
         w.publisher.clone_from(&self.publisher);
         w.url.clone_from(&self.url);
+        w.accessed = self.accessed.as_deref().and_then(|d| d.parse().ok());
+        w.language.clone_from(&self.language);
         let ids = self.ids.iter().filter_map(|id| id.parse().ok()).collect();
         (w, ids)
     }

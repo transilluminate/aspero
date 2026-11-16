@@ -62,8 +62,10 @@ crates/
                (via the official SDK, `rmcp`), served over stdio by the CLI
   cli/         clap front end: arguments, stdin, tables and text
   ffi/         UniFFI bindings for apps (Swift), shipped as an .xcframework
-bench/         verify benchmark data (known-answer citations)
-scripts/       fixture recorders, one per provider
+bench/         verify benchmark data (known-answer citations), the red-team
+               corpora (`bench/redteam/`) and the navigability dogfood
+scripts/       fixture recorders, one per provider; the red team, HTTP tape
+               and dogfood tools; the file-size and doc-path gates
 ```
 
 ### Seams and contracts
@@ -433,6 +435,19 @@ title search finds the original. Ties go to the earliest published. A
 record a provider gives for an identifier it doesn't list (OpenAlex
 answers a Zenodo version's DOI with the concept's record) carries that
 identifier: the provider resolved it, so it isn't "does not exist".
+
+The code: gathering in `crates/engine/src/resolve/gather.rs`, records of
+one work merged into a candidate in `resolve/merge.rs`, candidates ranked
+in `resolve/rank.rs` (`resolve/mod.rs` runs them in turn). Scoring is in
+`crates/core/src/matching/`: `assess.rs` compares each field and applies
+the caps and floors in order; `caps.rs` holds the weights, penalties,
+caps, floors and verdict thresholds; `claim.rs` reads what a claim
+asserts; `titles.rs`, `authors.rs`, `derivative.rs` (replies, errata),
+`preprint.rs`, `same_work.rs` and `text.rs` the rest, with per-rule tests
+in `matching/tests/`. Journals and places are in
+`crates/core/src/publication/`: `journal.rs` compares names,
+`cited_journal.rs` reads the journal a reference cites, `locator.rs` its
+volume and first page, `conference.rs` venues, `bibtex.rs` pasted BibTeX.
 
 A reference pasted in a tagged format is read as its fields, a
 structured claim, as the bibliography readers read a file's entries
@@ -1079,7 +1094,11 @@ from `cites:` pages); G3 OpenCitations as a free source of citing works.
 
 ## Storage
 
-Two SQLite stores, split by whether data can be refetched:
+Two SQLite stores, split by whether data can be refetched. The cache is
+`crates/store/src/`: `lib.rs` (`SqliteCache`), `schema.rs`
+(`SCHEMA_VERSION`, the tables), `cache.rs` (answers), `edges.rs`
+(citation links), `evict.rs` (the size limit), `pacing.rs`, `prepaid.rs`,
+`spend.rs` (the accounting tables) and `tape.rs` (the HTTP tape).
 
 - **Cache** (`cache.sqlite`, platform cache dir or `$ASPERO_CACHE_DIR`):
   mapped records with raw bodies, "not found" answers, search pages,
@@ -1597,6 +1616,10 @@ free; nothing asked without one; also each kind of call's price,
 `Budget.prices`, `searchPriceUsd`), `check_openalex_key` (one free lookup), `cache_stats`,
 `clear_cache` and `unavailable`. Network calls take a `Patience` (batch,
 interactive, offline, fresh).
+The calls are in `crates/ffi/src/calls/` and the records in
+`crates/ffi/src/records/`, a file per domain in each (`verify.rs`,
+`lookup.rs`, `search.rs`, `graph.rs`, `bib.rs`, `cite.rs`, `page.rs`,
+`text.rs`, `settings.rs`; records also `work.rs`, `budget.rs`, `errors.rs`).
 They return typed records (`Lookup`, `Verification`, `Work`, …), mirrors
 of the engine's types converted in `aspero-ffi` so the engine stays free
 of UniFFI. Reasons and failures are data (`Reason`, `ErrorKind`) as well

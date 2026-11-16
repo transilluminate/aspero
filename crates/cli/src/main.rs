@@ -181,8 +181,9 @@ fn engine(
     config.pacing = file.clone().map(|c| c as _);
     config.prepaid_days = file.clone().map(|c| c as _);
     config.cache = file.filter(|_| !no_cache).map(|c| c as _);
-    // A developer tool for benchmark runs (DESIGN "Benchmark"), so not in
-    // `--help`: ASPERO_HTTP_TAPE, ASPERO_HTTP_TAPE_MODE.
+    // A developer tool for benchmark runs (DESIGN "Resolve, verify and
+    // check", its HTTP tape), so not in `--help`: ASPERO_HTTP_TAPE,
+    // ASPERO_HTTP_TAPE_MODE.
     config.http_tape = HttpTape::from_env().map_err(|e| Failure::usage(e.to_string()))?;
     standard(config).map_err(|e| Failure {
         exit: Exit::Internal,

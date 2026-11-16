@@ -23,6 +23,9 @@ check") and `crates/core/src/matching/mod.rs` (verified ≥ 0.85, plausible
 | Year off by one (online-first vs print, preprint vs version of record) | verified or plausible |
 | Year off by two or more | mismatch (plausible at most) |
 | Wrong journal, for a journal article | plausible (capped 0.8, #80) |
+| A sister journal of the same family ("JAMA" for JAMA Oncology, "JAMA Intern Med" for JAMA) | plausible (round 5; "not clearly another" before) |
+| A journal's article cited as a chapter of an edited book ("In: …, editors. Handbook of …") | plausible |
+| A journal's article cited by its preprint's DOI (Research Square, bioRxiv, …) | plausible, the server named |
 | Wrong volume or first page | plausible (capped 0.8) |
 | Title and year only, no authors or ID | plausible at most (0.8) |
 | Year/journal alone, or a 1–2-word title in free text | not_found |
@@ -418,6 +421,100 @@ Of the 10 "accepted as another work", 7 were the scorer comparing an
 ISBN-10 with its ISBN-13 or a DOI with its version's (`_v1`): fixed.
 No corpus file or API response seen in this round contained
 instruction-like text.
+
+## Round 5: the fourth held-out corpus, and the first wild one (2026-11-16, unreleased)
+
+`holdout-4.jsonl` (1,076 citations, 569 real; see
+[holdout-4.md](holdout-4.md)) was written without seeing the earlier
+corpora, their failures or the code, mostly of the subtle errors a
+model makes on real works; `wild-1.jsonl` (394 references, 363 real;
+see [wild-1.md](wild-1.md)) holds what two language models actually
+wrote, each checked by hand. Both were first run live after round 4's
+fixes (74 of 481 and 4 of 31 wrong citations verified) and are no
+longer held out. Round 5 was measured offline, replaying that run's
+tape (`--replay-only`); the earlier corpora as round 4 did (the
+round-1 corpus and holdout-1 from round 2's answer cache, offline;
+holdout-2 from round 4's tape; holdout-3 from this run's). The scorer
+now compares identifiers however a corpus writes them (wild-1's bare
+DOIs counted 295 real citations as "accepted as another work"; 15 now)
+and prints a criterion with nothing to measure as n/a.
+
+```
+holdout-4 (replay)                           round 4          round 5
+wrong -> verified                         74/481 (15.4%)   9/481 (1.9%)    <= 2%
+invented, fake ID, DOI swap -> verified    0/157           0/157           <= 0%
+real -> mismatch or not_found             11/569 (1.9%)   11/569 (1.9%)    <= 3%
+real -> verified                         537/569 (94.4%) 537/569 (94.4%)   >= 85%
+real -> verified or plausible            558/569 (98.1%) 558/569 (98.1%)   >= 95%
+wrong -> plausible names a differing field 226/228        289/291          >= 80%
+retracted flagged                          26/26           26/26           >= 100%
+
+wild-1 (replay)                              round 4          round 5
+wrong -> verified                          4/31 (12.9%)    3/31 (9.7%)     <= 2%
+real -> mismatch or not_found             16/363 (4.4%)   16/363 (4.4%)    <= 3%
+real -> verified                         305/363 (84.0%) 309/363 (85.1%)   >= 85%
+real -> verified or plausible            347/363 (95.6%) 347/363 (95.6%)   >= 95%
+wrong -> plausible names a differing field 15/15           16/16           >= 80%
+```
+
+The earlier corpora stay at 0, 0, 1 and 0 false VERIFIED, real verified
+142/155, 352/382 (from 351: #186, a correction cited after its year, is
+the notice's), 388/441 and 474/508, accepted unchanged. The known-answer
+bench, from its answer cache offline, passes 44/49, the other 5
+unverifiable for answers no cache or tape holds, as before these fixes.
+
+| Pattern | holdout-4 verified | Example | Rule now |
+|---|---|---|---|
+| Sister journal | 23/36 → 2 | `… Hematologic Cancers. JAMA. 2018;4(12):1783.` for JAMA Oncology's | a name inside the other with subject words of its own is another journal |
+| Meeting of the same society | 19/30 → 1 | `In Proceedings of the International AAAI Conference on Web and Social Media (ICWSM-24)` for AAAI's | a society's acronym before a meeting word names neither; an acronym the record's name can't make is another meeting; a venue-less copy can't confirm one |
+| Preprint's DOI with its journal | 13/25 → 3 | `… Journal of Cardiothoracic Surgery. 2024;19(1):2. doi:10.21203/rs.3.rs-2791419/v1` | a preprint server's DOI on the journal article's merged record, a journal cited: another version |
+| Article cited as a chapter | 11/12 → 0 | `In: Corvaro IR, Mirkrand P, editors. Handbook of Nurse-Midwifery.` | an edited book cited for a journal's article: another container |
+| Erratum cited as the original | 6/22 → 1 | the original's title at an "Author Correction:"'s place | "Author/Publisher Correction:", a correction's type, "– RETRACTION": a notice |
+
+Minimised in `fourth_held_out_red_team_failures_stay_fixed` and the
+per-rule tests beside it (`crates/core/src/matching/tests.rs`,
+`publication.rs`, `crates/engine/src/resolve.rs`). The tests encoding
+0.20.1's leniency for a name inside another
+(`another_journal_is_clearly_another`: "Lancet Infect Dis" for The
+Lancet was "possibly a sister journal, possibly the same") now hold
+sister journals another, a deliberate change of policy.
+
+Left verified in holdout-4: #698 and #708 (the parent cited for Diabetes
+Care, and "Energy" for Applied Energy, which a journal read cut short
+after a dotted abbreviation can't be told from), #770 (FSE cited as
+ICSE: "icse" fits its name's letters), #842 and #843 (a preprint's other
+title with the journal's place: its words largely shared), #857 (an
+arXiv ID with its journal, as physics cites), #955 (a correction OpenAlex
+keeps under the original's title and type), #864 ("Dissociation" for
+"Association", read as a misspelling) and #733 (a locator `10(2),
+jphr.2021.2736` unread). In wild-1: #192 (an NBER number of another
+paper), #194 (an invented co-author of a book, whose records aren't
+held to their bylines) and #313 (a trial's label from another trial).
+
+wild-1's real citations that came back plausible were mostly right as
+written: 17 are NeurIPS, ICLR and ICML papers whose only record is
+arXiv's (the venue unconfirmable: round 3's rule, now also for an arXiv
+copy DataCite types an article, #336); others cite a trial or guideline
+by a label in place of its title (SPRINT, EMPA-REG, "2018 AHA/ACC
+Cholesterol Guideline"), or matched a reply or letter repeating the
+title (ASCOT-LLA, ARISE). Over-strict and fixed: a trial's label before
+the byline read as invented co-authors (#41, #42), BibTeX's accents
+(#169), a record's garbled dash (#90) and a record's title running on
+into a second sentence (#374); #86 too. #351 (MMWR Recomm Rep for the
+weekly report OpenAlex records it in) is a sister series now, plausible.
+
+Off the tape: searching the reference's own title beside a hit's part
+of it (BibTeX's, wild-1 #337 and #338; holdout-3's Open Library books)
+sends a title search the tape lacks for 281 claims (corpus 14,
+holdout-1 18, holdout-2 74, holdout-3 82, holdout-4 75, wild-1 18), so
+it can't be measured offline and needs a live run; the figures above
+are without it. Reading a page's section letter (BMJ's `m1123`) asks a
+place search for four invented references (corpus #282, #306, holdout-2
+#826, holdout-3 #586); and 47 of holdout-4's wrong citations no longer
+verified search on past where the live run stopped. No corpus file or
+API response seen in this round contained instruction-like text (one
+wild-1 title, "Training language models to follow instructions…", is a
+paper's).
 
 ## Failures (`failures.jsonl`)
 

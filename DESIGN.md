@@ -414,7 +414,11 @@ one (a conference paper without a DOI, a book Crossref lacks), the title
 the reference's shape suggests is searched instead of its keywords
 (`probable_title`: a BibTeX title, a quoted one, else the sentence most
 in sentence case that isn't a byline, publisher or locator), at the same
-cost. `verify` stops early only
+cost; and first, beside the hits', when every hit points only to part of
+a title the reference marks as one (BibTeX's "graph convolutional
+networks" of "Semi-Supervised Classification with Graph Convolutional
+Networks") or to none of it (a publisher's words its hits share: "addison
+wesley longman"), two title searches still at most. `verify` stops early only
 on a decisive match that the claimed identifiers or two providers vouch
 for: a digest or reprint can match a claim exactly while only a later
 title search finds the original. Ties go to the earliest published. A
@@ -456,7 +460,10 @@ citation styles. The rules, each from a real failure:
   identifier or the place, nothing is plausible: a year or journal alone,
   or a title of a word or two found in free text, matches by chance.
 - **Titles compare on content words**, and a dropped subtitle still
-  matches; a few shared topic words in free text are not a title match.
+  matches, as does a record's title cited without the second sentence it
+  runs on into ("… to inform policy and practice. A review and
+  discussion paper based on …"); a few shared topic words in free text
+  are not a title match.
   A BibTeX entry's title is compared as a claimed title is, not looked
   for anywhere in the entry (its booktitle may be a proceedings' title).
 - **A title with words added or replaced is partial, plausible at
@@ -496,13 +503,25 @@ citation styles. The rules, each from a real failure:
   Nor is the original one cited ("Corrigendum to “…” [Biochim. Biophys.
   Acta 1236 (1995) 197-200]", "Corrections to …"): plausible at most, so
   the notice's record ranks first when found. Not for a retraction cited
-  ("retraction of" is a title's words too).
+  ("retraction of" is a title's words too). A notice is one by its
+  title's start ("Correction to", "Author Correction:", "Publisher
+  Correction:", "Retraction Note"), a marker anywhere ("Erratum",
+  "Reply"), the word after a dash at its end ("… – RETRACTION",
+  Cambridge's), or its record's type, a correction's (holdout-4's
+  `w:erratum-cited-as-original`: the original's title at the notice's
+  place or with its DOI). Not a record typed a retraction: OpenAlex
+  types retracted articles so, and IEEE's keep their DOI under "Notice
+  of Retraction:", Elsevier's under "RETRACTED:". A claim cites a notice
+  when a sentence of it starts as one, its year or quote aside ("(2015)
+  'Correction: …'").
 - **Online and print years both count**, so either year of an
   online-first paper matches, as do years across merged records.
 - **Journal, volume and first page** come from claim fields or the text
   (Vancouver `2017;376(26):2545`, APA `376(26), 2545` or `Journal, 146,
   106274.`, Harvard `376(26), pp. 2545` or `pp.2545`, MLA `77.4 (2005):
-  1321-1373`, IEEE's `Art. no. 615` for the page, Nature `530, 484 (2016)`, also
+  1321-1373`, IEEE's `Art. no. 615` for the page, a page with a section's
+  letter, `e1234`, `S12`, `R3`, `L51`, BMJ's `m1123`, and a record's
+  garbled dash, `205???210`, Nature `530, 484 (2016)`, also
   after a dotted name (`J. Org. Chem. 101, 6301 (1994)`), Chicago `94,
   no. 2 (2004): 317-321` (the issue labelled, not the volume) or `94, no.
   2 (2004).`, `vol./pp.`, BibTeX fields). Journals match by rule (each abbreviated word
@@ -545,13 +564,47 @@ citation styles. The rules, each from a real failure:
   (`2007.0(52)`, a working-paper series') is no year cited. Different means clearly another: not the
   same by rule, neither name (abbreviated, spelling aside) inside the other
   (`Proc Natl Acad Sci U S A` ↔ `Proceedings of the National Academy of
-  Sciences`), nor initials of part of it (PNAS). Only journal articles,
+  Sciences`), nor initials of part of it (PNAS), unless it's a sister
+  journal (`publication::sister_journal`, round 5; until then a name
+  inside the other was "not clearly another", and holdout-4's
+  `w:sister-journal` verified 23 of 36): one name is the other's with
+  subject words of its own, "The Lancet" for The Lancet Oncology, "JAMA"
+  for JAMA Internal Medicine, "Nature" for Nature Medicine, "Diabetes"
+  for Diabetes Care, "Circulation" for "Circulation: Heart Failure", or
+  "JAMA Intern Med", "NEJM Evid", "JCO Oncol Pract", "JACC Heart Fail"
+  for the parent's. The words the names share abbreviate each other or
+  are a name's initials (JCO, JACC); a word left over on either side
+  tells them apart, unless it's what an acronym stands for ("JAMA: The
+  Journal of the American Medical Association", `MMWR Morb Mortal Wkly
+  Rep`), a series letter, a structural word, a place, edition or article
+  (`Lancet Lond Engl`, "Das Gesundheitswesen"), in brackets, or a
+  subtitle describing the journal ("BJOG: An International Journal of
+  …", "Physical review. B, Condensed matter"). A true abbreviation
+  (`Lancet Infect Dis` for The Lancet Infectious Diseases) is no
+  sister. Read from text, a reading may run on from the title's end
+  ("… Smoker and in COPD. PLoS One": any part after a stop that is the
+  journal counts) or be cut short after a dotted abbreviation ("Theory"
+  of `IEEE Trans. Inform. Theory.`: a reading the record's name ends
+  with is no sister, so "Energy" for Applied Energy goes untold). A
+  journal's letters numbered in its volumes ("The Astrophysical Journal
+  Letters, 195, L51") are the journal at its own volume and page. A word
+  of three letters abbreviates by its letters, not its consonants ("Gut"
+  is no Gastroenterology). Only journal articles,
   and records in a journal whose type isn't given (Europe PMC's
-  editorials and letters), are held to it, structured claims or text
-  (series, proceedings and repositories go by many names), and
-  a preprint is when the reference cites a journal (not a preprint
-  server) unless the claimed identifier is the preprint's: it's another
-  version. So is a journal's article cited as a preprint ("medRxiv
+  editorials and letters), or a conference's abstract or a notice in a
+  journal's volume (a supplement's), are held to it, structured claims or
+  text (series, proceedings and repositories go by many names); a
+  BibTeX `journal` is the journal cited even when the title has its
+  words. A
+  preprint is when the reference cites a journal (not a preprint
+  server) unless the claimed identifier is its arXiv ID (computing and
+  physics cite a venue beside it): it's another version. So is the
+  published version's record, merged with its preprint's (OpenAlex's),
+  cited in its journal by the preprint's DOI (a preprint server's prefix:
+  bioRxiv's and medRxiv's `10.1101/` with digits after it, Research
+  Square, Preprints.org, SSRN, PsyArXiv, OSF, SocArXiv, ChemRxiv,
+  TechRxiv, Authorea; holdout-4's `w:preprint-as-journal`): plausible,
+  the server named as the journal that differs. So is a journal's article cited as a preprint ("medRxiv
   preprint", "Research Square", no identifier). A record with no journal, volume or page (a
   Zenodo copy, a report; not a preprint, book, chapter, dataset or
   software) can't confirm a journal cited, nor can one without volume or
@@ -634,6 +687,34 @@ citation styles. The rules, each from a real failure:
   pages but no venue (OpenAlex's of ACM papers) takes the venue of the
   other record merged with it, where their numbers agree, so a venue
   cited is checked whichever record is kept.
+  A meeting of the same society is told apart too (round 5, holdout-4's
+  `w:conference-same-society`, 19 of 30 verified): an acronym right
+  before a meeting word names who holds the meeting, not the meeting
+  ("International AAAI Conference on Web and Social Media (ICWSM-24)"
+  doesn't name AAAI's conference; "ICML Workshop on …" isn't ICML), in
+  the named conferences and in subject comparison alike; and a venue
+  cited by acronyms of its own, none the record's name can make (its
+  letters in order, each word giving its initial and any of its later
+  letters: "MWSCAS" of "Midwest Symposium on Circuits and Systems",
+  "AIES" of "Conference on AI, Ethics, and Society"), is another
+  meeting however many subject words they share ("ICECS" for the Midwest
+  Symposium on Circuits and Systems, "ICMR" for "… Multimedia in Asia").
+  Series' and publishers' acronyms (PMLR, CEUR, LNAI) are a venue's
+  none. An acronym that fits is no proof: FSE cited as ICSE goes
+  untold. A record in no venue, volume or page (a repository's copy
+  typed an article, a talk's DataCite record typed a preprint; not a
+  conference paper's record, its proceedings merely unnamed) can't
+  confirm a meeting cited, as arXiv's can't: plausible, unless the
+  claimed identifier is its.
+- **A journal's article cited as a chapter of an edited book is
+  plausible** (holdout-4's `w:article-as-chapter`, the reverse of the
+  next rule): a reference citing its work "In" (or Harvard's "in" after
+  a comma or quote) and then its editors ("editors", "(eds)", "(Eds.)",
+  "ed." but not an edition's "2nd ed.", "edited by", "Hrsg.") holds a
+  journal's article to another container, the journal named. Not when
+  the book named is the record's container (a series' volume: "In: …,
+  editor. Methods in Enzymology") or the venue is a meeting's
+  proceedings.
 - **A book's chapter cited as a journal's article is plausible**
   (holdout-3's `m`): a chapter, in no volume, cited with a volume and an
   issue (`Biogeochemical Cycles and Climate. 2019;23(5):159-175`,
@@ -675,6 +756,12 @@ citation styles. The rules, each from a real failure:
   author's, the given initial agreeing (`Hirschi-Santelmo, Sandrine` for
   Sandrine Hirschi), is that author; organisations among a structured
   claim's authors ("Committee on Infectious Diseases") aren't compared.
+  A label before the byline (a trial's or guideline's, as models write
+  them: "EMPEROR-Reduced (empagliflozin, n=3,730): Packer M, …"; a few
+  words before a colon, no comma among them outside brackets, then a
+  name with its initials) is none of its names; BibTeX's accents
+  (`Veli{\v{c}}kovi{\'c}`, `Tr{\k{e}}bacz`) are read as the letters they
+  mark, in its fields and its text alike.
 - **Another edition or version is plausible**: a book (or one reprinted
   whole as a chapter, cited with its publisher) with another year, and a
   dataset or software matching the claimed identifier and title, cited

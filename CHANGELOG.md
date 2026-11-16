@@ -119,6 +119,50 @@ real ones verified 474 of 508, from 475, and accepted 490):
   misses). The red team counts an ISBN-10 or a versioned DOI as the
   work's own identifier.
 
+Fixed (from a fourth held-out red team, `bench/redteam/holdout-4.jsonl`,
+and 394 references two language models wrote, `bench/redteam/wild-1.jsonl`,
+replayed offline: wrong citations verified fell from 74 of 481 to 9, and
+in wild-1 from 4 of 31 to 3; real ones verified 537 of 569, unchanged,
+and in wild-1 309 of 363, from 305):
+
+- A sister journal cited is another journal, plausible with the journal
+  named: the family's parent for a sister's article ("JAMA" for JAMA
+  Oncology, "The Lancet" for The Lancet Infectious Diseases, "Nature"
+  for Nature Medicine) or a sister for the parent's ("JAMA Intern Med",
+  "NEJM Evid", "JACC Heart Fail"). One name inside the other no longer
+  makes them possibly the same; what each has of its own decides, an
+  acronym's expansion, a series letter, a place, edition or descriptive
+  subtitle aside. Abbreviations still match ("Lancet Infect Dis").
+- A meeting of the same society cited is another venue: a society's
+  acronym before its other meetings ("International AAAI Conference on
+  Web and Social Media") isn't its conference's, and a venue cited by an
+  acronym the record's name can't make (ICECS for the Midwest Symposium
+  on Circuits and Systems) is another meeting. A copy in no venue (a
+  repository's, a talk's) can't confirm a meeting cited.
+- A journal's article cited by its preprint's DOI (Research Square,
+  Preprints.org, bioRxiv, SSRN, …) with the journal's name and place is
+  plausible, the server named; so is a preprint's record, its server DOI
+  claimed, cited in a journal by name alone. An arXiv identifier beside
+  a journal or venue still verifies.
+- A journal's article cited as a chapter of an edited book ("In: …,
+  editors. Handbook of …") is plausible, another container.
+- A correction notice titled "Author Correction:" or "Publisher
+  Correction:", typed a correction by its record, or titled "… –
+  RETRACTION", is not the original it corrects; a claim citing one after
+  its year ("(2015) 'Correction: …'") cites one.
+- As models write them: a trial's label before the byline
+  ("EMPEROR-Reduced (…): Packer M, …") is no invented author; BibTeX's
+  accents (`Veli{\v{c}}kovi{\'c}`) are read; a record's garbled dash
+  ("205???210") or title running on into a second sentence no longer
+  differs; a page with a section's letter (`pp. R3–R20`, BMJ's `m1123`)
+  is read; a journal's letters numbered in its volumes are the journal.
+- A reference's own title (BibTeX's, a quoted one) is searched when the
+  citation matchers' hits share only part of it, or only other words
+  (a publisher's), with the reference.
+- Developer: the red team compares identifiers however a corpus writes
+  them (bare DOIs, `PMID:`), and prints a criterion with nothing to
+  measure as n/a.
+
 ## 0.29.0
 
 Added:

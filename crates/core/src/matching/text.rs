@@ -450,6 +450,70 @@ pub fn shared_title(candidate_title: &str, reference: &str) -> Option<String> {
     Some(title[end - len..end].join(" "))
 }
 
+/// The title a reference probably cites, read from its shape, to search
+/// for when no citation matcher's hit points to it: a BibTeX entry's
+/// title, else the longest quoted span (Harvard's 'An image is worth
+/// 16x16 words', IEEE's "…,"), else the sentence after the byline
+/// ("Lundberg SM, Lee SI. A unified approach to interpreting model
+/// predictions. Adv Neural …"). `None` when nothing looks like one.
+pub fn probable_title(text: &str) -> Option<String> {
+    let title = |s: &str| {
+        let s = s
+            .trim()
+            .trim_matches(|c: char| c.is_whitespace() || ",.;:'\"“”‘’".contains(c));
+        let wordy = s
+            .split_whitespace()
+            .any(|w| w.chars().filter(|c| c.is_alphabetic()).count() >= 3);
+        (wordy && !s.starts_with("In:") && !s.starts_with("In ")).then(|| s.to_owned())
+    };
+    if let Some(t) = crate::publication::bibtex_field(text, "title") {
+        return title(&t);
+    }
+    let quoted = [('"', '"'), ('“', '”'), ('‘', '’'), ('\'', '\'')]
+        .iter()
+        .filter_map(|&(open, close)| {
+            let start = text
+                .char_indices()
+                .find(|&(i, c)| {
+                    c == open
+                        && text[..i]
+                            .chars()
+                            .next_back()
+                            .is_none_or(char::is_whitespace)
+                })?
+                .0
+                + open.len_utf8();
+            let end = text[start..]
+                .char_indices()
+                .find(|&(i, c)| {
+                    c == close
+                        && text[start + i + c.len_utf8()..]
+                            .chars()
+                            .next()
+                            .is_none_or(|n| n.is_whitespace() || ",.;".contains(n))
+                })?
+                .0;
+            title(&text[start..start + end])
+        })
+        .max_by_key(|t| t.split_whitespace().count());
+    if quoted.is_some() {
+        return quoted;
+    }
+    // Of its sentences, not a byline, a publisher or locator (";"), the
+    // one most in sentence case, then the longest.
+    text.split(". ")
+        .filter(|s| !s.contains(';') && !super::authors::names_given(s))
+        .filter_map(title)
+        .max_by_key(|s| {
+            let words: Vec<&str> = s.split_whitespace().collect();
+            let lower = words
+                .iter()
+                .filter(|w| w.chars().count() >= 3 && w.starts_with(char::is_lowercase))
+                .count();
+            (lower, words.len())
+        })
+}
+
 /// Keywords for a plain search engine from a messy reference: years,
 /// numbers, initials and "et al." dropped, since they dilute keyword
 /// ranking (observed with OpenAlex).

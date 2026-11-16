@@ -616,6 +616,49 @@ fn search_terms_drop_noise() {
 }
 
 #[test]
+fn the_probable_title_is_read_from_a_references_shape() {
+    // Red team (#102): no matcher hit, so no title was searched.
+    for (text, title) in [
+        (
+            "Radford A, Kim JW, Hallacy C, et al. Learning transferable visual models from \
+             natural language supervision. In: Proceedings of the 38th International Conference \
+             on Machine Learning (ICML). PMLR; 2021:8748-8763.",
+            "Learning transferable visual models from natural language supervision",
+        ),
+        (
+            "Dosovitskiy, A. et al. (2021) 'An image is worth 16x16 words: Transformers for image \
+             recognition at scale', International Conference on Learning Representations (ICLR).",
+            "An image is worth 16x16 words: Transformers for image recognition at scale",
+        ),
+        (
+            "Lundberg SM, Lee SI. A unified approach to interpreting model predictions. Adv Neural \
+             Inf Process Syst. 2017;30.",
+            "A unified approach to interpreting model predictions",
+        ),
+        (
+            "Said EW. Orientalism. New York: Pantheon Books; 1978.",
+            "Orientalism",
+        ),
+        (
+            "Pillow, K. (2003) 'Did Goodman's Distinction Survive LeWitt?', Journal of Aesthetics.",
+            "Did Goodman's Distinction Survive LeWitt?",
+        ),
+        (
+            "E. Dijkstra, \"A note on two problems in connexion with graphs,\" Numerische \
+             Mathematik, vol. 1, 1959.",
+            "A note on two problems in connexion with graphs",
+        ),
+        (
+            "@article{d, author = {Doe, J}, title = {Sepsis in {mice}}, year = {2020}}",
+            "Sepsis in mice",
+        ),
+    ] {
+        assert_eq!(probable_title(text).as_deref(), Some(title), "{text}");
+    }
+    assert_eq!(probable_title("2020. 12"), None);
+}
+
+#[test]
 fn finds_ids_in_running_text() {
     let text = "See (https://doi.org/10.1145/3368089.3409741), arXiv:1706.03762v5 and \
                 https://arxiv.org/abs/hep-th/9901001; also arXiv:1706.03762.";

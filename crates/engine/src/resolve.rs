@@ -505,11 +505,19 @@ impl Engine {
         // in provider-then-title order, so merging stays deterministic.
         titles = distinct(titles);
         titles.truncate(MAX_TITLE_SEARCHES);
+        // No hit pointed to the title (a conference paper without a DOI, a
+        // book Crossref lacks): the cleaned-up keywords, and the title the
+        // reference's shape suggests.
+        let keywords = titles.is_empty();
+        if keywords
+            && claim.title.is_none()
+            && let Some(title) = claim.text.as_deref().and_then(matching::probable_title)
+        {
+            titles.push(title);
+        }
         let mut jobs: Vec<(ProviderId, SearchQuery, Via)> = Vec::new();
         for provider in self.searchers(false) {
-            if titles.is_empty()
-                && let Some(text) = &claim.text
-            {
+            if keywords && let Some(text) = &claim.text {
                 let q = query(&matching::search_terms(text), false);
                 jobs.push((provider.clone(), q, Via::KeywordSearch));
             }

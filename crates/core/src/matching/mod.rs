@@ -39,7 +39,8 @@ pub use derivative::{
 };
 use text::{Normalised, content_words, words};
 pub use text::{
-    normalise, search_terms, shared_title, title_similarity, unmarked, whole_title_similarity,
+    normalise, probable_title, search_terms, shared_title, title_similarity, unmarked,
+    whole_title_similarity,
 };
 
 /// Field weights in the confidence (before penalties).

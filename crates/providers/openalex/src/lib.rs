@@ -7,7 +7,8 @@
 //!
 //! Every call reports its cost, the daily allowance, what's left of it and
 //! any prepaid balance in [`Usage`] (USD); with a key, `/rate-limit` says
-//! the same for free ([`Provider::budget`]).
+//! the same for free ([`Provider::budget`]), and each kind of call's price
+//! ([`Prices`](aspero_core::Prices)).
 //!
 //! Works have no filter on their journal's name, so a search by container
 //! first finds the sources so named (one more search, $0.001) and keeps

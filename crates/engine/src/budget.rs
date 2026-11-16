@@ -13,7 +13,7 @@
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use aspero_core::{Error, ProviderId, Response, Usage};
+use aspero_core::{Error, Prices, ProviderId, Response, Usage};
 use aspero_store::{PrepaidDay, PrepaidDays};
 use jiff::Timestamp;
 
@@ -46,6 +46,10 @@ pub struct Budget {
     /// When the prepaid balance expires, where the provider says
     /// (OpenAlex: `/rate-limit` only).
     pub prepaid_expires_at: Option<Timestamp>,
+    /// What each kind of call costs, as the provider last said (OpenAlex:
+    /// `/rate-limit` only, so `None` until it's asked, with a key); kept
+    /// until it says otherwise.
+    pub prices: Option<Prices>,
 }
 
 impl Budget {
@@ -59,7 +63,13 @@ impl Budget {
             seen_at,
             prepaid_spent_today: None,
             prepaid_expires_at: None,
+            prices: None,
         }
+    }
+
+    /// What a page of a keyword search costs, where the provider says.
+    pub fn search_price(&self) -> Option<f64> {
+        self.prices?.search
     }
 
     /// Spent in the current period (`limit − remaining`, to a millionth),
@@ -106,7 +116,8 @@ impl Budgets {
 
     /// Remembers what a response (or a spent-budget error) said. What it
     /// leaves out (the limit, a prepaid balance, its expiry) is kept from
-    /// before, and the credit spent today while the period lasts.
+    /// before, and the credit spent today while the period lasts. Prices
+    /// are kept until said again.
     pub(crate) fn note(
         &self,
         provider: &ProviderId,
@@ -114,7 +125,7 @@ impl Budgets {
         error: Option<&Error>,
         now: Timestamp,
     ) {
-        let (remaining, resets_at, limit, prepaid, expires, bought) = match (usage, error) {
+        let (remaining, resets_at, limit, prepaid, expires, bought, prices) = match (usage, error) {
             (Some(u), _) => (
                 u.remaining,
                 u.resets_at,
@@ -122,13 +133,19 @@ impl Budgets {
                 u.prepaid_remaining,
                 u.prepaid_expires_at,
                 u.prepaid_bought,
+                u.prices,
             ),
             (None, Some(Error::QuotaExhausted { resets_at })) => {
-                (Some(0.0), *resets_at, None, None, None, None)
+                (Some(0.0), *resets_at, None, None, None, None, None)
             }
             _ => return,
         };
-        if remaining.is_none() && resets_at.is_none() && limit.is_none() && prepaid.is_none() {
+        if remaining.is_none()
+            && resets_at.is_none()
+            && limit.is_none()
+            && prepaid.is_none()
+            && prices.is_none()
+        {
             return;
         }
         // Before the budgets' lock: it may wait on the file.
@@ -150,6 +167,7 @@ impl Budgets {
                 .filter(still_today)
                 .and_then(|k| k.prepaid_spent_today)),
             prepaid_expires_at: expires.or(known.and_then(|k| k.prepaid_expires_at)),
+            prices: prices.or(known.and_then(|k| k.prices)),
         };
         match all.iter_mut().find(|(p, _)| p == provider) {
             Some((_, known)) => *known = budget,

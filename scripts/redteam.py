@@ -15,9 +15,10 @@ capped (`ASPERO_OPENALEX_CAP_USD`, 0.75 unless set). `OPENALEX_API_KEY` and
 Prints a confusion table (category x verdict) and the headline numbers:
 false VERIFIED among fabricated or wrong citations (the critical metric),
 retracted works verified without a retraction flag, and real-citation
-recall (verified or plausible). `--failures` lists every false VERIFIED and
-every real citation missed. `--rescore` re-scores saved results without
-running anything. Exits 1 if any fabricated or wrong citation verified.
+recall (verified or plausible); then each acceptance criterion with PASS
+or FAIL (`CRITERIA`). `--failures` lists every false VERIFIED and every
+real citation missed. `--rescore` re-scores saved results without running
+anything. Exits 1 if any fabricated or wrong citation verified.
 """
 
 import argparse
@@ -30,6 +31,8 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 VERDICTS = ["verified", "plausible", "mismatch", "not_found", "unverifiable"]
+# Wholly invented works and identifiers: never verified, whatever else.
+INVENTED = ("a:", "e:", "f:", "i:")
 
 
 def claim_line(claim):
@@ -85,6 +88,9 @@ def judge(case, result):
         and verdict in ("verified", "plausible") and not flagged,
         "real_miss": real and verdict not in ("verified", "plausible"),
         "wrong_work": False,
+        "flagged": flagged,
+        # A plausible verdict naming the fields to check.
+        "names_field": bool((result.get("reason") or {}).get("differs")),
     }
     if case.get("ids") and verdict in ("verified", "plausible") and real:
         row["wrong_work"] = not ({i.lower() for i in case["ids"]} & matched_ids(result))
@@ -93,6 +99,32 @@ def judge(case, result):
 
 def pct(a, b):
     return f"{a}/{b} ({100 * a / b:.1f}%)" if b else "0/0"
+
+
+def criteria(wrong, real, retracted):
+    """Prints each acceptance criterion with PASS or FAIL."""
+    def share(picked, pool):
+        return len(picked) / len(pool) if pool else 0.0
+
+    invented = [r for r in wrong if r["category"].startswith(INVENTED)]
+    plausible = [r for r in wrong if r["verdict"] == "plausible"]
+    checks = [
+        ("wrong -> verified", [r for r in wrong if r["false_verified"]], wrong, "<=", 0.02),
+        ("invented, fake ID, DOI swap -> verified",
+         [r for r in invented if r["false_verified"]], invented, "<=", 0.0),
+        ("real -> mismatch or not_found",
+         [r for r in real if r["verdict"] in ("mismatch", "not_found")], real, "<=", 0.03),
+        ("real -> verified", [r for r in real if r["verdict"] == "verified"], real, ">=", 0.85),
+        ("real -> verified or plausible", [r for r in real if not r["real_miss"]], real, ">=", 0.95),
+        ("wrong -> plausible names a differing field",
+         [r for r in plausible if r["names_field"]], plausible, ">=", 0.80),
+        ("retracted flagged", [r for r in retracted if r["flagged"]], retracted, ">=", 1.0),
+    ]
+    print("\nAcceptance criteria:")
+    for name, picked, pool, op, bound in checks:
+        got = share(picked, pool)
+        ok = got <= bound if op == "<=" else got >= bound
+        print(f"  {'PASS' if ok else 'FAIL'}  {name:<44} {pct(len(picked), len(pool)):>16}  {op} {bound:.0%}")
 
 
 def report(cases, results, usage, show_failures):
@@ -131,6 +163,7 @@ def report(cases, results, usage, show_failures):
     print(f"  accepted but matched another work than the one cited: {len(ww)}")
     spent = sum(u.get("cost_usd") or 0 for u in usage.values()) if usage else 0
     print(f"OpenAlex spend this run: ${spent:.4f}")
+    criteria(wrong, real, retracted)
 
     if show_failures:
         by_n = {c.get("n"): (c, r) for c, r in zip(cases, results)}

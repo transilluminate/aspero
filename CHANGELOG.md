@@ -1,5 +1,37 @@
 # Changelog
 
+## Unreleased
+
+Fixed (from a held-out red team 0.27.0's fixes never saw,
+`bench/redteam/holdout-1.jsonl`: wrong citations verified fell from 29
+of 351 to none, 229 of them answered, the rest at OpenAlex's daily cap;
+real ones verified 351 of 382, from 343, and accepted 375, from 373):
+
+- The journal is read in more styles: Nature's single page after a
+  dotted name ("J. Org. Chem. 101, 6301 (1994)"), IEEE's comma after one
+  ("Mach. Intell., vol. 56"), Chicago's issue and bracketed year
+  ("Journal 94, no. 2 (2004): 317-321", which read the issue as the
+  volume, and "“…” eClinicalMedicine (2010)."), a colon inside a name
+  ("JAMA: The Journal of …"), the words after a quoted title in sentence
+  case ("Revue historique"), and dotted names after a title in title
+  case ("… by Nanoparticles. J. Am. Chem. Soc."), where each reading is
+  weighed and the journal is clearly another only if every one is.
+- A record in a journal whose type isn't given (Europe PMC's) is held to
+  its journal like an article, structured claims included.
+- A year or journal word inside a DOI or link ("10.1113/jphysiol.1974…",
+  "10.1093/brain/…") is not the year or journal cited.
+- A byline naming people as IEEE, MLA or BibTeX write them, none of them
+  the work's authors, makes the authors different, not unknown; a
+  co-author with initials of their own is no given name of the next.
+- A BibTeX entry's title is compared as its title (not a booktitle that
+  is a proceedings' name), and a quoted title counts however short.
+- A book doesn't confirm a BibTeX `@article`'s journal; the original
+  isn't verified for a correction of it cited ("Corrigendum to “…”"); a
+  record without its page takes it from another record of the work in
+  the same journal and volume.
+- A title in capitals ("… WOMEN ON ORAL CONTRACEPTIVES …") no longer
+  reads as names.
+
 ## 0.29.0
 
 Added:
@@ -127,36 +159,6 @@ Fixed:
   once the day's allowance is used up while prepaid credit is left:
   OpenAlex spends the credit then, so only no credit left either (or its
   `not_enough_credits`) is a spent budget.
-
-Fixed (from a held-out red team 0.27.0's fixes never saw,
-`bench/redteam/holdout-1.jsonl`: wrong citations verified fell from 29
-of 351 to none, 229 of them answered, the rest at OpenAlex's daily cap;
-real ones verified 351 of 382, from 343, and accepted 375, from 373):
-
-- The journal is read in more styles: Nature's single page after a
-  dotted name ("J. Org. Chem. 101, 6301 (1994)"), IEEE's comma after one
-  ("Mach. Intell., vol. 56"), Chicago's issue and bracketed year
-  ("Journal 94, no. 2 (2004): 317-321", which read the issue as the
-  volume, and "“…” eClinicalMedicine (2010)."), a colon inside a name
-  ("JAMA: The Journal of …"), the words after a quoted title in sentence
-  case ("Revue historique"), and dotted names after a title in title
-  case ("… by Nanoparticles. J. Am. Chem. Soc."), where each reading is
-  weighed and the journal is clearly another only if every one is.
-- A record in a journal whose type isn't given (Europe PMC's) is held to
-  its journal like an article, structured claims included.
-- A year or journal word inside a DOI or link ("10.1113/jphysiol.1974…",
-  "10.1093/brain/…") is not the year or journal cited.
-- A byline naming people as IEEE, MLA or BibTeX write them, none of them
-  the work's authors, makes the authors different, not unknown; a
-  co-author with initials of their own is no given name of the next.
-- A BibTeX entry's title is compared as its title (not a booktitle that
-  is a proceedings' name), and a quoted title counts however short.
-- A book doesn't confirm a BibTeX `@article`'s journal; the original
-  isn't verified for a correction of it cited ("Corrigendum to “…”"); a
-  record without its page takes it from another record of the work in
-  the same journal and volume.
-- A title in capitals ("… WOMEN ON ORAL CONTRACEPTIVES …") no longer
-  reads as names.
 
 ## 0.27.0
 

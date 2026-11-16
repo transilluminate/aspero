@@ -240,10 +240,18 @@ impl Normalised {
         }
         let year = |w: &str| w.len() == 4 && w.parse().is_ok_and(|y| PLAUSIBLE_YEARS.contains(&y));
         self.words.windows(n).enumerate().find_map(|(at, run)| {
+            let same = |k: usize| run[k] == title[k];
+            // Each word put in place stands in a sentence with one of the
+            // title's own beside it: not the journal after the title's
+            // stop ("… septic shock. JAMA").
+            let placed = (0..n).filter(|&k| !same(k)).all(|k| {
+                (k > 0 && same(k - 1) && self.one_sentence(at + k - 1, at + k))
+                    || (k + 1 < n && same(k + 1) && self.one_sentence(at + k, at + k + 1))
+            });
             let differ: Vec<(&String, &String)> =
                 run.iter().zip(&title).filter(|(a, b)| a != b).collect();
             let substituted = !differ.is_empty()
-                && self.one_sentence(at, at + n - 1)
+                && placed
                 && differ.len() * 4 <= n.max(4)
                 && differ.iter().all(|(a, b)| {
                     !super::authors::near(a, b)

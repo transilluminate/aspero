@@ -118,12 +118,16 @@ impl ClaimInput {
                 claim.ids.push(id);
             }
         }
-        claim.title = self.title;
-        claim.authors = self.authors;
-        claim.year = self.year;
-        claim.container = self.container;
-        claim.volume = self.volume;
-        claim.page = self.page;
+        // Fields given win; those not given keep what the text says, as
+        // a tagged record's (RIS, EndNote, a citation template) does.
+        claim.title = self.title.or(claim.title);
+        if !self.authors.is_empty() {
+            claim.authors = self.authors;
+        }
+        claim.year = self.year.or(claim.year);
+        claim.container = self.container.or(claim.container);
+        claim.volume = self.volume.or(claim.volume);
+        claim.page = self.page.or(claim.page);
         if let Some(site) = self.site {
             claim.site = Some(
                 aspero_core::site::site_of(&site)
@@ -225,6 +229,29 @@ mod tests {
                 .contains("unknown field")
         );
         assert!(claim(r#"{"doi": "not a doi"}"#).is_err());
+    }
+
+    #[test]
+    fn a_tagged_record_as_text_keeps_its_fields() {
+        // holdout-3 #645: an RIS record on several lines, sent as JSON
+        // text, kept only its DOI (and verified by it); without one
+        // (#509), nothing at all ("claim has no text …").
+        let ris = "TY  - JOUR\nAU  - Inayoshi, Kohei\nAU  - Fenwinho, Idris\nTI  - Supermassive \
+                   black hole formation by cold accretion shocks in the first galaxies\nJO  - \
+                   Monthly Notices of the Royal Astronomical Society\nPY  - 2012\nVL  - 422\nSP  \
+                   - 2539\nDO  - 10.1111/j.1365-2966.2012.20812.x\nER  - ";
+        let line = serde_json::json!({ "text": ris }).to_string();
+        let c = claim(&line).unwrap();
+        assert_eq!(c.authors, ["Inayoshi, Kohei", "Fenwinho, Idris"]);
+        assert_eq!(c.year, Some(2012));
+        assert_eq!(c.volume.as_deref(), Some("422"));
+        assert!(c.title.is_some() && c.container.is_some(), "{c:?}");
+        let undoi = ris.replace("DO  - 10.1111/j.1365-2966.2012.20812.x\n", "");
+        let line = serde_json::json!({ "text": undoi }).to_string();
+        assert!(claim(&line).unwrap().ids.is_empty());
+        // Fields given beside the text still win.
+        let line = serde_json::json!({ "text": ris, "year": 2013 }).to_string();
+        assert_eq!(claim(&line).unwrap().year, Some(2013));
     }
 
     #[test]

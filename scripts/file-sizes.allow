@@ -1,0 +1,4 @@
+# Rust sources allowed over scripts/file-sizes.py's limit, one per line:
+# `path  # reason`. Keep it short: a file that has more than one concern
+# should be split instead.
+crates/cli/src/args.rs  # clap argument definitions and their help text: one table of the CLI surface, read by command

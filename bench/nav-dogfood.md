@@ -107,3 +107,25 @@ the turn cap). $0.87 for the 28 runs.
 - **Variance** is small on well-named targets (same-work, tape-keys,
   cli-table were identical across runs) and large on vague ones
   (journal-read 8 vs 11 calls, journal-cap 2 vs 5).
+
+## After the structure splits (2026-11-16, 011fe7d)
+
+The same 14 tasks, twice each, after splitting `matching/`, `publication/`,
+`resolve/`, the store and the FFI records by concern, and adding the size
+and cited-path gates.
+
+| Mean per run | Before (1e7d18b) | After (011fe7d) |
+|---|---|---|
+| Correct | 28/28 | 27/28, 1 partial |
+| Tool calls | 3.7 | 3.1 |
+| Wasted searches | 1.8 | 1.5 |
+| Input tokens | 34k | ~26k |
+| Wall time | 16 s | 10 s |
+
+- The worst task improved most: journal-read went from 8 and 11 calls (56k
+  and 121k tokens) to 4 and 4 (30k each), now that
+  `crates/core/src/publication/cited_journal.rs` names what it does.
+- The partial answer (openalex-cap) found the right file and named a
+  neighbouring function.
+- DESIGN.md is still the index: unscoped greps hit it in 24 of 28 runs.
+  Keep its pointers specific; `scripts/doc-paths.py` keeps them existing.

@@ -882,17 +882,31 @@ first paid call.
 reported by OpenAlex, so it's told from the balance every response and
 refresh carries: the first balance seen in the budget day (the UTC day
 ending at `resets_at`, an hour back so a reset read a moment past midnight
-names the day before), raised by any top-up since, less the latest. A
-rise of a cent or more is a top-up; a smaller rise, or a sighting older
-than the latest, is responses arriving out of order and changes nothing.
-The day is kept in the cache file's `prepaid_day (provider, day,
-start_usd, last_usd, seen_at)` (`PrepaidDays`; one write transaction a
-sighting; a week kept), so every process sharing it (CLI, MCP, the app)
+names the day before), raised by any top-up since, less the balance now.
+Headers' balances are not to be trusted one by one: OpenAlex answers from
+many servers, some minutes behind, so requests made together say balances
+up to $0.30 apart, the stale ones higher (seen 2026-11-16 on the red
+team's tape: 9.84 and 9.66 interleaved within a second). Taking each rise
+of a cent as a top-up ran one day's count to $5.33 for $0.34 spent. So a
+header's balance only ever lowers the balance now (the lowest seen is the
+nearest the truth), and never raises the start. Only `/rate-limit`, which
+also says the credit bought (`prepaid_balance_usd`, `Usage.prepaid_bought`),
+sets the balance outright, either way, and only a rise in the credit
+bought is a top-up, raising the start by as much. A stop at the credit
+cap is checked first with a free `/rate-limit` (once a minute at most;
+with a key), so a stale low header can't stop calls for long. The day is
+kept in the cache file's `prepaid_day (provider, day, start_usd, last_usd,
+seen_at, bought_usd)` (`PrepaidDays`; one write transaction a sighting; a
+week kept; a table of the first shape, without `bought_usd`, is dropped),
+so every process sharing it (CLI, MCP, the app)
 and every restart tells the same figure, counting everything using the
 key from the day's first sighting by any of them; without a file, each
 engine keeps its own. Like the allowance's use it counts everything
 using the key, but a day first seen part-way through misses what was
-spent before: an undercount, accepted. `Budget::prepaid_expires_at` (FFI
+spent before, as does a top-up seen only in headers (until `/rate-limit`
+says it, it isn't one, and spend down to the old balance goes uncounted):
+undercounts, accepted. A day's first sighting from a stale server starts
+it high, an overcount of the staleness. `Budget::prepaid_expires_at` (FFI
 `prepaidExpiresAt`) is `/rate-limit`'s `prepaid_expires_at`, a JavaScript
 `Date` printed as a string ("Sun Feb 14 2027 12:08:05 GMT+0000
 (Coordinated Universal Time)", ISO also read); headers don't carry it, so

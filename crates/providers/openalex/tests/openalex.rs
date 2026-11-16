@@ -165,6 +165,8 @@ fn rate_limit_says_the_prepaid_balance_and_its_expiry() {
     assert_eq!(usage.limit, Some(1.0));
     assert_eq!(usage.remaining, Some(0.0));
     assert_eq!(usage.prepaid_remaining, Some(9.8851));
+    // The credit bought: said only here, not in headers.
+    assert_eq!(usage.prepaid_bought, Some(10.0));
     assert_eq!(
         usage.prepaid_expires_at,
         Some("2027-02-14T12:08:05Z".parse().unwrap())

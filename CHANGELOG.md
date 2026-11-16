@@ -47,6 +47,16 @@ Changed:
 
 Fixed:
 
+- Credit spent today no longer runs far past the truth ("$5.33 of credit
+  spent today" for $0.34 spent): OpenAlex's servers answer with balances
+  up to $0.30 apart, the stale ones higher, and each rise was taken for a
+  top-up. A response's balance now only ever lowers today's figure; only
+  `/rate-limit` (which says the credit bought) sets it either way or tells
+  a top-up; and a stop at the credit cap is checked with a free
+  `/rate-limit` first (at most once a minute). `Budget.prepaid_remaining`
+  is that balance, not the last response's. The first `prepaid_day`
+  table is dropped. `Usage.prepaid_bought` (OpenAlex
+  `prepaid_balance_usd`).
 - OpenAlex is no longer stopped until the reset ("usage quota
   exhausted") by a failing call (a per-second 429, a server fault) made
   once the day's allowance is used up while prepaid credit is left:

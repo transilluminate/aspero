@@ -20,6 +20,10 @@ just fuzz scan 1800 -jobs=4 -workers=4
 ```
 
 (`scripts/fuzz.sh <target> [seconds] [libFuzzer options…]` without just.)
+It builds without a sanitizer: aspero forbids `unsafe`, so panics,
+overflow (debug assertions are on), timeouts and memory are what to
+catch, and AddressSanitizer's runtime hung at start on macOS 26 with
+nightly 2025-12. Add `-fork=4 -ignore_crashes=1` to go on past failures.
 New inputs collect in `corpus/<target>`, failures in `artifacts/<target>`;
 `cargo +nightly fuzz tmin <target> <artifact>` minimises one.
 

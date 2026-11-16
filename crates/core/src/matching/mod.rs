@@ -89,6 +89,9 @@ const VERSION: f64 = PLAUSIBLE;
 const SHORT_TITLE_WORDS: usize = 3;
 /// Multiplier for replies, corrections, errata and commentaries.
 const DERIVATIVE_PENALTY: f64 = 0.5;
+/// Confidence ceiling for the original when the claim cites a reply,
+/// correction or comment on it.
+const DERIVATIVE_CITED_CAP: f64 = LOCATION_MISMATCH_CAP;
 /// Confidence ceiling when the claimed volume or first page differs.
 const LOCATION_MISMATCH_CAP: f64 = 0.8;
 /// Multiplier when the claim names a journal clearly another
@@ -955,11 +958,25 @@ pub fn assess(claim: &Claim, record: &SourceRecord) -> Assessment {
     }
     // A reply, correction or commentary is not the work it responds to,
     // unless the citation says it is citing one.
+    let cites_derivative = derivative::claim_derivative_kind(claim);
     if let Some(actual) = &work_title
         && is_derivative(actual)
-        && !claim_mentions_derivative(claim)
+        && cites_derivative.is_none()
     {
         confidence *= DERIVATIVE_PENALTY;
+    }
+    // Nor is the original a correction, reply or comment cited ("Corrigendum
+    // to “…” [Biochim. Biophys. Acta 1236 (1995) 197-200]"), its title and
+    // place quoted inside: plausible at most, the notice's record ranking
+    // first when found. (A retraction cited isn't held to this: "retraction
+    // of the gingiva" is a title's.)
+    if work_title.as_deref().is_some_and(|t| !is_derivative(t))
+        && matches!(
+            cites_derivative,
+            Some(WorkKind::Correction | WorkKind::Reply | WorkKind::Comment)
+        )
+    {
+        confidence = confidence.min(DERIVATIVE_CITED_CAP);
     }
 
     Assessment {

@@ -586,6 +586,44 @@ fn replies_and_corrections_are_not_the_original() {
         ),
     );
     assert!(a.confidence >= VERIFIED, "{a:?}");
+    // Nor is the original a correction cited (holdout-1 #185, corpus
+    // #105): the correction's record may be missing, but the original
+    // isn't verified in its place, its title and place quoted inside.
+    let cloning = placed(
+        &[],
+        "Cloning of a cGMP-gated cation channel from mouse kidney inner medullary collecting \
+         duct",
+        &["K H Karlson", "F Ciampolillo-Bates", "D E McCoy"],
+        1995,
+        ("Biochimica et Biophysica Acta", "1236", "197-200"),
+    );
+    let corrigendum = "Karlson KH, Ciampolillo-Bates F, McCoy DE. Corrigendum to \"Cloning of a \
+                       cGMP-gated cation channel from mouse kidney inner medullary collecting \
+                       duct\" [Biochim. Biophys. Acta 1236 (1995) 197-200]. Biochim Biophys Acta. \
+                       1995;1238(2):197.";
+    let a = assess(&Claim::from_text(corrigendum), &cloning);
+    assert!((PLAUSIBLE..VERIFIED).contains(&a.confidence), "{a:?}");
+    let shamloul = placed(
+        &[],
+        "Complementary and Alternative Medicine (CAM) for Sexual Dysfunction",
+        &["Rany Shamloul", "Anthony J. Bella"],
+        2014,
+        ("The Journal of Sexual Medicine", "11", "1097-1098"),
+    );
+    let corrections = "Corrections to “Shamloul R, Bella AJ. Complementary and alternative \
+                       medicine (CAM) for sexual dysfunction. J Sex Med 2014;11:1097–8”. J Sexual \
+                       Med. 2014;11:2126.";
+    let a = assess(&Claim::from_text(corrections), &shamloul);
+    assert!(a.confidence < VERIFIED, "{a:?}");
+    // The correction's own record verifies.
+    let mut notice = shamloul.clone();
+    notice.work.title = Some(
+        "Corrections to “Complementary and Alternative Medicine (CAM) for Sexual Dysfunction”"
+            .into(),
+    );
+    notice.work.page = None;
+    let a = assess(&Claim::from_text(corrections), &notice);
+    assert!(a.confidence >= VERIFIED, "{a:?}");
 }
 
 #[test]

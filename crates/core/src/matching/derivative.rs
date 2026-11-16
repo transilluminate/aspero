@@ -83,6 +83,7 @@ pub fn derivative_work_kind(title: &str) -> Option<WorkKind> {
         "correction" => {
             norm == "correction"
                 || norm.starts_with("correction to ")
+                || norm.starts_with("corrections to ")
                 || starts_with_ci(title.trim_start(), "correction:")
         }
         _ => words.starts_with(&format!(" {m} ")),
@@ -108,11 +109,23 @@ pub fn derivative_work_kind(title: &str) -> Option<WorkKind> {
 /// records: its title, or a sentence of its text ("Smith J. Correction to:
 /// …"), marks one. Then derivatives are fair matches.
 pub fn claim_mentions_derivative(claim: &Claim) -> bool {
-    claim.title.as_deref().is_some_and(is_derivative)
-        || claim
-            .text
-            .as_deref()
-            .is_some_and(|text| text.split(['.', '?', '!']).any(is_derivative))
+    claim_derivative_kind(claim).is_some()
+}
+
+/// What derivative the claim cites, by its title or a sentence of its
+/// text ([`claim_mentions_derivative`]).
+pub(super) fn claim_derivative_kind(claim: &Claim) -> Option<WorkKind> {
+    claim
+        .title
+        .as_deref()
+        .and_then(derivative_work_kind)
+        .or_else(|| {
+            claim
+                .text
+                .as_deref()?
+                .split(['.', '?', '!'])
+                .find_map(derivative_work_kind)
+        })
 }
 
 #[cfg(test)]

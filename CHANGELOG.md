@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+Changed:
+
+- The FFI crate's records and the `Aspero` handle's methods are split into
+  modules by domain. No Swift API changes, but 31 binding checksums do
+  (uniffi hashes each item's module path): regenerate the Swift bindings
+  with the library, as the xcframework does.
+
 ## 0.30.0
 
 Changed:

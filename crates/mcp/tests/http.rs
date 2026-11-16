@@ -14,7 +14,7 @@ use aspero_mcp::http::{
     ACTIVITY_QUEUE, Activity, Host, HostError, HostOutput, HostTool, HttpConfig, HttpServer, Key,
     Ledger, MemoryLedger, StartError, sha256_hex,
 };
-use aspero_mcp::{Caller, Scope, Tools};
+use aspero_mcp::{Caller, Scope, ToolErrorKind, Tools};
 use async_trait::async_trait;
 use common::{SEARCH_COST, source, tools};
 use serde_json::{Value, json};
@@ -483,6 +483,110 @@ async fn a_key_without_the_scope_is_refused_before_the_host_is_asked() {
     assert!(host.calls().is_empty());
     let activity = host.activity(2).await;
     assert!(activity.iter().all(|a| a.is_error));
+    assert!(
+        activity
+            .iter()
+            .all(|a| a.error == Some(ToolErrorKind::Forbidden) && a.count.is_none())
+    );
+    assert_eq!(
+        activity[1].error_message.as_deref(),
+        Some("this key can't use search: it lacks the sources scope")
+    );
+    // What the agent asked, though refused; the app words its own tools.
+    assert_eq!(activity[1].query.as_deref(), Some("Deep learning"));
+    assert_eq!(activity[0].query, None);
+    server.stop().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn activity_says_what_was_asked_how_many_came_back_and_what_went_wrong() {
+    let host = FakeHost::new();
+    let server = start(&host).await;
+    let mut agent = Agent::new(server.port(), FULL);
+    agent.initialize().await;
+
+    let calls = [
+        ("search", json!({"text": "Deep learning"})),
+        (
+            "search",
+            json!({"query": {"all": [{"title": "Deep learning"}, {"years": {"from": 2015}}]}}),
+        ),
+        (
+            "verify",
+            json!({"citations": [
+                "LeCun Y, Bengio Y, Hinton G. Deep learning. Nature. 2015. doi:10.1038/nature14539",
+                {"title": "Attention is all you need", "authors": ["Vaswani A"], "year": 2017, "arxiv": "1706.03762"},
+            ]}),
+        ),
+        (
+            "lookup",
+            json!({"ids": ["10.1038/nature14539", "arXiv:1706.03762", "10.1/none"]}),
+        ),
+        ("search", json!({"text": "Deep learning", "limit": 0})),
+        ("history_search", json!({"q": "sepsis"})),
+        ("history_fail", json!({})),
+    ];
+    for (name, arguments) in &calls {
+        agent.call(name, arguments.clone()).await;
+    }
+    let activity = host.activity(calls.len()).await;
+    let fields: Vec<_> = activity
+        .iter()
+        .map(|a| (a.tool.as_str(), a.query.as_deref(), a.count, a.error))
+        .collect();
+    assert_eq!(
+        fields,
+        [
+            ("search", Some("Deep learning"), Some(1), None),
+            (
+                "search",
+                Some("title:(Deep learning) AND years:2015–"),
+                Some(1),
+                None
+            ),
+            (
+                "verify",
+                Some(
+                    "LeCun Y, Bengio Y, Hinton G. Deep learning. Nature. 2015. \
+                     doi:10.1038/nature14539; Vaswani A. Attention is all you need. 2017. \
+                     1706.03762"
+                ),
+                Some(2),
+                None
+            ),
+            (
+                "lookup",
+                Some("10.1038/nature14539; arXiv:1706.03762; 10.1/none"),
+                Some(3),
+                None
+            ),
+            (
+                "search",
+                Some("Deep learning"),
+                None,
+                Some(ToolErrorKind::InvalidArguments)
+            ),
+            ("history_search", None, None, None),
+            ("history_fail", None, None, Some(ToolErrorKind::Refused)),
+        ]
+    );
+    // The summaries are as they were; the message is whole, without
+    // "error: ".
+    let bad = &activity[4];
+    assert!(bad.is_error);
+    assert_eq!(bad.summary, "error: `limit` is 1 to 50, not 0");
+    assert_eq!(
+        bad.error_message.as_deref(),
+        Some("`limit` is 1 to 50, not 0")
+    );
+    assert_eq!(activity[0].summary, "searched ‘Deep learning’");
+    assert_eq!(activity[2].summary, "verified 2 citations");
+    assert_eq!(activity[6].error_message.as_deref(), Some("not today"));
+    assert!(
+        activity
+            .iter()
+            .all(|a| a.is_error == a.error.is_some() && a.is_error == a.error_message.is_some())
+    );
     server.stop().await;
 }
 

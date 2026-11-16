@@ -5,8 +5,10 @@ use std::ops::Range;
 
 use unicode_normalization::UnicodeNormalization;
 
-use super::AUTHORS_COMPARED;
 use crate::work::PLAUSIBLE_YEARS;
+
+/// Authors compared from the start of a byline.
+const AUTHORS_COMPARED: usize = 3;
 
 /// Lowercase ASCII-folded words: accents dropped, punctuation as spaces.
 pub fn normalise(s: &str) -> String {
@@ -571,7 +573,7 @@ impl Normalised {
         /// Words inserted, at most, before the title is taken as not there.
         const GAP: usize = 8;
         let title = words(unmarked(title));
-        if content_words(&title.join(" ")).len() < super::SHORT_TITLE_WORDS {
+        if content_words(&title.join(" ")).len() < super::caps::SHORT_TITLE_WORDS {
             return false;
         }
         (0..self.words.len())

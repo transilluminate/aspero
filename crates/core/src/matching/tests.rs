@@ -2,9 +2,13 @@
 
 use jiff::Timestamp;
 
+use super::caps::SINGLE_FIELD_CAP;
+use super::text::Normalised;
 use super::*;
+use crate::id::WorkId;
 use crate::provider::ProviderId;
-use crate::record::{FieldSet, Raw};
+use crate::publication;
+use crate::record::{FieldSet, Raw, SourceRecord};
 use crate::work::{PartialDate, Person, Work};
 
 fn record(ids: &[&str], title: &str, authors: &[&str], year: i16) -> SourceRecord {

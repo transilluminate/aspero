@@ -2,6 +2,23 @@
 
 ## Unreleased
 
+Added:
+
+- `docs/accuracy.md`: what `verify` promises (a fabricated or miscited
+  reference shouldn't come back verified; plausible is "check it") and
+  what it can't check, the verdict policy, the red-team method (held-out
+  and adversarial rounds), acceptance criteria and the release gate, the
+  0.26.0 baseline, and how to reproduce it. Linked from the README and
+  DESIGN.
+- Issue forms: "Wrong verdict" (the citation, the verdict, the JSON
+  output, the right work, the version and where it ran), "Bug" and
+  "Feature"; `scripts/issue-to-case.py <n>` turns a wrong-verdict issue
+  into a red-team case in `bench/redteam/reports.jsonl`.
+- `verify --report`: after each result, a link to a new wrong-verdict
+  issue with the form filled in (JSON: `report_url`), the output
+  shortened to keep the link under 7,000 characters. Nothing is sent: the
+  link is only printed.
+
 Fixed (found by fuzzing, `fuzz/`):
 
 - An `author_id` like an ORCID with extra hyphens (`0000-0002-18-5-0097`)

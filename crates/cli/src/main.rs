@@ -8,6 +8,7 @@ mod cmd;
 mod exit;
 mod grid;
 mod output;
+mod report;
 mod term;
 
 use std::io::IsTerminal;
@@ -201,7 +202,11 @@ async fn run(cli: Cli, out: Out) -> Result<Exit, Failure> {
         Command::Lookup { ids } => cmd::lookup::run(&engine, ids, out).await,
         Command::Search { query, options } => cmd::search::run(&engine, query, options, out).await,
         Command::Resolve { claim } => cmd::resolve::run(&engine, claim, out).await,
-        Command::Verify { claim, page } => cmd::verify::run(&engine, claim, page, out).await,
+        Command::Verify {
+            claim,
+            page,
+            report,
+        } => cmd::verify::run(&engine, claim, page, report, out).await,
         Command::Identify {
             file,
             title,

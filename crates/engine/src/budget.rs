@@ -2,17 +2,18 @@
 //! end can show what's left without spending any.
 //!
 //! Prepaid credit spent today, which OpenAlex doesn't say, is told from
-//! the balance: the first one seen in the budget day less the latest
-//! ([`PrepaidDay`]), kept where every process sharing the cache file sees
-//! the same day ([`PrepaidDays`]; without one, by the engine alone). Like
-//! the allowance's use it counts everything using the key, but only from
-//! the day's first sighting: a day first seen part-way through, after
-//! credit was spent, undercounts.
+//! the balance: the first one seen in the budget day less the balance now
+//! ([`PrepaidDay`]: the lowest a response's headers said, since they can
+//! be minutes stale, unless `/rate-limit` said it since), kept where every
+//! process sharing the cache file sees the same day ([`PrepaidDays`];
+//! without one, by the engine alone). Like the allowance's use it counts
+//! everything using the key, but only from the day's first sighting: a
+//! day first seen part-way through, after credit was spent, undercounts.
 
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use aspero_core::{Error, ProviderId, Response, Usage};
+use aspero_core::{Error, Prices, ProviderId, Response, Usage};
 use aspero_store::{PrepaidDay, PrepaidDays};
 use jiff::Timestamp;
 
@@ -29,19 +30,26 @@ pub struct Budget {
     /// provider says it.
     pub limit: Option<f64>,
     /// A prepaid balance beside the period's budget, where the provider
-    /// says one.
+    /// says one: OpenAlex's as told for the day's credit spend (the lowest
+    /// its responses said since `/rate-limit` last did), not the last
+    /// response's, which may be stale.
     pub prepaid_remaining: Option<f64>,
     /// When the provider said so.
     pub seen_at: Timestamp,
     /// Prepaid credit spent in the current period (OpenAlex: today, in
     /// USD), by everything using the key: the period's first balance seen
     /// (by any process sharing the cache file), raised by any top-up since,
-    /// less the latest. Seen first part-way through the period, it misses
-    /// what was spent before. `None` where no balance is known this period.
+    /// less the balance now ([`PrepaidDay`]). Seen first part-way through
+    /// the period, it misses what was spent before. `None` where no
+    /// balance is known this period.
     pub prepaid_spent_today: Option<f64>,
     /// When the prepaid balance expires, where the provider says
     /// (OpenAlex: `/rate-limit` only).
     pub prepaid_expires_at: Option<Timestamp>,
+    /// What each kind of call costs, as the provider last said (OpenAlex:
+    /// `/rate-limit` only, so `None` until it's asked, with a key); kept
+    /// until it says otherwise.
+    pub prices: Option<Prices>,
 }
 
 impl Budget {
@@ -55,7 +63,13 @@ impl Budget {
             seen_at,
             prepaid_spent_today: None,
             prepaid_expires_at: None,
+            prices: None,
         }
+    }
+
+    /// What a page of a keyword search costs, where the provider says.
+    pub fn search_price(&self) -> Option<f64> {
+        self.prices?.search
     }
 
     /// Spent in the current period (`limit − remaining`, to a millionth),
@@ -102,7 +116,8 @@ impl Budgets {
 
     /// Remembers what a response (or a spent-budget error) said. What it
     /// leaves out (the limit, a prepaid balance, its expiry) is kept from
-    /// before, and the credit spent today while the period lasts.
+    /// before, and the credit spent today while the period lasts. Prices
+    /// are kept until said again.
     pub(crate) fn note(
         &self,
         provider: &ProviderId,
@@ -110,27 +125,35 @@ impl Budgets {
         error: Option<&Error>,
         now: Timestamp,
     ) {
-        let (remaining, resets_at, limit, prepaid, expires) = match (usage, error) {
+        let (remaining, resets_at, limit, prepaid, expires, bought, prices) = match (usage, error) {
             (Some(u), _) => (
                 u.remaining,
                 u.resets_at,
                 u.limit,
                 u.prepaid_remaining,
                 u.prepaid_expires_at,
+                u.prepaid_bought,
+                u.prices,
             ),
             (None, Some(Error::QuotaExhausted { resets_at })) => {
-                (Some(0.0), *resets_at, None, None, None)
+                (Some(0.0), *resets_at, None, None, None, None, None)
             }
             _ => return,
         };
-        if remaining.is_none() && resets_at.is_none() && limit.is_none() && prepaid.is_none() {
+        if remaining.is_none()
+            && resets_at.is_none()
+            && limit.is_none()
+            && prepaid.is_none()
+            && prices.is_none()
+        {
             return;
         }
         // Before the budgets' lock: it may wait on the file.
-        let spent = prepaid.map(|balance| {
-            self.see_prepaid(provider, &budget_day(resets_at, now), balance, now)
-                .spent_usd()
+        let day = prepaid.map(|balance| {
+            self.see_prepaid(provider, &budget_day(resets_at, now), balance, bought, now)
         });
+        let spent = day.map(|d| d.spent_usd());
+        let prepaid = day.map(|d| d.last_usd);
         let mut all = lock(&self.all);
         let known = all.iter().find(|(p, _)| p == provider).map(|(_, b)| *b);
         let still_today = |k: &Budget| k.resets_at.is_some_and(|r| now < r);
@@ -144,6 +167,7 @@ impl Budgets {
                 .filter(still_today)
                 .and_then(|k| k.prepaid_spent_today)),
             prepaid_expires_at: expires.or(known.and_then(|k| k.prepaid_expires_at)),
+            prices: prices.or(known.and_then(|k| k.prices)),
         };
         match all.iter_mut().find(|(p, _)| p == provider) {
             Some((_, known)) => *known = budget,
@@ -159,10 +183,11 @@ impl Budgets {
         provider: &ProviderId,
         day: &str,
         balance: f64,
+        bought: Option<f64>,
         now: Timestamp,
     ) -> PrepaidDay {
         if let Some(days) = &self.prepaid_days {
-            match days.see_prepaid(provider.as_str(), day, balance, now) {
+            match days.see_prepaid(provider.as_str(), day, balance, bought, now) {
                 Ok(seen) => return seen,
                 Err(e) => tracing::warn!(
                     target: "aspero::budget",
@@ -177,7 +202,7 @@ impl Budgets {
             .iter()
             .find(|(p, _, _)| p == provider)
             .map(|(_, _, seen)| *seen);
-        let seen = PrepaidDay::see(known, balance, now);
+        let seen = PrepaidDay::see(known, balance, bought, now);
         match own.iter_mut().find(|(p, _, _)| p == provider) {
             Some((_, _, kept)) => *kept = seen,
             None => own.push((provider.clone(), day.to_owned(), seen)),

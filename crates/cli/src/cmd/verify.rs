@@ -3,7 +3,7 @@
 
 use std::fmt::Write as _;
 
-use aspero_core::{PageSource, ProviderId, Usage};
+use aspero_core::{PageClaim, PageKind, PageSource, PartialDate, ProviderId, Usage, WebPage};
 use aspero_engine::{
     Candidate, Difference, Engine, Reason, Verdict, Verification, describe_update,
 };
@@ -30,7 +30,14 @@ pub async fn run(
     let limit = args.limit;
     let (claims, page_source) = if let Some(url) = &page.url {
         let html = page.html.as_deref().map(read_page).transpose()?;
-        let (claim, source) = from_page(html.as_deref(), url, args.title.as_deref())?;
+        let read = aspero_core::claim_from_page(html.as_deref(), url, args.title.as_deref());
+        if read.kind == PageKind::WebPage
+            && let Some(web) = &read.web_page
+        {
+            let accessed = page.accessed.unwrap_or_else(today);
+            return web_page(web, url, accessed, &out);
+        }
+        let (claim, source) = page_claim(read, url)?;
         (vec![claim], Some(source))
     } else {
         let split_list = args.split;
@@ -141,12 +148,17 @@ fn read_page(path: &str) -> Result<String, Failure> {
 
 /// The claim an article page makes (see `aspero_core::webpage`), with
 /// its address as the input, and what answered.
-pub(super) fn from_page(
+#[cfg(test)]
+fn from_page(
     html: Option<&str>,
     url: &str,
     title: Option<&str>,
 ) -> Result<(InputClaim, PageSource), Failure> {
-    let page = aspero_core::claim_from_page(html, url, title);
+    page_claim(aspero_core::claim_from_page(html, url, title), url)
+}
+
+/// [`from_page`]'s claim from what the page was read as.
+fn page_claim(page: PageClaim, url: &str) -> Result<(InputClaim, PageSource), Failure> {
     let Some(claim) = page.claim else {
         return Err(Failure {
             exit: Exit::NotFound,
@@ -159,6 +171,84 @@ pub(super) fn from_page(
         claim: Ok(claim),
     };
     Ok((claim, page.source))
+}
+
+/// Today, on the local calendar: when a web page was read.
+fn today() -> PartialDate {
+    let d = jiff::Zoned::now().date();
+    let two = |n: i8| u8::try_from(n).ok();
+    PartialDate::new(d.year(), two(d.month()), two(d.day())).expect("a calendar date")
+}
+
+/// A page that isn't a scholarly work's: nothing to verify, so its web
+/// page record, or (exporting) the page as a web page read on `accessed`.
+fn web_page(page: &WebPage, url: &str, accessed: PartialDate, out: &Out) -> Result<Exit, Failure> {
+    if out.format.is_export() {
+        let mut export = output::Exporter::new(out)?;
+        let entry = export.entry(&page.to_work(Some(accessed)), &[]);
+        if !entry.is_empty() {
+            println!("{entry}");
+        }
+        print!("{}", export.finish());
+        return Ok(Exit::Ok);
+    }
+    let date = |d: Option<PartialDate>| d.map(|d| d.to_string());
+    let item = json!({
+        "input": url,
+        "kind": PageKind::WebPage.as_str(),
+        "web_page": {
+            "title": page.title,
+            "site": page.site,
+            "url": page.url,
+            "key": page.key,
+            "authors": page.authors,
+            "published": date(page.published),
+            "updated": date(page.updated),
+            "language": page.language,
+        },
+    });
+    match out.format {
+        Format::Jsonl => print_line(&item),
+        Format::Json | Format::Auto => {
+            print(&json!({"results": [item], "usage": output::usage(&[])}));
+        }
+        _ => println!("{}", term::fill(&web_page_text(page, url))),
+    }
+    Ok(Exit::Ok)
+}
+
+/// A web page as text: what it is, then its record.
+fn web_page_text(page: &WebPage, url: &str) -> String {
+    let heading = term::paint("WEB PAGE", Paint::Strong(Level::Info));
+    let mut lines = vec![
+        format!("{heading}  {url}"),
+        "  not a scholarly work: nothing to verify; cite it as a web page".to_owned(),
+    ];
+    let title = page.title.as_deref().unwrap_or("(untitled)");
+    lines.push(match &page.site {
+        Some(site) => format!("  \"{title}\", {site}"),
+        None => format!("  \"{title}\""),
+    });
+    if !page.authors.is_empty() {
+        lines.push(format!("  by {}", page.authors.join(", ")));
+    }
+    let dates: Vec<String> = [
+        page.published.map(|d| format!("published {d}")),
+        page.updated.map(|d| format!("updated {d}")),
+        page.language.as_ref().map(|l| format!("language {l}")),
+    ]
+    .into_iter()
+    .flatten()
+    .collect();
+    if !dates.is_empty() {
+        lines.push(format!("  {}", dates.join(", ")));
+    }
+    lines.push(format!("  {}", page.url));
+    lines.push(format!(
+        "  {}",
+        term::paint(&format!("key {}", page.key), Paint::Dim)
+    ));
+    lines.join("\n") + "\n"
 }
 
 /// A claim's echo, saying what answered when it was read from a page.
@@ -504,6 +594,40 @@ mod tests {
                 ..
             })
         ));
+    }
+
+    /// `verify --html wikipedia.html --url …`: a web page, not "not
+    /// found": its record, offline.
+    #[test]
+    fn a_web_page_is_shown_not_verified() {
+        let html = std::fs::read_to_string(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../core/tests/fixtures/pages/wikipedia.html"
+        ))
+        .unwrap();
+        let url = "https://en.wikipedia.org/wiki/Gene_Hackman";
+        let read = aspero_core::claim_from_page(Some(&html), url, None);
+        assert_eq!(read.kind, PageKind::WebPage);
+        let text = web_page_text(read.web_page.as_ref().unwrap(), url);
+        assert_eq!(
+            text,
+            format!(
+                "{}  {url}\n  not a scholarly work: nothing to verify; cite it as a web page\n  \
+                 \"Gene Hackman\", Wikipedia\n  published 2001-09-13, updated 2026-11-12, \
+                 language en\n  {url}\n  {}\n",
+                term::paint("WEB PAGE", Paint::Strong(Level::Info)),
+                term::paint(&format!("key url:{url}"), Paint::Dim)
+            )
+        );
+        let out = Out {
+            format: Format::Text,
+            full: false,
+            abstracts: false,
+            style: None,
+            locale: None,
+        };
+        let page = read.web_page.as_ref().unwrap();
+        assert_eq!(web_page(page, url, today(), &out).unwrap(), Exit::Ok);
     }
 
     /// `--report`: the link is in the JSON as `report_url`, and on its own

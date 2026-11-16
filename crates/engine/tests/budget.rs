@@ -56,6 +56,9 @@ async fn with_a_key_refreshing_asks_rate_limit_for_free() {
     // No credit: none spent, and no expiry.
     assert_eq!(budget.prepaid_spent_today, Some(0.0));
     assert_eq!(budget.prepaid_expires_at, None);
+    // What each kind of call costs.
+    assert_eq!(budget.search_price(), Some(0.001));
+    assert_eq!(budget.prices.unwrap().list, Some(0.0001));
 }
 
 /// With credit, `/rate-limit` says when it expires; the day's first
@@ -100,6 +103,7 @@ async fn credit_spent_today_counts_from_the_days_first_balance() {
         Some("2027-02-14T12:08:05Z".parse().unwrap()),
         "kept: headers don't say it"
     );
+    assert_eq!(budget.search_price(), Some(0.001), "nor prices: kept");
 }
 
 #[tokio::test]

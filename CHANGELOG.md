@@ -2,6 +2,144 @@
 
 ## Unreleased
 
+Fixed (from a held-out red team 0.27.0's fixes never saw,
+`bench/redteam/holdout-1.jsonl`: wrong citations verified fell from 29
+of 351 to none, 229 of them answered, the rest at OpenAlex's daily cap;
+real ones verified 351 of 382, from 343, and accepted 375, from 373):
+
+- The journal is read in more styles: Nature's single page after a
+  dotted name ("J. Org. Chem. 101, 6301 (1994)"), IEEE's comma after one
+  ("Mach. Intell., vol. 56"), Chicago's issue and bracketed year
+  ("Journal 94, no. 2 (2004): 317-321", which read the issue as the
+  volume, and "“…” eClinicalMedicine (2010)."), a colon inside a name
+  ("JAMA: The Journal of …"), the words after a quoted title in sentence
+  case ("Revue historique"), and dotted names after a title in title
+  case ("… by Nanoparticles. J. Am. Chem. Soc."), where each reading is
+  weighed and the journal is clearly another only if every one is.
+- A record in a journal whose type isn't given (Europe PMC's) is held to
+  its journal like an article, structured claims included.
+- A year or journal word inside a DOI or link ("10.1113/jphysiol.1974…",
+  "10.1093/brain/…") is not the year or journal cited.
+- A byline naming people as IEEE, MLA or BibTeX write them, none of them
+  the work's authors, makes the authors different, not unknown; a
+  co-author with initials of their own is no given name of the next.
+- A BibTeX entry's title is compared as its title (not a booktitle that
+  is a proceedings' name), and a quoted title counts however short.
+- A book doesn't confirm a BibTeX `@article`'s journal; the original
+  isn't verified for a correction of it cited ("Corrigendum to “…”"); a
+  record without its page takes it from another record of the work in
+  the same journal and volume.
+- A title in capitals ("… WOMEN ON ORAL CONTRACEPTIVES …") no longer
+  reads as names.
+
+Fixed (from a second held-out red team, `bench/redteam/holdout-2.jsonl`,
+replayed offline from the tape of round 2's run: wrong citations verified
+fell from 39 of 399 to 2, 87 claims needing requests the tape lacks; real
+ones mismatched or not found fell from 19 to 9 of 441):
+
+- A conference paper cited at another conference (CVPR's at ICCV, KDD's
+  at ICML) is plausible, the venue named: the major conferences are told
+  by acronym or name, the record's by its proceedings or IEEE DOI. A
+  preprint server's copy cited in a conference's proceedings can't
+  confirm the conference: plausible, as a copy can't confirm a journal.
+  Real NeurIPS or ICML citations whose only record is arXiv's are
+  plausible too.
+- A title with words swapped for others anywhere in it, several
+  together ("Likelihood Determinants" for "Risk Factors", "A Controlled
+  Study" for "A Randomized Trial"), in free text or a structured claim,
+  is plausible at most; spelling, abbreviations, numbers spelt out and
+  words broken at a line's end still match.
+- More locators and journals are read: MLA's `77.4 (2005): 1321-1373`,
+  Harvard's `pp.58-63` and `p.054433`, IEEE's `Art. no. 615`, prose's "the
+  2007 … paper in Psychol Sci (…)", and dotted names after a title in
+  title case ending in a short abbreviation (`… Creation. Psychol. Sci.
+  5, 14`), each reading weighed.
+- Invented co-authors beside a real first author are caught where the
+  record gives a family name in capitals (`Seok-Bae LEE`), and next to
+  Vancouver initials (`Rangel TR, Thalubrecht HL, …`).
+- A journal word inside the work's title isn't the journal cited
+  (`… monitoring autophagy. bioRxiv [Preprint]`), and a record OpenAlex
+  types a preprint but in a journal PubMed indexes is that journal's
+  article, so either cited as a preprint is plausible.
+- A Chinese or Japanese title is a title given, however few spaces: one
+  at another work's journal, volume and page is no longer verified.
+- A BibTeX entry's arXiv `eprint` and `pmid` are identifiers claimed, so
+  an unassigned arXiv ID there is checked.
+- A record a provider gives for an identifier it doesn't list (OpenAlex
+  answers a Zenodo version's DOI with the concept's record) carries it:
+  the version's DOI no longer "does not exist".
+- An inverted name in a record (`Lubrano, Emanuele`, DataCite's) is split
+  as one; a claimed double-barrelled name an author's record shortens
+  (`Hirschi-Santelmo` for Hirschi) and an organisation among a structured
+  claim's authors are no strangers; BMJ's page `698.1` is page 698.
+
+## 0.29.0
+
+Added:
+
+- Pages that aren't scholarly works (#119): `claimFromPage` tells a
+  scholarly work's page (an identifier, citation tags, scholarly JSON-LD,
+  a publisher's site, or no markup to tell) from a web page (a Wikipedia
+  article, a news story, guidance), and a web page has no claim to
+  verify. `PageClaim.kind` (`PageKind`: `work`, `webPage`) and
+  `PageClaim.webPage` (`WebPage`: title, site, canonical address
+  normalised, people as authors, published, updated, language, and its
+  key, `url:` and the address), read for every page with a title.
+  `webPageWork(page, accessed)` makes it a `Work` of type `webpage` that
+  `export` writes as BibTeX `@misc` (`howpublished`, `note` with the
+  site and access date), RIS `ELEC` (`Y2`, `LA`) and CSL-JSON `webpage`
+  (`accessed`, `language`: a Zotero Web Page), and `cite` formats in any
+  style. `Work.accessed` and `Work.language`; core `WorkType::WebPage`,
+  `Work::accessed`, `Work::language`, `webpage::{PageKind, WebPage,
+  normalise_url}`. `aspero verify --html FILE --url URL` shows a web
+  page's record (exit 0) rather than verifying it, and writes it out
+  with `--format bibtex|ris|csl-json|cite`, read on `--accessed DATE`
+  (today by default).
+
+Fixed:
+
+- `claimFromPage` titled a page by its JSON-LD `headline` before its
+  `name` (#118): Wikipedia's `headline` is the article's short
+  description ("American actor and novelist (1930–2025)"). `name` comes
+  first now, unless it isn't a title. A page title's suffix also goes
+  when it is the name the page gives its own site (`og:site_name`,
+  JSON-LD's website or publisher), even one holding a separator.
+- A page's values lost anything that looked like a tag once decoded, so
+  a title naming one ("&lt;meta&gt;: The metadata element") lost it. Only
+  formatting markup (`<i>`, `<sub>`, `<span>`, JATS's, namespaced tags)
+  is taken out now, escaped or not.
+
+## 0.28.2
+
+Added:
+
+- `Budget.spendableTodayUsd`: what this engine's paid calls may still
+  spend today under both caps, as `aspero budget` counts it
+  (`Engine::spendable_today`), and `Budget.creditCapUsd`, the credit cap
+  in force ($0.25 when unset), so callers needn't repeat the policy.
+
+## 0.28.1
+
+Added:
+
+- Each MCP key's spend today (#113): `HttpServer::status` gains
+  `KeyStatus.spent_today_usd`, `Status.spend_day` and `spend_resets_at`
+  (FFI `McpKeyStatus.spentTodayUsd`, `McpStatus.spendDay`,
+  `spendResetsAt`): the ledger's figure for the UTC day plus spend not yet
+  recorded, the same the key's daily budget is checked against.
+- What OpenAlex charges (#113), from `/rate-limit`'s `endpoint_costs_usd`
+  (so with a key): `Usage.prices` and `Budget::prices` (a `Prices` of
+  `singleton`, `list`, `search`, …), `Budget::search_price`; FFI
+  `Budget.searchPriceUsd` and `Budget.prices` (`[BudgetPrice { endpoint,
+  usd }]`). `Engine::spendable_today`: what paid calls may still spend
+  today under the caps (the allowance left to its cap, then credit to the
+  credit cap). `aspero budget` adds "searches $0.001 each, about 850 left
+  today" (spendable over the search price, rounded down) and JSON
+  `spendable_today_usd`, `search_price_usd`, `searches_left_today`,
+  `prices_usd`.
+
+## 0.28.0
+
 Added:
 
 - References pasted as a Wikipedia citation template (`{{cite journal
@@ -55,82 +193,21 @@ Changed:
 
 Fixed:
 
+- Credit spent today no longer runs far past the truth ("$5.33 of credit
+  spent today" for $0.34 spent): OpenAlex's servers answer with balances
+  up to $0.30 apart, the stale ones higher, and each rise was taken for a
+  top-up. A response's balance now only ever lowers today's figure; only
+  `/rate-limit` (which says the credit bought) sets it either way or tells
+  a top-up; and a stop at the credit cap is checked with a free
+  `/rate-limit` first (at most once a minute). `Budget.prepaid_remaining`
+  is that balance, not the last response's. The first `prepaid_day`
+  table is dropped. `Usage.prepaid_bought` (OpenAlex
+  `prepaid_balance_usd`).
 - OpenAlex is no longer stopped until the reset ("usage quota
   exhausted") by a failing call (a per-second 429, a server fault) made
   once the day's allowance is used up while prepaid credit is left:
   OpenAlex spends the credit then, so only no credit left either (or its
   `not_enough_credits`) is a spent budget.
-
-Fixed (from a second held-out red team, `bench/redteam/holdout-2.jsonl`,
-replayed offline from the tape of round 2's run: wrong citations verified
-fell from 39 of 399 to 2, 87 claims needing requests the tape lacks; real
-ones mismatched or not found fell from 19 to 9 of 441):
-
-- A conference paper cited at another conference (CVPR's at ICCV, KDD's
-  at ICML) is plausible, the venue named: the major conferences are told
-  by acronym or name, the record's by its proceedings or IEEE DOI. A
-  preprint server's copy cited in a conference's proceedings can't
-  confirm the conference: plausible, as a copy can't confirm a journal.
-  Real NeurIPS or ICML citations whose only record is arXiv's are
-  plausible too.
-- A title with words swapped for others anywhere in it, several
-  together ("Likelihood Determinants" for "Risk Factors", "A Controlled
-  Study" for "A Randomized Trial"), in free text or a structured claim,
-  is plausible at most; spelling, abbreviations, numbers spelt out and
-  words broken at a line's end still match.
-- More locators and journals are read: MLA's `77.4 (2005): 1321-1373`,
-  Harvard's `pp.58-63` and `p.054433`, IEEE's `Art. no. 615`, prose's "the
-  2007 … paper in Psychol Sci (…)", and dotted names after a title in
-  title case ending in a short abbreviation (`… Creation. Psychol. Sci.
-  5, 14`), each reading weighed.
-- Invented co-authors beside a real first author are caught where the
-  record gives a family name in capitals (`Seok-Bae LEE`), and next to
-  Vancouver initials (`Rangel TR, Thalubrecht HL, …`).
-- A journal word inside the work's title isn't the journal cited
-  (`… monitoring autophagy. bioRxiv [Preprint]`), and a record OpenAlex
-  types a preprint but in a journal PubMed indexes is that journal's
-  article, so either cited as a preprint is plausible.
-- A Chinese or Japanese title is a title given, however few spaces: one
-  at another work's journal, volume and page is no longer verified.
-- A BibTeX entry's arXiv `eprint` and `pmid` are identifiers claimed, so
-  an unassigned arXiv ID there is checked.
-- A record a provider gives for an identifier it doesn't list (OpenAlex
-  answers a Zenodo version's DOI with the concept's record) carries it:
-  the version's DOI no longer "does not exist".
-- An inverted name in a record (`Lubrano, Emanuele`, DataCite's) is split
-  as one; a claimed double-barrelled name an author's record shortens
-  (`Hirschi-Santelmo` for Hirschi) and an organisation among a structured
-  claim's authors are no strangers; BMJ's page `698.1` is page 698.
-
-Fixed (from a held-out red team 0.27.0's fixes never saw,
-`bench/redteam/holdout-1.jsonl`: wrong citations verified fell from 29
-of 351 to none, 229 of them answered, the rest at OpenAlex's daily cap;
-real ones verified 351 of 382, from 343, and accepted 375, from 373):
-
-- The journal is read in more styles: Nature's single page after a
-  dotted name ("J. Org. Chem. 101, 6301 (1994)"), IEEE's comma after one
-  ("Mach. Intell., vol. 56"), Chicago's issue and bracketed year
-  ("Journal 94, no. 2 (2004): 317-321", which read the issue as the
-  volume, and "“…” eClinicalMedicine (2010)."), a colon inside a name
-  ("JAMA: The Journal of …"), the words after a quoted title in sentence
-  case ("Revue historique"), and dotted names after a title in title
-  case ("… by Nanoparticles. J. Am. Chem. Soc."), where each reading is
-  weighed and the journal is clearly another only if every one is.
-- A record in a journal whose type isn't given (Europe PMC's) is held to
-  its journal like an article, structured claims included.
-- A year or journal word inside a DOI or link ("10.1113/jphysiol.1974…",
-  "10.1093/brain/…") is not the year or journal cited.
-- A byline naming people as IEEE, MLA or BibTeX write them, none of them
-  the work's authors, makes the authors different, not unknown; a
-  co-author with initials of their own is no given name of the next.
-- A BibTeX entry's title is compared as its title (not a booktitle that
-  is a proceedings' name), and a quoted title counts however short.
-- A book doesn't confirm a BibTeX `@article`'s journal; the original
-  isn't verified for a correction of it cited ("Corrigendum to “…”"); a
-  record without its page takes it from another record of the work in
-  the same journal and volume.
-- A title in capitals ("… WOMEN ON ORAL CONTRACEPTIVES …") no longer
-  reads as names.
 
 ## 0.27.0
 

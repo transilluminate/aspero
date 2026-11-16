@@ -5,17 +5,22 @@
 //! daily allowance: 1 with a key, 0.1 without), `x-ratelimit-remaining-usd`
 //! (left of it today), `x-ratelimit-prepaid-remaining-usd` and
 //! `x-ratelimit-reset` (seconds to midnight UTC). 404s are an HTML page;
-//! 400s are JSON `{error, message}`.
+//! 400s are JSON `{error, message}`. The prepaid balance in headers comes
+//! from whichever server answered, some minutes behind: requests made
+//! together said 9.84 and 9.66 within a second (2026-11-16), so it's
+//! never taken alone as the balance (see the engine's `PrepaidDay`).
 //!
 //! `GET /rate-limit` (key required, as a Bearer header or `api_key`; 401
 //! "Authentication required" without) says the same as JSON, costs
 //! nothing (`daily_used_usd` unchanged across calls, checked 2026-11-14)
-//! and carries no `x-ratelimit-*` headers.
+//! and carries no `x-ratelimit-*` headers. It also says each kind of
+//! call's price, `endpoint_costs_usd` (2026-11-16: `singleton` 0, `list`
+//! 0.0001, `search` 0.001, `content` 0.01, …), which headers never do.
 
 use std::time::Duration;
 
 use aspero_core::http::status_error;
-use aspero_core::{Error, HttpResponse, Usage};
+use aspero_core::{Error, HttpResponse, Prices, Usage};
 use jiff::Timestamp;
 
 /// Error messages longer than this are cut; OpenAlex's 400 bodies list every
@@ -37,7 +42,7 @@ pub(crate) fn usage(resp: &HttpResponse) -> Usage {
 
 /// The budget `/rate-limit` reports: `{"rate_limit": {"daily_budget_usd",
 /// "daily_remaining_usd", "prepaid_remaining_usd", "prepaid_expires_at",
-/// "resets_at", …}}`.
+/// "resets_at", "endpoint_costs_usd", …}}`.
 pub(crate) fn rate_limit(resp: &HttpResponse) -> Result<Usage, Error> {
     #[derive(serde::Deserialize)]
     struct Body {
@@ -49,10 +54,14 @@ pub(crate) fn rate_limit(resp: &HttpResponse) -> Result<Usage, Error> {
         daily_used_usd: Option<f64>,
         daily_remaining_usd: Option<f64>,
         prepaid_remaining_usd: Option<f64>,
+        prepaid_balance_usd: Option<f64>,
         /// A string or whatever else; never failing the rest.
         prepaid_expires_at: Option<serde_json::Value>,
         resets_at: Option<String>,
         resets_in_seconds: Option<f64>,
+        /// `{"singleton": 0, "list": 0.0001, "search": 0.001, …}`; never
+        /// failing the rest.
+        endpoint_costs_usd: Option<serde_json::Value>,
     }
     let body: Body = serde_json::from_slice(&resp.body).map_err(Error::decode)?;
     let r = body.rate_limit;
@@ -63,6 +72,8 @@ pub(crate) fn rate_limit(resp: &HttpResponse) -> Result<Usage, Error> {
         .daily_remaining_usd
         .or_else(|| Some(r.daily_budget_usd? - r.daily_used_usd?));
     usage.prepaid_remaining = r.prepaid_remaining_usd;
+    // The credit bought, so this balance is OpenAlex's own word.
+    usage.prepaid_bought = r.prepaid_balance_usd;
     usage.prepaid_expires_at = r.prepaid_expires_at.as_ref().and_then(|v| match v {
         serde_json::Value::String(s) => date(s),
         // Unix milliseconds, as a JavaScript Date's value.
@@ -76,7 +87,30 @@ pub(crate) fn rate_limit(resp: &HttpResponse) -> Result<Usage, Error> {
             let d = Duration::try_from_secs_f64(r.resets_in_seconds?).ok()?;
             resp.received_at.checked_add(d).ok()
         });
+    usage.prices = r.endpoint_costs_usd.as_ref().and_then(prices);
     Ok(usage)
+}
+
+/// `/rate-limit`'s `endpoint_costs_usd`, the kinds aspero names: each a
+/// price in USD, zero or more, or left out. `None` if it names none.
+fn prices(costs: &serde_json::Value) -> Option<Prices> {
+    let costs = costs.as_object()?;
+    let price = |name: &str| {
+        costs
+            .get(name)?
+            .as_f64()
+            .filter(|usd| usd.is_finite() && *usd >= 0.0)
+    };
+    let mut prices = Prices::default();
+    prices.singleton = price("singleton");
+    prices.list = price("list");
+    prices.search = price("search");
+    prices.search_rerank = price("search_rerank");
+    prices.rerank_extra = price("rerank_extra");
+    prices.content = price("content");
+    prices.semantic = price("semantic");
+    prices.text = price("text");
+    (!prices.is_empty()).then_some(prices)
 }
 
 /// A date as `/rate-limit` gives one: ISO 8601 (`resets_at`), or, for

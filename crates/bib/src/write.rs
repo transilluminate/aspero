@@ -11,14 +11,28 @@ const MONTHS: [&str; 12] = [
 ];
 
 /// A conventional BibTeX key: the first author's family name, the year
-/// and the title's first word, `lecun2015deep`. Accents are dropped;
-/// whatever is missing is left out, and an empty key becomes `work`.
+/// and the title's first word, `lecun2015deep`; a web page without
+/// authors, its site's first word (`wikipedia2001gene`). Accents are
+/// dropped; whatever is missing is left out, and an empty key becomes
+/// `work`.
 pub fn cite_key(work: &Work) -> String {
     let first = work.authors.first().map(name);
-    let name = first.as_ref().and_then(|n| match n {
-        Name::Person { family, .. } => Some(family.as_str()),
-        Name::Whole(whole) => whole.split_whitespace().next(),
-    });
+    let site = match work.work_type {
+        Some(WorkType::WebPage) => work.container_title.as_deref(),
+        _ => None,
+    };
+    let name = first
+        .as_ref()
+        .and_then(|n| match n {
+            Name::Person { family, .. } => Some(family.as_str()),
+            Name::Whole(whole) => whole.split_whitespace().next(),
+        })
+        .or_else(|| {
+            site.and_then(|s| {
+                s.split(|c: char| !c.is_alphanumeric())
+                    .find(|w| !w.is_empty() && !STOP.contains(&w.to_lowercase().as_str()))
+            })
+        });
     let word = work.title.as_deref().and_then(|t| {
         t.split(|c: char| !c.is_alphanumeric())
             .find(|w| !w.is_empty() && !STOP.contains(&w.to_lowercase().as_str()))
@@ -128,6 +142,14 @@ pub fn bibtex(work: &Work, ids: &[WorkId], key: &str) -> String {
     if let Some(title) = &work.title {
         fields.push(("title", escape(title)));
     }
+    // A web page as BibTeX's styles print one (`@misc`, as plain and
+    // natbib's know it): its address in `howpublished`, its site and when
+    // it was read in `note`.
+    let web = matches!(work.work_type, Some(WorkType::WebPage));
+    if web && let Some(url) = &work.url {
+        let url = url.replace('%', "\\%").replace('#', "\\#");
+        fields.push(("howpublished", format!("\\url{{{url}}}")));
+    }
     if let Some(container) = &work.container_title {
         match entry_type {
             "article" => fields.push(("journal", escape(container))),
@@ -166,8 +188,23 @@ pub fn bibtex(work: &Work, ids: &[WorkId], key: &str) -> String {
             _ => {}
         }
     }
-    if let Some(url) = &work.url {
-        fields.push(("url", url.clone()));
+    if web {
+        let site = work.container_title.as_deref().map(escape);
+        let accessed = work.accessed.map(|d| format!("Accessed {d}"));
+        let note: Vec<String> = [site, accessed].into_iter().flatten().collect();
+        if !note.is_empty() {
+            fields.push(("note", note.join(". ")));
+        }
+    } else {
+        if let Some(url) = &work.url {
+            fields.push(("url", url.clone()));
+        }
+        if let Some(accessed) = work.accessed {
+            fields.push(("urldate", accessed.to_string()));
+        }
+    }
+    if let Some(language) = &work.language {
+        fields.push(("language", escape(language)));
     }
     // One of each field: the first identifier of a kind wins.
     let mut seen = Vec::new();
@@ -226,6 +263,7 @@ pub fn ris(work: &Work, ids: &[WorkId]) -> String {
         Some(WorkType::Report) => "RPRT",
         Some(WorkType::Dataset) => "DATA",
         Some(WorkType::Software) => "COMP",
+        Some(WorkType::WebPage) => "ELEC",
         _ => "GEN",
     };
     let mut out = String::new();
@@ -283,8 +321,20 @@ pub fn ris(work: &Work, ids: &[WorkId]) -> String {
     if let Some(url) = &work.url {
         line("UR", url);
     }
+    if let Some(accessed) = work.accessed {
+        line("Y2", &ris_date(accessed));
+    }
+    if let Some(language) = &work.language {
+        line("LA", language);
+    }
     line("ER", "");
     out
+}
+
+/// A date as RIS writes it: `2026/11/16/`, `2026/11//`, `2026///`.
+fn ris_date(d: aspero_core::PartialDate) -> String {
+    let two = |n: Option<u8>| n.map(|n| format!("{n:02}")).unwrap_or_default();
+    format!("{}/{}/{}/", d.year(), two(d.month()), two(d.day()))
 }
 
 /// The item types of CSL 1.0.2.
@@ -375,20 +425,18 @@ pub fn csl_item(work: &Work, ids: &[WorkId], id: &str) -> Map<String, Value> {
         })
         .collect();
     put("author", (!authors.is_empty()).then(|| json!(authors)));
-    put(
-        "issued",
-        work.issued.map(|d| {
-            let parts: Vec<i64> = [
-                Some(i64::from(d.year())),
-                d.month().map(i64::from),
-                d.day().map(i64::from),
-            ]
-            .into_iter()
-            .map_while(|p| p)
-            .collect();
-            json!({"date-parts": [parts]})
-        }),
-    );
+    let date = |d: aspero_core::PartialDate| {
+        let parts: Vec<i64> = [
+            Some(i64::from(d.year())),
+            d.month().map(i64::from),
+            d.day().map(i64::from),
+        ]
+        .into_iter()
+        .map_while(|p| p)
+        .collect();
+        json!({"date-parts": [parts]})
+    };
+    put("issued", work.issued.map(date));
     let text = |v: &Option<String>| v.as_ref().map(|v| json!(v));
     put("container-title", text(&work.container_title));
     put("volume", text(&work.volume));
@@ -396,6 +444,8 @@ pub fn csl_item(work: &Work, ids: &[WorkId], id: &str) -> Map<String, Value> {
     put("page", text(&work.page));
     put("publisher", text(&work.publisher));
     put("URL", text(&work.url));
+    put("accessed", work.accessed.map(date));
+    put("language", text(&work.language));
     let preprint = on_arxiv(work, ids) || matches!(work.work_type, Some(WorkType::Preprint));
     for id in ids {
         let (key, value) = match id {
@@ -588,6 +638,74 @@ ER  -\x20
         assert_eq!(item["number"], "arXiv:1706.03762");
         assert_eq!(item["publisher"], "arXiv");
         assert_eq!(item["URL"], "https://arxiv.org/abs/1706.03762");
+    }
+
+    /// A web page, as `WebPage::to_work` makes it: Wikipedia's article,
+    /// read on 2026-11-16.
+    fn wikipedia() -> Work {
+        let mut w = Work::default();
+        w.title = Some("Gene Hackman".into());
+        w.work_type = Some(WorkType::WebPage);
+        w.container_title = Some("Wikipedia".into());
+        w.url = Some("https://en.wikipedia.org/wiki/Gene_Hackman".into());
+        w.issued = PartialDate::new(2001, Some(9), Some(13));
+        w.accessed = PartialDate::new(2026, Some(11), Some(16));
+        w.language = Some("en".into());
+        w
+    }
+
+    #[test]
+    fn web_pages_write_as_web_citations() {
+        let w = wikipedia();
+        assert_eq!(
+            bibtex(&w, &[], &cite_key(&w)),
+            "@misc{wikipedia2001gene,
+  title = {Gene Hackman},
+  howpublished = {\\url{https://en.wikipedia.org/wiki/Gene_Hackman}},
+  year = {2001},
+  note = {Wikipedia. Accessed 2026-11-16},
+  language = {en},
+  month = sep,
+}
+"
+        );
+        assert_eq!(
+            ris(&w, &[]),
+            "TY  - ELEC
+TI  - Gene Hackman
+T2  - Wikipedia
+PY  - 2001
+DA  - 2001/09/13/
+UR  - https://en.wikipedia.org/wiki/Gene_Hackman
+Y2  - 2026/11/16/
+LA  - en
+ER  -\x20
+"
+        );
+        // As Zotero imports a Web Page item: `webpage`, the site as
+        // `container-title` (its Website Title), `accessed`.
+        let json: Value = serde_json::from_str(&csl_json(&[(&w, &[])])).unwrap();
+        assert_eq!(
+            json,
+            json!([{
+                "id": "wikipedia2001gene",
+                "type": "webpage",
+                "title": "Gene Hackman",
+                "issued": {"date-parts": [[2001, 9, 13]]},
+                "container-title": "Wikipedia",
+                "URL": "https://en.wikipedia.org/wiki/Gene_Hackman",
+                "accessed": {"date-parts": [[2026, 11, 16]]},
+                "language": "en"
+            }])
+        );
+        // And reads back as written.
+        let items: Vec<aspero_core::csl::CslItem> =
+            serde_json::from_str(&csl_json(&[(&w, &[])])).unwrap();
+        assert_eq!(items[0].to_work(), w);
+        // A `%` or `#` in the address is escaped inside `\url`.
+        let mut odd = wikipedia();
+        odd.url = Some("https://example.org/a%20b#c".into());
+        assert!(bibtex(&odd, &[], "k").contains("{\\url{https://example.org/a\\%20b\\#c}}"));
     }
 
     #[test]

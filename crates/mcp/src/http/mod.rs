@@ -22,7 +22,8 @@
 //!   the session's GET stream, or wait for the client to open one.
 //! - **Budgets:** per session ([`HttpConfig::session_budget_usd`]), and per
 //!   key per UTC day ([`Key::daily_budget_usd`]), engine spend only, kept
-//!   in a [`Ledger`] (the cache file) so restarts don't reset it.
+//!   in a [`Ledger`] (the cache file) so restarts don't reset it. Each
+//!   key's spend today is in [`HttpServer::status`].
 //! - **Activity:** after every tool call the host hears who did what and
 //!   what it cost, from a thread of its own, in order.
 
@@ -207,10 +208,18 @@ impl Ledger for MemoryLedger {
 
 /// Today, UTC, as `YYYY-MM-DD`.
 pub(crate) fn today() -> String {
-    Timestamp::now()
-        .to_zoned(jiff::tz::TimeZone::UTC)
-        .date()
-        .to_string()
+    day_of(Timestamp::now()).0
+}
+
+/// The UTC day `at` falls in, as `YYYY-MM-DD`, and when it ends (the next
+/// midnight UTC), when keys' spend starts again from nothing.
+fn day_of(at: Timestamp) -> (String, Timestamp) {
+    let date = at.to_zoned(jiff::tz::TimeZone::UTC).date();
+    let ends = date
+        .tomorrow()
+        .and_then(|d| d.to_zoned(jiff::tz::TimeZone::UTC))
+        .map_or(at, |z| z.timestamp());
+    (date.to_string(), ends)
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -223,6 +232,12 @@ pub struct Status {
     pub last_key_name: Option<String>,
     /// Each key's, in the order set.
     pub keys: Vec<KeyStatus>,
+    /// The UTC day (`YYYY-MM-DD`) the keys' spend is of: keys' budgets are
+    /// per UTC day.
+    pub spend_day: String,
+    /// When that day ends (midnight UTC), and keys' spend starts again from
+    /// nothing.
+    pub spend_resets_at: Timestamp,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -230,6 +245,11 @@ pub struct KeyStatus {
     pub key_id: String,
     /// Its last authenticated request since the server started.
     pub last_used_at: Option<Timestamp>,
+    /// Its engine spend in USD on [`Status::spend_day`], as its daily
+    /// budget is checked against: the [`Ledger`]'s figure (so before
+    /// restarts too), and what the ledger couldn't record yet. Spend the
+    /// ledger can't say counts as none here (its paid calls are refused).
+    pub spent_today_usd: f64,
 }
 
 /// What sessions share: the tools, the host's, budgets, activity.
@@ -302,6 +322,27 @@ impl Shared {
             .copied()
             .unwrap_or(0.0);
         Ok(self.ledger.spent(key_id, &day)? + owed)
+    }
+
+    /// What the key `key_id` spent on `day`, as [`key_spent`](Self::key_spent)
+    /// says it, without writing: for a status, which mustn't wait on a
+    /// write. Spend the ledger can't say is left out (and logged).
+    fn key_spent_on(&self, key_id: &str, day: &str) -> f64 {
+        // Held while the ledger is read, as by `key_spent`: spend being
+        // recorded meanwhile is counted once.
+        let unrecorded = self
+            .unrecorded
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        let owed = unrecorded
+            .get(&(key_id.to_owned(), day.to_owned()))
+            .copied()
+            .unwrap_or(0.0);
+        let recorded = self.ledger.spent(key_id, day).unwrap_or_else(|e| {
+            tracing::warn!(target: "aspero::mcp", key = key_id, error = %e, "could not read a key's spend");
+            0.0
+        });
+        recorded + owed
     }
 
     /// Writes the key `key_id`'s unrecorded spend to the ledger, keeping
@@ -798,8 +839,18 @@ impl HttpServer {
         self.state.port
     }
 
+    /// How the server is: its sessions, its keys' last use, and each key's
+    /// spend today (UTC), read from the [`Ledger`] (a read of the cache
+    /// file per key).
     pub fn status(&self) -> Status {
         let state = &self.state;
+        let (spend_day, spend_resets_at) = day_of(Timestamp::now());
+        let credentials = state.credentials();
+        // Before the usage lock: the ledger may wait on the file.
+        let spent: Vec<f64> = credentials
+            .iter()
+            .map(|c| state.shared.key_spent_on(&c.key.id, &spend_day))
+            .collect();
         let usage = state.usage.lock().unwrap_or_else(PoisonError::into_inner);
         // Without waiting: while a session opens or closes, the sessions
         // whose clients are connected. (The owners on record can include
@@ -814,14 +865,17 @@ impl HttpServer {
             sessions: u32::try_from(sessions).unwrap_or(u32::MAX),
             last_request_at: usage.last_at,
             last_key_name: usage.last_key_name.clone(),
-            keys: state
-                .credentials()
+            keys: credentials
                 .iter()
-                .map(|c| KeyStatus {
+                .zip(spent)
+                .map(|(c, spent_today_usd)| KeyStatus {
                     key_id: c.key.id.clone(),
                     last_used_at: usage.keys.get(&c.key.id).copied(),
+                    spent_today_usd,
                 })
                 .collect(),
+            spend_day,
+            spend_resets_at,
         }
     }
 

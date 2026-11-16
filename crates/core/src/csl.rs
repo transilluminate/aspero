@@ -41,6 +41,8 @@ pub struct CslItem {
     pub author: Vec<CslName>,
     pub issued: Option<CslDate>,
     pub published: Option<CslDate>,
+    pub accessed: Option<CslDate>,
+    pub language: Option<String>,
     pub publisher: Option<String>,
     pub volume: Option<Scalar>,
     pub issue: Option<Scalar>,
@@ -408,6 +410,8 @@ impl CslItem {
                 .collect(),
             other_years: Vec::new(),
             open_access: None,
+            accessed: self.accessed.as_ref().and_then(CslDate::to_partial),
+            language: self.language.clone(),
         };
         work.type_as_notice();
         work

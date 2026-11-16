@@ -391,6 +391,17 @@ const BODIES: [&str; 55] = [
     "research",
 ];
 
+/// Whether a (lowercase) word joins a family name: "van", "de".
+pub(crate) fn is_particle(word: &str) -> bool {
+    PARTICLES.contains(&word)
+}
+
+/// Whether a (lowercase) word makes a name an organisation's: "group",
+/// "consortium", "collaboration".
+pub(crate) fn is_body_word(word: &str) -> bool {
+    BODIES.contains(&word)
+}
+
 /// A personal name written whole ("Yann LeCun", "Vincent van Gogh"), as
 /// family and given names; `None` for anything that may be an
 /// organisation's.

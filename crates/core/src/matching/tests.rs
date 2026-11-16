@@ -51,10 +51,7 @@ fn a_messy_reference_matches_its_work_not_its_namesakes() {
     let claim =
         Claim::from_text("LeCun Y, Bengio Y, Hinton G. Deep learning. Nature. 2015;521:436-444.");
     let authors = ["Yann LeCun", "Yoshua Bengio", "Geoffrey Hinton"];
-    let right = assess(
-        &claim,
-        &record(&["10.1038/nature14539"], "Deep learning", &authors, 2015),
-    );
+    let right = assess(&claim, &lecun());
     let later = assess(
         &claim,
         &record(&["10.1145/3448250"], "Deep learning for AI", &authors, 2021),
@@ -619,6 +616,49 @@ fn search_terms_drop_noise() {
 }
 
 #[test]
+fn the_probable_title_is_read_from_a_references_shape() {
+    // Red team (#102): no matcher hit, so no title was searched.
+    for (text, title) in [
+        (
+            "Radford A, Kim JW, Hallacy C, et al. Learning transferable visual models from \
+             natural language supervision. In: Proceedings of the 38th International Conference \
+             on Machine Learning (ICML). PMLR; 2021:8748-8763.",
+            "Learning transferable visual models from natural language supervision",
+        ),
+        (
+            "Dosovitskiy, A. et al. (2021) 'An image is worth 16x16 words: Transformers for image \
+             recognition at scale', International Conference on Learning Representations (ICLR).",
+            "An image is worth 16x16 words: Transformers for image recognition at scale",
+        ),
+        (
+            "Lundberg SM, Lee SI. A unified approach to interpreting model predictions. Adv Neural \
+             Inf Process Syst. 2017;30.",
+            "A unified approach to interpreting model predictions",
+        ),
+        (
+            "Said EW. Orientalism. New York: Pantheon Books; 1978.",
+            "Orientalism",
+        ),
+        (
+            "Pillow, K. (2003) 'Did Goodman's Distinction Survive LeWitt?', Journal of Aesthetics.",
+            "Did Goodman's Distinction Survive LeWitt?",
+        ),
+        (
+            "E. Dijkstra, \"A note on two problems in connexion with graphs,\" Numerische \
+             Mathematik, vol. 1, 1959.",
+            "A note on two problems in connexion with graphs",
+        ),
+        (
+            "@article{d, author = {Doe, J}, title = {Sepsis in {mice}}, year = {2020}}",
+            "Sepsis in mice",
+        ),
+    ] {
+        assert_eq!(probable_title(text).as_deref(), Some(title), "{text}");
+    }
+    assert_eq!(probable_title("2020. 12"), None);
+}
+
+#[test]
 fn finds_ids_in_running_text() {
     let text = "See (https://doi.org/10.1145/3368089.3409741), arXiv:1706.03762v5 and \
                 https://arxiv.org/abs/hep-th/9901001; also arXiv:1706.03762.";
@@ -1000,4 +1040,1136 @@ fn journals_named_otherwise_or_not_at_all_are_no_mismatch() {
     let text = format!("Meyer G, et al. {title}. Lancet. 2014;370:1402-11.");
     let a = assess(&Claim::from_text(&text), &paper);
     assert_eq!(a.container.agreement, Agreement::Unknown);
+}
+
+/// Red team (#102): a real work cited with co-authors it doesn't have.
+fn egdt() -> SourceRecord {
+    let mut r = placed(
+        &[],
+        "Early Goal-Directed Therapy in the Treatment of Severe Sepsis and Septic Shock",
+        &["Emanuel Rivers", "Bryant Nguyen", "Suzanne Havstad"],
+        2001,
+        ("New England Journal of Medicine", "345", "1368-1377"),
+    );
+    r.work.work_type = Some(crate::work::WorkType::JournalArticle);
+    r
+}
+
+const EGDT: &str = "Early goal-directed therapy in the treatment of severe sepsis and septic shock";
+
+#[test]
+fn invented_co_authors_are_not_an_author_match() {
+    for text in [
+        format!("Rivers E, Smith J, Patel R, et al. {EGDT}. N Engl J Med. 2001;345(19):1368-77."),
+        format!("Rivers E, Quarshie-Holm B. {EGDT}. 2001."),
+        format!(
+            "Rivers, E., & Venkatesan-Moll, P. R. (2001). {EGDT}. New England Journal of \
+             Medicine, 345(19), 1368–1377."
+        ),
+        format!(
+            "@article{{r, author = {{Rivers, Emanuel and Okafor, Tunde}}, title = {{{EGDT}}}, \
+             year = {{2001}}}}"
+        ),
+    ] {
+        let a = assess(&Claim::from_text(&text), &egdt());
+        assert_eq!(a.authors.agreement, Agreement::Partial, "{text}");
+        assert!(
+            (PLAUSIBLE..VERIFIED).contains(&a.confidence),
+            "{text}: {a:?}"
+        );
+    }
+    // Structured: one of two claimed authors invented.
+    let claim = Claim {
+        title: Some("Fibrinolysis for patients with intermediate-risk pulmonary embolism".into()),
+        authors: vec!["Meyer, G.".into(), "Smith, J.".into()],
+        year: Some(2014),
+        ..Claim::default()
+    };
+    let a = assess(&claim, &peitho());
+    assert_eq!(a.authors.agreement, Agreement::Partial);
+    assert!((PLAUSIBLE..VERIFIED).contains(&a.confidence), "{a:?}");
+}
+
+#[test]
+fn the_records_own_authors_however_written_are_no_strangers() {
+    for text in [
+        format!(
+            "Rivers E, Nguyen B, Havstad S, et al. {EGDT}. N Engl J Med. 2001;345(19):1368-77."
+        ),
+        format!("Rivers E, et al. {EGDT}. N Engl J Med. 2001;345:1368."),
+        // Given names written out.
+        format!("Emanuel Rivers, Bryant Nguyen and Suzanne Havstad. {EGDT}. 2001."),
+        format!(
+            "@article{{r, author = {{Rivers, Emanuel and Nguyen, Bryant and others}}, title = \
+             {{{EGDT}}}, year = {{2001}}}}"
+        ),
+        // Transliterated or misspelt by a letter.
+        format!("Rivers E, Nguyen B, Havstadt S. {EGDT}. 2001."),
+        // Prose: the byline ends where the sentence goes on.
+        format!(
+            "Rivers et al. described in The New England Journal of Medicine (2001) — \"{EGDT}\"."
+        ),
+    ] {
+        let a = assess(&Claim::from_text(&text), &egdt());
+        assert_eq!(a.authors.agreement, Agreement::Match, "{text}");
+        assert!(a.confidence >= VERIFIED, "{text}: {a:?}");
+    }
+    // Given names the record gives as initials.
+    let mut initials = egdt();
+    initials.work.authors = vec![Person::new("E", "Rivers"), Person::new("B", "Nguyen")];
+    let text = format!("Emanuel Rivers, Bryant Nguyen. {EGDT}. 2001.");
+    assert!(assess(&Claim::from_text(&text), &initials).confidence >= VERIFIED);
+    // Particles, hyphens, accents.
+    let r = record(
+        &[],
+        "Climatic forcing of vegetation in the late Quaternary",
+        &[
+            "Anna van der Berg",
+            "Jennifer H. Ahn-Jarvis",
+            "Bernhard Schölkopf",
+        ],
+        2003,
+    );
+    for text in [
+        "van der Berg A, Ahn-Jarvis JH, Schoelkopf B. Climatic forcing of vegetation in the late \
+         Quaternary. 2003.",
+        "A. van der Berg, J. H. Ahn-Jarvis and B. Schölkopf, \"Climatic forcing of vegetation in \
+         the late Quaternary,\" 2003.",
+    ] {
+        let a = assess(&Claim::from_text(text), &r);
+        assert!(a.confidence >= VERIFIED, "{text}: {a:?}");
+    }
+    let claim = Claim {
+        title: Some("Climatic forcing of vegetation in the late Quaternary".into()),
+        authors: vec![
+            "A. van der Berg".into(),
+            "Ahn-Jarvis, J.".into(),
+            "others".into(),
+        ],
+        year: Some(2003),
+        ..Claim::default()
+    };
+    assert!(assess(&claim, &r).confidence >= VERIFIED);
+}
+
+#[test]
+fn bylines_that_may_name_others_are_not_held_to_the_record() {
+    // A consortium cited by name, its members on the record.
+    let atlas = record(
+        &[],
+        "Observation of a new particle in the search for the Standard Model Higgs boson",
+        &["Georges Aad", "Tatevik Abajyan", "Brad Abbott"],
+        2012,
+    );
+    let text = "ATLAS Collaboration, Aad G, Smith J. Observation of a new particle in the search \
+                for the Standard Model Higgs boson. 2012.";
+    let a = assess(&Claim::from_text(text), &atlas);
+    assert_eq!(a.authors.agreement, Agreement::Match, "{a:?}");
+    // A byline cut short (OpenAlex lists 100): the rest may be cited.
+    let mut long = egdt();
+    long.work.authors = std::iter::once(Person::new("Emanuel", "Rivers"))
+        .chain((0..99).map(|i| Person::new("A", format!("Author{i}"))))
+        .collect();
+    let text = format!("Rivers E, Smith J. {EGDT}. 2001.");
+    assert!(assess(&Claim::from_text(&text), &long).confidence >= VERIFIED);
+    // An organisation's byline, cited by its members' names.
+    let mut org = egdt();
+    org.work.authors = vec![
+        Person::new("Emanuel", "Rivers"),
+        Person::literal("Early Goal-Directed Therapy Collaborative Group"),
+    ];
+    assert!(assess(&Claim::from_text(&text), &org).confidence >= VERIFIED);
+    // A book's record listing its first author only (Open Library).
+    let mut book = record(
+        &[],
+        "Reinforcement Learning: An Introduction",
+        &["Richard S. Sutton"],
+        2018,
+    );
+    book.work.work_type = Some(crate::work::WorkType::Book);
+    let claim = Claim {
+        title: Some("Reinforcement Learning: An Introduction".into()),
+        authors: vec!["Sutton, Richard S.".into(), "Barto, Andrew G.".into()],
+        year: Some(2018),
+        ..Claim::default()
+    };
+    assert!(assess(&claim, &book).confidence >= VERIFIED);
+    // But people listed beside it are the ones cited.
+    let mut listed = egdt();
+    listed.work.authors.push(Person::literal(
+        "Early Goal-Directed Therapy Collaborative Group",
+    ));
+    let a = assess(&Claim::from_text(&text), &listed);
+    assert!((PLAUSIBLE..VERIFIED).contains(&a.confidence), "{a:?}");
+}
+
+fn lecun() -> SourceRecord {
+    let mut r = placed(
+        &["10.1038/nature14539"],
+        "Deep learning",
+        &["Yann LeCun", "Yoshua Bengio", "Geoffrey Hinton"],
+        2015,
+        ("Nature", "521", "436-444"),
+    );
+    r.work.work_type = Some(crate::work::WorkType::JournalArticle);
+    r
+}
+
+fn hallmarks() -> SourceRecord {
+    let mut r = placed(
+        &[],
+        "Hallmarks of Cancer: The Next Generation",
+        &["Douglas Hanahan", "Robert A. Weinberg"],
+        2011,
+        ("Cell", "144", "646-674"),
+    );
+    r.work.work_type = Some(crate::work::WorkType::JournalArticle);
+    r
+}
+
+#[test]
+fn a_title_with_words_added_is_not_the_records() {
+    // Red team (#102): another work's title containing this one's, or a
+    // subtitle it lacks or doesn't have.
+    for (text, record) in [
+        (
+            "LeCun Y, Bengio Y, Hinton G. Deep learning for medical image analysis. Nature. \
+             2015;521:436-444.",
+            lecun(),
+        ),
+        (
+            "LeCun Y, Bengio Y, Hinton G. Deep learning: a primer for clinicians. Nature. 2015.",
+            lecun(),
+        ),
+        (
+            "Hanahan D, Weinberg RA. Hallmarks of cancer: the next generation of targeted \
+             therapies. Cell. 2011;144(5):646-674.",
+            hallmarks(),
+        ),
+        (
+            "Hanahan D, Weinberg RA. Hallmarks of cancer: implications for therapy. Cell. 2011.",
+            hallmarks(),
+        ),
+        (
+            "Hanahan D, Weinberg RA. Colorectal hallmarks of cancer: the next generation. Cell. \
+             2011.",
+            hallmarks(),
+        ),
+        (
+            "Hanahan D, Weinberg RA. Hallmarks of cancer: the next generation enables therapy. \
+             Cell. 2011.",
+            hallmarks(),
+        ),
+    ] {
+        let a = assess(&Claim::from_text(text), &record);
+        assert_eq!(a.title.agreement, Agreement::Partial, "{text}");
+        assert!(
+            (PLAUSIBLE..VERIFIED).contains(&a.confidence),
+            "{text}: {a:?}"
+        );
+    }
+    let claim = Claim {
+        title: Some("Deep learning: a primer for clinicians".into()),
+        authors: vec!["LeCun, Y.".into(), "Bengio, Y.".into()],
+        year: Some(2015),
+        container: Some("Nature".into()),
+        ..Claim::default()
+    };
+    let a = assess(&claim, &lecun());
+    assert_eq!(a.title.agreement, Agreement::Partial);
+    assert!((PLAUSIBLE..VERIFIED).contains(&a.confidence), "{a:?}");
+}
+
+#[test]
+fn a_title_cited_as_is_or_without_its_subtitle_is_the_records() {
+    for (text, record) in [
+        (
+            "LeCun Y, Bengio Y, Hinton G. Deep learning. Nature. 2015;521:436-444.",
+            lecun(),
+        ),
+        (
+            "LeCun, Y., Bengio, Y. & Hinton, G. Deep learning. Nature 521, 436–444 (2015).",
+            lecun(),
+        ),
+        (
+            "LeCun, Y. et al. (2015) 'Deep learning', Nature, 521, pp. 436-444.",
+            lecun(),
+        ),
+        (
+            "Y. LeCun, Y. Bengio, and G. Hinton, \"Deep learning,\" Nature, vol. 521, 2015.",
+            lecun(),
+        ),
+        ("LeCun et al. Deep learning in Nature 2015", lecun()),
+        (
+            "LeCun and Hinton Deep learning doi:10.1038/nature14539 2015",
+            lecun(),
+        ),
+        (
+            "LeCun et al. described in Nature (2015) — \"Deep learning\".",
+            lecun(),
+        ),
+        (
+            "Hanahan D, Weinberg RA. Hallmarks of cancer. Cell. 2011;144:646.",
+            hallmarks(),
+        ),
+        (
+            "Hanahan D, Weinberg RA. The hallmarks of cancer: the next generation. Cell. 2011.",
+            hallmarks(),
+        ),
+    ] {
+        let a = assess(&Claim::from_text(text), &record);
+        assert_eq!(a.title.agreement, Agreement::Match, "{text}");
+        assert!(a.confidence >= VERIFIED, "{text}: {a:?}");
+    }
+    let a = assess(
+        &Claim::from_text("Vaswani A, Shazeer N. Attention is all you need NeurIPS 2017"),
+        &attention(&[], 2017),
+    );
+    assert!(a.confidence >= VERIFIED, "{a:?}");
+    let claim = Claim {
+        title: Some("Hallmarks of cancer".into()),
+        authors: vec!["Hanahan, D.".into()],
+        year: Some(2011),
+        ..Claim::default()
+    };
+    assert!(assess(&claim, &hallmarks()).confidence >= VERIFIED);
+    // A book's record without the subtitle cited (OpenAlex's "Imagined
+    // communities"); an article's must have it.
+    let mut book = record(&[], "Imagined communities", &["Benedict Anderson"], 1983);
+    book.work.work_type = Some(crate::work::WorkType::Book);
+    let text = "Anderson, B. (1983) Imagined Communities: Reflections on the Origin and Spread of \
+                Nationalism. London: Verso.";
+    assert!(assess(&Claim::from_text(text), &book).confidence >= VERIFIED);
+    let claim = Claim {
+        title: Some(
+            "Imagined Communities: Reflections on the Origin and Spread of Nationalism".into(),
+        ),
+        authors: vec!["Anderson, B.".into()],
+        year: Some(1983),
+        ..Claim::default()
+    };
+    assert!(assess(&claim, &book).confidence >= VERIFIED);
+    book.work.work_type = Some(crate::work::WorkType::JournalArticle);
+    assert!(assess(&claim, &book).confidence < VERIFIED);
+}
+
+#[test]
+fn a_year_in_the_title_is_not_the_year_cited() {
+    // Red team (#102): "Cancer statistics, 2020" cited as of 2018.
+    let mut stats = placed(
+        &[],
+        "Cancer statistics, 2020",
+        &["Rebecca L. Siegel", "Kimberly D. Miller", "Ahmedin Jemal"],
+        2020,
+        ("CA: A Cancer Journal for Clinicians", "70", "7-30"),
+    );
+    stats.work.work_type = Some(crate::work::WorkType::JournalArticle);
+    for text in [
+        "Siegel RL, Miller KD, Jemal A. Cancer statistics, 2020. CA Cancer J Clin. 2018;70(1):7-30.",
+        "Siegel RL, Miller KD, Jemal A. Cancer statistics, 2020. 2017.",
+    ] {
+        let claim = Claim::from_text(text);
+        let a = assess(&claim, &stats);
+        assert_eq!(a.year.agreement, Agreement::Mismatch, "{text}");
+        assert!(a.confidence < VERIFIED, "{text}: {a:?}");
+        assert!(
+            !claim
+                .cited_years_beside(stats.work.title.as_deref())
+                .contains(&2020)
+        );
+    }
+    // Its title (year and all), journal, volume and pages name it: the
+    // year cited is the citation's error, plausible. The 2018 report, the
+    // year cited and in its title, is another title.
+    let text = "Siegel RL, Miller KD, Jemal A. Cancer statistics, 2020. CA Cancer J Clin. 2018;70(1):7-30.";
+    let a2020 = assess(&Claim::from_text(text), &stats);
+    assert!(
+        (PLAUSIBLE..VERIFIED).contains(&a2020.confidence),
+        "{a2020:?}"
+    );
+    let mut stats2018 = placed(
+        &[],
+        "Cancer statistics, 2018",
+        &["Rebecca L. Siegel", "Kimberly D. Miller", "Ahmedin Jemal"],
+        2018,
+        ("CA: A Cancer Journal for Clinicians", "68", "7-30"),
+    );
+    stats2018.work.work_type = Some(crate::work::WorkType::JournalArticle);
+    let a2018 = assess(&Claim::from_text(text), &stats2018);
+    assert_ne!(a2018.title.agreement, Agreement::Match, "{a2018:?}");
+    assert!(a2018.confidence < PLAUSIBLE, "{a2018:?}");
+    // Without the place, the year alone decides.
+    let text = "Siegel RL, Miller KD, Jemal A. Cancer statistics, 2020. 2017.";
+    assert!(assess(&Claim::from_text(text), &stats).confidence < PLAUSIBLE);
+    for text in [
+        "Siegel RL, Miller KD, Jemal A. Cancer statistics, 2020. CA Cancer J Clin. 2020;70(1):7-30.",
+        "Siegel RL, Miller KD, Jemal A. Cancer statistics, 2020.",
+    ] {
+        let a = assess(&Claim::from_text(text), &stats);
+        assert_ne!(a.year.agreement, Agreement::Mismatch, "{text}");
+        assert!(a.confidence >= VERIFIED, "{text}: {a:?}");
+    }
+}
+
+#[test]
+fn a_journal_after_a_capitalised_title_end_is_read() {
+    // Red team (#102): "… Wuhan, China. Lancet." read as a dotted name
+    // that may have begun earlier, so no journal, and the wrong one passed.
+    let mut wang = placed(
+        &[],
+        "Clinical Characteristics of 138 Hospitalized Patients With 2019 Novel \
+         Coronavirus–Infected Pneumonia in Wuhan, China",
+        &["Dawei Wang", "Bo Hu", "Chang Hu"],
+        2020,
+        ("JAMA", "323", "1061-1069"),
+    );
+    wang.work.work_type = Some(crate::work::WorkType::JournalArticle);
+    let text = "Wang D, Hu B, Hu C, et al. Clinical characteristics of 138 hospitalized patients \
+                with 2019 novel coronavirus-infected pneumonia in Wuhan, China. Lancet. \
+                2020;323(11):1061-1069.";
+    let a = assess(&Claim::from_text(text), &wang);
+    assert_eq!(a.container.agreement, Agreement::Mismatch, "{a:?}");
+    assert!((PLAUSIBLE..VERIFIED).contains(&a.confidence), "{a:?}");
+    let a = assess(&Claim::from_text(text.replace("Lancet", "JAMA")), &wang);
+    assert_eq!(a.container.agreement, Agreement::Match, "{a:?}");
+    assert!(a.confidence >= VERIFIED, "{a:?}");
+}
+
+#[test]
+fn a_journal_cited_without_volume_and_page_is_read() {
+    // Red team (#102): "… JAMA. 2020." gave no journal, so the wrong one
+    // passed; with the year one off as well, two small errors verified.
+    let lstm = {
+        let mut r = placed(
+            &[],
+            "Long Short-Term Memory",
+            &["Sepp Hochreiter", "Jürgen Schmidhuber"],
+            1997,
+            ("Neural Computation", "9", "1735-1780"),
+        );
+        r.work.work_type = Some(crate::work::WorkType::JournalArticle);
+        r
+    };
+    for text in [
+        "Hochreiter S, Schmidhuber J. Long short-term memory. Neural Netw. 1997.",
+        "Hochreiter S, Schmidhuber J. Long short-term memory. Neural Netw. 1998.",
+        "S. Hochreiter and J. Schmidhuber, \"Long short-term memory,\" Neural Networks, vol. 9, \
+         1997.",
+        "Hochreiter, S. and Schmidhuber, J. (1997) 'Long short-term memory', Neural Networks.",
+    ] {
+        let a = assess(&Claim::from_text(text), &lstm);
+        assert_eq!(a.container.agreement, Agreement::Mismatch, "{text}");
+        assert!(
+            (PLAUSIBLE..VERIFIED).contains(&a.confidence),
+            "{text}: {a:?}"
+        );
+    }
+    for text in [
+        "Hochreiter S, Schmidhuber J. Long short-term memory. Neural Comput. 1997.",
+        "S. Hochreiter and J. Schmidhuber, \"Long short-term memory,\" Neural Computation, vol. 9, \
+         1997.",
+    ] {
+        let a = assess(&Claim::from_text(text), &lstm);
+        assert_eq!(a.container.agreement, Agreement::Match, "{text}");
+        assert!(a.confidence >= VERIFIED, "{text}: {a:?}");
+    }
+    // A title in title case before the year is the title, not a journal.
+    let mut gravitons = placed(
+        &[],
+        "Hot Gravitons From Kerr Black Holes",
+        &["Dan Hooper", "Gordan Krnjaic"],
+        2020,
+        ("Physical Review D", "101", "1"),
+    );
+    gravitons.work.work_type = Some(crate::work::WorkType::JournalArticle);
+    let text = "Hooper D, Krnjaic G. Hot Gravitons From Kerr Black Holes. 2020.";
+    let a = assess(&Claim::from_text(text), &gravitons);
+    assert_eq!(a.container.agreement, Agreement::Unknown, "{a:?}");
+    assert!(a.confidence >= VERIFIED, "{a:?}");
+}
+
+#[test]
+fn a_copy_without_journal_or_place_cannot_confirm_the_journal_cited() {
+    // Red team (#102): a Zenodo deposit of Ioannidis's essay, no journal,
+    // volume or page, verified a reference to the article in another
+    // journal.
+    let mut copy = record(
+        &["10.5281/zenodo.13525448"],
+        "Why Most Published Research Findings Are False",
+        &["John P. A. Ioannidis"],
+        2005,
+    );
+    copy.work.work_type = Some(crate::work::WorkType::JournalArticle);
+    for text in [
+        "Ioannidis JP. Why most published research findings are false. BMJ. 2005.",
+        "Ioannidis JP. Why most published research findings are false. PLoS Med. \
+         2005;2(8):e124.",
+    ] {
+        let a = assess(&Claim::from_text(text), &copy);
+        assert!(
+            (PLAUSIBLE..VERIFIED).contains(&a.confidence),
+            "{text}: {a:?}"
+        );
+    }
+    // Unless the claim's identifier names it, or no journal is cited.
+    for text in [
+        "Ioannidis JP. Why most published research findings are false. Zenodo. 2005. \
+         doi:10.5281/zenodo.13525448",
+        "Ioannidis JP. Why most published research findings are false. 2005.",
+    ] {
+        let a = assess(&Claim::from_text(text), &copy);
+        assert!(a.confidence >= VERIFIED, "{text}: {a:?}");
+    }
+    // A preprint has no journal to give.
+    let mut preprint = copy.clone();
+    preprint.work.work_type = Some(crate::work::WorkType::Preprint);
+    let text = "Ioannidis JP. Why most published research findings are false. medRxiv. 2005.";
+    assert!(assess(&Claim::from_text(text), &preprint).confidence >= VERIFIED);
+    // Nor does a record in another series, without volume or page, confirm
+    // a journal, volume and page all cited (PsycEXTRA's record of a paper
+    // Science printed).
+    let mut psycextra = record(
+        &["10.1037/e301492005-001"],
+        "Judgment Under Uncertainty: Heuristics and Biases",
+        &["Amos Tversky", "Daniel Kahneman"],
+        1974,
+    );
+    psycextra.work.work_type = Some(crate::work::WorkType::Dataset);
+    psycextra.work.container_title = Some("PsycEXTRA Dataset".into());
+    let text = "Tversky A, Kahneman D. Judgment under uncertainty: heuristics and biases. Science. \
+                1974;185:1124.";
+    let a = assess(&Claim::from_text(text), &psycextra);
+    assert!((PLAUSIBLE..VERIFIED).contains(&a.confidence), "{a:?}");
+}
+
+#[test]
+fn another_title_at_the_right_place_is_a_different_title() {
+    // Red team (#102): the title was treated as missing whenever journal
+    // and volume agreed, and the place verified another work's title.
+    let mut niwa = placed(
+        &[],
+        "Lytic enzyme, labiase for a broad range of Gram-positive bacteria",
+        &["Tomoko Niwa", "Yoshiaki Kawamura"],
+        2005,
+        ("Journal of Microbiological Methods", "61", "251-260"),
+    );
+    niwa.work.work_type = Some(crate::work::WorkType::JournalArticle);
+    for (text, record) in [
+        (
+            "Niwa T. Transfection of plasmid DNA by nanocarriers. J Microbiol Methods. 2005;61:251.",
+            niwa,
+        ),
+        (
+            "Rivers E, et al. Vasopressin versus norepinephrine for septic shock. N Engl J Med. \
+             2001;345(19):1368-1377.",
+            egdt(),
+        ),
+    ] {
+        let a = assess(&Claim::from_text(text), &record);
+        assert_eq!(a.title.agreement, Agreement::Mismatch, "{text}");
+        assert!(
+            (PLAUSIBLE..VERIFIED).contains(&a.confidence),
+            "{text}: {a:?}"
+        );
+    }
+    // Without a title, the place still names the work.
+    for text in [
+        "Rivers E, et al. N Engl J Med. 2001;345:1368.",
+        "Rivers E, Nguyen B. NEJM 2001;345(19):1368-77. Epub 2001 Nov 8.",
+    ] {
+        let a = assess(&Claim::from_text(text), &egdt());
+        assert_eq!(a.title.agreement, Agreement::Unknown, "{text}");
+        assert!(a.confidence >= VERIFIED, "{text}: {a:?}");
+    }
+}
+
+#[test]
+fn bibtex_harvard_and_single_page_locators_are_checked() {
+    // Red team (#102): the wrong numbers went unread in these styles.
+    let bibtex = |volume: &str| {
+        format!(
+            "@article{{l, author = {{LeCun, Yann and Bengio, Yoshua}}, title = {{Deep learning}}, \
+             journal = {{Nature}}, year = {{2015}}, volume = {{{volume}}}, pages = {{436--444}}}}"
+        )
+    };
+    for (text, right) in [
+        (bibtex("521"), true),
+        (bibtex("597"), false),
+        (
+            "LeCun, Y., Bengio, Y. & Hinton, G. Deep learning. Nature 521, 436 (2015).".to_owned(),
+            true,
+        ),
+        (
+            "LeCun, Y., Bengio, Y. & Hinton, G. Deep learning. Nature 521, 999 (2015).".to_owned(),
+            false,
+        ),
+        (
+            "LeCun, Y. et al. (2015) 'Deep learning', Nature, 521, pp. 436-444.".to_owned(),
+            true,
+        ),
+        (
+            "LeCun, Y. et al. (2015) 'Deep learning', Science, 521, pp. 436-444.".to_owned(),
+            false,
+        ),
+    ] {
+        let a = assess(&Claim::from_text(&text), &lecun());
+        if right {
+            assert!(a.confidence >= VERIFIED, "{text}: {a:?}");
+        } else {
+            assert!(
+                (PLAUSIBLE..VERIFIED).contains(&a.confidence),
+                "{text}: {a:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn a_preprint_and_a_journal_article_are_other_versions_of_each_other() {
+    // Red team (#102): an arXiv preprint cited in a journal by name alone,
+    // and a journal's article cited as a preprint, verified.
+    let mut preprint = record(
+        &["arxiv:2410.02479"],
+        "Cross-Embodiment Dexterous Grasping with Reinforcement Learning",
+        &["Haoqi Yuan", "Bohan Zhou"],
+        2024,
+    );
+    preprint.work.work_type = Some(crate::work::WorkType::Preprint);
+    let text = "Yuan H, Zhou B. Cross-embodiment dexterous grasping with reinforcement learning. \
+                Science Robotics. 2024.";
+    let a = assess(&Claim::from_text(text), &preprint);
+    assert_eq!(a.container.agreement, Agreement::Mismatch, "{a:?}");
+    assert!((PLAUSIBLE..VERIFIED).contains(&a.confidence), "{a:?}");
+    // Cited as the preprint it is, or by its identifier: verified.
+    for text in [
+        "Yuan H, Zhou B. Cross-embodiment dexterous grasping with reinforcement learning. arXiv. \
+         2024.",
+        "Yuan H, Zhou B. Cross-embodiment dexterous grasping with reinforcement learning. Science \
+         Robotics. 2024. arXiv:2410.02479",
+    ] {
+        let a = assess(&Claim::from_text(text), &preprint);
+        assert!(a.confidence >= VERIFIED, "{text}: {a:?}");
+    }
+    for text in [
+        format!("Rivers E, Nguyen B. {EGDT}. medRxiv preprint, 2001."),
+        format!("Rivers E, Nguyen B. {EGDT}. arXiv preprint. 2001."),
+    ] {
+        let a = assess(&Claim::from_text(&text), &egdt());
+        assert_eq!(a.container.agreement, Agreement::Mismatch, "{text}");
+        assert!(
+            (PLAUSIBLE..VERIFIED).contains(&a.confidence),
+            "{text}: {a:?}"
+        );
+    }
+}
+
+#[test]
+fn reprints_and_versions_cited_with_another_year_are_plausible() {
+    // Red team (#102) real misses: a book reprinted whole in a reader, and
+    // a dataset whose DOI's record carries its latest version's year.
+    let mut reprint = record(
+        &["10.4324/9781315680347-10"],
+        "Distinction: A Social Critique of the Judgement of Taste",
+        &["Pierre Bourdieu"],
+        2018,
+    );
+    reprint.work.work_type = Some(crate::work::WorkType::Chapter);
+    let text = "Bourdieu P. Distinction: A Social Critique of the Judgement of Taste. Cambridge, \
+                MA: Harvard University Press; 1984.";
+    let a = assess(&Claim::from_text(text), &reprint);
+    assert_eq!(a.year.agreement, Agreement::Mismatch);
+    assert!((PLAUSIBLE..VERIFIED).contains(&a.confidence), "{a:?}");
+    // Not a chapter cited as an article with the wrong year.
+    let text = "Bourdieu P. Distinction: a social critique of the judgement of taste. Soc Sci Inf. \
+                1984;13:1-20.";
+    assert!(assess(&Claim::from_text(text), &reprint).confidence < PLAUSIBLE);
+
+    let mut mimic = record(
+        &["10.13026/c2xw26"],
+        "MIMIC-III Clinical Database",
+        &["Alistair Johnson", "Tom Pollard", "Roger Mark"],
+        2023,
+    );
+    mimic.work.work_type = Some(crate::work::WorkType::Dataset);
+    let text = "Johnson A, Pollard T, Mark R. MIMIC-III Clinical Database (version 1.4). PhysioNet. \
+                2016. doi:10.13026/C2XW26";
+    let a = assess(&Claim::from_text(text), &mimic);
+    assert!((PLAUSIBLE..VERIFIED).contains(&a.confidence), "{a:?}");
+    // Without the identifier, the year still tells another version.
+    let text = "Johnson A, Pollard T, Mark R. MIMIC-III Clinical Database. PhysioNet. 2016.";
+    assert!(assess(&Claim::from_text(text), &mimic).confidence < PLAUSIBLE);
+}
+
+#[test]
+fn the_report_titled_with_its_year_and_place_outranks_its_namesakes() {
+    // Live (app pre-test): "Cancer statistics, 2020 … 2018;70(1):7-30" chose
+    // "Colorectal cancer statistics, 2020" (its title partial, its page
+    // another), taking the title's 2020 for the year cited.
+    let fixture: serde_json::Value = serde_json::from_str(include_str!(
+        "../../tests/fixtures/resolve/cancer-statistics-cited-2018.json"
+    ))
+    .unwrap();
+    let claim = Claim::from_text(fixture["claim"].as_str().unwrap());
+    assert_eq!(claim.as_read().year, Some(2018), "the year cited");
+    let field = |c: &serde_json::Value, k: &str| c[k].as_str().unwrap().to_owned();
+    let assessed: Vec<(String, Assessment)> = fixture["candidates"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|c| {
+            let authors: Vec<String> = c["authors"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|a| a.as_str().unwrap().to_owned())
+                .collect();
+            let authors: Vec<&str> = authors.iter().map(String::as_str).collect();
+            let year = i16::try_from(c["year"].as_i64().unwrap()).unwrap();
+            let at = (field(c, "container"), field(c, "volume"), field(c, "page"));
+            let record = article(&field(c, "title"), &authors, year, (&at.0, &at.1, &at.2));
+            (field(c, "id"), assess(&claim, &record))
+        })
+        .collect();
+    let (best, a) = assessed
+        .iter()
+        .max_by(|x, y| x.1.confidence.total_cmp(&y.1.confidence))
+        .unwrap();
+    assert_eq!(best, fixture["cited"].as_str().unwrap(), "{assessed:#?}");
+    assert!((PLAUSIBLE..VERIFIED).contains(&a.confidence), "{a:?}");
+    assert_eq!(
+        (a.title.agreement, a.container.agreement, a.year.agreement),
+        (Agreement::Match, Agreement::Match, Agreement::Mismatch)
+    );
+    for (id, other) in &assessed {
+        if id != best {
+            assert!(other.confidence < a.confidence, "{id}: {other:?}");
+        }
+    }
+}
+
+#[test]
+fn a_title_with_words_inserted_is_not_the_records() {
+    // App pre-test: words inserted in the middle of a real title.
+    let sepsis3 = article(
+        "The Third International Consensus Definitions for Sepsis and Septic Shock (Sepsis-3)",
+        &[
+            "Mervyn Singer",
+            "Clifford S. Deutschman",
+            "Christopher Warren Seymour",
+        ],
+        2016,
+        ("JAMA", "315", "801-810"),
+    );
+    let cite = |title: &str| {
+        Claim::from_text(format!(
+            "Singer M, Deutschman CS, Seymour CW, et al. {title}. JAMA. 2016;315(8):801-810."
+        ))
+    };
+    let a = assess(
+        &cite(
+            "The Third International Consensus Definitions for Sepsis and Septic Shock in Adults \
+             and Children (Sepsis-3)",
+        ),
+        &sepsis3,
+    );
+    assert_eq!(a.title.agreement, Agreement::Partial, "{a:?}");
+    assert!((PLAUSIBLE..VERIFIED).contains(&a.confidence), "{a:?}");
+    // Words dropped, or the title as it is: the same title.
+    for title in [
+        "The Third International Consensus Definitions for Sepsis and Septic Shock (Sepsis-3)",
+        "The third international consensus definitions for sepsis and septic shock",
+        "Third International Consensus Definitions for Sepsis (Sepsis-3)",
+    ] {
+        let a = assess(&cite(title), &sepsis3);
+        assert!(a.confidence >= VERIFIED, "{title}: {a:?}");
+    }
+}
+
+#[test]
+fn a_title_with_a_word_replaced_is_not_the_records() {
+    // Red team (#102): another drug's trial at RECOVERY's place verified.
+    let mut recovery = placed(
+        &[],
+        "Dexamethasone in Hospitalized Patients with Covid-19",
+        &["Peter Horby", "Wei Shen Lim", "Jonathan R. Emberson"],
+        2021,
+        ("New England Journal of Medicine", "384", "693-704"),
+    );
+    recovery.work.work_type = Some(crate::work::WorkType::JournalArticle);
+    let text = "Horby P, Lim WS, Emberson JR, et al. Hydroxychloroquine in hospitalized patients \
+                with Covid-19. N Engl J Med. 2021;384(8):693-704.";
+    let a = assess(&Claim::from_text(text), &recovery);
+    assert_eq!(a.title.agreement, Agreement::Partial, "{a:?}");
+    assert!((PLAUSIBLE..VERIFIED).contains(&a.confidence), "{a:?}");
+    // A misspelt or respelt word is the same title.
+    for text in [
+        "Horby P, Lim WS, Emberson JR, et al. Dexamethazone in hospitalized patients with \
+         Covid-19. N Engl J Med. 2021;384(8):693-704.",
+        "Horby P, Lim WS, Emberson JR, et al. Dexamethasone in hospitalized patients with \
+         Covid-19. N Engl J Med. 2021;384(8):693-704.",
+    ] {
+        let a = assess(&Claim::from_text(text), &recovery);
+        assert!(a.confidence >= VERIFIED, "{text}: {a:?}");
+    }
+}
+
+/// A journal article's record for the red-team table.
+fn article(title: &str, authors: &[&str], year: i16, at: (&str, &str, &str)) -> SourceRecord {
+    let mut r = placed(&[], title, authors, year, at);
+    r.work.work_type = Some(crate::work::WorkType::JournalArticle);
+    r
+}
+
+#[test]
+fn red_team_minimised_failures_stay_fixed() {
+    // Minimised false VERIFIEDs from bench/redteam/failures.jsonl (#102),
+    // against the records they verified: none may verify now. Each with
+    // its id there.
+    let nature = |title: &str, authors: &[&str], year, volume, pages| {
+        article(title, authors, year, ("Nature", volume, pages))
+    };
+    let alphafold = nature(
+        "Highly accurate protein structure prediction with AlphaFold",
+        &["John Jumper", "Richard Evans", "Alexander Pritzel"],
+        2021,
+        "596",
+        "583-589",
+    );
+    let lstm = article(
+        "Long Short-Term Memory",
+        &["Sepp Hochreiter", "Jürgen Schmidhuber"],
+        1997,
+        ("Neural Computation", "9", "1735-1780"),
+    );
+    let colchicine = article(
+        "Efficacy and Safety of Low-Dose Colchicine after Myocardial Infarction",
+        &["Jean-Claude Tardif", "Simon Kouz", "David D. Waters"],
+        2019,
+        ("New England Journal of Medicine", "381", "2497-2505"),
+    );
+    let huang = article(
+        "Clinical features of patients infected with 2019 novel coronavirus in Wuhan, China",
+        &["Chaolin Huang", "Yeming Wang", "Xingwang Li"],
+        2020,
+        ("The Lancet", "395", "497-506"),
+    );
+    let mut zenodo = record(
+        &["10.5281/zenodo.13525448"],
+        "Why Most Published Research Findings Are False",
+        &["John P. A. Ioannidis"],
+        2005,
+    );
+    zenodo.work.work_type = Some(crate::work::WorkType::JournalArticle);
+    let mut arxiv = record(
+        &["arxiv:2410.02479"],
+        "Cross-Embodiment Dexterous Grasping with Reinforcement Learning",
+        &["Haoqi Yuan", "Bohan Zhou"],
+        2024,
+    );
+    arxiv.work.work_type = Some(crate::work::WorkType::Preprint);
+    let cases: Vec<(&str, Claim, SourceRecord)> = vec![
+        (
+            "corpus-174",
+            Claim::from_text(
+                "Tuyls K, Rourke-Ellison D. Evolutionary game theory and multi-agent \
+                 reinforcement learning. 2005.",
+            ),
+            article(
+                "Evolutionary game theory and multi-agent reinforcement learning",
+                &["Karl Tuyls", "Ann Nowé"],
+                2005,
+                ("The Knowledge Engineering Review", "20", "63-90"),
+            ),
+        ),
+        (
+            "adv-18",
+            Claim::from_text(format!(
+                "Rivers E, Smith J, Patel R, et al. {EGDT}. N Engl J Med. 2001;345(19):1368-77."
+            )),
+            egdt(),
+        ),
+        (
+            "adv-21",
+            Claim {
+                title: Some(
+                    "Fibrinolysis for patients with intermediate-risk pulmonary embolism".into(),
+                ),
+                authors: vec!["Meyer, G.".into(), "Smith, J.".into()],
+                year: Some(2014),
+                ..Claim::default()
+            },
+            peitho(),
+        ),
+        (
+            "adv-01",
+            Claim::from_text(
+                "LeCun Y, Bengio Y, Hinton G. Deep learning for medical image analysis. Nature. \
+                 2015;521:436-444.",
+            ),
+            lecun(),
+        ),
+        (
+            "adv-13",
+            Claim {
+                title: Some("Deep learning: a primer for clinicians".into()),
+                authors: vec!["LeCun, Y.".into(), "Bengio, Y.".into(), "Hinton, G.".into()],
+                year: Some(2015),
+                container: Some("Nature".into()),
+                ..Claim::default()
+            },
+            lecun(),
+        ),
+        (
+            "adv-12",
+            Claim::from_text(
+                "Hanahan D, Weinberg RA. Hallmarks of cancer: the next generation of targeted \
+                 therapies. Cell. 2011;144(5):646-674.",
+            ),
+            hallmarks(),
+        ),
+        (
+            "adv-08",
+            Claim::from_text(
+                "Jumper J, Evans R, Pritzel A, et al. Highly accurate protein structure \
+                 prediction with AlphaFold enables structure-based drug discovery. Nature. 2021.",
+            ),
+            alphafold.clone(),
+        ),
+        (
+            "adv-33",
+            Claim::from_text(
+                "Siegel RL, Miller KD, Jemal A. Cancer statistics, 2020. CA Cancer J Clin. \
+                 2018;70(1):7-30.",
+            ),
+            article(
+                "Cancer statistics, 2020",
+                &["Rebecca L. Siegel", "Kimberly D. Miller", "Ahmedin Jemal"],
+                2020,
+                ("CA: A Cancer Journal for Clinicians", "70", "7-30"),
+            ),
+        ),
+        (
+            "adv-39",
+            Claim::from_text(
+                "Hindricks G, Potpara T, Dagres N, et al. 2020 ESC Guidelines for the diagnosis \
+                 and management of atrial fibrillation developed in collaboration with the \
+                 European Association for Cardio-Thoracic Surgery (EACTS). Eur Heart J. 2017.",
+            ),
+            article(
+                "2020 ESC Guidelines for the diagnosis and management of atrial fibrillation \
+                 developed in collaboration with the European Association for Cardio-Thoracic \
+                 Surgery (EACTS)",
+                &["Gerhard Hindricks", "Tatjana Potpara", "Nikolaos Dagres"],
+                2020,
+                ("European Heart Journal", "42", "373-498"),
+            ),
+        ),
+        (
+            "adv-27",
+            Claim::from_text(
+                "Jumper J, Evans R, Pritzel A, et al. Highly accurate protein structure \
+                 prediction with AlphaFold. Science. 2021;596(7873):583-589.",
+            ),
+            alphafold.clone(),
+        ),
+        (
+            "corpus-203",
+            Claim::from_text(
+                "Huang C, et al. Clinical features of patients infected with 2019 novel \
+                 coronavirus in Wuhan, China. JAMA. 2020.",
+            ),
+            huang,
+        ),
+        (
+            "adv-56",
+            Claim::from_text(
+                "Hochreiter S, Schmidhuber J. Long short-term memory. Neural Netw. 1998.",
+            ),
+            lstm.clone(),
+        ),
+        (
+            "corpus-202",
+            Claim::from_text(
+                "Altschul, S.F. et al. (1990) 'Basic local alignment search tool', American \
+                 Journal of Epidemiology, 215(3), pp. 403-410.",
+            ),
+            article(
+                "Basic local alignment search tool",
+                &["Stephen F. Altschul", "Warren Gish", "Webb Miller"],
+                1990,
+                ("Journal of Molecular Biology", "215", "403-410"),
+            ),
+        ),
+        (
+            "adv-52",
+            Claim::from_text(
+                "Silver, D. et al. Mastering the game of Go with deep neural networks and tree \
+                 search. Nature 530, 484 (2016).",
+            ),
+            nature(
+                "Mastering the game of Go with deep neural networks and tree search",
+                &["David Silver", "Aja Huang", "Chris J. Maddison"],
+                2016,
+                "529",
+                "484-489",
+            ),
+        ),
+        (
+            "adv-53",
+            Claim::from_text(
+                "@article{jumper2021, author = {Jumper, John and Evans, Richard}, title = \
+                 {Highly accurate protein structure prediction with {AlphaFold}}, journal = \
+                 {Nature}, year = {2021}, volume = {597}, pages = {583--589}}",
+            ),
+            alphafold,
+        ),
+        (
+            "corpus-219",
+            Claim::from_text(
+                "Niwa T. Transfection of plasmid DNA by nanocarriers. J Microbiol Methods. \
+                 2005;61:251.",
+            ),
+            article(
+                "Lytic enzyme, labiase for a broad range of Gram-positive bacteria",
+                &["Tomoko Niwa", "Yoshiaki Kawamura"],
+                2005,
+                ("Journal of Microbiological Methods", "61", "251-260"),
+            ),
+        ),
+        (
+            "adv-44",
+            Claim::from_text(
+                "Horby P, Lim WS, Emberson JR, et al. Hydroxychloroquine in hospitalized \
+                 patients with Covid-19. N Engl J Med. 2021;384(8):693-704.",
+            ),
+            article(
+                "Dexamethasone in Hospitalized Patients with Covid-19",
+                &["Peter Horby", "Wei Shen Lim", "Jonathan R. Emberson"],
+                2021,
+                ("New England Journal of Medicine", "384", "693-704"),
+            ),
+        ),
+        (
+            "adv-57",
+            Claim::from_text(
+                "Ioannidis JP. Why most published research findings are false. BMJ. 2006.",
+            ),
+            zenodo,
+        ),
+        (
+            "corpus-271",
+            Claim::from_text(
+                "Yuan H. Cross-embodiment dexterous grasping with reinforcement learning. \
+                 Science Robotics. 2024.",
+            ),
+            arxiv,
+        ),
+        (
+            "corpus-277",
+            Claim::from_text(
+                "Tardif JC. Efficacy and safety of low-dose colchicine after myocardial \
+                 infarction. medRxiv. 2019.",
+            ),
+            colchicine.clone(),
+        ),
+        (
+            "corpus-275",
+            Claim::from_text("Hochreiter S. Long short-term memory. arXiv preprint. 1997."),
+            lstm,
+        ),
+        (
+            "adv-45",
+            Claim::from_text(
+                "World Medical Association. Declaration of Geneva: the physician's pledge. JAMA. \
+                 2013;310(20):2191-2194.",
+            ),
+            {
+                let mut r = placed(
+                    &[],
+                    "World Medical Association Declaration of Helsinki",
+                    &[],
+                    2013,
+                    ("JAMA", "310", "2191-2194"),
+                );
+                r.work.work_type = Some(crate::work::WorkType::JournalArticle);
+                r
+            },
+        ),
+        (
+            "corpus-193",
+            Claim::from_text(
+                "Shiomi and SUGIURA reported in Gastroenterology (1984) — \"\
+                 ヒメフタテンヨコバイが媒介するマイコプラズマ様微生物の寄主範囲による類別\".",
+            ),
+            {
+                let mut r = record(
+                    &["10.3186/jjphytopath.50.149"],
+                    "ヒメフタテンヨコバイが媒介するマイコプラズマ様微生物の寄主範囲による類別",
+                    &["Toshiki Shiomi", "Miyoji SUGIURA"],
+                    1984,
+                );
+                r.work.work_type = Some(crate::work::WorkType::JournalArticle);
+                r
+            },
+        ),
+        // The app's pre-test of the fixes: the report of the year cited
+        // chosen over the one titled, volume and pages; words inserted
+        // inside a title.
+        (
+            "app-cancer-statistics",
+            Claim::from_text(
+                "Siegel RL, Miller KD, Jemal A. Cancer statistics, 2020. CA Cancer J Clin. \
+                 2018;70(1):7-30.",
+            ),
+            article(
+                "Cancer statistics, 2018",
+                &["Rebecca L. Siegel", "Kimberly D. Miller", "Ahmedin Jemal"],
+                2018,
+                ("CA: A Cancer Journal for Clinicians", "68", "7-30"),
+            ),
+        ),
+        (
+            "app-sepsis-3",
+            Claim::from_text(
+                "Singer M, Deutschman CS, Seymour CW, et al. The Third International Consensus \
+                 Definitions for Sepsis and Septic Shock in Adults and Children (Sepsis-3). JAMA. \
+                 2016;315(8):801-810.",
+            ),
+            article(
+                "The Third International Consensus Definitions for Sepsis and Septic Shock \
+                 (Sepsis-3)",
+                &[
+                    "Mervyn Singer",
+                    "Clifford S. Deutschman",
+                    "Christopher Warren Seymour",
+                ],
+                2016,
+                ("JAMA", "315", "801-810"),
+            ),
+        ),
+    ];
+    for (id, claim, record) in &cases {
+        let a = assess(claim, record);
+        assert!(a.confidence < VERIFIED, "{id}: {a:?}");
+    }
+    // The same works cited right still verify.
+    for (text, record) in [
+        (
+            "Tardif JC, Kouz S, Waters DD, et al. Efficacy and safety of low-dose colchicine \
+             after myocardial infarction. N Engl J Med. 2019;381(26):2497-2505.",
+            colchicine,
+        ),
+        (
+            "Hanahan D, Weinberg RA. Hallmarks of cancer: the next generation. Cell. \
+             2011;144(5):646-674.",
+            hallmarks(),
+        ),
+        (
+            "LeCun, Y., Bengio, Y. & Hinton, G. Deep learning. Nature 521, 436–444 (2015).",
+            lecun(),
+        ),
+    ] {
+        let a = assess(&Claim::from_text(text), &record);
+        assert!(a.confidence >= VERIFIED, "{text}: {a:?}");
+    }
 }

@@ -89,7 +89,8 @@ scripts/redteam.py --rescore --failures      # re-score the saved results
 Claims go to `aspero verify - --format json` in one batch through
 `target/redteam-cache`, with OpenAlex capped at $0.75/day unless
 `ASPERO_OPENALEX_CAP_USD` says otherwise. The first run cost $0.30 of
-OpenAlex searches; re-runs within the cache TTLs are free. Exit 1 if any
+OpenAlex searches; re-runs within the cache TTLs are free. It prints the
+acceptance criteria (each PASS or FAIL) after the table. Exit 1 if any
 fabricated or wrong citation verified.
 
 ## Results (2026-11-16, aspero 0.26.0)
@@ -142,6 +143,58 @@ wrong journal (3/3), wrong journal (8/10), right authors and locator with
 another title (5/6), wrong numbers in unread styles (3/6), lookalike copies
 (1/4). The other 10 include deliberate controls showing where each rule
 does hold.
+
+## Results after the fixes (2026-11-16, unreleased)
+
+Each failure pattern below got a rule (see DESIGN, "Resolve, verify and
+check", and CHANGELOG), tested offline first (`red_team_minimised_failures_stay_fixed`
+and one test per rule in `crates/core/src/matching/tests.rs`).
+No corpus label was changed. `scripts/redteam.py` now prints the agreed
+acceptance criteria:
+
+```
+PASS  wrong -> verified                                0/152 (0.0%)  <= 2%
+PASS  invented, fake ID, DOI swap -> verified           0/69 (0.0%)  <= 0%
+PASS  real -> mismatch or not_found                    3/155 (1.9%)  <= 3%
+PASS  real -> verified                              147/155 (94.8%)  >= 85%
+PASS  real -> verified or plausible                 152/155 (98.1%)  >= 95%
+PASS  wrong -> plausible names a differing field      69/71 (97.2%)  >= 80%
+PASS  retracted flagged                              15/15 (100.0%)  >= 100%
+```
+
+```
+category              verified  plausible   mismatch  not_found     n
+real:book                   14          1                     2    17
+real:conference             15          1                     1    17
+real:consortium             14          1                          15
+real:dataset                 5          1                           6
+real:erratum                 2          1                           3
+real (other 9 kinds)        97                                     97
+a:invented                                         1         14    15
+b:wrong-authors                         6          7          1    14
+b:wrong-coauthors                       8                           8
+c:wrong-journal                        14                          14
+c:wrong-locator                        11                          11
+c:wrong-year                           10          2               12
+d:chimera                              10                     2    12
+e:doi-swap                                        12               12
+f:fake-id                                          6          6    12
+g:retracted                 15                                     15
+h:preprint-swap                        11                     1    12
+i:llm-hallucination                     1          1         28    30
+```
+
+Real citations accepted as another work: 3 (from 8). A wrong year with
+the work's whole title, authors, volume and pages is plausible, the year
+named (10 of the 12 `c:wrong-year`).
+
+**Adversarial round**: 1 of the 48 recorded false VERIFIEDs still
+verifies: `Kahneman D. Thinking, Fast and Slow: The Psychology of
+Intuitive Judgment.` (an invented subtitle on a book whose record has
+none; book records often leave real subtitles out, so a subtitle added
+to a book's title is tolerated). Real misses left: SHAP (a NeurIPS paper
+without a DOI), Said's *Orientalism* and Cohen's *Statistical Power
+Analysis* (books no searched index returned).
 
 ## Failures (`failures.jsonl`)
 

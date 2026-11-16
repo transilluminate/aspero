@@ -20,20 +20,27 @@ mod authors;
 mod derivative;
 mod text;
 
+use std::ops::Range;
+
 use serde::{Deserialize, Serialize};
 
 use crate::id::{IdKind, WorkId, starts_with_ci};
 use crate::provider::Place;
 use crate::publication::{self, first_page, journal_in, other_journal, same_journal};
 use crate::record::SourceRecord;
+use crate::work::WorkType;
 
-use authors::{author_overlap, family_name, same_family};
+use authors::{
+    author_overlap, byline_strangers, claimed_strangers, complete_byline, family_name, name_words,
+    same_family,
+};
 pub use derivative::{
     WorkKind, claim_mentions_derivative, derivative_kind, derivative_work_kind, is_derivative,
 };
 use text::{Normalised, content_words, words};
 pub use text::{
-    normalise, search_terms, shared_title, title_similarity, unmarked, whole_title_similarity,
+    normalise, probable_title, search_terms, shared_title, title_similarity, unmarked,
+    whole_title_similarity,
 };
 
 /// Field weights in the confidence (before penalties).
@@ -60,12 +67,23 @@ const PLACED: f64 = 0.9;
 /// The same with the year off by one (online first, then in print):
 /// plausible.
 const PLACED_YEAR_OFF: f64 = 0.8;
+/// The title, authors, volume and first page agreeing with the year two or
+/// more off: plausible, the year to check, and as high as a partial match
+/// can be (a partial title with another page is capped there too), so
+/// that the work confirming more of the citation ranks first.
+const PLACED_YEAR_WRONG: f64 = PLACED_YEAR_OFF;
+/// Title score, a mismatch, for another title of a series: the title's
+/// own year replaced ([`text::Normalised::substitutes_in`]).
+const OTHER_IN_SERIES: f64 = 0.3;
 /// Confidence ceiling, below plausible, without evidence of which work is
 /// cited: only a year or journal agreeing, or a short title found inside
 /// free text.
 const NO_EVIDENCE_CAP: f64 = 0.5;
 /// Another edition of a cited book: plausible, with the year a difference.
 const EDITION: f64 = PLAUSIBLE;
+/// A dataset's or software's version, its identifier claimed, cited with
+/// another year: plausible, with the year a difference.
+const VERSION: f64 = PLAUSIBLE;
 /// Content words below which a title found inside free text is short: one
 /// or two words turn up in any text ("Aspero", "Deep learning").
 const SHORT_TITLE_WORDS: usize = 3;
@@ -80,6 +98,18 @@ const JOURNAL_MISMATCH_PENALTY: f64 = 0.9;
 /// clearly another ([`other_journal`]): a citation error, as a wrong volume
 /// is, and a tell of invented references.
 const JOURNAL_MISMATCH_CAP: f64 = LOCATION_MISMATCH_CAP;
+/// Confidence ceiling when the claim names an author the record's complete
+/// byline lacks: invented co-authors beside a real first author.
+const STRANGERS_CAP: f64 = LOCATION_MISMATCH_CAP;
+/// Title score, partial, when the claim's title is the record's with words
+/// added ([`text::extends`]).
+const EXTENDED_TITLE: f64 = 0.75;
+/// Confidence ceiling then: the claim may cite another work whose title
+/// contains this one's, or this one with a subtitle its record lacks.
+const EXTENDED_TITLE_CAP: f64 = LOCATION_MISMATCH_CAP;
+/// Confidence ceiling for a work with no journal, volume or page when the
+/// claim cites a journal: a lookalike copy can't confirm it.
+const UNPLACED_CAP: f64 = LOCATION_MISMATCH_CAP;
 
 /// Verdict thresholds on confidence.
 pub const VERIFIED: f64 = 0.85;
@@ -241,9 +271,16 @@ impl Claim {
 
     /// The years the claim cites: its year, else those in its text.
     pub fn cited_years(&self) -> Vec<i16> {
+        self.cited_years_beside(None)
+    }
+
+    /// [`Claim::cited_years`], but for years inside `title` (a work's,
+    /// compared with the claim) where the text gives it: "Siegel RL.
+    /// Cancer statistics, 2020. 2018." cites 2018, not 2020.
+    pub fn cited_years_beside(&self, title: Option<&str>) -> Vec<i16> {
         match (self.year, &self.text) {
             (Some(year), _) => vec![year],
-            (None, Some(text)) => Normalised::new(text).years(),
+            (None, Some(text)) => Normalised::new(text).years_beside(title),
             _ => Vec::new(),
         }
     }
@@ -382,10 +419,58 @@ fn cites_chapter(text: &str) -> bool {
     })
 }
 
+/// A free-text reference's byline: a BibTeX entry's author field, else
+/// its text before the record's title (at `span`). When the title is cited
+/// otherwise, up to the first of the title's words or the first sentence's
+/// end ("Rivers E, et al." before another title), whichever comes first.
+fn byline(text: &Normalised, title: Option<&str>, span: Option<&Range<usize>>) -> Option<String> {
+    if let Some(authors) = publication::bibtex_field(&text.raw, "author") {
+        return Some(authors);
+    }
+    let start = if let Some(span) = span {
+        span.start
+    } else {
+        let title = content_words(title?);
+        let titled = text.words.iter().position(|w| title.contains(w))?;
+        // A word ending a sentence, not an initial ("RS.", "J.").
+        let ended = (0..titled).find(|&i| {
+            let raw = &text.raw[text.spans[i].clone()];
+            let initial = raw.chars().count() <= 3 && raw.chars().all(char::is_uppercase);
+            let after = &text.raw[text.spans[i].end..];
+            !initial
+                && (after.starts_with(". ") || after.starts_with(").") || after.starts_with("). "))
+        });
+        ended.map_or(titled, |i| i + 1)
+    };
+    Some(text.raw[..text.spans.get(start).map_or(text.raw.len(), |s| s.start)].to_owned())
+}
+
 fn dedup_years(mut years: Vec<i16>) -> Vec<i16> {
     years.sort_unstable();
     years.dedup();
     years
+}
+
+/// Words naming a preprint server, or a preprint.
+const PREPRINT_WORDS: &[&str] = &[
+    "arxiv",
+    "biorxiv",
+    "medrxiv",
+    "chemrxiv",
+    "psyarxiv",
+    "socarxiv",
+    "techrxiv",
+    "ssrn",
+    "preprint",
+    "preprints",
+];
+
+/// Whether a venue is a preprint server's: "arXiv (Cornell University)",
+/// "medRxiv", "Research Square", "SSRN Electronic Journal".
+fn preprint_server(name: &str) -> bool {
+    let words = words(name);
+    words.iter().any(|w| PREPRINT_WORDS.contains(&w.as_str()))
+        || words.windows(2).any(|w| w == ["research", "square"])
 }
 
 /// Scores how well `record` matches `claim`.
@@ -426,6 +511,79 @@ pub fn assess(claim: &Claim, record: &SourceRecord) -> Assessment {
     } else {
         FieldCheck::UNKNOWN
     };
+    // Where the record's title stands in free text: what precedes it is the
+    // byline, what follows the journal and place.
+    let title_span = match (&claim.title, &work_title, &text) {
+        (None, Some(actual), Some(text)) => text.title_span(actual),
+        _ => None,
+    };
+    // Names the claim gives that the record's byline lacks: invented
+    // co-authors beside a real first author. Not a match, whoever is first.
+    // Not for books, whose records often list only the first author (Open
+    // Library's Sutton without Barto).
+    let strangers = authors.agreement != Agreement::Unknown
+        && work.work_type != Some(crate::work::WorkType::Book)
+        && complete_byline(&work.authors)
+        && if claim.authors.is_empty() {
+            text.as_ref()
+                .and_then(|text| byline(text, work_title.as_deref(), title_span.as_ref()))
+                .is_some_and(|b| {
+                    byline_strangers(&b, &work.authors, work.container_title.as_deref())
+                })
+        } else {
+            claimed_strangers(&claim.authors, &work.authors)
+        };
+    let authors = match authors.score {
+        Some(s) if strangers => FieldCheck::scored(s.min(CORROBORATING_AUTHORS)),
+        _ => authors,
+    };
+    // The record's title with words added: another work's title that
+    // contains this one's ("Deep learning for medical image analysis"
+    // isn't "Deep learning"), or a subtitle the record lacks. Partly the
+    // same, never the same. Books' records often leave their subtitles out
+    // ("Imagined Communities", cited with "Reflections on the Origin …"):
+    // there, a subtitle after the whole title is no more words.
+    let subtitle_ok = work.work_type == Some(crate::work::WorkType::Book)
+        && work_title
+            .as_deref()
+            .is_some_and(|t| text::main_title(unmarked(t)) == unmarked(t));
+    let extended = match (&claim.title, &work_title, &text, &title_span) {
+        (Some(claimed), Some(actual), _, _) => text::extends(claimed, actual, subtitle_ok),
+        (None, Some(_), Some(text), Some(span)) => {
+            let journal = work
+                .container_title
+                .as_deref()
+                .map(publication::significant);
+            let names = name_words(&work.authors);
+            text.extends_title(span, &names, journal.as_deref(), subtitle_ok)
+        }
+        _ => false,
+    };
+    let title = match title.score {
+        Some(s) if extended => FieldCheck::scored(s.min(EXTENDED_TITLE)),
+        _ => title,
+    };
+    // Or with a word put in place of one of its own (not misspelt):
+    // "Hydroxychloroquine in hospitalized patients with Covid-19" at the
+    // place of "Dexamethasone in …".
+    // A year put in place of the title's own is another title of a series
+    // ("Cancer statistics, 2020" isn't the 2018 report, whatever year is
+    // cited). Or with words of its own inserted ("… Septic Shock in Adults
+    // and Children (Sepsis-3)"); words dropped are a title shortened.
+    let found = matches!(title.agreement, Agreement::Match | Agreement::Partial);
+    let reworded = match (&work_title, &text) {
+        (Some(actual), Some(text)) if found && title_span.is_none() && claim.title.is_none() => {
+            text.substitutes_in(actual)
+                .or_else(|| text.inserts_in(actual).then_some(false))
+        }
+        _ => None,
+    };
+    let substituted = reworded.is_some();
+    let title = match (title.score, reworded) {
+        (Some(s), Some(true)) => FieldCheck::scored(s.min(OTHER_IN_SERIES)),
+        (Some(s), Some(false)) => FieldCheck::scored(s.min(EXTENDED_TITLE)),
+        _ => title,
+    };
 
     let actual_years: Vec<i16> = work
         .issued
@@ -433,7 +591,9 @@ pub fn assess(claim: &Claim, record: &SourceRecord) -> Assessment {
         .into_iter()
         .chain(work.other_years.iter().copied())
         .collect();
-    let claimed_years = claim.cited_years();
+    // A year inside the title ("Cancer statistics, 2020") is not the year
+    // cited.
+    let claimed_years = claim.cited_years_beside(work_title.as_deref());
     let year = if actual_years.is_empty() || claimed_years.is_empty() {
         FieldCheck::UNKNOWN
     } else {
@@ -452,16 +612,39 @@ pub fn assess(claim: &Claim, record: &SourceRecord) -> Assessment {
     // Only a journal article's journal is held against a citation: books'
     // series, proceedings and repositories go by many names.
     let article = work.work_type == Some(crate::work::WorkType::JournalArticle);
-    let cited_journal = claim.cited_container();
+    // A journal read from text that is the work's own title, in title case
+    // ("… Hooper D. Hot Gravitons From Kerr Black Holes. 2020."), is none.
+    let title_words = work_title.as_deref().map(words).unwrap_or_default();
+    let cited_journal = claim.cited_container().filter(|cited| {
+        claim.container.is_some()
+            || !publication::significant(cited)
+                .iter()
+                .all(|w| title_words.contains(w))
+    });
     let cited_place = claim.locator();
     // A reference giving a journal, volume and page cites the published
     // article; a preprint of it (in no journal, at no volume) is another
     // version, not the one cited.
-    let preprint_of_cited = work.work_type == Some(crate::work::WorkType::Preprint)
+    // So is one cited in a journal by name alone ("Science Robotics.
+    // 2024."), unless its identifier is the one claimed.
+    let preprint = work.work_type == Some(WorkType::Preprint)
+        || work.container_title.as_deref().is_some_and(preprint_server);
+    let preprint_of_cited = preprint
         && work.volume.is_none()
-        && cited_journal.is_some()
-        && cited_place.volume.is_some()
-        && cited_place.page.is_some();
+        && cited_journal
+            .as_deref()
+            .is_some_and(|j| !preprint_server(j))
+        && ((cited_place.volume.is_some() && cited_place.page.is_some())
+            || id_agreement(&claim.ids, &record.ids) != Agreement::Match);
+    // A journal's article cited as a preprint ("medRxiv preprint, 2019"),
+    // without an identifier to say which version: another version.
+    let article_as_preprint = article
+        && !preprint
+        && claim.ids.is_empty()
+        && claim.container.is_none()
+        && text
+            .as_ref()
+            .is_some_and(|t| t.words.iter().any(|w| PREPRINT_WORDS.contains(&w.as_str())));
     // The journal the claim names, or reads where its reference gives one,
     // decides, not words elsewhere in a reference (an author's initials
     // "SR" for Scientific Reports). Names compare by rule, which misses
@@ -484,16 +667,17 @@ pub fn assess(claim: &Claim, record: &SourceRecord) -> Assessment {
         }
         _ => FieldCheck::UNKNOWN,
     };
-    let container = if preprint_of_cited && container.agreement != Agreement::Match {
-        FieldCheck::exact(false)
-    } else {
-        container
-    };
+    let container =
+        if (preprint_of_cited || article_as_preprint) && container.agreement != Agreement::Match {
+            FieldCheck::exact(false)
+        } else {
+            container
+        };
     // A journal article cited in a journal clearly not its own, or a
     // preprint cited as a journal's article.
     let wrong_journal =
         container.agreement == Agreement::Mismatch && (preprint_of_cited || article);
-    let located = cited_place;
+    let located = &cited_place;
     let same = |claimed: Option<&str>, actual: Option<&str>| match (claimed, actual) {
         (Some(c), Some(a)) if !c.is_empty() && !a.is_empty() => {
             FieldCheck::exact(c.trim().eq_ignore_ascii_case(a.trim()))
@@ -512,12 +696,19 @@ pub fn assess(claim: &Claim, record: &SourceRecord) -> Assessment {
     // al. N Engl J Med 2017;376:2545"); with the journal and volume
     // agreeing, a title missing from the text is not a different one (the
     // page then decides between verified and a wrong page).
+    // Unless it gives one: a few words that are none of the work's authors,
+    // journal, numbers or furniture ("Niwa T. Transfection of plasmid DNA
+    // by nanocarriers. J Microbiol Methods. 2005;61:251" isn't titleless).
     let placed = container.agreement == Agreement::Match && volume.agreement == Agreement::Match;
-    let title = if placed && claim.title.is_none() && title.agreement == Agreement::Mismatch {
-        FieldCheck::UNKNOWN
-    } else {
-        title
-    };
+    let titled = text.as_ref().is_some_and(|t| {
+        t.title_run(&families, work.container_title.as_deref()) >= SHORT_TITLE_WORDS
+    });
+    let title =
+        if placed && claim.title.is_none() && title.agreement == Agreement::Mismatch && !titled {
+            FieldCheck::UNKNOWN
+        } else {
+            title
+        };
 
     let ids = id_agreement(&claim.ids, &record.ids);
     // A claim of identifiers alone is fully confirmed by a matching ID.
@@ -579,6 +770,17 @@ pub fn assess(claim: &Claim, record: &SourceRecord) -> Assessment {
     // Journal, volume and first page together name one work, title or no
     // title ("Injury 47 (2016) 797–804"), unless something contradicts
     // it.
+    // Another title at this work's place, by its authors: a title
+    // translated or paraphrased, or one work's title cited at another's
+    // place. Plausible, its title to check; never verified.
+    if located
+        && container.agreement == Agreement::Match
+        && title.agreement == Agreement::Mismatch
+        && authors.agreement == Agreement::Match
+        && year.agreement != Agreement::Mismatch
+    {
+        confidence = confidence.max(PLAUSIBLE);
+    }
     if located
         && container.agreement == Agreement::Match
         && title.agreement != Agreement::Mismatch
@@ -590,6 +792,18 @@ pub fn assess(claim: &Claim, record: &SourceRecord) -> Assessment {
             Agreement::Mismatch => 0.0,
         };
         confidence = confidence.max(floor);
+    }
+    // The whole title (a year in it too), the authors, volume and first
+    // page name the work, a year two or more off notwithstanding: the
+    // year is the citation's error ("Cancer statistics, 2020 … 2018;70:7"),
+    // plausible, and ranks this work over the one of the year cited.
+    if located
+        && title.agreement == Agreement::Match
+        && authors.agreement == Agreement::Match
+        && container.agreement != Agreement::Mismatch
+        && year.agreement == Agreement::Mismatch
+    {
+        confidence = confidence.max(PLACED_YEAR_WRONG);
     }
     // A wrong volume or page is an error in the citation, and tells an
     // original from the letters and corrections in the same journal.
@@ -608,18 +822,76 @@ pub fn assess(claim: &Claim, record: &SourceRecord) -> Assessment {
     if wrong_journal {
         confidence = confidence.min(JOURNAL_MISMATCH_CAP);
     }
+    // A copy deposited elsewhere (Zenodo, a repository, a technical
+    // report) has the work's title, authors and year but no journal,
+    // volume or page: it can't confirm the journal cited, and it isn't the
+    // article cited there, unless the claim's identifier says it is.
+    // Preprints, books, chapters, data and software have none to give,
+    // but nor do they confirm a journal, volume and page all cited
+    // (PsycEXTRA's record of a paper Science printed).
+    let unconfirmable = cited_place.volume.is_some()
+        && cited_place.page.is_some()
+        && work.volume.is_none()
+        && work.page.is_none()
+        && container.agreement != Agreement::Match;
+    let journal_less = !matches!(
+        work.work_type,
+        Some(
+            WorkType::Preprint
+                | WorkType::Book
+                | WorkType::Chapter
+                | WorkType::Dataset
+                | WorkType::Software
+        )
+    ) && work.container_title.is_none()
+        && work.volume.is_none()
+        && work.page.is_none();
+    if (journal_less || unconfirmable) && cited_journal.is_some() && ids != Agreement::Match {
+        confidence = confidence.min(UNPLACED_CAP);
+    }
     // Another edition of a book: the same title and authors, another year
     // (a 9th edition cited, a later one found). The book is right; the
     // year, or a publisher given as its container, is a difference. A
     // chapter cited in the book is not the book: its authors found may be
-    // the book's editors.
-    if work.work_type == Some(crate::work::WorkType::Book)
-        && title.agreement == Agreement::Match
+    // the book's editors. A book cited with its publisher, found reprinted
+    // whole as a chapter of a reader (Bourdieu's "Distinction" in a 2018
+    // collection), is another edition too.
+    let cites_book = text.as_ref().is_some_and(|t| {
+        t.words.iter().any(|w| {
+            matches!(
+                w.as_str(),
+                "press" | "publisher" | "publishers" | "publishing" | "books" | "verlag"
+            )
+        })
+    });
+    if (work.work_type == Some(WorkType::Book)
+        || (work.work_type == Some(WorkType::Chapter) && cites_book))
+        && (title.agreement == Agreement::Match || extended)
         && authors.score.is_some_and(|s| s >= CORROBORATING_AUTHORS)
         && year.agreement == Agreement::Mismatch
         && !claim.text.as_deref().is_some_and(cites_chapter)
     {
         confidence = confidence.max(EDITION);
+    }
+    // A dataset's or software's record carries its latest version's date:
+    // the claimed identifier and title name it, whatever year is cited
+    // (MIMIC-III's DOI, cited as of 2016, registered in 2023).
+    if matches!(work.work_type, Some(WorkType::Dataset | WorkType::Software))
+        && ids == Agreement::Match
+        && title.agreement == Agreement::Match
+        && year.agreement == Agreement::Mismatch
+    {
+        confidence = confidence.max(VERSION);
+    }
+    // Authors the work doesn't have are an error in the citation, and a
+    // tell of invented references, whatever else agrees.
+    if strangers {
+        confidence = confidence.min(STRANGERS_CAP);
+    }
+    // So is a title with words the work's lacks, or one of its own
+    // replaced, whatever else agrees.
+    if extended || substituted {
+        confidence = confidence.min(EXTENDED_TITLE_CAP);
     }
     // A reply, correction or commentary is not the work it responds to,
     // unless the citation says it is citing one.

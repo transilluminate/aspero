@@ -240,14 +240,20 @@ pub fn attention_lookalike() -> SourceRecord {
     )
 }
 
+/// LeCun et al.'s "Deep learning", as Crossref has it: in Nature
+/// 521:436-444.
 pub fn deep_learning() -> SourceRecord {
-    work(
+    let mut r = work(
         "crossref",
         &["10.1038/nature14539"],
         "Deep learning",
         &LECUN,
         2015,
-    )
+    );
+    r.work.container_title = Some("Nature".into());
+    r.work.volume = Some("521".into());
+    r.work.page = Some("436-444".into());
+    r
 }
 
 pub fn deep_learning_for_ai() -> SourceRecord {

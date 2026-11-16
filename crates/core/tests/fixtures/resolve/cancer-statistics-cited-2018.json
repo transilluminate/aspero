@@ -1,0 +1,43 @@
+{
+  "why": "Live resolve, 2026-11-16 (target/live/cancer-stats-resolve.json), trimmed to the top four candidates. Volume and pages are the records' own (the live output omits them; its checks agree).",
+  "claim": "Siegel RL, Miller KD, Jemal A. Cancer statistics, 2020. CA Cancer J Clin. 2018;70(1):7-30.",
+  "cited": "doi:10.3322/caac.21590",
+  "candidates": [
+    {
+      "id": "doi:10.3322/caac.21601",
+      "title": "Colorectal cancer statistics, 2020",
+      "authors": ["Rebecca L. Siegel", "Kimberly D. Miller", "Ann Goding Sauer"],
+      "year": 2020,
+      "container": "CA A Cancer Journal for Clinicians",
+      "volume": "70",
+      "page": "145-164"
+    },
+    {
+      "id": "doi:10.3322/caac.21590",
+      "title": "Cancer statistics, 2020",
+      "authors": ["Rebecca L. Siegel", "Kimberly D. Miller", "Ahmedin Jemal"],
+      "year": 2020,
+      "container": "CA: A Cancer Journal for Clinicians",
+      "volume": "70",
+      "page": "7-30"
+    },
+    {
+      "id": "doi:10.3322/caac.21442",
+      "title": "Cancer statistics, 2018",
+      "authors": ["Rebecca L. Siegel", "Kimberly D. Miller", "Ahmedin Jemal"],
+      "year": 2018,
+      "container": "CA: A Cancer Journal for Clinicians",
+      "volume": "68",
+      "page": "7-30"
+    },
+    {
+      "id": "doi:10.3322/caac.21637",
+      "title": "Cancer statistics for adolescents and young adults, 2020",
+      "authors": ["Kimberly D. Miller", "Miranda Fidler‐Benaoudia", "Theresa H. Keegan"],
+      "year": 2020,
+      "container": "CA: A Cancer Journal for Clinicians",
+      "volume": "70",
+      "page": "443-459"
+    }
+  ]
+}

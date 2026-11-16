@@ -28,7 +28,7 @@
 use aspero_core::matching::{self, PLAUSIBLE, VERIFIED, id_agreement, same_work_id};
 use aspero_core::{
     Agreement, Assessment, Claim, FieldSet, Filter, IdKind, OpenAccess, PartialDate, ProviderId,
-    SearchQuery, SourceRecord, Update, Usage, WorkId, YearRange, site,
+    SearchQuery, SourceRecord, Update, Usage, WorkId, WorkType, YearRange, site,
 };
 
 use futures::future::{Either, join_all, select};
@@ -125,6 +125,24 @@ fn from_counts(record: &SourceRecord) -> bool {
     record.source.as_str() == COUNTS
 }
 
+/// Scores a record against the claim with every identifier known for its
+/// work (`ids`, merged from its other records), so a claimed identifier
+/// counts whichever record of the work is kept: arXiv's DataCite record of
+/// a paper cited by its journal DOI.
+fn assess(claim: &Claim, record: &SourceRecord, ids: &[WorkId]) -> matching::Assessment {
+    let known = |id: &WorkId| record.ids.iter().any(|r| same_work_id(r, id));
+    if ids.iter().all(known) {
+        return matching::assess(claim, record);
+    }
+    let mut record = record.clone();
+    for id in ids {
+        if !record.ids.iter().any(|r| same_work_id(r, id)) {
+            record.ids.push(id.clone());
+        }
+    }
+    matching::assess(claim, &record)
+}
+
 /// Merges another record of the same work (found in `sightings`) into a
 /// candidate: its identifiers, notices and sightings, every year reported,
 /// and the record itself if it matches the claim better. Whichever record
@@ -155,8 +173,10 @@ fn absorb(
     let counts = merged_values(&mut c.record, &mut record, counts);
     add_years(&mut c.record, &pooled);
     add_years(&mut record, &pooled);
-    c.assessment = matching::assess(claim, &c.record);
-    let assessment = matching::assess(claim, &record);
+    add_place(&mut c.record, &record);
+    add_place(&mut record, &c.record);
+    c.assessment = assess(claim, &c.record, &c.ids);
+    let assessment = assess(claim, &record, &c.ids);
     if assessment.confidence > c.assessment.confidence {
         c.record = record;
         c.assessment = assessment;
@@ -487,11 +507,19 @@ impl Engine {
         // in provider-then-title order, so merging stays deterministic.
         titles = distinct(titles);
         titles.truncate(MAX_TITLE_SEARCHES);
+        // No hit pointed to the title (a conference paper without a DOI, a
+        // book Crossref lacks): the title the reference's shape suggests,
+        // else the cleaned-up keywords (a bare title ranks far better).
+        if titles.is_empty()
+            && claim.title.is_none()
+            && let Some(title) = claim.text.as_deref().and_then(matching::probable_title)
+        {
+            titles.push(title);
+        }
+        let keywords = titles.is_empty();
         let mut jobs: Vec<(ProviderId, SearchQuery, Via)> = Vec::new();
         for provider in self.searchers(false) {
-            if titles.is_empty()
-                && let Some(text) = &claim.text
-            {
+            if keywords && let Some(text) = &claim.text {
                 let q = query(&matching::search_terms(text), false);
                 jobs.push((provider.clone(), q, Via::KeywordSearch));
             }
@@ -779,17 +807,19 @@ fn settle_alternatives(claim: &Claim, report: &mut ResolveReport) -> Claim {
     }
     report.lookups.retain(|l| claim.ids.contains(&l.id));
     for c in &mut report.candidates {
-        c.assessment = matching::assess(&claim, &c.record);
+        c.assessment = assess(&claim, &c.record, &c.ids);
         c.assessment.ids = id_agreement(&claim.ids, &c.ids);
     }
     report.chosen_by_site = rank(&mut report.candidates, &claim);
     claim
 }
 
-/// Most confident first; on a tie the earliest-published (an original
-/// precedes its reprints, abstracts and corrections), then the one more
-/// providers agree on. Then the first may give way to a candidate from the
-/// claim's site's publisher ([`prefer_site`]); returns whether it did.
+/// Most confident first; on a tie the one confirming more of the journal,
+/// volume and page the claim cites (the article over a copy that can't
+/// check them), then the earliest-published (an original precedes its
+/// reprints, abstracts and corrections), then the one more providers agree
+/// on. Then the first may give way to a candidate from the claim's site's
+/// publisher ([`prefer_site`]); returns whether it did.
 fn rank(candidates: &mut [Candidate], claim: &Claim) -> bool {
     let issued = |c: &Candidate| {
         c.record.work.issued.map_or(i64::MAX, |d| {
@@ -798,10 +828,18 @@ fn rank(candidates: &mut [Candidate], claim: &Claim) -> bool {
                 + i64::from(d.day().unwrap_or(31))
         })
     };
+    let confirmed = |c: &Candidate| {
+        let a = &c.assessment;
+        [a.container, a.volume, a.page]
+            .iter()
+            .filter(|f| f.agreement == Agreement::Match)
+            .count()
+    };
     candidates.sort_by(|a, b| {
         b.assessment
             .confidence
             .total_cmp(&a.assessment.confidence)
+            .then(confirmed(b).cmp(&confirmed(a)))
             .then(issued(a).cmp(&issued(b)))
             .then(b.sightings.len().cmp(&a.sightings.len()))
     });
@@ -886,6 +924,23 @@ fn prefer_site(candidates: &mut [Candidate], claim: &Claim) -> bool {
     }
 }
 
+/// The journal, volume and page of another record of the work, for a
+/// record that gives none of them and isn't a preprint (arXiv's DataCite
+/// record of a paper published in Physical Review Letters): the work
+/// appeared there, whichever record of it is kept.
+fn add_place(record: &mut SourceRecord, other: &SourceRecord) {
+    let (w, o) = (&mut record.work, &other.work);
+    if w.work_type != Some(WorkType::Preprint)
+        && w.container_title.is_none()
+        && w.volume.is_none()
+        && w.page.is_none()
+    {
+        w.container_title.clone_from(&o.container_title);
+        w.volume.clone_from(&o.volume);
+        w.page.clone_from(&o.page);
+    }
+}
+
 /// Every year a record reports: issued, then other editions or versions.
 fn years(record: &SourceRecord) -> impl Iterator<Item = i16> + '_ {
     let w = &record.work;
@@ -923,7 +978,7 @@ fn distinct(titles: Vec<String>) -> Vec<String> {
 
 #[cfg(test)]
 mod tests {
-    use aspero_core::{Raw, UpdateKind, Work, WorkType};
+    use aspero_core::{Raw, UpdateKind, Work};
     use jiff::Timestamp;
 
     use super::*;
@@ -1318,5 +1373,47 @@ mod tests {
         let (dois, chosen) = ranked(&claim(STROKE, &[], None, Some("jamanetwork.com")), &records);
         assert_eq!(dois[0], "doi:10.1001/jama.2026.19482");
         assert!(chosen);
+    }
+
+    #[test]
+    fn a_record_without_a_place_takes_its_works() {
+        // arXiv's DataCite record of the LIGO paper, merged with OpenAlex's.
+        let title = "Observation of Gravitational Waves from a Binary Black Hole Merger";
+        let mut datacite = titled("10.48550/arxiv.1602.03837", title, &[], 2016);
+        let mut openalex = titled("10.1103/physrevlett.116.061102", title, &[], 2016);
+        openalex.work.container_title = Some("Physical Review Letters".into());
+        openalex.work.volume = Some("116".into());
+        openalex.work.page = Some("061102".into());
+        let mut preprint = datacite.clone();
+        preprint.work.work_type = Some(WorkType::Preprint);
+        add_place(&mut datacite, &openalex);
+        assert_eq!(
+            datacite.work.container_title.as_deref(),
+            Some("Physical Review Letters")
+        );
+        assert_eq!(datacite.work.volume.as_deref(), Some("116"));
+        // A preprint is another version, still in no journal.
+        add_place(&mut preprint, &openalex);
+        assert_eq!(preprint.work.container_title, None);
+    }
+
+    #[test]
+    fn the_article_outranks_a_copy_that_cant_check_its_place() {
+        // Red team (#102): Tversky & Kahneman's Science article, cited with
+        // a wrong page, against the earlier technical report.
+        let title = "Judgment under Uncertainty: Heuristics and Biases";
+        let authors = ["Amos Tversky", "Daniel Kahneman"];
+        let mut report = titled("10.21236/ad0767426", title, &authors, 1973);
+        report.work.work_type = Some(WorkType::Report);
+        let mut article = titled("10.1126/science.185.4157.1124", title, &authors, 1974);
+        article.work.container_title = Some("Science".into());
+        article.work.volume = Some("185".into());
+        article.work.page = Some("1124-1131".into());
+        let claim = Claim::from_text(
+            "Tversky A, Kahneman D. Judgment under uncertainty: heuristics and biases. Science. \
+             1974;185:1353.",
+        );
+        let (dois, _) = ranked(&claim, &[report, article]);
+        assert_eq!(dois[0], "doi:10.1126/science.185.4157.1124");
     }
 }

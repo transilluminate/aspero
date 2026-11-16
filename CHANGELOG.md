@@ -85,6 +85,40 @@ ones mismatched or not found fell from 19 to 9 of 441):
   (`Hirschi-Santelmo` for Hirschi) and an organisation among a structured
   claim's authors are no strangers; BMJ's page `698.1` is page 698.
 
+Fixed (from a third held-out red team, `bench/redteam/holdout-3.jsonl`,
+replayed offline: wrong citations verified fell from 36 of 426 to none;
+real ones verified 474 of 508, from 475, and accepted 490):
+
+- A paper cited in any other meeting's proceedings is plausible, the
+  venue named: proceedings' names are compared by what they are about,
+  their furniture (Proceedings of the, ordinals, years, Annual,
+  International, ACM/IEEE, SIG…, Conference on) set aside, and by their
+  acronyms ("In … Conference on Computers and Accessibility (ASSETS
+  '15)" for an HRI paper). A journal's article cited "In Proceedings of
+  …" a meeting is another venue too. A record giving its pages but not
+  its proceedings (OpenAlex's of ACM papers) takes them from another
+  record of the same DOI, so the venue is checked whichever is kept.
+- A book's chapter cited as a journal's article (a volume and issue, its
+  book's title or a journal as the journal) is plausible, its volume
+  named; nor does the book verify for it.
+- An RIS or EndNote record or a citation template sent as a JSON claim's
+  `text` keeps the fields it gives: an RIS record on several lines kept
+  only its DOI (and verified by it whatever authors it named), or was
+  refused as empty without one.
+- A work named by its claimed identifier, whole title and place, cited
+  with other authors, is plausible rather than a mismatch.
+- A journal's words in a reworded title before it are the title's, not
+  the journal's, so the title is compared; an invented co-author among
+  names in a script without capitals (Arabic) is seen; a volume
+  numbered like a year (`2007.0(52)`) is no year cited; prose naming a
+  journal before its volume and pages (`showed in Cancer Epidemiology,
+  38, 211–214`) is read; "Research Square" names a preprint server.
+- Developer: OpenAlex's 404s answered on prepaid credit, past the daily
+  allowance, are recorded on the HTTP tape (they read as a spent budget,
+  so a red-team run on credit replayed its "not found" lookups as
+  misses). The red team counts an ISBN-10 or a versioned DOI as the
+  work's own identifier.
+
 ## 0.29.0
 
 Added:

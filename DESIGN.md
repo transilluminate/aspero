@@ -434,7 +434,9 @@ an ISBN only when it is one) and an EndNote record (`%0 Journal Article
 %A … %T … %J …`, `%R` the DOI). Their tags would otherwise be misread as
 free text ("Journal Article" after `%0` as authors). A stdin line starting
 with `{{`, or with `{` but not meant as JSON (no key or `}` next), is a
-reference, not invalid JSON. A BibTeX entry pasted as text stays text, but
+reference, not invalid JSON. A claim object's `text` that is one (an RIS
+record on several lines, sent as `{"text": …}`) keeps the fields it gives;
+fields the object gives beside it win. A BibTeX entry pasted as text stays text, but
 its `eprint` (arXiv unless `archivePrefix` says otherwise) and `pmid` are
 identifiers claimed, as DOIs in it already were.
 
@@ -537,7 +539,10 @@ citation styles. The rules, each from a real failure:
   Lancet.`), not as one of its words. A short abbreviation after another
   (`Sci.`, not `JAMA.`) is never read alone. In prose, "a paper in"
   (article, study, report) reads the journal up to a bracket (`the 2007
-  Bar-Haim paper in Psychol Sci (…)`). Different means clearly another: not the
+  Bar-Haim paper in Psychol Sci (…)`), and a verb's "in" reads it before
+  its volume and pages (`showed in Cancer Epidemiology, 38, 211–214, in
+  …`). A volume numbered like a year with its part and issue
+  (`2007.0(52)`, a working-paper series') is no year cited. Different means clearly another: not the
   same by rule, neither name (abbreviated, spelling aside) inside the other
   (`Proc Natl Acad Sci U S A` ↔ `Proceedings of the National Academy of
   Sciences`), nor initials of part of it (PNAS). Only journal articles,
@@ -547,7 +552,7 @@ citation styles. The rules, each from a real failure:
   a preprint is when the reference cites a journal (not a preprint
   server) unless the claimed identifier is the preprint's: it's another
   version. So is a journal's article cited as a preprint ("medRxiv
-  preprint", no identifier). A record with no journal, volume or page (a
+  preprint", "Research Square", no identifier). A record with no journal, volume or page (a
   Zenodo copy, a report; not a preprint, book, chapter, dataset or
   software) can't confirm a journal cited, nor can one without volume or
   page, its journal unconfirmed, confirm a journal, volume and page all
@@ -570,8 +575,10 @@ citation styles. The rules, each from a real failure:
   Matching volume and page corroborate like authors; with journal and
   volume agreeing, a title missing from a short reference doesn't count
   against it, but a reference that gives one (three or more words in a
-  run that are none of the work's authors, journal, numbers or furniture)
-  keeps its title mismatch: with the work's authors and the place, that
+  run that are none of the work's authors, journal, numbers or furniture;
+  the journal's words only where it stands, their longest run: "The
+  contribution of growth hormone in fetal design. Growth Hormone & IGF
+  Research." gives a title) keeps its title mismatch: with the work's authors and the place, that
   is plausible (a translated title, or one work's title at another's
   place), never verified. A quoted title, or BibTeX's, is a title given
   however short (`"The essence of entanglement," Phys. Rev. A, vol.
@@ -603,6 +610,44 @@ citation styles. The rules, each from a real failure:
   unless the claimed identifier is its or its DOI names the conference.
   Real NeurIPS citations whose only record is arXiv's are plausible
   too: the venue unconfirmed.
+  Any other meeting is told by what it's about (holdout-3's `k`: an HRI
+  paper "In The 26th International ACM SIGACCESS Conference on Computers
+  and Accessibility (ASSETS '15)"; `publication::proceedings_agree`).
+  Each name is reduced to its subject words, its furniture set aside
+  (Proceedings of the, Companion, ordinals and years, Annual,
+  International, World, Joint, ACM/IEEE and other publishers, SIG…,
+  Conference/Symposium/Workshop on, pages, editors), and its acronyms
+  (two or more capitals: "HRI", "RecSys"; not a publisher's or a
+  numeral): a shared acronym is the same meeting; at least half the
+  record's subject words in the venue cited (an abbreviation for its
+  word: "Robot." for "Robotics") is the same; a third or fewer is
+  another, plausible with the venue named; an acronym alone against a
+  name with another acronym is another, against a name without one
+  ("ASSETS" for "… Computers and Accessibility") can't be told. Only a
+  venue the claim gives (a structured container, BibTeX's, or text
+  after the title) as a meeting's ("In …", "Proceedings of …"), against
+  a record's proceedings ("… Conference on …", "Companion of …", or
+  "Proceedings of …" unless the record is a journal's article: the
+  Royal Society's journals go by abbreviations this can't tell). A
+  journal's article cited "In Proceedings of …" a meeting is another
+  venue too. A record of the same version (a DOI shared) that gives its
+  pages but no venue (OpenAlex's of ACM papers) takes the venue of the
+  other record merged with it, where their numbers agree, so a venue
+  cited is checked whichever record is kept.
+- **A book's chapter cited as a journal's article is plausible**
+  (holdout-3's `m`): a chapter, in no volume, cited with a volume and an
+  issue (`Biogeochemical Cycles and Climate. 2019;23(5):159-175`,
+  `Psychotherapy Research, 54(12), 341–356`), or with a structured
+  journal (not its book's title) and volume. Its volume is the
+  difference named, and a journal other than its book the venue. A book
+  series' volume has no issue (`Lecture Notes in Computer Science, vol.
+  9351`), and a chapter cited "In: …" is none. Nor does the book itself
+  verify for it, its title where the journal stands with a volume and
+  issue.
+- **An identified work cited with other authors is plausible**: the
+  claimed identifier, the whole title and the place name the work, and
+  authors that differ are the citation's error (or a record's garbled
+  byline: holdout-3 #138's one author "Ruff, Paul Jurica, Ronald M").
 - **First author alone is an author match** ("Vaswani et al."); an
   unmentioned sole author is no match. But a name the claim gives that
   the work's byline lacks (#102: an invented co-author beside a real
@@ -624,7 +669,9 @@ citation styles. The rules, each from a real failure:
   a family name, not a given name of the next. A record's name with its
   family name in capitals (`Seok-Bae LEE`, `A. H. LINSSEN`) or inverted
   (`Lubrano, Emanuele`, DataCite's) is a person's, so its byline is
-  complete. A claimed double-barrelled name one part of which is an
+  complete; so is a name of two to five words in a script without
+  capitals (Arabic: `امحمد عثمان فيدان`), which can't be told a person's
+  otherwise. A claimed double-barrelled name one part of which is an
   author's, the given initial agreeing (`Hirschi-Santelmo, Sandrine` for
   Sandrine Hirschi), is that author; organisations among a structured
   claim's authors ("Committee on Infectious Diseases") aren't compared.

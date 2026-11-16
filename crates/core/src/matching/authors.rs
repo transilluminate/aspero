@@ -68,7 +68,7 @@ pub(super) fn complete_byline(authors: &[Person]) -> bool {
 }
 
 /// Every word of every name on a byline, normalised.
-fn name_words(authors: &[Person]) -> Vec<String> {
+pub(super) fn name_words(authors: &[Person]) -> Vec<String> {
     authors
         .iter()
         .flat_map(|p| [&p.family, &p.given, &p.literal])

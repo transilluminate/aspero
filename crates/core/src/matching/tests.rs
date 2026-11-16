@@ -1162,3 +1162,153 @@ fn bylines_that_may_name_others_are_not_held_to_the_record() {
     let a = assess(&Claim::from_text(&text), &listed);
     assert!((PLAUSIBLE..VERIFIED).contains(&a.confidence), "{a:?}");
 }
+
+fn lecun() -> SourceRecord {
+    let mut r = placed(
+        &["10.1038/nature14539"],
+        "Deep learning",
+        &["Yann LeCun", "Yoshua Bengio", "Geoffrey Hinton"],
+        2015,
+        ("Nature", "521", "436-444"),
+    );
+    r.work.work_type = Some(crate::work::WorkType::JournalArticle);
+    r
+}
+
+fn hallmarks() -> SourceRecord {
+    let mut r = placed(
+        &[],
+        "Hallmarks of Cancer: The Next Generation",
+        &["Douglas Hanahan", "Robert A. Weinberg"],
+        2011,
+        ("Cell", "144", "646-674"),
+    );
+    r.work.work_type = Some(crate::work::WorkType::JournalArticle);
+    r
+}
+
+#[test]
+fn a_title_with_words_added_is_not_the_records() {
+    // Red team (#102): another work's title containing this one's, or a
+    // subtitle it lacks or doesn't have.
+    for (text, record) in [
+        (
+            "LeCun Y, Bengio Y, Hinton G. Deep learning for medical image analysis. Nature. \
+             2015;521:436-444.",
+            lecun(),
+        ),
+        (
+            "LeCun Y, Bengio Y, Hinton G. Deep learning: a primer for clinicians. Nature. 2015.",
+            lecun(),
+        ),
+        (
+            "Hanahan D, Weinberg RA. Hallmarks of cancer: the next generation of targeted \
+             therapies. Cell. 2011;144(5):646-674.",
+            hallmarks(),
+        ),
+        (
+            "Hanahan D, Weinberg RA. Hallmarks of cancer: implications for therapy. Cell. 2011.",
+            hallmarks(),
+        ),
+        (
+            "Hanahan D, Weinberg RA. Colorectal hallmarks of cancer: the next generation. Cell. \
+             2011.",
+            hallmarks(),
+        ),
+        (
+            "Hanahan D, Weinberg RA. Hallmarks of cancer: the next generation enables therapy. \
+             Cell. 2011.",
+            hallmarks(),
+        ),
+    ] {
+        let a = assess(&Claim::from_text(text), &record);
+        assert_eq!(a.title.agreement, Agreement::Partial, "{text}");
+        assert!(
+            (PLAUSIBLE..VERIFIED).contains(&a.confidence),
+            "{text}: {a:?}"
+        );
+    }
+    let claim = Claim {
+        title: Some("Deep learning: a primer for clinicians".into()),
+        authors: vec!["LeCun, Y.".into(), "Bengio, Y.".into()],
+        year: Some(2015),
+        container: Some("Nature".into()),
+        ..Claim::default()
+    };
+    let a = assess(&claim, &lecun());
+    assert_eq!(a.title.agreement, Agreement::Partial);
+    assert!((PLAUSIBLE..VERIFIED).contains(&a.confidence), "{a:?}");
+}
+
+#[test]
+fn a_title_cited_as_is_or_without_its_subtitle_is_the_records() {
+    for (text, record) in [
+        (
+            "LeCun Y, Bengio Y, Hinton G. Deep learning. Nature. 2015;521:436-444.",
+            lecun(),
+        ),
+        (
+            "LeCun, Y., Bengio, Y. & Hinton, G. Deep learning. Nature 521, 436–444 (2015).",
+            lecun(),
+        ),
+        (
+            "LeCun, Y. et al. (2015) 'Deep learning', Nature, 521, pp. 436-444.",
+            lecun(),
+        ),
+        (
+            "Y. LeCun, Y. Bengio, and G. Hinton, \"Deep learning,\" Nature, vol. 521, 2015.",
+            lecun(),
+        ),
+        ("LeCun et al. Deep learning in Nature 2015", lecun()),
+        (
+            "LeCun and Hinton Deep learning doi:10.1038/nature14539 2015",
+            lecun(),
+        ),
+        (
+            "LeCun et al. described in Nature (2015) — \"Deep learning\".",
+            lecun(),
+        ),
+        (
+            "Hanahan D, Weinberg RA. Hallmarks of cancer. Cell. 2011;144:646.",
+            hallmarks(),
+        ),
+        (
+            "Hanahan D, Weinberg RA. The hallmarks of cancer: the next generation. Cell. 2011.",
+            hallmarks(),
+        ),
+    ] {
+        let a = assess(&Claim::from_text(text), &record);
+        assert_eq!(a.title.agreement, Agreement::Match, "{text}");
+        assert!(a.confidence >= VERIFIED, "{text}: {a:?}");
+    }
+    let a = assess(
+        &Claim::from_text("Vaswani A, Shazeer N. Attention is all you need NeurIPS 2017"),
+        &attention(&[], 2017),
+    );
+    assert!(a.confidence >= VERIFIED, "{a:?}");
+    let claim = Claim {
+        title: Some("Hallmarks of cancer".into()),
+        authors: vec!["Hanahan, D.".into()],
+        year: Some(2011),
+        ..Claim::default()
+    };
+    assert!(assess(&claim, &hallmarks()).confidence >= VERIFIED);
+    // A book's record without the subtitle cited (OpenAlex's "Imagined
+    // communities"); an article's must have it.
+    let mut book = record(&[], "Imagined communities", &["Benedict Anderson"], 1983);
+    book.work.work_type = Some(crate::work::WorkType::Book);
+    let text = "Anderson, B. (1983) Imagined Communities: Reflections on the Origin and Spread of \
+                Nationalism. London: Verso.";
+    assert!(assess(&Claim::from_text(text), &book).confidence >= VERIFIED);
+    let claim = Claim {
+        title: Some(
+            "Imagined Communities: Reflections on the Origin and Spread of Nationalism".into(),
+        ),
+        authors: vec!["Anderson, B.".into()],
+        year: Some(1983),
+        ..Claim::default()
+    };
+    assert!(assess(&claim, &book).confidence >= VERIFIED);
+    book.work.work_type = Some(crate::work::WorkType::JournalArticle);
+    assert!(assess(&claim, &book).confidence < VERIFIED);
+}

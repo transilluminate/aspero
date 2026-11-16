@@ -86,6 +86,23 @@ pub fn title_similarity(a: &str, b: &str) -> f64 {
         .fold(0.0, f64::max)
 }
 
+/// Whether a claimed title is a record's with words added: every content
+/// word of the record's, and more ("Deep learning: a primer for
+/// clinicians" for "Deep learning"). Not a dropped subtitle, which is the
+/// other way round; nor, with `subtitle_ok`, a subtitle added to the
+/// record's whole title.
+pub(super) fn extends(claimed: &str, actual: &str, subtitle_ok: bool) -> bool {
+    let (claimed, actual) = (unmarked(claimed), unmarked(actual));
+    if subtitle_ok
+        && main_title(claimed) != claimed
+        && dedup(content_words(main_title(claimed))) == dedup(content_words(actual))
+    {
+        return false;
+    }
+    let (claimed, actual) = (content_words(claimed), content_words(actual));
+    !actual.is_empty() && claimed.len() > actual.len() && actual.iter().all(|w| claimed.contains(w))
+}
+
 /// [`title_similarity`] of the whole titles, subtitles included: of two
 /// works whose main title is the one cited, the one whose subtitle is too
 /// ("Treatment of Acute Ischemic Stroke: A Review" over "…: Open Trial
@@ -111,6 +128,38 @@ pub(super) const STOPWORDS: &[&str] = &[
 /// The words of a link written out (`https:// doi. org/ …`), which are no
 /// evidence of a title.
 const LINK_WORDS: &[&str] = &["http", "https", "www", "doi", "dx", "org", "com"];
+
+/// A reference's furniture: words around its fields, not in them.
+const FURNITURE: &[&str] = &[
+    "doi",
+    "epub",
+    "ahead",
+    "print",
+    "online",
+    "published",
+    "accessed",
+    "available",
+    "vol",
+    "pp",
+    "suppl",
+    "eds",
+    "pmid",
+    "pmcid",
+    "arxiv",
+    "isbn",
+];
+
+/// Words naming where a work appeared rather than continuing its title:
+/// "… supervision In Proceedings of the 38th Conference".
+const VENUE_WORDS: &[&str] = &[
+    "proceedings",
+    "proc",
+    "conference",
+    "symposium",
+    "workshop",
+    "journal",
+    "preprint",
+];
 
 /// A title's distinct words, without stopwords or link words (unless that
 /// leaves none).
@@ -176,6 +225,86 @@ impl Normalised {
         })
     }
 
+    /// The words from `from` on that run together as written: joined by
+    /// spaces or a word's own hyphens and apostrophes, up to punctuation.
+    fn run_from(&self, from: usize) -> Range<usize> {
+        let mut end = from;
+        while end < self.words.len() {
+            let joined = end == from
+                || self.raw[self.spans[end - 1].end..self.spans[end].start]
+                    .chars()
+                    .all(|c| c.is_whitespace() || matches!(c, '-' | '‐' | '\'' | '’'));
+            if !joined {
+                break;
+            }
+            end += 1;
+        }
+        from..end
+    }
+
+    /// Whether the claim's title is the record's (found at `span`) with more
+    /// words: carried on in the same sentence ("Deep learning for medical
+    /// image analysis", "… with AlphaFold enables drug discovery"), given a
+    /// subtitle the record's lacks or another ("Deep learning: a primer"),
+    /// or with a word before it ("Colorectal cancer statistics"). A title
+    /// is the record's only up to punctuation, a capitalised word (a
+    /// venue's, in a reference without stops: "Attention is all you need
+    /// ICML 2017"), or the journal and year ("… in Nature 2015"); a word
+    /// before it may be its authors' (`names`) or a joining word ("The").
+    /// With `subtitle_ok`, a subtitle after the record's whole title is
+    /// not more words.
+    pub(super) fn extends_title(
+        &self,
+        span: &Range<usize>,
+        names: &[String],
+        journal: Option<&[String]>,
+        subtitle_ok: bool,
+    ) -> bool {
+        let significant = |run: Range<usize>| {
+            self.words[run].iter().any(|w| {
+                !STOPWORDS.contains(&w.as_str())
+                    && !LINK_WORDS.contains(&w.as_str())
+                    && !FURNITURE.contains(&w.as_str())
+                    && !VENUE_WORDS.contains(&w.as_str())
+                    && !w.chars().all(|c| c.is_ascii_digit())
+                    && !crate::publication::is_month(w)
+                    && !journal.is_some_and(|j| crate::publication::journal_word(w, j))
+            })
+        };
+        let after = |i: usize| {
+            let Some(next) = self.words.get(i) else {
+                return false;
+            };
+            let gap = &self.raw[self.spans[i - 1].end..self.spans[i].start];
+            let gap = gap.trim_start_matches([')', ']']).trim();
+            let raw = &self.raw[self.spans[i].clone()];
+            let continues = match gap {
+                "" => {
+                    STOPWORDS.contains(&next.as_str())
+                        || raw.chars().next().is_some_and(char::is_lowercase)
+                }
+                ":" | "—" | "–" | "-" => {
+                    !subtitle_ok && raw.chars().next().is_some_and(char::is_alphabetic)
+                }
+                _ => false,
+            };
+            continues && significant(self.run_from(i))
+        };
+        let before = |i: usize| {
+            let gap = &self.raw[self.spans[i - 1].end..self.spans[i].start];
+            let word = &self.words[i - 1];
+            let raw = &self.raw[self.spans[i - 1].clone()];
+            gap.trim().is_empty()
+                && word.chars().count() > 1
+                && raw.chars().any(char::is_lowercase)
+                && !matches!(word.as_str(), "et" | "al")
+                && !STOPWORDS.contains(&word.as_str())
+                && !names.contains(word)
+                && significant(i - 1..i)
+        };
+        after(span.end) || (span.start > 0 && before(span.start))
+    }
+
     /// 1.0 if the title (or its main title, without subtitle) appears as a
     /// phrase; otherwise the share of its content words present. Under two
     /// thirds present is scored as a mismatch: a couple of topic words
@@ -231,24 +360,6 @@ impl Normalised {
     /// ("et al", "epub", a month). "Wittermans E, et al. ERJ Open Res.
     /// 2022. doi:…" has none.
     pub(super) fn untitled(&self, families: &[String], journal: Option<&str>) -> bool {
-        const FURNITURE: &[&str] = &[
-            "doi",
-            "epub",
-            "ahead",
-            "print",
-            "online",
-            "published",
-            "accessed",
-            "available",
-            "vol",
-            "pp",
-            "suppl",
-            "eds",
-            "pmid",
-            "pmcid",
-            "arxiv",
-            "isbn",
-        ];
         let author_words: Vec<&str> = families.iter().flat_map(|f| f.split(' ')).collect();
         let journal = journal.map(crate::publication::significant);
         self.words.iter().filter(|w| !w.is_empty()).all(|w| {

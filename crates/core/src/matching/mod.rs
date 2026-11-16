@@ -30,7 +30,8 @@ use crate::publication::{self, first_page, journal_in, other_journal, same_journ
 use crate::record::SourceRecord;
 
 use authors::{
-    author_overlap, byline_strangers, claimed_strangers, complete_byline, family_name, same_family,
+    author_overlap, byline_strangers, claimed_strangers, complete_byline, family_name, name_words,
+    same_family,
 };
 pub use derivative::{
     WorkKind, claim_mentions_derivative, derivative_kind, derivative_work_kind, is_derivative,
@@ -87,6 +88,12 @@ const JOURNAL_MISMATCH_CAP: f64 = LOCATION_MISMATCH_CAP;
 /// Confidence ceiling when the claim names an author the record's complete
 /// byline lacks: invented co-authors beside a real first author.
 const STRANGERS_CAP: f64 = LOCATION_MISMATCH_CAP;
+/// Title score, partial, when the claim's title is the record's with words
+/// added ([`text::extends`]).
+const EXTENDED_TITLE: f64 = 0.75;
+/// Confidence ceiling then: the claim may cite another work whose title
+/// contains this one's, or this one with a subtitle its record lacks.
+const EXTENDED_TITLE_CAP: f64 = LOCATION_MISMATCH_CAP;
 
 /// Verdict thresholds on confidence.
 pub const VERIFIED: f64 = 0.85;
@@ -475,6 +482,32 @@ pub fn assess(claim: &Claim, record: &SourceRecord) -> Assessment {
         Some(s) if strangers => FieldCheck::scored(s.min(CORROBORATING_AUTHORS)),
         _ => authors,
     };
+    // The record's title with words added: another work's title that
+    // contains this one's ("Deep learning for medical image analysis"
+    // isn't "Deep learning"), or a subtitle the record lacks. Partly the
+    // same, never the same. Books' records often leave their subtitles out
+    // ("Imagined Communities", cited with "Reflections on the Origin …"):
+    // there, a subtitle after the whole title is no more words.
+    let subtitle_ok = work.work_type == Some(crate::work::WorkType::Book)
+        && work_title
+            .as_deref()
+            .is_some_and(|t| text::main_title(unmarked(t)) == unmarked(t));
+    let extended = match (&claim.title, &work_title, &text, &title_span) {
+        (Some(claimed), Some(actual), _, _) => text::extends(claimed, actual, subtitle_ok),
+        (None, Some(_), Some(text), Some(span)) => {
+            let journal = work
+                .container_title
+                .as_deref()
+                .map(publication::significant);
+            let names = name_words(&work.authors);
+            text.extends_title(span, &names, journal.as_deref(), subtitle_ok)
+        }
+        _ => false,
+    };
+    let title = match title.score {
+        Some(s) if extended => FieldCheck::scored(s.min(EXTENDED_TITLE)),
+        _ => title,
+    };
 
     let actual_years: Vec<i16> = work
         .issued
@@ -663,7 +696,7 @@ pub fn assess(claim: &Claim, record: &SourceRecord) -> Assessment {
     // chapter cited in the book is not the book: its authors found may be
     // the book's editors.
     if work.work_type == Some(crate::work::WorkType::Book)
-        && title.agreement == Agreement::Match
+        && (title.agreement == Agreement::Match || extended)
         && authors.score.is_some_and(|s| s >= CORROBORATING_AUTHORS)
         && year.agreement == Agreement::Mismatch
         && !claim.text.as_deref().is_some_and(cites_chapter)
@@ -674,6 +707,10 @@ pub fn assess(claim: &Claim, record: &SourceRecord) -> Assessment {
     // tell of invented references, whatever else agrees.
     if strangers {
         confidence = confidence.min(STRANGERS_CAP);
+    }
+    // So is a title with words the work's lacks, whatever else agrees.
+    if extended {
+        confidence = confidence.min(EXTENDED_TITLE_CAP);
     }
     // A reply, correction or commentary is not the work it responds to,
     // unless the citation says it is citing one.

@@ -39,6 +39,20 @@
 //! identifiers (see [`crate::site`]), never a claimed field. The page's address is not an identifier
 //! unless it holds one. With no identifier and no title, there's no claim.
 //!
+//! Not every page is a scholarly work's (#119). A page is one
+//! ([`PageKind::Work`]) when it gives an identifier (in its tags, its
+//! JSON-LD or its address; an ISBN too, so a bookshop's page tagged with
+//! one is the book's), citation tags (Highwire's with a title, journal or
+//! identifier; PRISM's or Dublin Core's with a journal or identifier), or
+//! a `ScholarlyArticle` or `MedicalScholarlyArticle` in JSON-LD; when it
+//! is on a publisher's site ([`crate::site::PUBLISHERS`]: an article page
+//! that gives only its title); or when no markup was given, so nothing
+//! tells. Any other page with a title is a [`PageKind::WebPage`]: it has
+//! no claim (there's no work to verify), and its record is
+//! [`PageClaim::web_page`] (see `web`), cited as itself. The record is
+//! read for every page with a title, works' too, so an app can still cite
+//! the page when its work isn't found.
+//!
 //! Caps: [`MAX_INPUT`] bytes of markup and [`MAX_TAGS`] tags are read,
 //! [`MAX_AUTHORS`] authors kept, and values over [`MAX_VALUE`] characters
 //! ignored.
@@ -46,9 +60,11 @@
 mod html;
 mod jsonld;
 mod title;
+mod web;
 
 pub use html::{MAX_INPUT, MAX_JSON_LD, MAX_TAGS};
 use serde::{Deserialize, Serialize};
+pub use web::{PageKind, WebPage, normalise_url};
 
 use crate::id::{IdKind, Mention, WorkId, scan};
 use crate::matching::Claim;
@@ -67,11 +83,17 @@ pub struct PageClaim {
     /// Every identifier found, each once, in priority order.
     pub ids: Vec<PageId>,
     /// The work as the page describes it, identifiers included; `None`
-    /// with no identifier and no title.
+    /// with no identifier and no title, or for a web page.
     pub claim: Option<Claim>,
     /// The first vocabulary, in priority order, that gave an identifier or
     /// the title: what answered. [`PageSource::Url`] when nothing did.
     pub source: PageSource,
+    /// Whether the page shows a scholarly work, or is a web page to cite
+    /// as itself.
+    pub kind: PageKind,
+    /// The page as a web page: always for [`PageKind::WebPage`], and for a
+    /// work's page with a title too.
+    pub web_page: Option<WebPage>,
 }
 
 /// One identifier a page gave.
@@ -161,6 +183,20 @@ pub fn claim_from_page(html: Option<&str>, url: &str, title: Option<&str>) -> Pa
         (PageSource::DublinCore, dublin_core(&markup)),
         (PageSource::JsonLd, jsonld::read(&markup.json_ld)),
     ];
+    // Citation tags: Highwire's with a title, journal or identifier;
+    // PRISM's and Dublin Core's with a journal or identifier (Dublin
+    // Core's title and creator alone are any page's).
+    let cited = vocabularies
+        .iter()
+        .any(|(vocabulary, found)| match vocabulary {
+            PageSource::Highwire => {
+                !found.ids.is_empty() || found.title.is_some() || found.container.is_some()
+            }
+            PageSource::Prism | PageSource::DublinCore => {
+                !found.ids.is_empty() || found.container.is_some()
+            }
+            _ => false,
+        });
     let mut source = None;
     let mut ids: Vec<PageId> = Vec::new();
     let mut claim = Claim::default();
@@ -214,11 +250,29 @@ pub fn claim_from_page(html: Option<&str>, url: &str, title: Option<&str>) -> Pa
     }
     claim.ids = ids.iter().map(|id| id.mention.id.clone()).collect();
     claim.site = crate::site::site_of(url);
-    let claim = (!claim.ids.is_empty() || claim.title.is_some()).then_some(claim);
+    let publishers = claim
+        .site
+        .as_deref()
+        .is_some_and(|s| !crate::site::doi_prefixes(s).is_empty());
+    let scholarly = html.is_none()
+        || !ids.is_empty()
+        || cited
+        || publishers
+        || jsonld::scholarly(&markup.json_ld);
+    let web_page = web::read(&markup, &jsonld::web(&markup.json_ld), url, title);
+    let kind = if !scholarly && web_page.is_some() {
+        PageKind::WebPage
+    } else {
+        PageKind::Work
+    };
+    let claim = (kind == PageKind::Work && (!claim.ids.is_empty() || claim.title.is_some()))
+        .then_some(claim);
     PageClaim {
         ids,
         claim,
         source: source.unwrap_or(PageSource::Url),
+        kind,
+        web_page,
     }
 }
 
@@ -373,17 +427,55 @@ fn tidy_value(value: &str) -> Option<String> {
     tidy(value).filter(|v| v.chars().count() <= MAX_VALUE)
 }
 
-/// `s` with markup such as `<i>` removed and its whitespace collapsed;
-/// `None` when nothing's left.
+/// Inline formatting that titles carry as markup, HTML's and JATS's
+/// (lowercase), and any namespaced tag (`mml:math`, `jats:italic`).
+/// Publishers write it into metadata escaped as often as not
+/// (`&lt;i&gt;`), so it's taken out after decoding; other names (`meta`,
+/// `title`, `div`) are text then, as in "&lt;meta&gt;: The metadata
+/// element".
+const FORMATTING: &[&str] = &[
+    "i",
+    "b",
+    "em",
+    "strong",
+    "sub",
+    "sup",
+    "sc",
+    "scp",
+    "span",
+    "u",
+    "small",
+    "big",
+    "br",
+    "tt",
+    "font",
+    "italic",
+    "bold",
+    "underline",
+    "overline",
+    "monospace",
+    "roman",
+    "sans-serif",
+    "inline-formula",
+    "named-content",
+    "styled-content",
+];
+
+/// `s` with formatting markup such as `<i>` removed ([`FORMATTING`]) and
+/// its whitespace collapsed; `None` when nothing's left.
 fn tidy(s: &str) -> Option<String> {
     let mut out = String::with_capacity(s.len());
     let mut rest = s;
     while let Some(lt) = rest.find('<') {
         let after = &rest[lt + 1..];
-        let tag = after
+        let name: String = after
+            .trim_start_matches('/')
             .chars()
-            .next()
-            .is_some_and(|c| c.is_ascii_alphabetic() || c == '/');
+            .take_while(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | ':'))
+            .flat_map(char::to_lowercase)
+            .collect();
+        let tag = name.starts_with(|c: char| c.is_ascii_alphabetic())
+            && (FORMATTING.contains(&name.as_str()) || name.contains(':'));
         match after.find('>') {
             Some(gt) if tag && !after[..gt].contains('<') => {
                 out.push_str(&rest[..lt]);

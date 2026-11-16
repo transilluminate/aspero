@@ -485,6 +485,14 @@ claimed. JSON gives `page_source`, what answered: highwire, prism,
 dublin_core, json_ld, title, title_hint or url. Exits 3 when the page
 doesn't say which work it is.
 
+A page that isn't a scholarly work's (no identifier, citation tags or
+scholarly JSON-LD, and not on a publisher's site: a Wikipedia article, a
+news story, guidance) is a web page: nothing is verified, and its record
+is shown (title, site, canonical address, authors, dates, language, and
+its key, `url:` and the address). With --format bibtex, ris, csl-json or
+cite it's written out as a web page, read on --accessed (today by
+default).
+
 The page's site (--site for other claims, `site` in JSON) is a hint of
 its publisher, never the journal: for a claim without identifiers, its
 publisher's own works are searched for the title too (Crossref, free),
@@ -964,6 +972,16 @@ pub struct PageArgs {
         conflicts_with_all = ["text", "authors", "year", "journal", "volume", "page", "ids", "split", "site"]
     )]
     pub url: Option<String>,
+    /// When a web page was read (YYYY-MM-DD), for its citation: today by
+    /// default. With --url.
+    #[arg(long, value_name = "DATE", requires = "url", value_parser = date)]
+    pub accessed: Option<aspero_core::PartialDate>,
+}
+
+/// A date: `2026-11-16`, `2026-11` or `2026`.
+fn date(s: &str) -> Result<aspero_core::PartialDate, String> {
+    s.parse()
+        .map_err(|e: aspero_core::work::DateError| e.to_string())
 }
 
 #[derive(Debug, Args)]

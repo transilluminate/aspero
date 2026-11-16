@@ -50,7 +50,7 @@ pub use query::{
 pub use record::{Field, FieldSet, Raw, SourceRecord};
 pub use references::{IndentedLine, LineReference, Reference, split_lines, split_references};
 pub use resilience::ResiliencePolicy;
-pub use webpage::{PageClaim, PageId, PageSource, claim_from_page};
+pub use webpage::{PageClaim, PageId, PageKind, PageSource, WebPage, claim_from_page};
 pub use work::{
     OpenAccess, PartialDate, Person, Update, UpdateKind, UpdateTo, Work, WorkType, orcid,
     tidy_abstract,

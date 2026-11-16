@@ -1,0 +1,25 @@
+name: Feature
+description: Something aspero should do, or do differently.
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What you're trying to do
+      description: The task, and where aspero falls short of it today.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What would help
+      description: A command, flag, tool or field, as you'd use it; and any alternatives you've considered.
+  - type: dropdown
+    id: surface
+    attributes:
+      label: Where
+      multiple: true
+      options:
+        - CLI
+        - MCP server
+        - library/other

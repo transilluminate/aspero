@@ -1,0 +1,73 @@
+name: Wrong verdict
+description: A citation aspero verified that it shouldn't have, or failed to verify that it should.
+title: "Wrong verdict: "
+labels: ["verdict"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks: every wrong verdict reported becomes a test case. How verdicts are
+        meant to work, and how they're measured, is in
+        [docs/accuracy.md](https://github.com/transilluminate/aspero/blob/main/docs/accuracy.md).
+
+        `aspero verify --report "<citation>"` prints a link that fills in most of this form.
+        Nothing is sent anywhere until you submit it here, and everything you submit is public.
+  - type: textarea
+    id: citation
+    attributes:
+      label: Citation
+      description: The reference exactly as written (or the JSON claim you gave), errors and all.
+      placeholder: "Surname A, Other B. Title of the work. Journal. 2020;12(3):45-67."
+    validations:
+      required: true
+  - type: dropdown
+    id: verdict
+    attributes:
+      label: Verdict aspero gave
+      options:
+        - verified
+        - plausible
+        - mismatch
+        - not_found
+        - invalid
+  - type: textarea
+    id: output
+    attributes:
+      label: Output
+      description: "Paste the output of `aspero verify --format json \"<citation>\"`."
+      render: json
+  - type: textarea
+    id: expected
+    attributes:
+      label: What it should have been
+      description: >-
+        The right work's DOI, PMID or URL, and which detail differs; or, for a
+        work that doesn't exist, why you're sure it doesn't.
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Evidence
+      description: Anything that shows it (the publisher's page, a database record, the retraction notice).
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: "`aspero --version`"
+      placeholder: aspero 0.26.0
+  - type: dropdown
+    id: surface
+    attributes:
+      label: Where you ran it
+      options:
+        - CLI
+        - MCP server
+        - library/other
+  - type: checkboxes
+    id: privacy
+    attributes:
+      label: Privacy
+      options:
+        - label: This citation is from a published or shareable source — not an unpublished manuscript.
+          required: true

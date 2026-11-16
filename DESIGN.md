@@ -441,6 +441,13 @@ nothing), year_differs (info when off by one, error beyond), duplicate
 (warning), updated (retraction/withdrawal error, expression of concern
 warning, correction info). `--fail-on` sets the exit-9 threshold.
 
+**Accuracy**: what the verdicts promise, the red team that measures them
+(`bench/redteam/`, its verdict policy and corpus), the acceptance criteria
+and release gate, and the results are in
+[docs/accuracy.md](docs/accuracy.md). Wrong verdicts are reported with the
+wrong-verdict issue form (`verify --report` fills it in) and become
+red-team cases (`scripts/issue-to-case.py`).
+
 **Benchmark**: `bench/citations.jsonl` (known-answer citations, optionally
 requiring a specific match or retraction flag), run live by
 `cargo run -p aspero-engine --example verify_bench` through

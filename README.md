@@ -132,6 +132,17 @@ which works around them are read with them or share their references. A work who
 OpenAlex doesn't have (often a book) is reported as such, never as
 unlinked.
 
+## Accuracy
+
+The promise: a fabricated or miscited reference shouldn't come back
+`verified`; `plausible` means "looks like this work, check it". How that's
+measured (a red-team corpus of real and wrong citations, held-out rounds,
+acceptance criteria), the results, and what `verify` can't check are in
+[docs/accuracy.md](docs/accuracy.md). A verdict that looks wrong:
+`aspero verify --report "<citation>"` prints a link to a [wrong-verdict
+issue](https://github.com/transilluminate/aspero/issues/new?template=wrong-verdict.yml),
+filled in; nothing is sent unless you open it and submit.
+
 ## Agents (MCP)
 
 Agents that speak the Model Context Protocol can use aspero as tools

@@ -1,6 +1,8 @@
 //! `aspero verify`: does a citation refer to a real work, with matching
 //! details?
 
+use std::fmt::Write as _;
+
 use aspero_core::{PageSource, ProviderId, Usage};
 use aspero_engine::{
     Candidate, Difference, Engine, Reason, Verdict, Verification, describe_update,
@@ -15,12 +17,14 @@ use crate::args::{ClaimArgs, Format, PageArgs};
 use crate::exit::Exit;
 use crate::grid::{self, Col, Grid, Text};
 use crate::output::{self, Level};
+use crate::report;
 use crate::term::{self, Paint, Progress};
 
 pub async fn run(
     engine: &Engine,
     args: ClaimArgs,
     page: PageArgs,
+    report: bool,
     out: Out,
 ) -> Result<Exit, Failure> {
     let limit = args.limit;
@@ -39,7 +43,7 @@ pub async fn run(
 
     let (positions, valid) = InputClaim::valid(&claims);
     let total = claims.len();
-    let mut results = Results::new(out.format, total);
+    let mut results = Results::new(out.format, total, report);
     let mut export = output::Exporter::new(&out)?;
     for (i, claim) in claims.iter().enumerate() {
         if let Err(e) = &claim.claim {
@@ -194,10 +198,12 @@ struct Results {
     done: usize,
     progress: Progress,
     exit: Exit,
+    /// `--report`: each result with a link to report its verdict.
+    report: bool,
 }
 
 impl Results {
-    fn new(format: Format, total: usize) -> Self {
+    fn new(format: Format, total: usize, report: bool) -> Self {
         let mut progress = Progress::new("citations", if format.is_human() { total } else { 0 });
         progress.show(0);
         Results {
@@ -207,10 +213,14 @@ impl Results {
             done: 0,
             progress,
             exit: Exit::Ok,
+            report,
         }
     }
 
-    fn add(&mut self, i: usize, done: Done) {
+    fn add(&mut self, i: usize, mut done: Done) {
+        if self.report {
+            with_report(&mut done, self.format);
+        }
         self.exit = self.exit.worst(done.verdict.map_or(Exit::Usage, exit_for));
         self.done += 1;
         match self.format {
@@ -249,11 +259,21 @@ impl Results {
                 if let [one] = &done[..] {
                     println!("{}", term::fill(&one.text));
                 } else {
+                    let reports: Vec<String> = done
+                        .iter()
+                        .filter_map(|d| d.item["report_url"].as_str().map(str::to_owned))
+                        .collect();
                     let mut grid = Grid::new(cols());
                     for d in done {
                         grid.row(d.row);
                     }
                     println!("{grid}");
+                    if !reports.is_empty() {
+                        println!("Report a wrong verdict, by row:");
+                        for (n, url) in reports.iter().enumerate() {
+                            println!("  {}. {url}", n + 1);
+                        }
+                    }
                 }
                 output::eprint_usage(usage);
             }
@@ -264,6 +284,20 @@ impl Results {
         }
         self.exit
     }
+}
+
+/// `done` with its `--report` link: `report_url` in the JSON, a line after
+/// the text (a table of one shows the text). Export formats print the
+/// entries on stdout, so the link goes to stderr.
+fn with_report(done: &mut Done, format: Format) {
+    let url = report::issue_url(&done.item);
+    if format.is_export() {
+        eprintln!("report a wrong verdict: {url}");
+    } else {
+        let label = term::paint("report a wrong verdict:", Paint::Dim);
+        let _ = writeln!(done.text, "  {label} {url}");
+    }
+    done.item["report_url"] = json!(url);
 }
 
 /// Positional text and the field flags.
@@ -470,6 +504,28 @@ mod tests {
                 ..
             })
         ));
+    }
+
+    /// `--report`: the link is in the JSON as `report_url`, and on its own
+    /// line after the text.
+    #[test]
+    fn a_report_link_follows_the_result() {
+        let item = json!({"input": "Smith J. A study. 2020", "verdict": "not_found"});
+        let mut done = Done {
+            item,
+            text: "NOT FOUND  Smith J. A study. 2020\n".into(),
+            row: Vec::new(),
+            verdict: Some(Verdict::NotFound),
+        };
+        with_report(&mut done, Format::Text);
+        let url = done.item["report_url"].as_str().unwrap();
+        assert!(url.starts_with(
+            "https://github.com/transilluminate/aspero/issues/new?template=wrong-verdict.yml&"
+        ));
+        assert!(url.contains("&verdict=not_found&"), "{url}");
+        let last = done.text.lines().last().unwrap();
+        assert!(last.starts_with("  ") && last.ends_with(url), "{last}");
+        assert!(done.text.ends_with('\n'));
     }
 
     /// What `verify` prints, byte for byte, as text and as a table at 80

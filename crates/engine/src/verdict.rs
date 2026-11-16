@@ -264,10 +264,14 @@ fn differences(claim: &Claim, c: &Candidate, known_only: bool) -> Vec<Difference
                 cited_year.map(|y| y.to_string()),
             )
         }),
+        // The journal's article, cited by its preprint's DOI: the
+        // identifier names the preprint server's version.
         (a.container.agreement == Agreement::Mismatch).then(|| {
             diff(
                 CitedField::Journal,
-                w.container_title.clone(),
+                matching::preprint_version_claimed(claim, &c.record)
+                    .map(str::to_owned)
+                    .or_else(|| w.container_title.clone()),
                 read.container.clone(),
             )
         }),

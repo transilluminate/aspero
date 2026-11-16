@@ -534,6 +534,68 @@ fn names_preprint(words: &[String]) -> bool {
         || words.windows(2).any(|w| w == ["research", "square"])
 }
 
+/// Preprint servers by their DOIs' prefixes (and, for bioRxiv's and
+/// medRxiv's, the digits after it: Cold Spring Harbor's journals share it,
+/// "10.1101/gr.…"). arXiv's isn't here: physics and computing cite a
+/// journal's article with its arXiv identifier as a matter of course.
+const PREPRINT_DOIS: &[(&str, &str)] = &[
+    ("10.1101/", "bioRxiv or medRxiv"),
+    ("10.21203/", "Research Square"),
+    ("10.20944/", "Preprints.org"),
+    ("10.2139/", "SSRN"),
+    ("10.31234/", "PsyArXiv"),
+    ("10.31219/", "OSF Preprints"),
+    ("10.31235/", "SocArXiv"),
+    ("10.26434/", "ChemRxiv"),
+    ("10.36227/", "TechRxiv"),
+    ("10.22541/", "Authorea"),
+];
+
+/// The preprint server whose DOI `id` is, if it is one.
+fn preprint_server_of(id: &WorkId) -> Option<&'static str> {
+    if id.kind() != IdKind::Doi {
+        return None;
+    }
+    let doi = id.to_string();
+    let doi = doi.strip_prefix("doi:").unwrap_or(&doi);
+    PREPRINT_DOIS.iter().find_map(|(prefix, server)| {
+        let rest = doi.strip_prefix(prefix)?;
+        (*prefix != "10.1101/" || rest.starts_with(|c: char| c.is_ascii_digit())).then_some(*server)
+    })
+}
+
+/// The preprint server whose version of the work a citation's identifier
+/// names, when the citation gives a journal for it: a journal article's
+/// record carrying its preprint's DOI too (OpenAlex merges the two), cited
+/// by the preprint's DOI with the journal's name ("… Journal of
+/// Cardiothoracic Surgery. 2024;19(1):2. doi:10.21203/rs.3.rs-2791419/v1").
+/// The identifier is another version's than the one cited: plausible, the
+/// journal to check against the server's.
+pub fn preprint_version_claimed(claim: &Claim, record: &SourceRecord) -> Option<&'static str> {
+    let journals = claim.cited_containers();
+    if journals.is_empty() || journals.iter().any(|j| preprint_server(j)) {
+        return None;
+    }
+    let held = |id: &WorkId| record.ids.iter().any(|r| same_work_id(r, id));
+    // The record's own DOI, a journal's.
+    let published = record
+        .ids
+        .iter()
+        .any(|id| id.kind() == IdKind::Doi && preprint_server_of(id).is_none());
+    let claimed_published = claim
+        .ids
+        .iter()
+        .any(|id| held(id) && preprint_server_of(id).is_none());
+    if !published || claimed_published || record.work.volume.is_none() {
+        return None;
+    }
+    claim
+        .ids
+        .iter()
+        .filter(|id| held(id))
+        .find_map(preprint_server_of)
+}
+
 /// Scores how well `record` matches `claim`.
 pub fn assess(claim: &Claim, record: &SourceRecord) -> Assessment {
     let work = &record.work;
@@ -759,13 +821,26 @@ pub fn assess(claim: &Claim, record: &SourceRecord) -> Assessment {
     // article; a preprint of it (in no journal, at no volume) is another
     // version, not the one cited.
     // So is one cited in a journal by name alone ("Science Robotics.
-    // 2024."), unless its identifier is the one claimed.
+    // 2024."), unless its arXiv identifier is the one claimed (a venue
+    // named beside it, "Transformer Circuits Thread. arXiv:2209.11895", as
+    // computing and physics cite): a server's DOI with a journal's name
+    // names two versions.
+    let by_arxiv = claim.ids.iter().any(|id| {
+        record.ids.iter().any(|r| same_work_id(r, id))
+            && (id.kind() == IdKind::Arxiv || id.to_string().starts_with("doi:10.48550/"))
+    });
     let preprint_of_cited = preprint
         && work.volume.is_none()
         && cites_journal
         && journals.iter().all(|j| !preprint_server(j))
         && ((cited_place.volume.is_some() && cited_place.page.is_some())
-            || id_agreement(&claim.ids, &record.ids) != Agreement::Match);
+            || id_agreement(&claim.ids, &record.ids) != Agreement::Match
+            || !by_arxiv);
+    // And the published version's record, merged with its preprint's,
+    // cited in its journal by the preprint's DOI: the journal the record's,
+    // the identifier the preprint's.
+    let preprint_id_cited =
+        article && !preprint && preprint_version_claimed(claim, record).is_some();
     // A journal's article cited as a preprint ("medRxiv preprint, 2019"),
     // without an identifier to say which version: another version.
     let article_as_preprint = article
@@ -823,12 +898,14 @@ pub fn assess(claim: &Claim, record: &SourceRecord) -> Assessment {
         }
         _ => FieldCheck::UNKNOWN,
     };
-    let container =
-        if (preprint_of_cited || article_as_preprint) && container.agreement != Agreement::Match {
-            FieldCheck::exact(false)
-        } else {
-            container
-        };
+    let container = if ((preprint_of_cited || article_as_preprint)
+        && container.agreement != Agreement::Match)
+        || preprint_id_cited
+    {
+        FieldCheck::exact(false)
+    } else {
+        container
+    };
     // A book's chapter, in no volume, cited as a journal's article: a
     // volume with an issue ("Biogeochemical Cycles and Climate.
     // 2019;23(5):159-175"), or a journal and volume as fields. The
@@ -977,6 +1054,7 @@ pub fn assess(claim: &Claim, record: &SourceRecord) -> Assessment {
     // preprint cited as a journal's article, a paper at another venue.
     let wrong_journal = container.agreement == Agreement::Mismatch
         && (preprint_of_cited
+            || preprint_id_cited
             || article
             || other_conference
             || preprint_at_conference

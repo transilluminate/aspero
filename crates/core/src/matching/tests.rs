@@ -1784,7 +1784,8 @@ fn a_preprint_and_a_journal_article_are_other_versions_of_each_other() {
     let a = assess(&Claim::from_text(text), &preprint);
     assert_eq!(a.container.agreement, Agreement::Mismatch, "{a:?}");
     assert!((PLAUSIBLE..VERIFIED).contains(&a.confidence), "{a:?}");
-    // Cited as the preprint it is, or by its identifier: verified.
+    // Cited as the preprint it is, or by its arXiv identifier beside a
+    // venue (as computing and physics cite): verified.
     for text in [
         "Yuan H, Zhou B. Cross-embodiment dexterous grasping with reinforcement learning. arXiv. \
          2024.",
@@ -1794,6 +1795,20 @@ fn a_preprint_and_a_journal_article_are_other_versions_of_each_other() {
         let a = assess(&Claim::from_text(text), &preprint);
         assert!(a.confidence >= VERIFIED, "{text}: {a:?}");
     }
+    // A preprint server's DOI with a journal's name names two versions
+    // (round 5): plausible.
+    let mut biorxiv = record(
+        &["doi:10.1101/2024.01.02.573000"],
+        "Cross-Embodiment Dexterous Grasping with Reinforcement Learning",
+        &["Haoqi Yuan", "Bohan Zhou"],
+        2024,
+    );
+    biorxiv.work.work_type = Some(crate::work::WorkType::Preprint);
+    let text = "Yuan H, Zhou B. Cross-embodiment dexterous grasping with reinforcement learning. \
+                Science Robotics. 2024. doi:10.1101/2024.01.02.573000";
+    let a = assess(&Claim::from_text(text), &biorxiv);
+    assert_eq!(a.container.agreement, Agreement::Mismatch, "{a:?}");
+    assert!((PLAUSIBLE..VERIFIED).contains(&a.confidence), "{a:?}");
     for text in [
         format!("Rivers E, Nguyen B. {EGDT}. medRxiv preprint, 2001."),
         format!("Rivers E, Nguyen B. {EGDT}. arXiv preprint. 2001."),
@@ -4117,4 +4132,63 @@ fn a_meeting_of_the_same_society_cited_is_another_venue() {
             "{cited} | {actual}"
         );
     }
+}
+
+#[test]
+fn a_preprint_cited_as_its_journal_version_is_another_version() {
+    // holdout-4's `w:preprint-as-journal`: the preprint's DOI given with
+    // the journal's name and place, found on the journal article's record
+    // that carries both (OpenAlex merges them).
+    let merged = |preprint_doi: &str| {
+        let mut r = article(
+            "Effectiveness of pleurodesis for postoperative air leaks after lung resection",
+            &["Norifumi Tsubokawa", "Takahiro Mimae", "Ryoichi Ito"],
+            2024,
+            ("Journal of Cardiothoracic Surgery", "19", "2"),
+        );
+        r.ids = vec![
+            "doi:10.1186/s13019-023-02444-6".parse().unwrap(),
+            preprint_doi.parse().unwrap(),
+        ];
+        r
+    };
+    let cited = |doi: &str| {
+        format!(
+            "Tsubokawa N, Mimae T, Ito R, et al. Effectiveness of Pleurodesis for Postoperative \
+             Air Leaks after Lung Resection. Journal of Cardiothoracic Surgery. 2024;19(1):2. \
+             doi:{doi}"
+        )
+    };
+    let record = merged("doi:10.21203/rs.3.rs-2791419/v1");
+    let claim = Claim::from_text(cited("10.21203/rs.3.rs-2791419/v1"));
+    let a = assess(&claim, &record);
+    assert_eq!(a.ids, Agreement::Match);
+    assert_eq!(a.container.agreement, Agreement::Mismatch, "{a:?}");
+    assert!((PLAUSIBLE..VERIFIED).contains(&a.confidence), "{a:?}");
+    assert_eq!(
+        preprint_version_claimed(&claim, &record),
+        Some("Research Square")
+    );
+    // The journal's own DOI: the article.
+    let claim = Claim::from_text(cited("10.1186/s13019-023-02444-6"));
+    let a = assess(&claim, &record);
+    assert!(a.confidence >= VERIFIED, "{a:?}");
+    assert_eq!(preprint_version_claimed(&claim, &record), None);
+    // A bioRxiv DOI is a preprint's; Genome Research's, under the same
+    // prefix, is an article's.
+    let record = merged("doi:10.1101/2023.01.02.522000");
+    let claim = Claim::from_text(cited("10.1101/2023.01.02.522000"));
+    assert!(assess(&claim, &record).confidence < VERIFIED);
+    let record = merged("doi:10.1101/gr.277000.122");
+    let claim = Claim::from_text(cited("10.1101/gr.277000.122"));
+    assert!(assess(&claim, &record).confidence >= VERIFIED);
+
+    // An arXiv identifier beside the journal: as physics cites.
+    let record = merged("arxiv:2401.01234");
+    let claim = Claim::from_text(
+        "Tsubokawa N, Mimae T, Ito R, et al. Effectiveness of Pleurodesis for Postoperative Air \
+         Leaks after Lung Resection. Journal of Cardiothoracic Surgery. 2024;19(1):2. \
+         arXiv:2401.01234",
+    );
+    assert!(assess(&claim, &record).confidence >= VERIFIED);
 }

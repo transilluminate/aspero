@@ -430,6 +430,37 @@ fn junk_fragments_and_huge_input() {
     assert_eq!(page(&meta("citation_title", &long)).claim, None);
 }
 
+/// Formatting goes, written or escaped; a tag's name written as text
+/// (escaped, so decoded to what looks like a tag) stays.
+#[test]
+fn formatting_goes_but_tags_named_in_text_stay() {
+    for (written, title) in [
+        (
+            "Deep learning for &lt;i&gt;sepsis&lt;/i&gt; in H&lt;sub&gt;2&lt;/sub&gt;O",
+            "Deep learning for sepsis in H2O",
+        ),
+        (
+            "Growth of &lt;jats:italic&gt;E. coli&lt;/jats:italic&gt; on &lt;SPAN class=x&gt;agar&lt;/SPAN&gt;",
+            "Growth of E. coli on agar",
+        ),
+        (
+            "&lt;meta&gt;: The metadata element",
+            "<meta>: The metadata element",
+        ),
+        (
+            "Why &lt;div&gt; soup is bad for &lt;a&gt; links",
+            "Why <div> soup is bad for <a> links",
+        ),
+        (
+            "A &lt; B and C &gt; D in the model",
+            "A < B and C > D in the model",
+        ),
+    ] {
+        let c = page(&meta("citation_title", written)).claim.unwrap();
+        assert_eq!(c.title.as_deref(), Some(title), "{written}");
+    }
+}
+
 #[test]
 fn entities_in_values() {
     let p = page(

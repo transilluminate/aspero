@@ -251,7 +251,12 @@ scripts/       fixture recorders, one per provider
   - The markup is read by a small hand-written scanner, not a parser
     (and no new dependency): tags and attributes in any quoting and case,
     values entity-decoded (`&amp;`, `&#39;`, `&#x2019;`, common named
-    ones), comments, declarations and closing tags skipped, and the
+    ones; then only formatting markup taken out of them, HTML's and
+    JATS's inline tags such as `<i>`, `<sub>`, `<span>`, `<italic>` and
+    any namespaced one, which publishers write escaped as often as not,
+    so a tag's name written as text stays: MDN's "&lt;meta&gt; HTML
+    metadata element" is "<meta> HTML metadata element"), comments,
+    declarations and closing tags skipped, and the
     contents of `<script>` (except `application/ld+json`, parsed with
     serde_json, CDATA wrapping aside), `<style>`, `<textarea>` and
     `<template>` never read as markup, so a `citation_doi` inside a
@@ -328,9 +333,8 @@ scripts/       fixture recorders, one per provider
     scanned for identifiers first, and a page with one is a work).
     Checked on modelled pages and 19 real pages' heads (news in three
     languages, guidance, docs, blogs, a code repository: fixtures in
-    `tests/fixtures/pages/web`). Two fall short: a title whose site
-    nothing names stays whole ("Announcing Rust 1.0 | Rust Blog"), and
-    MDN's `&lt;meta&gt;` decodes to what reads as a tag and is taken out.
+    `tests/fixtures/pages/web`). One falls short: a title whose site
+    nothing names stays whole ("Announcing Rust 1.0 | Rust Blog").
   - *Exported and cited* as a `Work` of type `webpage`
     (`WorkType::WebPage`; `WebPage::to_work(accessed)`, FFI
     `webPageWork(page, accessed)`): the site as container, published as

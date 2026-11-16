@@ -31,6 +31,10 @@ Fixed:
   first now, unless it isn't a title. A page title's suffix also goes
   when it is the name the page gives its own site (`og:site_name`,
   JSON-LD's website or publisher), even one holding a separator.
+- A page's values lost anything that looked like a tag once decoded, so
+  a title naming one ("&lt;meta&gt;: The metadata element") lost it. Only
+  formatting markup (`<i>`, `<sub>`, `<span>`, JATS's, namespaced tags)
+  is taken out now, escaped or not.
 
 ## 0.28.2
 

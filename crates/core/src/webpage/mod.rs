@@ -427,17 +427,55 @@ fn tidy_value(value: &str) -> Option<String> {
     tidy(value).filter(|v| v.chars().count() <= MAX_VALUE)
 }
 
-/// `s` with markup such as `<i>` removed and its whitespace collapsed;
-/// `None` when nothing's left.
+/// Inline formatting that titles carry as markup, HTML's and JATS's
+/// (lowercase), and any namespaced tag (`mml:math`, `jats:italic`).
+/// Publishers write it into metadata escaped as often as not
+/// (`&lt;i&gt;`), so it's taken out after decoding; other names (`meta`,
+/// `title`, `div`) are text then, as in "&lt;meta&gt;: The metadata
+/// element".
+const FORMATTING: &[&str] = &[
+    "i",
+    "b",
+    "em",
+    "strong",
+    "sub",
+    "sup",
+    "sc",
+    "scp",
+    "span",
+    "u",
+    "small",
+    "big",
+    "br",
+    "tt",
+    "font",
+    "italic",
+    "bold",
+    "underline",
+    "overline",
+    "monospace",
+    "roman",
+    "sans-serif",
+    "inline-formula",
+    "named-content",
+    "styled-content",
+];
+
+/// `s` with formatting markup such as `<i>` removed ([`FORMATTING`]) and
+/// its whitespace collapsed; `None` when nothing's left.
 fn tidy(s: &str) -> Option<String> {
     let mut out = String::with_capacity(s.len());
     let mut rest = s;
     while let Some(lt) = rest.find('<') {
         let after = &rest[lt + 1..];
-        let tag = after
+        let name: String = after
+            .trim_start_matches('/')
             .chars()
-            .next()
-            .is_some_and(|c| c.is_ascii_alphabetic() || c == '/');
+            .take_while(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | ':'))
+            .flat_map(char::to_lowercase)
+            .collect();
+        let tag = name.starts_with(|c: char| c.is_ascii_alphabetic())
+            && (FORMATTING.contains(&name.as_str()) || name.contains(':'));
         match after.find('>') {
             Some(gt) if tag && !after[..gt].contains('<') => {
                 out.push_str(&rest[..lt]);

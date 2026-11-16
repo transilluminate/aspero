@@ -397,8 +397,8 @@ fn scholarly_pages_stay_works() {
 }
 
 /// Real pages' heads: each a web page, read as a careful person would
-/// cite it. Two fall short, and say so: a title whose site nothing names
-/// stays as the page gives it, and a title naming an HTML tag loses it.
+/// cite it. One falls short, and says so: a title whose site nothing
+/// names stays as the page gives it.
 #[test]
 fn real_pages_read_as_cited() {
     /// File, address, title, site, authors, published.
@@ -513,11 +513,12 @@ fn real_pages_read_as_cited() {
             None,
         ),
         (
-            // Short of right: `&lt;meta&gt;` decodes to what reads as a
-            // tag, and tags are taken out of titles.
+            // `&lt;meta&gt;` decodes to text that looks like a tag: it
+            // stays, as it isn't formatting. " - HTML | MDN" go as short
+            // title-cased segments.
             "mdn",
             "https://developer.mozilla.org/en-US/docs/Web/HTML/Reference/Elements/meta",
-            "HTML metadata element",
+            "<meta> HTML metadata element",
             "MDN Web Docs",
             &[],
             None,

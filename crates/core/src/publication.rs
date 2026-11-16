@@ -1118,6 +1118,24 @@ fn prose_journal(tokens: &[&str]) -> Option<String> {
         // a paper's journal, before what is bracketed after it.
         let paper = matches!(tokens[i - 1], "paper" | "article" | "study" | "report")
             && rest[end].starts_with('(');
+        // "… showed in Cancer Epidemiology, 38, 211–214, in …": a journal,
+        // its last word's comma, then its volume and pages.
+        let placed = rest[end]
+            .strip_suffix(',')
+            .is_some_and(|w| !w.is_empty() && name_word(w))
+            && rest
+                .get(end + 1)
+                .and_then(|v| v.strip_suffix(','))
+                .is_some_and(|v| volume_number(v).is_some())
+            && rest.get(end + 2).is_some_and(|p| {
+                ranged(p) && page_number(p.trim_end_matches([',', '.'])).is_some()
+            });
+        if placed {
+            let mut words = rest[..end].to_vec();
+            words.push(rest[end].trim_end_matches(','));
+            return (words.len() <= JOURNAL_WORDS && !is_stopword(words[0]) && words[0] != "&")
+                .then(|| words.join(" "));
+        }
         let words = &rest[..end];
         ((year || paper)
             && !words.is_empty()

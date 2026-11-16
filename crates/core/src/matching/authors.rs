@@ -61,10 +61,25 @@ const PEOPLE_BESIDE_BODIES: usize = 3;
 /// consortium's members may be cited by name) unless people are listed
 /// with it.
 pub(super) fn complete_byline(authors: &[Person]) -> bool {
-    let people = authors.iter().filter(|p| p.parts().is_some()).count();
+    let people = authors
+        .iter()
+        .filter(|p| p.parts().is_some() || p.literal.as_deref().is_some_and(uncased_name))
+        .count();
     !authors.is_empty()
         && authors.len() < FULL_BYLINE
         && (people == authors.len() || people >= PEOPLE_BESIDE_BODIES)
+}
+
+/// A name of two to five words in a script without capitals (Arabic,
+/// Hebrew, Thai), which tells a person's name from an organisation's no
+/// other way: "امحمد عثمان فيدان".
+fn uncased_name(name: &str) -> bool {
+    let parts: Vec<&str> = name.split_whitespace().collect();
+    (2..=5).contains(&parts.len())
+        && parts.iter().all(|w| {
+            w.chars()
+                .all(|c| c.is_alphabetic() && !c.is_uppercase() && !c.is_lowercase())
+        })
 }
 
 /// Every word of every name on a byline, normalised.

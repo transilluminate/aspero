@@ -3670,3 +3670,126 @@ fn a_journals_words_in_the_title_are_the_titles() {
     let a = assess(&titleless, &gh);
     assert!(a.confidence >= VERIFIED, "{a:?}");
 }
+
+#[test]
+fn a_stranger_among_names_in_a_script_without_capitals_is_seen() {
+    // h3-646: an invented co-author among Arabic names, which can't be
+    // told a person's by their capitals: the byline was not taken as
+    // complete, so the stranger passed.
+    let mut r = record(
+        &["doi:10.59743/jaf.v8i2.405"],
+        "تأثير هرمونات الغدة الدرقية وفيتامين د والسكر التراكمي على متلازمة تكيس المبايض",
+        &[
+            "امحمد عثمان فيدان",
+            "سليمان مصطفى الأطيرش",
+            "أسماء محمد القنيدي",
+            "رنيم محمد الأطرش",
+            "ريان علي بيت المال",
+        ],
+        2024,
+    );
+    r.work.work_type = Some(crate::work::WorkType::JournalArticle);
+    let claim = |authors: &[&str]| Claim {
+        title: r.work.title.clone(),
+        authors: authors.iter().map(|a| (*a).to_owned()).collect(),
+        year: Some(2024),
+        ..Claim::default()
+    };
+    let named = [
+        "فيدان, ا. ع.",
+        "سليمان مصطفى الأطيرش",
+        "القنيدي, أ. م.",
+        "الأطرش, ر. م.",
+        "بيت المال, ر. ع.",
+    ];
+    assert!(assess(&claim(&named), &r).confidence >= VERIFIED);
+    let mut stranger = named.to_vec();
+    stranger.insert(4, "Paldekwe, B. L.");
+    let a = assess(&claim(&stranger), &r);
+    assert!((PLAUSIBLE..VERIFIED).contains(&a.confidence), "{a:?}");
+}
+
+#[test]
+fn third_held_out_red_team_failures_stay_fixed() {
+    // Minimised false VERIFIEDs from bench/redteam/holdout-3.jsonl (round
+    // 4) not covered by a test of their own, against the records they
+    // verified: none may verify now.
+    let mut feds = record(
+        &["doi:10.17016/feds.2007.52"],
+        "Do High Debt Payments Hinder Household Consumption Smoothing?",
+        &["Kathleen W. Johnson", "Geng Li"],
+        2007,
+    );
+    feds.work.work_type = Some(crate::work::WorkType::JournalArticle);
+    feds.work.container_title = Some("Finance and Economics Discussion Series".into());
+    feds.work.page = Some("1-40".into());
+    let hepatoid = article(
+        "Hepatoid adenocarcinoma in the lung",
+        &["Yasufumi Hayashi", "Yoshinori Takanashi", "Hiroyuki Ohsawa"],
+        2002,
+        ("Lung Cancer", "38", "211-214"),
+    );
+    let mut alcohol = record(
+        &["doi:10.15288/jsad.2020.81.297", "pmid:32527381"],
+        "Alcohol Policy and Coronavirus: An Open Research Agenda",
+        &["Maristela G. Monteiro", "Jürgen Rehm", "Maik Duennbier"],
+        2020,
+    );
+    alcohol.work.work_type = Some(crate::work::WorkType::JournalArticle);
+    alcohol.work.container_title = Some("Journal of Studies on Alcohol and Drugs".into());
+    let cases: Vec<(&str, &str, &SourceRecord)> = vec![
+        // c: a year five off, a series' number like a year in the volume.
+        (
+            "h3-691",
+            "Johnson, K.W. and Li, G. (2012) 'Do High Debt Payments Hinder Household \
+             Consumption Smoothing?', Finance and Economics Discussion Series, 2007.0(52), pp. \
+             1-40.",
+            &feds,
+        ),
+        // c: another journal, named in prose before its volume and pages.
+        (
+            "h3-717",
+            "As Hayashi et al. (2002) showed in Cancer Epidemiology, 38, 211–214, in “Hepatoid \
+             adenocarcinoma in the lung”, the effect held across subgroups.",
+            &hepatoid,
+        ),
+        // h: a journal's article cited as a Research Square preprint.
+        (
+            "h3-885",
+            "Monteiro, M. G., Rehm, J., & Duennbier, M. (2020). Alcohol Policy and \
+             Coronavirus: An Open Research Agenda. Research Square.",
+            &alcohol,
+        ),
+    ];
+    let failing: Vec<String> = cases
+        .iter()
+        .filter_map(|(id, claim, record)| {
+            let a = assess(&Claim::from_text(*claim), record);
+            (a.confidence >= VERIFIED).then(|| format!("{id}: {a:?}"))
+        })
+        .collect();
+    assert!(failing.is_empty(), "{failing:#?}");
+
+    // The same works cited right still verify.
+    for (claim, record) in [
+        (
+            "Johnson, K.W. and Li, G. (2007) 'Do High Debt Payments Hinder Household \
+             Consumption Smoothing?', Finance and Economics Discussion Series, 2007.0(52), pp. \
+             1-40.",
+            &feds,
+        ),
+        (
+            "As Hayashi et al. (2002) showed in Lung Cancer, 38, 211–214, in “Hepatoid \
+             adenocarcinoma in the lung”, the effect held across subgroups.",
+            &hepatoid,
+        ),
+        (
+            "Monteiro, M. G., Rehm, J., & Duennbier, M. (2020). Alcohol Policy and \
+             Coronavirus: An Open Research Agenda. Journal of Studies on Alcohol and Drugs.",
+            &alcohol,
+        ),
+    ] {
+        let a = assess(&Claim::from_text(claim), record);
+        assert!(a.confidence >= VERIFIED, "{claim}: {a:?}");
+    }
+}

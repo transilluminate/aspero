@@ -803,12 +803,24 @@ impl Normalised {
     /// statistics, 2020" too.
     pub(super) fn years_beside(&self, title: Option<&str>) -> Vec<i16> {
         let span = title.and_then(|t| self.title_span(t)).unwrap_or(0..0);
+        // A volume numbered like a year, with its part and issue
+        // ("2007.0(52)", a working-paper series'), is no year.
+        let decimal = |i: usize| {
+            self.raw[self.spans[i].end..]
+                .strip_prefix('.')
+                .map(|s| s.trim_start_matches(|c: char| c.is_ascii_digit()))
+                .is_some_and(|rest| rest.starts_with('('))
+        };
         let years = |skip: &Range<usize>| -> Vec<i16> {
             self.words
                 .iter()
                 .enumerate()
                 .filter(|(i, w)| {
-                    w.len() == 4 && !span.contains(i) && !skip.contains(i) && !self.linked[*i]
+                    w.len() == 4
+                        && !span.contains(i)
+                        && !skip.contains(i)
+                        && !self.linked[*i]
+                        && !decimal(*i)
                 })
                 .filter_map(|(_, w)| w.parse::<i16>().ok())
                 .filter(|y| PLAUSIBLE_YEARS.contains(y))

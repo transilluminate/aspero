@@ -525,7 +525,11 @@ const PREPRINT_WORDS: &[&str] = &[
 /// Whether a venue is a preprint server's: "arXiv (Cornell University)",
 /// "medRxiv", "Research Square", "SSRN Electronic Journal".
 fn preprint_server(name: &str) -> bool {
-    let words = words(name);
+    names_preprint(&words(name))
+}
+
+/// Whether words name a preprint server or a preprint.
+fn names_preprint(words: &[String]) -> bool {
     words.iter().any(|w| PREPRINT_WORDS.contains(&w.as_str()))
         || words.windows(2).any(|w| w == ["research", "square"])
 }
@@ -755,9 +759,7 @@ pub fn assess(claim: &Claim, record: &SourceRecord) -> Assessment {
         && !preprint
         && claim.ids.is_empty()
         && claim.container.is_none()
-        && text
-            .as_ref()
-            .is_some_and(|t| t.words.iter().any(|w| PREPRINT_WORDS.contains(&w.as_str())));
+        && text.as_ref().is_some_and(|t| names_preprint(&t.words));
     // The journal the claim names, or reads where its reference gives one,
     // decides, not words elsewhere in a reference (an author's initials
     // "SR" for Scientific Reports). Names compare by rule, which misses

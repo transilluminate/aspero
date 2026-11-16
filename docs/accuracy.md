@@ -188,6 +188,27 @@ of the correct ones and lets 3 of the 31 wrong ones through (a chimera of
 two trials, another paper's NBER number, an invented book co-author); it
 was tuned on this corpus, so treat it as a check, not a held-out score.
 
+**Real model output, held out.** `bench/redteam/wild-2.jsonl`: 1,032
+references from 100 fresh sessions of Claude Haiku and Sonnet asked, without
+tools, for reviews, reference lists and exact citations (half in medicine
+and allied health; some in Spanish, German, French, Portuguese and
+Japanese), each checked by hand. None was a wholly invented work: every
+wrong one was a real work cited wrongly, most often by a DOI a few digits
+off that lands on another paper in the same issue (Haiku 21% wrong, Sonnet
+7%). 0.30.0 had never seen it:
+
+| Criterion | Result | Target |
+|---|---|---|
+| Wrong → `verified` | 5/122 (4.1%) | ≤ 2% — not yet met |
+| Correct → `verified` | 777/910 (85.4%) | ≥ 85% |
+| Correct → `verified` or `plausible` | 857/910 (94.2%) | ≥ 95% — not yet met |
+| Correct → `mismatch` or `not_found` | 52/910 (5.7%) | ≤ 3% — not yet met |
+
+None of the near-miss DOIs verified. The 52 correct citations aspero
+missed are mostly books it doesn't find (humanities monographs in Open
+Library or Crossref), bare arXiv numbers in model output, and reprints;
+they're the next round's target (issue #126).
+
 The corpora, their method notes (`bench/redteam/holdout-*.md`,
 `wild-1.md`) and each round's notes (`bench/redteam/README.md`) are in the
 repository.

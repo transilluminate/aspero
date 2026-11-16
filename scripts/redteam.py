@@ -46,6 +46,13 @@ ROOT = Path(__file__).resolve().parent.parent
 VERDICTS = ["verified", "plausible", "mismatch", "not_found", "unverifiable"]
 # Wholly invented works and identifiers: never verified, whatever else.
 INVENTED = ("a:", "e:", "f:", "i:")
+# Words naming invented works and identifiers in corpora that name their
+# own categories (holdouts, wild corpora).
+INVENTED_WORDS = ("invent", "fabricat", "fake", "nonexist", "hallucin", "swap")
+
+
+def invented_case(category):
+    return category.startswith(INVENTED) or any(w in category for w in INVENTED_WORDS)
 
 
 def claim_line(claim):
@@ -115,11 +122,13 @@ def judge(case, result):
     verdict = result.get("verdict", "error")
     flagged = retraction_flagged(result)
     real = case.get("real", False)
-    retracted_case = case["category"].startswith("g:")
+    retracted_case = case["category"].startswith("g:") or "retract" in case["category"]
     row = {
         "n": case.get("n"),
         "category": case["category"],
         "verdict": verdict,
+        "real": real,
+        "retracted": retracted_case,
         "ok": verdict in case["expect"],
         # Verified where the policy allows it (a year one off) isn't false.
         "false_verified": not real
@@ -148,7 +157,7 @@ def criteria(wrong, real, retracted):
     def share(picked, pool):
         return len(picked) / len(pool) if pool else 0.0
 
-    invented = [r for r in wrong if r["category"].startswith(INVENTED)]
+    invented = [r for r in wrong if invented_case(r["category"])]
     plausible = [r for r in wrong if r["verdict"] == "plausible"]
     checks = [
         ("wrong -> verified", [r for r in wrong if r["false_verified"]], wrong, "<=", 0.02),
@@ -186,9 +195,11 @@ def report(cases, results, usage, show_failures):
         print(f"{c:<{width}}" + "".join(f"{table[c][v] or '':>11}" for v in VERDICTS) + f"{n:>6}{table[c]['ok']:>13}")
     print()
 
-    wrong = [r for r in rows if not r["category"].startswith(("real", "g:"))]
-    real = [r for r in rows if r["category"].startswith("real")]
-    retracted = [r for r in rows if r["category"].startswith("g:")]
+    # The case's `real` flag decides, as false VERIFIED does: categories
+    # are only names.
+    retracted = [r for r in rows if r["retracted"]]
+    real = [r for r in rows if r["real"] and not r["retracted"]]
+    wrong = [r for r in rows if not r["real"] and not r["retracted"]]
     fv = [r for r in wrong if r["false_verified"]]
     print(f"False VERIFIED (fabricated or wrong): {pct(len(fv), len(wrong))}")
     by_cat = Counter(r["category"] for r in fv)

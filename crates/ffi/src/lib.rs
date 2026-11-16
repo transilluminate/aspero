@@ -720,7 +720,7 @@ impl Aspero {
         self.engine
             .budgets()
             .iter()
-            .map(|(p, b)| Budget::new(p, b))
+            .map(|(p, b)| Budget::new(p, b).capped(&self.engine, p, b))
             .collect()
     }
 
@@ -741,7 +741,7 @@ impl Aspero {
                     .refresh_budgets()
                     .await
                     .iter()
-                    .map(|(p, b)| Budget::new(p, b))
+                    .map(|(p, b)| Budget::new(p, b).capped(&engine, p, b))
                     .collect()
             },
             cancel,
@@ -769,7 +769,9 @@ impl Aspero {
         Ok(KeyCheck {
             status: check.status.into(),
             message: check.message,
-            budget: check.budget.map(|(p, b)| Budget::new(&p, &b)),
+            budget: check
+                .budget
+                .map(|(p, b)| Budget::new(&p, &b).capped(&self.engine, &p, &b)),
         })
     }
 

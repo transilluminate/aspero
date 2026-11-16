@@ -1701,6 +1701,53 @@ fn reprints_and_versions_cited_with_another_year_are_plausible() {
 }
 
 #[test]
+fn the_report_titled_with_its_year_and_place_outranks_its_namesakes() {
+    // Live (app pre-test): "Cancer statistics, 2020 … 2018;70(1):7-30" chose
+    // "Colorectal cancer statistics, 2020" (its title partial, its page
+    // another), taking the title's 2020 for the year cited.
+    let fixture: serde_json::Value = serde_json::from_str(include_str!(
+        "../../tests/fixtures/resolve/cancer-statistics-cited-2018.json"
+    ))
+    .unwrap();
+    let claim = Claim::from_text(fixture["claim"].as_str().unwrap());
+    assert_eq!(claim.as_read().year, Some(2018), "the year cited");
+    let field = |c: &serde_json::Value, k: &str| c[k].as_str().unwrap().to_owned();
+    let assessed: Vec<(String, Assessment)> = fixture["candidates"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|c| {
+            let authors: Vec<String> = c["authors"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|a| a.as_str().unwrap().to_owned())
+                .collect();
+            let authors: Vec<&str> = authors.iter().map(String::as_str).collect();
+            let year = i16::try_from(c["year"].as_i64().unwrap()).unwrap();
+            let at = (field(c, "container"), field(c, "volume"), field(c, "page"));
+            let record = article(&field(c, "title"), &authors, year, (&at.0, &at.1, &at.2));
+            (field(c, "id"), assess(&claim, &record))
+        })
+        .collect();
+    let (best, a) = assessed
+        .iter()
+        .max_by(|x, y| x.1.confidence.total_cmp(&y.1.confidence))
+        .unwrap();
+    assert_eq!(best, fixture["cited"].as_str().unwrap(), "{assessed:#?}");
+    assert!((PLAUSIBLE..VERIFIED).contains(&a.confidence), "{a:?}");
+    assert_eq!(
+        (a.title.agreement, a.container.agreement, a.year.agreement),
+        (Agreement::Match, Agreement::Match, Agreement::Mismatch)
+    );
+    for (id, other) in &assessed {
+        if id != best {
+            assert!(other.confidence < a.confidence, "{id}: {other:?}");
+        }
+    }
+}
+
+#[test]
 fn a_title_with_words_inserted_is_not_the_records() {
     // App pre-test: words inserted in the middle of a real title.
     let sepsis3 = article(

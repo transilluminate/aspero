@@ -483,16 +483,29 @@ impl Normalised {
 
     /// Four-digit numbers that look like publication years, but for those
     /// inside `title` where the reference gives it: "Cancer statistics,
-    /// 2020" cites no year.
+    /// 2020" cites no year. Nor, when it gives another, does one inside
+    /// the title the reference itself suggests ([`probable_title`]),
+    /// whichever work it's compared with: "Cancer statistics, 2020. CA
+    /// Cancer J Clin. 2018;70:7" cites 2018, for "Colorectal cancer
+    /// statistics, 2020" too.
     pub(super) fn years_beside(&self, title: Option<&str>) -> Vec<i16> {
         let span = title.and_then(|t| self.title_span(t)).unwrap_or(0..0);
-        self.words
-            .iter()
-            .enumerate()
-            .filter(|(i, w)| w.len() == 4 && !span.contains(i))
-            .filter_map(|(_, w)| w.parse::<i16>().ok())
-            .filter(|y| PLAUSIBLE_YEARS.contains(y))
-            .collect()
+        let years = |skip: &Range<usize>| -> Vec<i16> {
+            self.words
+                .iter()
+                .enumerate()
+                .filter(|(i, w)| w.len() == 4 && !span.contains(i) && !skip.contains(i))
+                .filter_map(|(_, w)| w.parse::<i16>().ok())
+                .filter(|y| PLAUSIBLE_YEARS.contains(y))
+                .collect()
+        };
+        let suggested = probable_title(&self.raw)
+            .and_then(|t| self.title_span(&t))
+            .unwrap_or(0..0);
+        match years(&suggested) {
+            outside if !outside.is_empty() => outside,
+            _ => years(&(0..0)),
+        }
     }
 }
 

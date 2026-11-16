@@ -1,5 +1,39 @@
 # Changelog
 
+## Unreleased
+
+Fixed (from the red team of #102: wrong citations verified fell from 31
+of 152 to none, with real ones accepted 152 of 155, from 147):
+
+- A citation naming co-authors a work doesn't have is no longer
+  verified on its first author: it's plausible, its authors to check.
+  Not for consortia, bylines cut short, or books.
+- A title with words added ("Deep learning for medical image analysis"
+  for "Deep learning"), a subtitle the work lacks or another one, or a
+  word replaced ("Hydroxychloroquine in …" for "Dexamethasone in …") is
+  plausible at most. A dropped subtitle still matches, as does a subtitle
+  added to a book's title (book records often leave it out).
+- A year inside a title ("Cancer statistics, 2020") no longer stands in
+  for the year cited.
+- The cited journal is read in more styles: before the year ending a
+  Vancouver reference ("… JAMA. 2020."), before its DOI link, IEEE's
+  "vol." and "no.", Harvard's "'…', Chest." and "pp.", BibTeX's
+  fields, after a title ending in a capitalised word ("… Wuhan, China.
+  Lancet."). A wrong journal there, alone or with the year one off, is
+  plausible, not verified.
+- Nature's single page ("Nature 530, 484 (2016)"), Harvard's pages and
+  BibTeX's volume and pages are read, so wrong ones are caught.
+- Another work's title at a work's journal, volume and page is a
+  different title, not a missing one: plausible at most, never verified.
+- A copy without journal, volume or page (a Zenodo deposit, a report)
+  no longer verifies a citation of the journal article, nor outranks it.
+- A preprint cited in a journal by name, and a journal article cited as
+  a preprint, are other versions: plausible.
+- Real works missed before are found or accepted: conference papers
+  without DOIs (the title a reference suggests is searched when the
+  citation matcher has none), a book found only reprinted in a reader,
+  and a dataset whose DOI's record carries a later version's year.
+
 ## 0.26.0
 
 Added:

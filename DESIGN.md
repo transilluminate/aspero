@@ -332,7 +332,12 @@ Candidates are gathered cheapest first: lookups of claimed identifiers
 Crossref's citation matcher; then **title** searches on keyword providers.
 Bare titles rank far better than whole references there, and the title is
 located *inside* the reference via each matcher hit's title (or container
-title, for untitled book chapters): `shared_title`. `verify` stops early only
+title, for untitled book chapters): `shared_title`. When no hit points to
+one (a conference paper without a DOI, a book Crossref lacks), the title
+the reference's shape suggests is searched instead of its keywords
+(`probable_title`: a BibTeX title, a quoted one, else the sentence most
+in sentence case that isn't a byline, publisher or locator), at the same
+cost. `verify` stops early only
 on a decisive match that the claimed identifiers or two providers vouch
 for: a digest or reprint can match a claim exactly while only a later
 title search finds the original. Ties go to the earliest published.
@@ -353,13 +358,24 @@ citation styles. The rules, each from a real failure:
   or a title of a word or two found in free text, matches by chance.
 - **Titles compare on content words**, and a dropped subtitle still
   matches; a few shared topic words in free text are not a title match.
+- **A title with words added or replaced is partial, plausible at
+  most** (#102): the work's title carried on in the same sentence ("Deep
+  learning for medical image analysis": a joining or lowercase word, not
+  the journal and year), given a subtitle it lacks or another one, a word
+  before it, or a word put in place of one of its own that isn't a
+  misspelling ("Hydroxychloroquine in …" at the place of "Dexamethasone
+  in …"). A subtitle added to a book's whole title is no more words: book
+  records often leave theirs out.
+- **A year inside the title is not the year cited** ("Cancer statistics,
+  2020 … 2018" cites 2018).
 - **Replies, errata and comments are not the original.** Their titles
   repeat the original's; confidence halves unless the claim cites one.
 - **Online and print years both count**, so either year of an
   online-first paper matches, as do years across merged records.
 - **Journal, volume and first page** come from claim fields or the text
   (Vancouver `2017;376(26):2545`, APA `376(26), 2545` or `Journal, 146,
-  106274.`, `vol./pp.`). Journals match by rule (each abbreviated word
+  106274.`, Harvard `376(26), pp. 2545`, Nature `530, 484 (2016)`,
+  `vol./pp.`, BibTeX fields). Journals match by rule (each abbreviated word
   abbreviates the next significant word, or initials: NEJM, JAMA), not a
   list, so a journal the rule doesn't see only lowers the ranking. A
   different volume or page caps a match at plausible: a citation error,
@@ -369,19 +385,41 @@ citation styles. The rules, each from a real failure:
   cited journal is read only where it can be told: the capitalised words
   right before a styled locator (`… placenta. Environ Sci Technol.
   2021;146:106274`, `Environmental Science & Technology, 146, 106274.`),
-  back to the sentence before; a labelled locator, a publisher (`Springer;
-  2010:12-30`), a lowercase word or a run of dotted abbreviations that may
-  have begun earlier gives none. Different means clearly another: not the
+  back to the sentence before (a title ending in a capitalised word,
+  `… Wuhan, China. Lancet.`, isn't a dotted abbreviation). Without a
+  styled locator (#102), only after a title that has clearly ended (a stop
+  or a closing quote): before the year ending the reference (`… JAMA.
+  2020.`), its links, a labelled locator (IEEE `"…," Journal, vol. 8`,
+  `no. 10223`), or ending it after a quoted title (Harvard `'…',
+  Chest.`); a BibTeX entry's `journal`. A publisher (`Springer;
+  2010:12-30`, `MIT Press; 2016.`), a lowercase word, a run of dotted
+  abbreviations that may have begun earlier, or the work's own title in
+  title case gives none. Different means clearly another: not the
   same by rule, neither name (abbreviated, spelling aside) inside the other
   (`Proc Natl Acad Sci U S A` ↔ `Proceedings of the National Academy of
   Sciences`), nor initials of part of it (PNAS). Only journal articles are
   held to it (series, proceedings and repositories go by many names), and
-  a preprint is when the reference cites a journal, volume and page: it's
-  another version. The journal read is in `read`, and a `journal`
-  difference's `cited`. Matching volume and page corroborate
-  like authors; with journal and volume agreeing, a title missing from a
-  short reference doesn't count against it. Journal, volume and first page
-  all agreeing verify on their own (0.9; 0.8 a year off), so running
+  a preprint is when the reference cites a journal (not a preprint
+  server) unless the claimed identifier is the preprint's: it's another
+  version. So is a journal's article cited as a preprint ("medRxiv
+  preprint", no identifier). A record with no journal, volume or page (a
+  Zenodo copy, a report; not a preprint, book, chapter, dataset or
+  software) can't confirm a journal cited, nor can one without volume or
+  page, its journal unconfirmed, confirm a journal, volume and page all
+  cited: plausible at most, unless a claimed identifier is its; and of
+  equally confident candidates, the one confirming more of journal,
+  volume and page ranks first. Candidates are scored with every
+  identifier known for the work, whichever record of it is kept. The
+  journal read is in `read`, and a `journal` difference's `cited`.
+  Matching volume and page corroborate like authors; with journal and
+  volume agreeing, a title missing from a short reference doesn't count
+  against it, but a reference that gives one (three or more words in a
+  run that are none of the work's authors, journal, numbers or furniture)
+  keeps its title mismatch: with the work's authors and the place, that
+  is plausible (a translated title, or one work's title at another's
+  place), never verified. Journal, volume and first page all agreeing
+  (and no title against them) verify on their own (0.9; 0.8 a year off),
+  so running
   headers (`Injury 47 (2016) 797–804`, `Nature 521, 436–444 (2015)`) are
   found by an OpenAlex search on volume, first page and year (±1). A
   reference whose every word is the work's authors, journal, numbers or
@@ -389,7 +427,19 @@ citation styles. The rules, each from a real failure:
   identifier or the place. A reference that names no one (no "et al", no
   surname with initials) has no author mismatch.
 - **First author alone is an author match** ("Vaswani et al."); an
-  unmentioned sole author is no match.
+  unmentioned sole author is no match. But a name the claim gives that
+  the work's byline lacks (#102: an invented co-author beside a real
+  first author) makes the authors partial and the match plausible at
+  most: in free text, a capitalised name word in the byline (the text
+  before the title, or BibTeX's `author`) that is none of the record's
+  names give or take a letter, nor a given name beside its family name;
+  in a structured claim, a family name not on the record. Not checked for
+  initials, an organisation's byline, a record cut short (100 authors)
+  or naming an organisation with fewer than three people, or books.
+- **Another edition or version is plausible**: a book (or one reprinted
+  whole as a chapter, cited with its publisher) with another year, and a
+  dataset or software matching the claimed identifier and title, cited
+  with another year than its record's latest version.
 - **"RETRACTED:" title markers are ignored** when comparing titles.
 
 **Sites** (#98). A claim's `site` (the page it was read from:

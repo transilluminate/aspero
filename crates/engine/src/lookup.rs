@@ -2,11 +2,11 @@
 //! sharing calls in flight.
 
 use aspero_core::{
-    Error, ErrorCategory, FieldSet, IdKind, ProviderId, SourceRecord, Usage, WorkId,
+    Error, ErrorCategory, FieldSet, IdKind, Lookup, ProviderId, SourceRecord, Usage, WorkId,
 };
 
 use crate::inflight::Answer;
-use crate::{Engine, Entry, Served, add_usage};
+use crate::{Engine, Entry, Served, add_usage, transport};
 
 /// The outcome of one provider's attempt at one ID.
 #[derive(Debug, Clone)]
@@ -244,12 +244,24 @@ impl Engine {
         // Ask about the rest, unless another caller is already asking.
         let wanted: Vec<(usize, WorkId)> = pending.iter().map(|&i| (i, ids[i].clone())).collect();
         let (mut leads, joined) = self.inflight.claim(&provider, &wanted, fields);
-        let led = leads.indices();
-        // Batches cost where single lookups don't (OpenAlex): past a daily
-        // cap, IDs go as many at a time as is free.
+        let mut led = leads.indices();
         let free = caps.max_free_batch;
         let mut size = caps.max_batch.max(1);
-        if free > 0 && led.len() > free && self.check_cap(entry).await.is_err() {
+        if self.taped {
+            // Under a tape, one ID per request, so each ID's answer replays
+            // however later batches are made up; batches recorded whole
+            // replay as before.
+            let replayed;
+            (led, replayed) = self
+                .replay_batches(entry, ids, &led, size, fields, usage)
+                .await;
+            for (i, answer) in replayed {
+                answers[i] = Some(answer);
+            }
+            size = 1;
+        } else if free > 0 && led.len() > free && self.check_cap(entry).await.is_err() {
+            // Batches cost where single lookups don't (OpenAlex): past a
+            // daily cap, IDs go as many at a time as is free.
             size = size.min(free);
         }
         let mut chunks = led.chunks(size);
@@ -268,23 +280,9 @@ impl Engine {
                     if let Some(u) = resp.usage {
                         add_usage(usage, &provider, u);
                     }
-                    // The contract is one answer per ID, in order; anything
-                    // else is a provider bug, not a miss.
-                    let in_order = resp.value.len() == batch.len()
-                        && resp.value.iter().zip(&batch).all(|(l, id)| &l.id == id);
-                    if in_order {
-                        let stored: Vec<_> = resp
-                            .value
-                            .iter()
-                            .map(|l| (&l.id, l.record.as_ref()))
-                            .collect();
-                        self.remember_lookups(&provider, &stored);
-                        for (&i, lookup) in chunk.iter().zip(resp.value) {
-                            let outcome = match lookup.record {
-                                Some(_) => Outcome::Found,
-                                None => Outcome::NotFound,
-                            };
-                            answers[i] = Some((attempt(outcome, Served::Live), lookup.record));
+                    if let Some(answered) = self.answered(&provider, &batch, resp.value) {
+                        for (&i, answer) in chunk.iter().zip(answered) {
+                            answers[i] = Some(answer);
                         }
                         continue;
                     }
@@ -342,6 +340,81 @@ impl Engine {
             .into_iter()
             .map(|a| a.expect("every ID answered from cache, provider or failure"))
             .collect()
+    }
+
+    /// A provider's answers to `batch`, live, remembered in the cache; `None`
+    /// when they break the contract (one answer per ID, in order), which is
+    /// a provider bug, not a miss.
+    fn answered(
+        &self,
+        provider: &ProviderId,
+        batch: &[WorkId],
+        lookups: Vec<Lookup>,
+    ) -> Option<Vec<Answer>> {
+        let in_order =
+            lookups.len() == batch.len() && lookups.iter().zip(batch).all(|(l, id)| &l.id == id);
+        if !in_order {
+            return None;
+        }
+        let stored: Vec<_> = lookups.iter().map(|l| (&l.id, l.record.as_ref())).collect();
+        self.remember_lookups(provider, &stored);
+        let answers = lookups
+            .into_iter()
+            .map(|lookup| {
+                let outcome = match lookup.record {
+                    Some(_) => Outcome::Found,
+                    None => Outcome::NotFound,
+                };
+                let attempt = Attempt {
+                    provider: provider.clone(),
+                    outcome,
+                    served: Served::Live,
+                };
+                (attempt, lookup.record)
+            })
+            .collect();
+        Some(answers)
+    }
+
+    /// Under a tape, the batches of `led` (indices into `ids`, `size` at a
+    /// time, as they'd be asked untaped) that the tape holds whole, asked
+    /// replay-only: a tape recorded before lookups went one ID at a time
+    /// replays its batches while they're made up the same. The IDs still
+    /// to ask, and the answers replayed.
+    async fn replay_batches(
+        &self,
+        entry: &Entry,
+        ids: &[WorkId],
+        led: &[usize],
+        size: usize,
+        fields: FieldSet,
+        usage: &mut Vec<(ProviderId, Usage)>,
+    ) -> (Vec<usize>, Vec<(usize, Answer)>) {
+        let provider = entry.provider.id();
+        let (mut rest, mut replayed) = (Vec::new(), Vec::new());
+        for chunk in led.chunks(size) {
+            // One ID is asked alone anyway.
+            if chunk.len() < 2 {
+                rest.extend_from_slice(chunk);
+                continue;
+            }
+            let batch: Vec<WorkId> = chunk.iter().map(|&i| ids[i].clone()).collect();
+            let ask = entry.provider.lookup(&batch, fields);
+            let answered = match transport::replaying_only(ask).await {
+                Ok(resp) => {
+                    if let Some(u) = resp.usage {
+                        add_usage(usage, &provider, u);
+                    }
+                    self.answered(&provider, &batch, resp.value)
+                }
+                Err(_) => None,
+            };
+            match answered {
+                Some(answers) => replayed.extend(chunk.iter().copied().zip(answers)),
+                None => rest.extend_from_slice(chunk),
+            }
+        }
+        (rest, replayed)
     }
 
     // Cache access. Cache failures are never fatal: a broken cache behaves

@@ -1,6 +1,7 @@
 //! The engine's side of the [`HttpClient`] seam: a real client, pacing,
 //! and the HTTP tape that benchmarks replay.
 
+use std::future::Future;
 use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
@@ -270,6 +271,11 @@ impl HttpTape {
 /// (`x-ratelimit-*`, as recorded) are dropped and a recorded cost reads 0,
 /// so it neither counts towards a spend nor moves a daily cap. It's
 /// received when it was recorded. A miss sent counts as usual.
+///
+/// An engine behind one ([`EngineBuilder::taped`](crate::EngineBuilder::taped))
+/// looks identifiers up one per request, so each one's answer replays
+/// however batches are made up; it asks a batch [`replaying_only`] first,
+/// so batches recorded whole still replay.
 pub struct TapeClient {
     label: String,
     inner: Arc<dyn HttpClient>,
@@ -307,7 +313,12 @@ impl TapeClient {
 #[async_trait]
 impl HttpClient for TapeClient {
     async fn send(&self, request: HttpRequest) -> Result<HttpResponse, Error> {
+        // Asked whether a whole batch is on the tape: nothing is sent.
+        let peeking = REPLAYING_ONLY.try_with(|()| ()).is_ok();
         let Some(key) = TapeKey::new(&request).filter(|_| !is_live(&request.url)) else {
+            if peeking {
+                return Err(Error::Offline);
+            }
             return self.untaped(request).await;
         };
         let key = key.with_secrets(self.secrets.iter().cloned());
@@ -325,6 +336,13 @@ impl HttpClient for TapeClient {
                 target: "aspero::tape",
                 provider = %self.label, error = %e, "tape unreadable; sending {url}"
             ),
+        }
+        if peeking {
+            tracing::debug!(
+                target: "aspero::tape",
+                provider = %self.label, "batch not on tape: {url}"
+            );
+            return Err(Error::Offline);
         }
         if self.mode == TapeMode::ReplayOnly {
             tracing::warn!(
@@ -344,6 +362,20 @@ impl HttpClient for TapeClient {
         }
         Ok(response)
     }
+}
+
+tokio::task_local! {
+    /// Set while the engine asks whether a whole batch is on the tape.
+    static REPLAYING_ONLY: ();
+}
+
+/// Runs `f` with every [`TapeClient`] replay-only, whatever its mode: what
+/// it asks that isn't on the tape fails as [`Error::Offline`], unsent. The
+/// engine asks a batch this way under a tape, so a batch recorded whole
+/// still replays while one that isn't is asked one ID at a time. Requests
+/// that don't go through a tape are sent as usual.
+pub(crate) async fn replaying_only<F: Future>(f: F) -> F::Output {
+    REPLAYING_ONLY.scope((), f).await
 }
 
 /// Whether `url` asks for live state rather than data: OpenAlex's
@@ -686,6 +718,30 @@ mod tests {
         let miss = replaying.send(get("https://doi.org/10.1/y")).await;
         assert!(matches!(miss, Err(Error::Offline)), "{miss:?}");
         assert_eq!(inner.sent(), 1);
+    }
+
+    #[tokio::test]
+    async fn asked_replay_only_a_recording_tape_sends_nothing() {
+        let inner = Counting::new(200);
+        let (client, _) = taped(&inner, TapeMode::Record);
+        client.send(get("https://doi.org/10.1/x")).await.unwrap();
+        let (hit, miss, live) = replaying_only(async {
+            (
+                client.send(get("https://doi.org/10.1/x")).await,
+                client.send(get("https://doi.org/10.1/y")).await,
+                client
+                    .send(get("https://api.openalex.org/rate-limit"))
+                    .await,
+            )
+        })
+        .await;
+        assert_eq!(hit.unwrap().status, 200);
+        assert!(matches!(miss, Err(Error::Offline)), "{miss:?}");
+        assert!(matches!(live, Err(Error::Offline)), "{live:?}");
+        assert_eq!(inner.sent(), 1);
+        // Outside it, a miss is sent and recorded as usual.
+        client.send(get("https://doi.org/10.1/y")).await.unwrap();
+        assert_eq!(inner.sent(), 2);
     }
 
     #[tokio::test]

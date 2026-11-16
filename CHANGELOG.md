@@ -1,5 +1,19 @@
 # Changelog
 
+## Unreleased
+
+Changed:
+
+- Developer: under the HTTP tape, identifiers are looked up one per
+  request (`EngineBuilder::taped`, set by `StandardConfig::http_tape`), so
+  each ID's answer, found or not, is a tape entry of its own and replays
+  however later batches are made up (a code change moving which claims
+  carry identifiers no longer turns every later batch into a miss). A
+  batch an older tape holds whole still replays. Verdicts are the same;
+  recording costs no more (OpenAlex's single-work lookups are free, its
+  batch filters $0.0001 each) but sends more requests (DESIGN "HTTP
+  tape").
+
 ## 0.29.0
 
 Added:

@@ -632,6 +632,30 @@ copy (or copy the file while nothing uses it) and `import` merges one
 tape into another. The tape is durable: its table is never dropped, and
 a change to key normalisation only turns old entries into misses.
 
+Under a tape, identifiers are looked up one per request
+(`EngineBuilder::taped`, which `StandardConfig::http_tape` sets): a
+batch's key holds every ID in it (OpenAlex's `filter=doi:a|b|…`,
+Crossref's `doi:`/`alternative-id:` filters, Europe PMC's `OR`ed
+clauses), so a code change moving which claims carry identifiers
+changed every later batch and missed the tape, though each ID's answer
+was on it. One request per ID makes each answer, a "not found" too (a
+404, or an empty list), an entry of its own, replayed however claims
+are batched. A batch an older tape holds whole is still replayed: each
+is first asked replay-only (transport `replaying_only`: a miss fails
+unsent), and asked an ID at a time only if it isn't all there. The
+answers are the same, only the requests differ: the batch paths already
+answer as a lone ID's lookup does (OpenAlex asks a key its filter
+missed alone). Recording costs no more: OpenAlex's single-work lookups
+are free where a filter page is $0.0001, the other sources are free;
+it sends more requests (a 100-ID batch is 100, paced), once per ID,
+ever. The daily cap isn't asked about the size of batches under a tape
+(none are sent), and a graph's spend still counts its lookups as
+batches, so its budget stops the same with and without the tape.
+Splitting batch responses into per-ID entries at the tape was the
+alternative: it would keep batches on the wire, but needs each
+source's response format and ID matching in the transport (OpenAlex
+finds works by DOIs their records no longer carry), for no saving.
+
 **Identify** names the work a document is from its first page: none of
 the page's identifiers is taken on trust (pages print related articles,
 data and the first references too). Each one, header and footer first (at

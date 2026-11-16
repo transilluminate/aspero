@@ -894,7 +894,19 @@ pub fn assess(claim: &Claim, record: &SourceRecord) -> Assessment {
     ) && work.container_title.is_none()
         && work.volume.is_none()
         && work.page.is_none();
-    if (journal_less || unconfirmable) && cites_journal && ids != Agreement::Match {
+    // A BibTeX `@article` with its journal cites a journal's article: a
+    // book of that title (a working paper's monograph) isn't it.
+    let book_for_article = work.work_type == Some(WorkType::Book)
+        && text.as_ref().is_some_and(|t| {
+            t.raw
+                .trim_start()
+                .get(..8)
+                .is_some_and(|head| head.eq_ignore_ascii_case("@article"))
+        });
+    if (journal_less || unconfirmable || book_for_article)
+        && cites_journal
+        && ids != Agreement::Match
+    {
         confidence = confidence.min(UNPLACED_CAP);
     }
     // Another edition of a book: the same title and authors, another year

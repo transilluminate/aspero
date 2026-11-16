@@ -2476,6 +2476,25 @@ fn held_out_red_team_failures_stay_fixed() {
             },
         ),
         (
+            "h1-496",
+            Claim::from_text(
+                "@article{levitt1996, author = {Levitt, S. D.}, title = {The Effect of Prison \
+                 Population Size on Crime Rates: Evidence from Prison Overcrowding Litigation}, \
+                 journal = {Social Science & Medicine}, year = {1996}}",
+            ),
+            {
+                let mut r = record(
+                    &[],
+                    "The effect of prison population size on crime rates: evidence from prison \
+                     overcrowding litigation",
+                    &["Steven D. Levitt"],
+                    1996,
+                );
+                r.work.work_type = Some(crate::work::WorkType::Book);
+                r
+            },
+        ),
+        (
             "h1-491",
             Claim::from_text(
                 "Berry, Christopher J. “Adam Smith's Considerations on Language.” Revue \

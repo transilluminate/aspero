@@ -1,3 +1,11 @@
+//! Elsevier's PIIs, journal ones only (a book chapter's `B…` isn't read),
+//! from ScienceDirect, linkinghub, Cell and Lancet addresses or `pii:`.
+//!
+//! Only Crossref looks them up: Elsevier deposits each as an
+//! `alternative-id`, found by the compact, upper-case form alone (the
+//! punctuated and lower-case forms find nothing). The engine then looks the
+//! PII's DOI up through the whole chain (`aspero_engine`'s `lookup.rs`).
+
 use std::borrow::Cow;
 use std::fmt;
 

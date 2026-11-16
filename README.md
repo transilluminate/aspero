@@ -240,8 +240,9 @@ target in Swift 5 mode (in SwiftPM, `swiftSettings:
 
 ## Development
 
-`just check` runs what CI runs (fmt, clippy, tests); `just` lists the rest:
-the live benchmark, fixture recording, a release dry run.
+`just check` runs what CI runs (fmt, the file-size and doc-path gates,
+clippy, tests); `just` lists the rest: the live benchmark, fixture
+recording, a release dry run.
 
 ## Licence
 

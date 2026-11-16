@@ -37,6 +37,11 @@
 //! site's name alone, an address or identifier, or too short: under
 //! [`MIN_WORDS`] words or [`MIN_CHARS`] characters for a hint, under two
 //! words for a page's own title.
+//!
+//! Only evidence takes a segment off: a known name, the host's, or the
+//! page's own name for its site. There are no site-by-site rules for web
+//! pages, and when unsure a segment stays, since nothing downstream edits a
+//! title (a web page's goes to a reference manager as read).
 
 /// Fewest words with letters in a dragged link's name for it to be a
 /// title: "Deep learning" could be anything's link text.

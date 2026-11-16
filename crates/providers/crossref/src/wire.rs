@@ -79,7 +79,9 @@ impl WireExtras {
 }
 
 /// The Elsevier PIIs among a work's `alternative-id`s, which also hold
-/// publishers' other numbers (article numbers, internal ids).
+/// publishers' other numbers (article numbers, internal ids; JAMA's hold
+/// none): only PII-shaped values are read. One odd deposit holds
+/// `S0000000000000000`.
 pub(crate) fn piis(value: &serde_json::Value) -> Vec<Pii> {
     value
         .get("alternative-id")

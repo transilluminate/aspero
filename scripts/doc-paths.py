@@ -6,8 +6,9 @@
 Agents find their way by grep and DESIGN.md, so a path or section the
 docs cite that a move left behind sends them looking for nothing. This
 reads DESIGN.md, README.md, docs/**/*.md, bench/**/*.md, the `## Unreleased`
-section of CHANGELOG.md (older entries describe the tree as it was), and
-the `//`, `///` and `//!` comments of crates/**/*.rs, and checks:
+section of CHANGELOG.md (older entries, and the archived ones in
+docs/changelog/, describe the tree as it was), and the `//`, `///` and `//!`
+comments of crates/**/*.rs, and checks:
 
 - Paths: `crates/core/src/work.rs`, `scripts/redteam.py`, `bench/...`,
   `docs/...`, a Markdown link's target, and partial ones (`matching/mod.rs`,
@@ -38,6 +39,8 @@ EXTENSIONS = "rs|py|sh|md|jsonl|json|toml|yml|yaml|swift"
 BARE_EXTENSIONS = "rs|py|sh|md|jsonl|toml"
 # Files a script makes the first time it needs them.
 MADE = {"bench/redteam/reports.jsonl"}
+# Released changelog entries, archived as written: not checked.
+ARCHIVE = "docs/changelog/"
 
 # A path-like token: word characters, dots, dashes and slashes, plus the
 # pattern characters that make it a pattern rather than a path.
@@ -193,7 +196,10 @@ def check(source, numbered, markdown, problems):
 
 def markdown_files():
     names = ["DESIGN.md", "README.md"]
-    names += sorted(f for f in FILES if re.match(r"(docs|bench)/.*\.md$", f))
+    names += sorted(
+        f for f in FILES
+        if re.match(r"(docs|bench)/.*\.md$", f) and not f.startswith(ARCHIVE)
+    )
     for name in names:
         lines = (ROOT / name).read_text(encoding="utf-8").splitlines()
         yield name, list(enumerate(lines, 1))

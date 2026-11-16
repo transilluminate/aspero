@@ -201,9 +201,14 @@ impl Claim {
 
     /// A claim from whatever a user typed: if the whole input is an
     /// identifier, a claim of just that identifier (an existence check);
-    /// otherwise a free-text reference (see [`Claim::from_text`]).
+    /// a Wikipedia citation template, RIS or EndNote record, its fields
+    /// ([`crate::tagged`]); otherwise a free-text reference (see
+    /// [`Claim::from_text`]).
     pub fn from_input(input: &str) -> Self {
         let input = input.trim();
+        if let Some(claim) = crate::tagged::claim(input) {
+            return claim;
+        }
         let whole = || match crate::id::scan(input).as_slice() {
             // As a copy spaced it out: `https:// doi. org/ 10. 1183/ …`.
             [m] if m.span == (0..input.len()) => Some(m.id.clone()),

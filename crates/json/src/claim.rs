@@ -147,10 +147,16 @@ pub struct InputClaim {
 
 impl InputClaim {
     /// One stdin line: a JSON object or a plain reference. A JSON line's
-    /// `key` is kept even when the rest of it is invalid.
+    /// `key` is kept even when the rest of it is invalid. A line starting
+    /// with `{` that isn't meant as JSON (a Wikipedia template, `{{cite
+    /// journal |…}}`, or a reference in braces) is a reference.
     pub fn from_line(line: &str) -> Self {
-        let (key, claim) = if line.trim_start().starts_with('{') {
-            match serde_json::from_str::<Value>(line) {
+        let json = line.trim_start().starts_with('{') && !line.trim_start().starts_with("{{");
+        let parsed = json.then(|| serde_json::from_str::<Value>(line));
+        // Meant as JSON: an object's first key, or none.
+        let object = || line.trim_start()[1..].trim_start().starts_with(['"', '}']);
+        let (key, claim) = if let Some(parsed) = parsed.filter(|p| p.is_ok() || object()) {
+            match parsed {
                 Err(e) => (None, Err(format!("invalid claim JSON: {e}"))),
                 Ok(value) => (
                     value.get("key").cloned(),
@@ -263,5 +269,24 @@ mod tests {
         assert!(bad.claim.is_err());
         assert_eq!(bad.echo()["claim_key"], "ref-12");
         assert!(bad.echo().get("claim").is_none());
+    }
+
+    #[test]
+    fn a_line_in_braces_not_meant_as_json_is_a_reference() {
+        let wiki = claim(
+            "{{cite journal |last1=Melzack |first1=R |title=Pain mechanisms: a new theory \
+             |journal=Science |year=1965 |volume=150 |pages=971–9}}",
+        )
+        .unwrap();
+        assert_eq!(wiki.title.as_deref(), Some("Pain mechanisms: a new theory"));
+        assert_eq!(wiki.authors, ["Melzack, R"]);
+        let braced = claim("{Smith J. A study of things. 2020.}").unwrap();
+        assert!(braced.text.is_some());
+        // A JSON object with a mistake in it is still refused.
+        assert!(
+            claim(r#"{"title": "X""#)
+                .unwrap_err()
+                .contains("invalid claim JSON")
+        );
     }
 }

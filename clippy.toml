@@ -13,5 +13,7 @@ doc-valid-idents = [
     "JaLC",
     "SplitMix64",
     "ScienceDirect",
+    "EndNote",
+    "NeurIPS",
     "..",
 ]

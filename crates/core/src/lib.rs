@@ -8,6 +8,8 @@
 //! - [`error`]: the shared [`Error`] contract.
 //! - [`matching`]: does a record match what a citation claims?
 //! - [`references`]: splitting a pasted reference list.
+//! - [`tagged`]: a reference pasted as a Wikipedia citation template, an
+//!   RIS or an EndNote record, read as a structured claim.
 //! - [`resilience`]: per-provider [`ResiliencePolicy`].
 //! - [`site`]: an article page's site, and its publisher's DOI prefixes.
 //! - [`webpage`]: a claim from a publisher's article page's markup.
@@ -27,6 +29,7 @@ pub mod record;
 pub mod references;
 pub mod resilience;
 pub mod site;
+pub mod tagged;
 pub mod webpage;
 pub mod work;
 

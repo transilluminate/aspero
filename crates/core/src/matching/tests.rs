@@ -1557,3 +1557,42 @@ fn bibtex_harvard_and_single_page_locators_are_checked() {
         }
     }
 }
+
+#[test]
+fn a_preprint_and_a_journal_article_are_other_versions_of_each_other() {
+    // Red team (#102): an arXiv preprint cited in a journal by name alone,
+    // and a journal's article cited as a preprint, verified.
+    let mut preprint = record(
+        &["arxiv:2410.02479"],
+        "Cross-Embodiment Dexterous Grasping with Reinforcement Learning",
+        &["Haoqi Yuan", "Bohan Zhou"],
+        2024,
+    );
+    preprint.work.work_type = Some(crate::work::WorkType::Preprint);
+    let text = "Yuan H, Zhou B. Cross-embodiment dexterous grasping with reinforcement learning. \
+                Science Robotics. 2024.";
+    let a = assess(&Claim::from_text(text), &preprint);
+    assert_eq!(a.container.agreement, Agreement::Mismatch, "{a:?}");
+    assert!((PLAUSIBLE..VERIFIED).contains(&a.confidence), "{a:?}");
+    // Cited as the preprint it is, or by its identifier: verified.
+    for text in [
+        "Yuan H, Zhou B. Cross-embodiment dexterous grasping with reinforcement learning. arXiv. \
+         2024.",
+        "Yuan H, Zhou B. Cross-embodiment dexterous grasping with reinforcement learning. Science \
+         Robotics. 2024. arXiv:2410.02479",
+    ] {
+        let a = assess(&Claim::from_text(text), &preprint);
+        assert!(a.confidence >= VERIFIED, "{text}: {a:?}");
+    }
+    for text in [
+        format!("Rivers E, Nguyen B. {EGDT}. medRxiv preprint, 2001."),
+        format!("Rivers E, Nguyen B. {EGDT}. arXiv preprint. 2001."),
+    ] {
+        let a = assess(&Claim::from_text(&text), &egdt());
+        assert_eq!(a.container.agreement, Agreement::Mismatch, "{text}");
+        assert!(
+            (PLAUSIBLE..VERIFIED).contains(&a.confidence),
+            "{text}: {a:?}"
+        );
+    }
+}

@@ -439,6 +439,28 @@ fn dedup_years(mut years: Vec<i16>) -> Vec<i16> {
     years
 }
 
+/// Words naming a preprint server, or a preprint.
+const PREPRINT_WORDS: &[&str] = &[
+    "arxiv",
+    "biorxiv",
+    "medrxiv",
+    "chemrxiv",
+    "psyarxiv",
+    "socarxiv",
+    "techrxiv",
+    "ssrn",
+    "preprint",
+    "preprints",
+];
+
+/// Whether a venue is a preprint server's: "arXiv (Cornell University)",
+/// "medRxiv", "Research Square", "SSRN Electronic Journal".
+fn preprint_server(name: &str) -> bool {
+    let words = words(name);
+    words.iter().any(|w| PREPRINT_WORDS.contains(&w.as_str()))
+        || words.windows(2).any(|w| w == ["research", "square"])
+}
+
 /// Scores how well `record` matches `claim`.
 pub fn assess(claim: &Claim, record: &SourceRecord) -> Assessment {
     let work = &record.work;
@@ -570,11 +592,26 @@ pub fn assess(claim: &Claim, record: &SourceRecord) -> Assessment {
     // A reference giving a journal, volume and page cites the published
     // article; a preprint of it (in no journal, at no volume) is another
     // version, not the one cited.
-    let preprint_of_cited = work.work_type == Some(crate::work::WorkType::Preprint)
+    // So is one cited in a journal by name alone ("Science Robotics.
+    // 2024."), unless its identifier is the one claimed.
+    let preprint = work.work_type == Some(WorkType::Preprint)
+        || work.container_title.as_deref().is_some_and(preprint_server);
+    let preprint_of_cited = preprint
         && work.volume.is_none()
-        && cited_journal.is_some()
-        && cited_place.volume.is_some()
-        && cited_place.page.is_some();
+        && cited_journal
+            .as_deref()
+            .is_some_and(|j| !preprint_server(j))
+        && ((cited_place.volume.is_some() && cited_place.page.is_some())
+            || id_agreement(&claim.ids, &record.ids) != Agreement::Match);
+    // A journal's article cited as a preprint ("medRxiv preprint, 2019"),
+    // without an identifier to say which version: another version.
+    let article_as_preprint = article
+        && !preprint
+        && claim.ids.is_empty()
+        && claim.container.is_none()
+        && text
+            .as_ref()
+            .is_some_and(|t| t.words.iter().any(|w| PREPRINT_WORDS.contains(&w.as_str())));
     // The journal the claim names, or reads where its reference gives one,
     // decides, not words elsewhere in a reference (an author's initials
     // "SR" for Scientific Reports). Names compare by rule, which misses
@@ -597,11 +634,12 @@ pub fn assess(claim: &Claim, record: &SourceRecord) -> Assessment {
         }
         _ => FieldCheck::UNKNOWN,
     };
-    let container = if preprint_of_cited && container.agreement != Agreement::Match {
-        FieldCheck::exact(false)
-    } else {
-        container
-    };
+    let container =
+        if (preprint_of_cited || article_as_preprint) && container.agreement != Agreement::Match {
+            FieldCheck::exact(false)
+        } else {
+            container
+        };
     // A journal article cited in a journal clearly not its own, or a
     // preprint cited as a journal's article.
     let wrong_journal =

@@ -230,6 +230,31 @@ fn sister_names(cited: &str, actual: &str, read: bool) -> bool {
     !(own_c.is_empty() && own_a.is_empty())
 }
 
+/// Words naming a section a journal may number in its own volumes.
+const SECTION_WORDS: &[&str] = &[
+    "letters",
+    "letter",
+    "lett",
+    "supplement",
+    "supplements",
+    "suppl",
+    "supp",
+];
+
+/// Whether `cited` names a section of `actual`: its name with section
+/// words only ([`SECTION_WORDS`]: "The Astrophysical Journal Letters" of
+/// The Astrophysical Journal, whose letters its volumes numbered until
+/// 2010). Only at the record's own volume and page is it the journal.
+pub(crate) fn section_of(cited: &str, actual: &str) -> bool {
+    let (c, a) = (significant(cited), significant(actual));
+    let own_c = distinguishing(&c, &a);
+    !own_c.is_empty()
+        && distinguishing(&a, &c).is_empty()
+        && own_c
+            .iter()
+            .all(|&i| SECTION_WORDS.contains(&c[i].as_str()))
+}
+
 /// The run of `full`'s words whose initials `word` is ("jco" in "journal
 /// clinical oncology"), as a range, if any.
 fn initials_of_run(word: &str, full: &[String]) -> Option<std::ops::Range<usize>> {
@@ -413,9 +438,99 @@ fn is_initials(word: &str, full: &[String]) -> bool {
     word.chars().count() == full.len() && word.chars().zip(full).all(|(c, f)| f.starts_with(c))
 }
 
+/// BibTeX's accents and special letters as the letters they mark, the
+/// accent dropped (names and titles are compared folded):
+/// `Micha{\"e}l` is "Michael", `Veli{\v{c}}kovi{\'c}` "Velickovic",
+/// `Tr{\k{e}}bacz` "Trebacz", `\ss` "ss", `\&` "&". Braces stay.
+pub(crate) fn delatex(text: &str) -> String {
+    const ACCENTS: &str = "\"'`^~=.vkcuHrdbt";
+    const LETTERS: &[(&str, &str)] = &[
+        ("ss", "ss"),
+        ("aa", "a"),
+        ("AA", "A"),
+        ("ae", "ae"),
+        ("AE", "AE"),
+        ("oe", "oe"),
+        ("OE", "OE"),
+        ("o", "o"),
+        ("O", "O"),
+        ("l", "l"),
+        ("L", "L"),
+        ("i", "i"),
+        ("j", "j"),
+    ];
+    let chars: Vec<char> = text.chars().collect();
+    let mut out = String::with_capacity(text.len());
+    let mut i = 0;
+    while i < chars.len() {
+        // A letter's group, its braces dropped too: `{\"e}`, `{\v{c}}`.
+        if chars[i] == '{' && chars.get(i + 1) == Some(&'\\') {
+            let mut depth = 0usize;
+            let close = (i..chars.len().min(i + 12)).find(|&j| {
+                match chars[j] {
+                    '{' => depth += 1,
+                    '}' => depth -= 1,
+                    _ => {}
+                }
+                depth == 0
+            });
+            if let Some(close) = close {
+                let inner: String = chars[i + 1..close].iter().collect();
+                let letter = delatex(&inner);
+                if !letter.contains(['\\', '{', '}']) && letter.chars().count() <= 2 {
+                    out.push_str(&letter);
+                    i = close + 1;
+                    continue;
+                }
+            }
+        }
+        if chars[i] != '\\' || i + 1 >= chars.len() {
+            out.push(chars[i]);
+            i += 1;
+            continue;
+        }
+        let next = chars[i + 1];
+        let word: String = chars[i + 1..]
+            .iter()
+            .take_while(|c| c.is_ascii_alphabetic())
+            .collect();
+        if let Some((_, letter)) = LETTERS.iter().find(|(name, _)| *name == word) {
+            out.push_str(letter);
+            i += 1 + word.len();
+        } else if ACCENTS.contains(next) && (!next.is_ascii_alphabetic() || word.len() == 1) {
+            // The accent, then its letter: bare or in braces.
+            i += 2;
+            while chars.get(i) == Some(&' ') {
+                i += 1;
+            }
+            if chars.get(i) == Some(&'{') {
+                i += 1;
+                while let Some(&c) = chars.get(i) {
+                    i += 1;
+                    if c == '}' {
+                        break;
+                    }
+                    out.push(c);
+                }
+            } else if let Some(&c) = chars.get(i) {
+                out.push(c);
+                i += 1;
+            }
+        } else if !next.is_ascii_alphabetic() {
+            // An escaped character: `\&`, `\%`.
+            out.push(next);
+            i += 2;
+        } else {
+            out.push(chars[i]);
+            i += 1;
+        }
+    }
+    out
+}
+
 /// A field of a BibTeX entry pasted as a reference (`@article{key, journal
-/// = {Nature}, …}`), its braces dropped: `None` if the text isn't one or
-/// lacks the field.
+/// = {Nature}, …}`), its braces dropped and its accents read
+/// ([`delatex`]): `None` if the text isn't one or lacks the field.
 pub(crate) fn bibtex_field(text: &str, name: &str) -> Option<String> {
     let text = text.trim_start();
     if !text.starts_with('@') {
@@ -452,7 +567,7 @@ pub(crate) fn bibtex_field(text: &str, name: &str) -> Option<String> {
         };
         let mut depth = 0usize;
         let mut value = String::new();
-        for c in text[start + 1..].chars() {
+        for c in delatex(&text[start + 1..]).chars() {
             match c {
                 c if c == close && depth == 0 => {
                     let value = value.split_whitespace().collect::<Vec<_>>().join(" ");
@@ -470,11 +585,13 @@ pub(crate) fn bibtex_field(text: &str, name: &str) -> Option<String> {
 
 /// The first page of a page or range: "2545" from "2545-55" or "2545–2555".
 pub fn first_page(pages: &str) -> &str {
-    pages
-        .split(['-', '–', '—', ','])
-        .next()
-        .unwrap_or("")
-        .trim()
+    // Up to whatever separates the last page, a dash however a record
+    // garbles it ("205???210").
+    let pages = pages.trim();
+    let end = pages
+        .find(|c: char| !(c.is_alphanumeric() || c == '.'))
+        .unwrap_or(pages.len());
+    &pages[..end]
 }
 
 /// Volume and first page as a reference gives them.
@@ -1776,10 +1893,14 @@ fn volume_number(s: &str) -> Option<String> {
     (volume.len() <= 6 && is_digits(volume)).then(|| volume.to_owned())
 }
 
-/// "2545-55", "e1234" or "S12": the first page.
+/// "2545-55", "e1234", "S12" or "R3" (a letter for a section or
+/// supplement: Nucleic Acids Research's "D1", a review's "R3"): the first
+/// page.
 fn page_number(s: &str) -> Option<String> {
     let page = first_page(s.trim_end_matches(['.', ',', ';']));
-    let digits = page.trim_start_matches(['e', 'E', 's', 'S']);
+    let digits = page
+        .strip_prefix(|c: char| c.is_ascii_alphabetic())
+        .unwrap_or(page);
     (digits.len() <= 8 && is_digits(digits)).then(|| page.to_ascii_lowercase())
 }
 

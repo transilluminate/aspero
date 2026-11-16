@@ -4353,3 +4353,118 @@ fn a_notice_is_not_the_original_it_corrects() {
         assert!(a.confidence >= VERIFIED, "{title}: {a:?}");
     }
 }
+
+#[test]
+fn wild_red_team_citations_as_models_write_them() {
+    // bench/redteam/wild-1.jsonl (round 5): real citations models wrote,
+    // right but for a model's habits, against the records they missed.
+    let emperor = article(
+        "Cardiovascular and Renal Outcomes with Empagliflozin in Heart Failure",
+        &[
+            "Milton Packer",
+            "Stefan D. Anker",
+            "Javed Butler",
+            "Gerasimos Filippatos",
+        ],
+        2020,
+        ("New England Journal of Medicine", "383", "1413-1424"),
+    );
+    let mut braden = article(
+        "The Braden Scale for Predicting Pressure Sore Risk",
+        &[
+            "Nancy Bergstrom",
+            "Barbara J. Braden",
+            "Antoinette Laguzza",
+            "Victoria Holman",
+        ],
+        1987,
+        ("Nursing Research", "36", "205-210"),
+    );
+    // As the record garbles its dash.
+    braden.work.page = Some("205???210".into());
+    let griffiths = article(
+        "Nurse staffing and patient outcomes: Strengths and limitations of the evidence to \
+         inform policy and practice. A review and discussion paper based on evidence reviewed \
+         for the National Institute for Health and Care Excellence Safe Staffing guideline \
+         development",
+        &["Peter Griffiths", "Jane Ball", "Jonathan Drennan"],
+        2016,
+        ("International Journal of Nursing Studies", "63", "213-225"),
+    );
+    let mut gat = record(
+        &["arxiv:1710.10903"],
+        "Graph Attention Networks",
+        &["Petar Veličković", "Guillem Cucurull", "Arantxa Casanova"],
+        2018,
+    );
+    gat.work.work_type = Some(crate::work::WorkType::Preprint);
+    let pulsar = article(
+        "Discovery of a pulsar in a binary system",
+        &["R. A. Hulse", "J. H. Taylor"],
+        1975,
+        ("The Astrophysical Journal", "195", "L51-L53"),
+    );
+    for (n, claim, record) in [
+        // A trial's label before the byline is no author.
+        (
+            "w1-41",
+            "EMPEROR-Reduced (empagliflozin, n=3,730): Packer M, Anker SD, Butler J, et al. \
+             Cardiovascular and renal outcomes with empagliflozin in heart failure. N Engl J \
+             Med. 2020;383:1413-1424.",
+            &emperor,
+        ),
+        (
+            "w1-90",
+            "Bergstrom N, Braden BJ, Laguzza A, Holman V. The Braden Scale for predicting \
+             pressure sore risk. Nurs Res. 1987;36(4):205-210.",
+            &braden,
+        ),
+        // A record's title running on into a description, cited without.
+        (
+            "w1-374",
+            "Griffiths P, Ball J, Drennan J, et al. Nurse staffing and patient outcomes: \
+             strengths and limitations of the evidence to inform policy and practice. Int J \
+             Nurs Stud. 2016;63:213-25.",
+            &griffiths,
+        ),
+        // BibTeX's accents in its authors.
+        (
+            "w1-339",
+            "@misc{velickovic2018graph, author = {Veli{\\v{c}}kovi{\\'c}, Petar and Cucurull, \
+             Guillem and Casanova, Arantxa}, title = {Graph Attention Networks}, year = {2018}, \
+             eprint = {1710.10903}, archivePrefix = {arXiv}}",
+            &gat,
+        ),
+        // A journal's letters, numbered in its volumes, at its place.
+        (
+            "w1-249",
+            "Hulse, R. A., & Taylor, J. H. (1975). \"Discovery of a pulsar in a binary system.\" \
+             The Astrophysical Journal Letters, 195, L51–L53.",
+            &pulsar,
+        ),
+    ] {
+        let a = assess(&Claim::from_text(claim), record);
+        assert!(a.confidence >= VERIFIED, "{n}: {a:?}");
+    }
+    // A page with a section's letter is read: "pp. R3–R20" for pages
+    // 121–138 is the wrong page.
+    let ebell = article(
+        "The long-term economic impact of leaving the EU",
+        &["Monique Ebell", "James Warren"],
+        2016,
+        ("National Institute Economic Review", "236", "121-138"),
+    );
+    let claim = Claim::from_text(
+        "Ebell, M. and Warren, J. (2016) 'The long-term economic impact of leaving the EU', \
+         National Institute Economic Review, 236, pp. R3–R20.",
+    );
+    let a = assess(&claim, &ebell);
+    assert_eq!(a.page.agreement, Agreement::Mismatch, "{a:?}");
+    assert!((PLAUSIBLE..VERIFIED).contains(&a.confidence), "{a:?}");
+    // The letters cited at another place are the sister journal.
+    let claim = Claim::from_text(
+        "Hulse, R. A., & Taylor, J. H. (1975). \"Discovery of a pulsar in a binary system.\" \
+         The Astrophysical Journal Letters, 196, L1–L3.",
+    );
+    assert!(assess(&claim, &pulsar).confidence < VERIFIED);
+}

@@ -501,7 +501,51 @@ fn byline(text: &Normalised, title: Option<&str>, span: Option<&Range<usize>>) -
         });
         ended.map_or(titled, |i| i + 1)
     };
-    Some(text.raw[..text.spans.get(start).map_or(text.raw.len(), |s| s.start)].to_owned())
+    let byline = &text.raw[..text.spans.get(start).map_or(text.raw.len(), |s| s.start)];
+    Some(unlabelled(byline).to_owned())
+}
+
+/// A byline without the label a reference may open with, a trial's or a
+/// guideline's ("EMPEROR-Reduced (empagliflozin, n=3,730): Packer M, …",
+/// "HOPE-3: Yusuf S, …"): a few words before a colon, no comma among
+/// them outside brackets, and a name with its initials after it (not a
+/// title's words: "NICE (2010) Delirium: prevention, …").
+fn unlabelled(byline: &str) -> &str {
+    let Some(colon) = byline.find(": ") else {
+        return byline;
+    };
+    let mut after = byline[colon + 2..].split_whitespace();
+    let initials = |t: &str| {
+        let t = t.trim_end_matches([',', '.', ';']);
+        (1..=3).contains(&t.chars().count())
+            && t.chars().all(|c| c.is_uppercase() || c == '.' || c == '-')
+    };
+    let named = match (after.next(), after.next()) {
+        (Some(name), Some(next)) => {
+            name.starts_with(char::is_uppercase) && name.chars().count() > 1 && initials(next)
+        }
+        _ => false,
+    };
+    if !named {
+        return byline;
+    }
+    let label = &byline[..colon];
+    let mut depth = 0usize;
+    let bare: String = label
+        .chars()
+        .filter(|&c| {
+            match c {
+                '(' | '[' => depth += 1,
+                ')' | ']' => depth = depth.saturating_sub(1),
+                _ => return depth == 0,
+            }
+            false
+        })
+        .collect();
+    if bare.contains(',') || bare.split_whitespace().count() > 4 {
+        return byline;
+    }
+    &byline[colon + 2..]
 }
 
 /// The venue a claim cites, to tell a conference by: its container, a
@@ -633,7 +677,14 @@ pub fn preprint_version_claimed(claim: &Claim, record: &SourceRecord) -> Option<
 /// Scores how well `record` matches `claim`.
 pub fn assess(claim: &Claim, record: &SourceRecord) -> Assessment {
     let work = &record.work;
-    let text = claim.text.as_deref().map(Normalised::new);
+    // A BibTeX entry's accents read as letters (`Veli{\v{c}}kovi{\'c}`).
+    let text = claim.text.as_deref().map(|t| {
+        if t.trim_start().starts_with('@') {
+            Normalised::new(&publication::delatex(t))
+        } else {
+            Normalised::new(t)
+        }
+    });
     // A placeholder record's "title" may be a URL (a registration agency's
     // notice page): no title at all.
     let work_title = work.title.clone().filter(|t| !is_url(t));
@@ -892,11 +943,21 @@ pub fn assess(claim: &Claim, record: &SourceRecord) -> Assessment {
     // A sister journal's name holds the record's ("JAMA Intern Med" for
     // JAMA) but is another journal.
     let read = claim.container.is_none() && !bibtex;
+    // A journal's section numbered in its volumes ("The Astrophysical
+    // Journal Letters, 195, L51" for The Astrophysical Journal's L51) is
+    // the journal, at the record's own place.
+    let same_text = |c: Option<&str>, a: Option<&str>| matches!((c, a), (Some(c), Some(a)) if c.eq_ignore_ascii_case(a));
+    let at_its_place = same_text(cited_place.volume.as_deref(), work.volume.as_deref())
+        && same_text(
+            cited_place.page.as_deref(),
+            work.page.as_deref().map(first_page),
+        );
     let container = match &work.container_title {
         Some(actual)
             if journals.iter().any(|cited| {
                 (same_journal(cited, actual) || journal_in(&words(cited), actual))
-                    && !publication::sister_journal_as(cited, actual, read)
+                    && (!publication::sister_journal_as(cited, actual, read)
+                        || (at_its_place && publication::section_of(cited, actual)))
             }) =>
         {
             FieldCheck::exact(true)

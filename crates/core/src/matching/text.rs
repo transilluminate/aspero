@@ -180,6 +180,24 @@ pub(super) fn main_title(title: &str) -> &str {
         .map_or(title, |i| title[..i].trim())
 }
 
+/// A title's first sentence, when a record's runs on into a description
+/// ("Nurse staffing and patient outcomes: Strengths and limitations of
+/// the evidence to inform policy and practice. A review and discussion
+/// paper based on evidence reviewed for …"): cited without it, the title
+/// is the record's with words dropped, its subtitle kept.
+pub(super) fn first_sentence(title: &str) -> &str {
+    title
+        .find(". ")
+        .filter(|&i| {
+            // Not an initial or abbreviation's stop ("J. Smith", "vs. ").
+            title[..i]
+                .rsplit(' ')
+                .next()
+                .is_some_and(|w| w.chars().count() > 3)
+        })
+        .map_or(title, |i| title[..i].trim())
+}
+
 /// Whether a claimed title, given apart (a structured claim's), is the
 /// record's with significant words of its own put in place of the
 /// title's ("A Controlled Study of …" for "A Randomized Trial of …"):
@@ -450,20 +468,23 @@ impl Normalised {
             .collect()
     }
 
-    /// The words (as indices into `words`) where `title` (or its main
-    /// title, without subtitle) stands as a phrase, first found.
+    /// The words (as indices into `words`) where `title` (or its first
+    /// sentence, or its main title, without subtitle) stands as a phrase,
+    /// first found.
     pub(super) fn title_span(&self, title: &str) -> Option<Range<usize>> {
         let title = unmarked(title);
-        [title, main_title(title)].into_iter().find_map(|t| {
-            let phrase = words(t);
-            if phrase.is_empty() {
-                return None;
-            }
-            self.words
-                .windows(phrase.len())
-                .position(|run| run == phrase.as_slice())
-                .map(|at| at..at + phrase.len())
-        })
+        [title, first_sentence(title), main_title(title)]
+            .into_iter()
+            .find_map(|t| {
+                let phrase = words(t);
+                if phrase.is_empty() {
+                    return None;
+                }
+                self.words
+                    .windows(phrase.len())
+                    .position(|run| run == phrase.as_slice())
+                    .map(|at| at..at + phrase.len())
+            })
     }
 
     /// Whether the reference gives `title` with a word or two put in place
@@ -662,7 +683,10 @@ impl Normalised {
             let norm = normalise(t);
             !norm.is_empty() && self.padded.contains(&format!(" {norm} "))
         };
-        if phrase(title) || (main_title(title) != title && phrase(main_title(title))) {
+        if phrase(title)
+            || (first_sentence(title) != title && phrase(first_sentence(title)))
+            || (main_title(title) != title && phrase(main_title(title)))
+        {
             return 1.0;
         }
         let title_words = content_words(title);

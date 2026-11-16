@@ -239,27 +239,77 @@ fn key_spend_adds_up_per_day_and_survives_rebuilds() {
     assert_eq!(cache.key_spend("k1", "2026-12-20").unwrap(), 0.25);
 }
 
-/// Credit spent today is the day's first balance less the latest: a fall
-/// is spend, a top-up raises the start rather than counting as negative
-/// spend, a small rise or an older sighting is responses out of order,
-/// and a new day starts again.
+/// Credit spent today is the day's first balance less the balance now.
+/// Headers' balances only ever lower it: requests made together are
+/// answered by servers minutes apart, the stale ones higher, so a rise in
+/// them is never a top-up (it once ran the day's start up to $5 more than
+/// was spent).
 #[test]
-fn prepaid_spend_is_told_from_the_days_first_balance() {
-    let see = |known, balance, s| PrepaidDay::see(known, balance, at(s));
-    let first = see(None, 10.0, 0);
+fn stale_balances_in_headers_are_never_top_ups() {
+    let header = |known, balance| PrepaidDay::see(known, balance, None, at(0));
+    let mut day = header(None, 10.0);
+    // As seen 2026-11-16: interleaved, some servers $0.18 behind.
+    for balance in [
+        9.70, 9.69, 9.705, 9.68, 9.8436, 9.6539, 9.8414, 9.6517, 9.8445, 9.6528, 9.6649,
+    ] {
+        day = header(Some(day), balance);
+    }
+    assert_eq!(day.start_usd, 10.0, "never raised");
+    assert_eq!(day.last_usd, 9.6517, "the lowest seen");
+    assert_eq!(day.spent_usd(), 0.3483);
+}
+
+/// The provider's own word (`/rate-limit`, saying the credit bought) sets
+/// the balance either way, and only a rise in the credit bought is a
+/// top-up; its word older than the last changes nothing.
+#[test]
+fn the_providers_own_word_sets_the_balance_and_tells_top_ups() {
+    let see = |known, balance, bought, s| PrepaidDay::see(known, balance, bought, at(s));
+    let first = see(None, 10.0, Some(10.0), 0);
     assert_eq!((first.start_usd, first.last_usd), (10.0, 10.0));
     assert_eq!(first.spent_usd(), 0.0);
 
-    let fell = see(Some(first), 9.75, 10);
-    assert_eq!(fell.spent_usd(), 0.25);
+    // Headers too low (a server ahead, or a guess): the word corrects it.
+    let low = see(Some(first), 9.5, None, 5);
+    assert_eq!(low.spent_usd(), 0.5);
+    let said = see(Some(low), 9.75, Some(10.0), 10);
+    assert_eq!(said.spent_usd(), 0.25);
     // A top-up of $5 after $0.25 spent: still $0.25 spent, then more.
-    let topped = see(Some(fell), 14.75, 20);
+    let topped = see(Some(said), 14.75, Some(15.0), 20);
     assert_eq!((topped.start_usd, topped.spent_usd()), (15.0, 0.25));
-    assert_eq!(see(Some(topped), 14.5, 30).spent_usd(), 0.5);
-    // A response answered before the last, arriving after it.
-    let late = see(Some(fell), 9.751, 25);
-    assert_eq!(late, fell, "a rise under a cent is no top-up");
-    assert_eq!(see(Some(fell), 9.0, 5), fell, "older than the latest");
+    assert_eq!(see(Some(topped), 14.5, None, 30).spent_usd(), 0.5);
+    // A stale header after the top-up is still spend, until the word.
+    assert_eq!(see(Some(topped), 14.7, None, 30).spent_usd(), 0.3);
+    // The word older than the last changes nothing.
+    assert_eq!(see(Some(said), 9.0, Some(10.0), 5), said);
+    // Bought falling (credit expiring) is no top-up.
+    let expired = see(Some(said), 4.75, Some(5.0), 30);
+    assert_eq!(expired.start_usd, 10.0);
+}
+
+/// The first shape of the table took stale balances for top-ups: it's
+/// dropped, and its days started again.
+#[test]
+fn a_prepaid_table_of_the_first_shape_is_dropped() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("cache.sqlite");
+    drop(SqliteCache::open(&path).unwrap());
+    {
+        let conn = rusqlite::Connection::open(&path).unwrap();
+        conn.execute_batch(
+            "DROP TABLE prepaid_day;
+             CREATE TABLE prepaid_day (provider TEXT NOT NULL, day TEXT NOT NULL,
+                 start_usd REAL NOT NULL, last_usd REAL NOT NULL, seen_at INTEGER NOT NULL,
+                 PRIMARY KEY (provider, day));
+             INSERT INTO prepaid_day VALUES ('openalex', '2026-11-16', 15.0, 9.66, 0);",
+        )
+        .unwrap();
+    }
+    let cache = SqliteCache::open(&path).unwrap();
+    let day = cache
+        .see_prepaid("openalex", "2026-11-16", 9.65, None, at(0))
+        .unwrap();
+    assert_eq!((day.start_usd, day.spent_usd()), (9.65, 0.0));
 }
 
 /// The day's balances are shared through the file (other processes,
@@ -271,7 +321,7 @@ fn prepaid_days_are_kept_per_provider_and_day_and_survive_rebuilds() {
     {
         let cache = SqliteCache::open(&path).unwrap();
         let day = cache
-            .see_prepaid("openalex", "2026-11-16", 10.0, at(0))
+            .see_prepaid("openalex", "2026-11-16", 10.0, None, at(0))
             .unwrap();
         assert_eq!(day.spent_usd(), 0.0);
         cache.clear().unwrap();
@@ -283,29 +333,29 @@ fn prepaid_days_are_kept_per_provider_and_day_and_survive_rebuilds() {
     let cache = SqliteCache::open(&path).unwrap();
     let other = SqliteCache::open(&path).unwrap();
     let day = other
-        .see_prepaid("openalex", "2026-11-16", 9.0, at(10))
+        .see_prepaid("openalex", "2026-11-16", 9.0, None, at(10))
         .unwrap();
     assert_eq!(day.spent_usd(), 1.0, "another process sees the same day");
     let day = cache
-        .see_prepaid("openalex", "2026-11-16", 8.5, at(20))
+        .see_prepaid("openalex", "2026-11-16", 8.5, None, at(20))
         .unwrap();
     assert_eq!((day.start_usd, day.spent_usd()), (10.0, 1.5));
     // The next day starts from its own first balance.
     let next = cache
-        .see_prepaid("openalex", "2026-11-17", 8.5, at(86_400))
+        .see_prepaid("openalex", "2026-11-17", 8.5, None, at(86_400))
         .unwrap();
     assert_eq!(next.spent_usd(), 0.0);
     // Another provider's day is its own.
     let mine = cache
-        .see_prepaid("other", "2026-11-16", 3.0, at(30))
+        .see_prepaid("other", "2026-11-16", 3.0, None, at(30))
         .unwrap();
     assert_eq!(mine.spent_usd(), 0.0);
     // A week on, the old days go.
     cache
-        .see_prepaid("openalex", "2026-11-30", 8.0, at(14 * 86_400))
+        .see_prepaid("openalex", "2026-11-30", 8.0, None, at(14 * 86_400))
         .unwrap();
     let again = cache
-        .see_prepaid("openalex", "2026-11-16", 8.0, at(14 * 86_400))
+        .see_prepaid("openalex", "2026-11-16", 8.0, None, at(14 * 86_400))
         .unwrap();
     assert_eq!(again.start_usd, 8.0, "forgotten, so started afresh");
 }

@@ -275,12 +275,13 @@ fn tidy(text: &str) -> String {
 /// arXiv as a journal ("arXiv (Cornell University)"), sometimes with a
 /// later version's volume and pages: cite the preprint.
 fn item(index: usize, work: &Work, ids: &[WorkId]) -> Value {
-    const PRINTED: [&str; 14] = [
+    const PRINTED: [&str; 15] = [
         "id",
         "type",
         "title",
         "author",
         "issued",
+        "accessed",
         "container-title",
         "volume",
         "issue",
@@ -508,6 +509,34 @@ mod tests {
         assert!(p.contains("arXiv") && p.contains("1706.03762"), "{p}");
         let v = one("vancouver", &book, &[]).text;
         assert!(v.starts_with("Goodfellow I. Deep Learning."), "{v}");
+    }
+
+    #[test]
+    fn web_pages_cite_with_their_site_and_when_read() {
+        let mut page = Work::default();
+        page.title = Some("Hospital waiting lists fall for third month running".into());
+        page.work_type = Some(WorkType::WebPage);
+        page.authors = vec![Person::literal("Priya Shah")];
+        page.container_title = Some("The Example Times".into());
+        page.url = Some("https://www.example-times.co.uk/news/health/123456".into());
+        page.issued = PartialDate::new(2026, Some(11), Some(13));
+        page.accessed = PartialDate::new(2026, Some(11), Some(16));
+        let apa = one("apa", &page, &[]);
+        assert_eq!(
+            apa.text,
+            "Shah, P. (2026, November 13). Hospital waiting lists fall for third month running. \
+             The Example Times. https://www.example-times.co.uk/news/health/123456"
+        );
+        assert_eq!(apa.in_text, "(Shah, 2026)");
+        // Styles that print when a page was read do.
+        let harvard = one("harvard", &page, &[]).text;
+        assert!(
+            harvard.ends_with(
+                "The Example Times. Available at: \
+                 https://www.example-times.co.uk/news/health/123456 (Accessed: November 16, 2026)."
+            ),
+            "{harvard}"
+        );
     }
 
     /// Prints each bundled style's book, chapter and preprint:

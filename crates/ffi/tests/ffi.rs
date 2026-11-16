@@ -6,9 +6,9 @@ use std::collections::HashMap;
 use aspero_ffi::records::ReadError;
 use aspero_ffi::records::{
     AnalysisKind, Author, BibFormat, BibProblem, CitationManager, CiteFormat, Claim, Coverage,
-    ErrorKind, ExportFormat, KeyStatus, LookupStatus, PageSource, Reason, SearchBoolean,
+    ErrorKind, ExportFormat, KeyStatus, LookupStatus, PageKind, PageSource, Reason, SearchBoolean,
     SearchField, SearchFilter, SearchFilterValue, SearchNode, SearchRelation, SearchRequest,
-    SearchSort, SeedProblem, StyleError, StyleSource, Verdict, Work,
+    SearchSort, SeedProblem, StyleError, StyleSource, Verdict, WebPage, Work,
 };
 use aspero_ffi::{Aspero, AsperoError, CallToken, Config, Patience};
 
@@ -82,6 +82,69 @@ fn claims_from_pages_offline() {
     let page = aspero(None).claim_from_page(None, url.into(), Some("PDF".into()));
     assert!(page.claim.is_none() && page.ids.is_empty());
     assert_eq!(page.source, PageSource::Url);
+    assert_eq!(page.kind, Some(PageKind::Work));
+}
+
+/// A page that isn't a scholarly work's: a web page, cited as itself
+/// (#119), titled by its JSON-LD `name` (#118).
+#[test]
+fn web_pages_export_and_cite_as_themselves() {
+    let html = std::fs::read_to_string(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../core/tests/fixtures/pages/wikipedia.html"
+    ))
+    .unwrap();
+    let handle = aspero(None);
+    let page = handle.claim_from_page(
+        Some(html),
+        "https://en.wikipedia.org/wiki/Gene_Hackman?utm_source=share#Career".into(),
+        None,
+    );
+    assert_eq!(page.kind, Some(PageKind::WebPage));
+    assert!(page.claim.is_none());
+    let web = page.web_page.unwrap();
+    assert_eq!(
+        web,
+        WebPage {
+            title: Some("Gene Hackman".into()),
+            site: Some("Wikipedia".into()),
+            url: "https://en.wikipedia.org/wiki/Gene_Hackman".into(),
+            key: "url:https://en.wikipedia.org/wiki/Gene_Hackman".into(),
+            authors: Vec::new(),
+            published: Some("2001-09-13".into()),
+            updated: Some("2026-11-12".into()),
+            language: Some("en".into()),
+        }
+    );
+    let work = handle.web_page_work(web, "2026-11-16".into());
+    assert_eq!(work.work_type.as_deref(), Some("webpage"));
+    assert_eq!(work.container.as_deref(), Some("Wikipedia"));
+    assert_eq!(work.accessed.as_deref(), Some("2026-11-16"));
+    assert_eq!(work.source, "page");
+    let bibtex = handle.export(vec![work.clone()], ExportFormat::Bibtex);
+    assert!(bibtex.starts_with("@misc{wikipedia2001gene,"), "{bibtex}");
+    assert!(
+        bibtex.contains("note = {Wikipedia. Accessed 2026-11-16}"),
+        "{bibtex}"
+    );
+    let ris = handle.export(vec![work.clone()], ExportFormat::Ris);
+    assert!(ris.starts_with("TY  - ELEC\n") && ris.contains("Y2  - 2026/11/16/\n"));
+    let csl: serde_json::Value =
+        serde_json::from_str(&handle.export(vec![work.clone()], ExportFormat::CslJson)).unwrap();
+    assert_eq!(csl[0]["type"], "webpage");
+    assert_eq!(csl[0]["accessed"]["date-parts"][0][2], 16);
+    let cited = handle
+        .cite(
+            vec![work],
+            StyleSource::Bundled { id: "apa".into() },
+            CiteFormat::Text,
+            None,
+        )
+        .unwrap();
+    assert_eq!(
+        cited[0].text,
+        "Gene Hackman. (2001, September 13). Wikipedia. https://en.wikipedia.org/wiki/Gene_Hackman"
+    );
 }
 
 #[test]
@@ -240,6 +303,8 @@ fn works_export_as_bibtex_and_ris() {
         cited_by_count: None,
         fetched_at: std::time::SystemTime::UNIX_EPOCH,
         json: "{}".into(),
+        accessed: None,
+        language: None,
     };
     let bibtex = handle.export(vec![work.clone(), work.clone()], ExportFormat::Bibtex);
     assert!(bibtex.starts_with("@article{lecun2015deep,\n  author = {LeCun, Yann},"));
@@ -298,6 +363,8 @@ fn work(title: &str, author: &str, year: i16) -> Work {
         cited_by_count: None,
         fetched_at: std::time::SystemTime::UNIX_EPOCH,
         json: "{}".into(),
+        accessed: None,
+        language: None,
     }
 }
 

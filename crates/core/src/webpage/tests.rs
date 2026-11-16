@@ -256,18 +256,24 @@ fn identifiers_are_kept_once() {
     assert_eq!(p.claim.unwrap().ids.len(), 1);
 }
 
+/// A publisher's article page: a page there with only a title is still a
+/// work's.
+const PUBLISHER: &str = "https://emj.bmj.com/content/41/2/100";
+
 #[test]
 fn page_titles_only_when_no_vocabulary_has_one() {
-    let p = page(
+    let at = |html: &str| claim_from_page(Some(html), PUBLISHER, None);
+    let p = at(
         "<title>Chest wall thickness and decompression failure | Emergency Medicine Journal</title>",
     );
     assert_eq!(p.source, PageSource::Title);
+    assert_eq!(p.kind, PageKind::Work);
     assert_eq!(
         p.claim.unwrap().title.as_deref(),
         Some("Chest wall thickness and decompression failure")
     );
     // `og:title` before `<title>`.
-    let p = page(
+    let p = at(
         "<title>Site | Home</title><meta property=\"og:title\" content=\"Open Graph title of the work\">",
     );
     assert_eq!(
@@ -275,12 +281,18 @@ fn page_titles_only_when_no_vocabulary_has_one() {
         Some("Open Graph title of the work")
     );
     // Only the first `<title>`: an icon's in the body isn't the page's.
-    let p =
-        page("<title>Gut microbiota and depression</title><svg><title>Close menu</title></svg>");
+    let p = at("<title>Gut microbiota and depression</title><svg><title>Close menu</title></svg>");
     assert_eq!(
         p.claim.unwrap().title.as_deref(),
         Some("Gut microbiota and depression")
     );
+    // Elsewhere, a page with only a title is a web page: no claim.
+    let p = page("<title>Gut microbiota and depression</title>");
+    assert_eq!(p.kind, PageKind::WebPage);
+    assert_eq!(p.claim, None);
+    let web = p.web_page.unwrap();
+    assert_eq!(web.title.as_deref(), Some("Gut microbiota and depression"));
+    assert_eq!(web.key, "url:https://example.org/article/1");
 }
 
 #[test]
@@ -288,11 +300,17 @@ fn the_title_given_only_when_nothing_better() {
     let hint = Some("Gut microbiota and depression in adults | Frontiers");
     let p = claim_from_page(None, URL, hint);
     assert_eq!(p.source, PageSource::TitleHint);
+    // No markup: nothing tells it isn't a work's.
+    assert_eq!(p.kind, PageKind::Work);
     assert_eq!(
         p.claim.unwrap().title.as_deref(),
         Some("Gut microbiota and depression in adults")
     );
-    let p = claim_from_page(Some("<title>The page's own title here</title>"), URL, hint);
+    let p = claim_from_page(
+        Some("<title>The page's own title here</title>"),
+        PUBLISHER,
+        hint,
+    );
     assert_eq!(p.source, PageSource::Title);
     assert_eq!(
         p.claim.unwrap().title.as_deref(),
@@ -410,6 +428,37 @@ fn junk_fragments_and_huge_input() {
     // Values too long to be one are ignored.
     let long = "word ".repeat(MAX_VALUE);
     assert_eq!(page(&meta("citation_title", &long)).claim, None);
+}
+
+/// Formatting goes, written or escaped; a tag's name written as text
+/// (escaped, so decoded to what looks like a tag) stays.
+#[test]
+fn formatting_goes_but_tags_named_in_text_stay() {
+    for (written, title) in [
+        (
+            "Deep learning for &lt;i&gt;sepsis&lt;/i&gt; in H&lt;sub&gt;2&lt;/sub&gt;O",
+            "Deep learning for sepsis in H2O",
+        ),
+        (
+            "Growth of &lt;jats:italic&gt;E. coli&lt;/jats:italic&gt; on &lt;SPAN class=x&gt;agar&lt;/SPAN&gt;",
+            "Growth of E. coli on agar",
+        ),
+        (
+            "&lt;meta&gt;: The metadata element",
+            "<meta>: The metadata element",
+        ),
+        (
+            "Why &lt;div&gt; soup is bad for &lt;a&gt; links",
+            "Why <div> soup is bad for <a> links",
+        ),
+        (
+            "A &lt; B and C &gt; D in the model",
+            "A < B and C > D in the model",
+        ),
+    ] {
+        let c = page(&meta("citation_title", written)).claim.unwrap();
+        assert_eq!(c.title.as_deref(), Some(title), "{written}");
+    }
 }
 
 #[test]

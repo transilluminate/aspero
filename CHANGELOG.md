@@ -1,6 +1,71 @@
 # Changelog
 
-## Unreleased
+## 0.29.0
+
+Added:
+
+- Pages that aren't scholarly works (#119): `claimFromPage` tells a
+  scholarly work's page (an identifier, citation tags, scholarly JSON-LD,
+  a publisher's site, or no markup to tell) from a web page (a Wikipedia
+  article, a news story, guidance), and a web page has no claim to
+  verify. `PageClaim.kind` (`PageKind`: `work`, `webPage`) and
+  `PageClaim.webPage` (`WebPage`: title, site, canonical address
+  normalised, people as authors, published, updated, language, and its
+  key, `url:` and the address), read for every page with a title.
+  `webPageWork(page, accessed)` makes it a `Work` of type `webpage` that
+  `export` writes as BibTeX `@misc` (`howpublished`, `note` with the
+  site and access date), RIS `ELEC` (`Y2`, `LA`) and CSL-JSON `webpage`
+  (`accessed`, `language`: a Zotero Web Page), and `cite` formats in any
+  style. `Work.accessed` and `Work.language`; core `WorkType::WebPage`,
+  `Work::accessed`, `Work::language`, `webpage::{PageKind, WebPage,
+  normalise_url}`. `aspero verify --html FILE --url URL` shows a web
+  page's record (exit 0) rather than verifying it, and writes it out
+  with `--format bibtex|ris|csl-json|cite`, read on `--accessed DATE`
+  (today by default).
+
+Fixed:
+
+- `claimFromPage` titled a page by its JSON-LD `headline` before its
+  `name` (#118): Wikipedia's `headline` is the article's short
+  description ("American actor and novelist (1930–2025)"). `name` comes
+  first now, unless it isn't a title. A page title's suffix also goes
+  when it is the name the page gives its own site (`og:site_name`,
+  JSON-LD's website or publisher), even one holding a separator.
+- A page's values lost anything that looked like a tag once decoded, so
+  a title naming one ("&lt;meta&gt;: The metadata element") lost it. Only
+  formatting markup (`<i>`, `<sub>`, `<span>`, JATS's, namespaced tags)
+  is taken out now, escaped or not.
+
+## 0.28.2
+
+Added:
+
+- `Budget.spendableTodayUsd`: what this engine's paid calls may still
+  spend today under both caps, as `aspero budget` counts it
+  (`Engine::spendable_today`), and `Budget.creditCapUsd`, the credit cap
+  in force ($0.25 when unset), so callers needn't repeat the policy.
+
+## 0.28.1
+
+Added:
+
+- Each MCP key's spend today (#113): `HttpServer::status` gains
+  `KeyStatus.spent_today_usd`, `Status.spend_day` and `spend_resets_at`
+  (FFI `McpKeyStatus.spentTodayUsd`, `McpStatus.spendDay`,
+  `spendResetsAt`): the ledger's figure for the UTC day plus spend not yet
+  recorded, the same the key's daily budget is checked against.
+- What OpenAlex charges (#113), from `/rate-limit`'s `endpoint_costs_usd`
+  (so with a key): `Usage.prices` and `Budget::prices` (a `Prices` of
+  `singleton`, `list`, `search`, …), `Budget::search_price`; FFI
+  `Budget.searchPriceUsd` and `Budget.prices` (`[BudgetPrice { endpoint,
+  usd }]`). `Engine::spendable_today`: what paid calls may still spend
+  today under the caps (the allowance left to its cap, then credit to the
+  credit cap). `aspero budget` adds "searches $0.001 each, about 850 left
+  today" (spendable over the search price, rounded down) and JSON
+  `spendable_today_usd`, `search_price_usd`, `searches_left_today`,
+  `prices_usd`.
+
+## 0.28.0
 
 Added:
 
@@ -47,6 +112,16 @@ Changed:
 
 Fixed:
 
+- Credit spent today no longer runs far past the truth ("$5.33 of credit
+  spent today" for $0.34 spent): OpenAlex's servers answer with balances
+  up to $0.30 apart, the stale ones higher, and each rise was taken for a
+  top-up. A response's balance now only ever lowers today's figure; only
+  `/rate-limit` (which says the credit bought) sets it either way or tells
+  a top-up; and a stop at the credit cap is checked with a free
+  `/rate-limit` first (at most once a minute). `Budget.prepaid_remaining`
+  is that balance, not the last response's. The first `prepaid_day`
+  table is dropped. `Usage.prepaid_bought` (OpenAlex
+  `prepaid_balance_usd`).
 - OpenAlex is no longer stopped until the reset ("usage quota
   exhausted") by a failing call (a per-second 429, a server fault) made
   once the day's allowance is used up while prepaid credit is left:

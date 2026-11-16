@@ -165,6 +165,8 @@ fn rate_limit_says_the_prepaid_balance_and_its_expiry() {
     assert_eq!(usage.limit, Some(1.0));
     assert_eq!(usage.remaining, Some(0.0));
     assert_eq!(usage.prepaid_remaining, Some(9.8851));
+    // The credit bought: said only here, not in headers.
+    assert_eq!(usage.prepaid_bought, Some(10.0));
     assert_eq!(
         usage.prepaid_expires_at,
         Some("2027-02-14T12:08:05Z".parse().unwrap())
@@ -176,6 +178,39 @@ fn rate_limit_says_the_prepaid_balance_and_its_expiry() {
     // No credit: no expiry.
     let (oa, _) = provider([recorded("rate_limit")]);
     assert_eq!(block_on(oa.budget()).unwrap().prepaid_expires_at, None);
+}
+
+/// `endpoint_costs_usd`, as a key's `/rate-limit` gave it (2026-11-16): each
+/// kind's price, the free ones included.
+#[test]
+fn rate_limit_says_what_each_kind_of_call_costs() {
+    let (oa, _) = provider([recorded("rate_limit")]);
+    let prices = block_on(oa.budget()).unwrap().prices.unwrap();
+    assert_eq!(
+        prices.iter().collect::<Vec<_>>(),
+        [
+            ("singleton", 0.0),
+            ("list", 0.0001),
+            ("search", 0.001),
+            ("search_rerank", 0.002),
+            ("rerank_extra", 0.001),
+            ("content", 0.01),
+            ("semantic", 0.001),
+            ("text", 0.01),
+        ]
+    );
+    // A kind with no number is left out, the rest kept; none at all, none.
+    let body = r#"{"rate_limit": {"daily_budget_usd": 1, "endpoint_costs_usd":
+        {"search": "cheap", "list": 0.0001, "future": 0.5}}}"#;
+    let (oa, _) = provider([response(200, &[], body)]);
+    let usage = block_on(oa.budget()).unwrap();
+    let prices = usage.prices.unwrap();
+    assert_eq!((prices.search, prices.list), (None, Some(0.0001)));
+    assert_eq!(prices.iter().count(), 1);
+    assert_eq!(usage.limit, Some(1.0));
+    let body = r#"{"rate_limit": {"daily_budget_usd": 1, "endpoint_costs_usd": null}}"#;
+    let (oa, _) = provider([response(200, &[], body)]);
+    assert_eq!(block_on(oa.budget()).unwrap().prices, None);
 }
 
 #[test]

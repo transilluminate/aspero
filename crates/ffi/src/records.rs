@@ -79,6 +79,13 @@ pub struct Work {
     pub fetched_at: SystemTime,
     /// Everything known, as the JSON contract's full `work`.
     pub json: String,
+    /// When the work was read at its `url`, ISO 8601: a web page's
+    /// access date (`webPageWork`'s), exported and cited with it.
+    #[uniffi(default = None)]
+    pub accessed: Option<String>,
+    /// The work's language, as a language tag (`en`, `en-GB`).
+    #[uniffi(default = None)]
+    pub language: Option<String>,
 }
 
 impl Work {
@@ -119,6 +126,8 @@ impl Work {
             cited_by_count: w.cited_by_count,
             fetched_at: time(record.fetched_at),
             json: aspero_json::work(record, true).to_string(),
+            accessed: w.accessed.map(|d| d.to_string()),
+            language: w.language.clone(),
         }
     }
 
@@ -1119,11 +1128,23 @@ pub struct PageClaim {
     /// read from the page's address.
     pub ids: Vec<Mention>,
     /// The work as the page describes it, its identifiers included, ready
-    /// for `verify`; `nil` with no identifier and no title.
+    /// for `verify`; `nil` with no identifier and no title, and for a web
+    /// page (`kind` `webPage`), which has no work to verify.
     pub claim: Option<Claim>,
     /// What answered: the first vocabulary, in priority order, that gave
     /// an identifier or the title; `url` when nothing did.
     pub source: PageSource,
+    /// Whether the page shows a scholarly work (verify `claim`) or is a
+    /// web page to cite as itself (`webPage`). Always set by
+    /// `claimFromPage`; optional only so a `PageClaim` made by hand needn't
+    /// give it.
+    #[uniffi(default = None)]
+    pub kind: Option<PageKind>,
+    /// The page as a web page, to cite as itself (`webPageWork`): always
+    /// for `kind` `webPage`, and for a work's page with a title too, so
+    /// the page can be cited when its work isn't found.
+    #[uniffi(default = None)]
+    pub web_page: Option<WebPage>,
 }
 
 impl From<&aspero_core::PageClaim> for PageClaim {
@@ -1136,7 +1157,84 @@ impl From<&aspero_core::PageClaim> for PageClaim {
                 .collect(),
             claim: p.claim.as_ref().map(|c| Claim::read(c, None)),
             source: p.source.into(),
+            kind: Some(p.kind.into()),
+            web_page: p.web_page.as_ref().map(Into::into),
         }
+    }
+}
+
+/// Whether a page shows a scholarly work or is a web page.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Enum)]
+pub enum PageKind {
+    /// A scholarly work's page: it gives an identifier, citation tags or
+    /// a scholarly article in JSON-LD, or is on a publisher's site; or no
+    /// markup was given to tell. Verify `claim`.
+    Work,
+    /// Any other page with a title: a web page, cited as itself
+    /// (`webPage`).
+    WebPage,
+}
+
+impl From<aspero_core::PageKind> for PageKind {
+    fn from(kind: aspero_core::PageKind) -> Self {
+        match kind {
+            aspero_core::PageKind::WebPage => PageKind::WebPage,
+            // `PageKind` is non-exhaustive: a work's page is the fallback.
+            _ => PageKind::Work,
+        }
+    }
+}
+
+/// A web page, as a citation of it needs (`claimFromPage`'s `webPage`):
+/// export or cite it through `webPageWork`. Dates ISO 8601 as precise as
+/// the page gives them.
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct WebPage {
+    /// As the page gives it, but for its site's own name.
+    pub title: Option<String>,
+    /// The website's name ("Wikipedia", "BBC News"), else its host.
+    pub site: Option<String>,
+    /// The canonical address, normalised: without its fragment or
+    /// tracking parameters (`utm_*`, `fbclid`, …).
+    pub url: String,
+    /// `url:` and `url`: the same page shared twice is the same key.
+    pub key: String,
+    /// People only, in page order, as written.
+    pub authors: Vec<String>,
+    pub published: Option<String>,
+    pub updated: Option<String>,
+    /// A language tag: `en`, `en-GB`.
+    pub language: Option<String>,
+}
+
+impl From<&aspero_core::WebPage> for WebPage {
+    fn from(p: &aspero_core::WebPage) -> Self {
+        WebPage {
+            title: p.title.clone(),
+            site: p.site.clone(),
+            url: p.url.clone(),
+            key: p.key.clone(),
+            authors: p.authors.clone(),
+            published: p.published.map(|d| d.to_string()),
+            updated: p.updated.map(|d| d.to_string()),
+            language: p.language.clone(),
+        }
+    }
+}
+
+impl WebPage {
+    /// The core page, dates that don't parse left out.
+    pub(crate) fn to_core(&self) -> aspero_core::WebPage {
+        let mut p = aspero_core::WebPage::default();
+        p.title.clone_from(&self.title);
+        p.site.clone_from(&self.site);
+        p.url.clone_from(&self.url);
+        p.key.clone_from(&self.key);
+        p.authors.clone_from(&self.authors);
+        p.published = self.published.as_deref().and_then(|d| d.parse().ok());
+        p.updated = self.updated.as_deref().and_then(|d| d.parse().ok());
+        p.language.clone_from(&self.language);
+        p
     }
 }
 
@@ -1292,6 +1390,39 @@ pub struct Budget {
     /// asked by `refreshBudgets` with a key).
     #[uniffi(default = None)]
     pub prepaid_expires_at: Option<SystemTime>,
+    /// What a page of a keyword search costs, in US dollars, as the
+    /// provider says (OpenAlex: `$0.001`, asked by `refreshBudgets` with a
+    /// key; `nil` until then). With `remainingUsd` and the caps, says how
+    /// many searches are left.
+    #[uniffi(default = None)]
+    pub search_price_usd: Option<f64>,
+    /// What each kind of call costs, as the provider says (OpenAlex, asked
+    /// by `refreshBudgets` with a key: `singleton`, `list`, `search`,
+    /// `search_rerank`, `rerank_extra`, `content`, `semantic`, `text`, as
+    /// its `/rate-limit` names them), in a fixed order; empty until then.
+    #[uniffi(default = [])]
+    pub prices: Vec<BudgetPrice>,
+    /// What this engine's paid calls may still spend today, in US dollars,
+    /// under both caps, counting everything using the key: the allowance
+    /// left up to `Config.openalexDailyCapUsd`, then, once paid calls would
+    /// use the allowance up, the credit left up to `creditCapUsd`. As
+    /// `aspero budget` counts it; over `searchPriceUsd`, the searches left.
+    /// `nil` when the allowance left is unknown.
+    #[uniffi(default = None)]
+    pub spendable_today_usd: Option<f64>,
+    /// The cap on prepaid credit spent today in force, in US dollars:
+    /// `Config.openalexDailyCreditCapUsd`, or aspero's default ($0.25)
+    /// when that's unset. `nil` for a provider without one.
+    #[uniffi(default = None)]
+    pub credit_cap_usd: Option<f64>,
+}
+
+/// What one kind of call costs.
+#[derive(Debug, Clone, PartialEq, uniffi::Record)]
+pub struct BudgetPrice {
+    /// The provider's name for it: OpenAlex's `search`, `list`, ….
+    pub endpoint: String,
+    pub usd: f64,
 }
 
 impl Budget {
@@ -1305,7 +1436,31 @@ impl Budget {
             prepaid_remaining_usd: b.prepaid_remaining,
             prepaid_spent_today_usd: b.prepaid_spent_today,
             prepaid_expires_at: b.prepaid_expires_at.map(time),
+            search_price_usd: b.search_price(),
+            prices: b
+                .prices
+                .iter()
+                .flat_map(aspero_core::Prices::iter)
+                .map(|(endpoint, usd)| BudgetPrice {
+                    endpoint: endpoint.to_owned(),
+                    usd,
+                })
+                .collect(),
+            spendable_today_usd: None,
+            credit_cap_usd: None,
         }
+    }
+
+    /// With what `engine`'s caps leave spendable today, and its credit cap.
+    pub(crate) fn capped(
+        mut self,
+        engine: &engine::Engine,
+        provider: &aspero_core::ProviderId,
+        b: &engine::Budget,
+    ) -> Self {
+        self.spendable_today_usd = engine.spendable_today(provider, b);
+        self.credit_cap_usd = engine.daily_credit_cap(provider);
+        self
     }
 }
 
@@ -1997,6 +2152,8 @@ impl Work {
         w.page.clone_from(&self.page);
         w.publisher.clone_from(&self.publisher);
         w.url.clone_from(&self.url);
+        w.accessed = self.accessed.as_deref().and_then(|d| d.parse().ok());
+        w.language.clone_from(&self.language);
         let ids = self.ids.iter().filter_map(|id| id.parse().ok()).collect();
         (w, ids)
     }
@@ -2851,6 +3008,51 @@ mod tests {
         assert_eq!(used[0].limit_usd, Some(1.0));
         assert_eq!(used[0].prepaid_remaining_usd, Some(4.5));
         assert_eq!(used[0].remaining_usd, None);
+    }
+
+    #[test]
+    fn a_budget_says_what_the_caps_leave_spendable() {
+        let openalex = ProviderId::from_static("openalex");
+        let engine = engine::Engine::builder()
+            .daily_credit_cap(openalex.clone(), 0.25)
+            .build();
+        let mut b = engine::Budget::new(jiff::Timestamp::UNIX_EPOCH);
+        let unknown = Budget::new(&openalex, &b).capped(&engine, &openalex, &b);
+        assert_eq!(unknown.spendable_today_usd, None);
+        assert_eq!(unknown.credit_cap_usd, Some(0.25));
+        // The allowance gone: what's left of the day's credit cap.
+        b.limit = Some(1.0);
+        b.remaining = Some(0.0);
+        b.prepaid_remaining = Some(5.0);
+        b.prepaid_spent_today = Some(0.10);
+        let capped = Budget::new(&openalex, &b).capped(&engine, &openalex, &b);
+        assert_eq!(
+            capped.spendable_today_usd,
+            engine.spendable_today(&openalex, &b)
+        );
+        assert_eq!(capped.spendable_today_usd, Some(0.15));
+    }
+
+    #[test]
+    fn a_budget_says_the_prices_the_provider_said() {
+        let openalex = ProviderId::from_static("openalex");
+        let mut b = engine::Budget::new(jiff::Timestamp::UNIX_EPOCH);
+        let none = Budget::new(&openalex, &b);
+        assert_eq!((none.search_price_usd, none.prices), (None, Vec::new()));
+        let mut prices = aspero_core::Prices::default();
+        prices.singleton = Some(0.0);
+        prices.search = Some(0.001);
+        b.prices = Some(prices);
+        let said = Budget::new(&openalex, &b);
+        assert_eq!(said.search_price_usd, Some(0.001));
+        let price = |endpoint: &str, usd| BudgetPrice {
+            endpoint: endpoint.into(),
+            usd,
+        };
+        assert_eq!(
+            said.prices,
+            [price("singleton", 0.0), price("search", 0.001)]
+        );
     }
 
     #[test]

@@ -217,8 +217,9 @@ scripts/       fixture recorders, one per provider
   don't say. The caller has the page's markup (its `<head>` and JSON-LD
   scripts will do), or often only its address and the title a browser
   gave it (a window's, a shared page's or a dropped link's); aspero never
-  fetches a page, and the function is pure (no network, no clock). Read, each claim field from the
-  first that gives it: Highwire `citation_*` tags (DOI, PMID, PMCID, arXiv,
+  fetches a page, and the function is pure (no network, no clock). Read,
+  each claim field from the first that gives it: Highwire `citation_*`
+  tags (DOI, PMID, PMCID, arXiv,
   PII, ISBN; title; each author; journal, else its abbreviation, the
   conference or the book; volume; first and last page; the year of the
   publication date, else `citation_date`, else the online date), PRISM
@@ -227,8 +228,11 @@ scripts/       fixture recorders, one per provider
   the journal only when it reads as a name), then schema.org JSON-LD (the
   first `ScholarlyArticle`, `MedicalScholarlyArticle` or `Article` at a
   block's top, in its `@graph` or a page's `mainEntity`, never one nested
-  deeper such as a citation: identifier, `sameAs`, `@id`, headline or
-  name, authors, `datePublished`, pagination, and up `isPartOf` only a
+  deeper such as a citation: identifier, `sameAs`, `@id`, `name`, else
+  `headline` (it names the thing; pages fill `headline` with a
+  description, Wikipedia's with the article's short description, #118;
+  a `name` that isn't a title, an address or "Article", passed over),
+  authors, `datePublished`, pagination, and up `isPartOf` only a
   `PublicationVolume`'s number and a `Periodical`'s name, not a
   `WebSite`'s). For a title only: then `og:title`, else `<title>`, then
   the title given. Every identifier any of them gives (each value parsed
@@ -241,13 +245,18 @@ scripts/       fixture recorders, one per provider
   host: a wrong one makes `verify` report a journal mismatch and cap at
   plausible. The host is the claim's `site` instead (lower case, `www.`
   dropped; always, identifiers or not), a hint of the publisher (see
-  Resolve, verify and check: Sites). Authors keep page order and their written form ("Last,
-  First" or "First Last", as claims take them), blanks and "et al."
-  dropped, at most 50.
+  Resolve, verify and check: Sites). Authors keep page order and their
+  written form ("Last, First" or "First Last", as claims take them),
+  blanks and "et al." dropped, at most 50.
   - The markup is read by a small hand-written scanner, not a parser
     (and no new dependency): tags and attributes in any quoting and case,
     values entity-decoded (`&amp;`, `&#39;`, `&#x2019;`, common named
-    ones), comments, declarations and closing tags skipped, and the
+    ones; then only formatting markup taken out of them, HTML's and
+    JATS's inline tags such as `<i>`, `<sub>`, `<span>`, `<italic>` and
+    any namespaced one, which publishers write escaped as often as not,
+    so a tag's name written as text stays: MDN's "&lt;meta&gt; HTML
+    metadata element" is "<meta> HTML metadata element"), comments,
+    declarations and closing tags skipped, and the
     contents of `<script>` (except `application/ld+json`, parsed with
     serde_json, CDATA wrapping aside), `<style>`, `<textarea>` and
     `<template>` never read as markup, so a `citation_doi` inside a
@@ -260,7 +269,11 @@ scripts/       fixture recorders, one per provider
     ` — `, ` · `: a known site or browser name (`JAMA Network`,
     `ScienceDirect`, `Oxford Academic`, `Wiley Online Library`, `Google
     Chrome`, `Mozilla Firefox`, …), the host's name (`The Lancet` on
-    `thelancet.com`), a year or names ending in one (Wiley's and Sage's
+    `thelancet.com`), a name the page gives its own site (`og:site_name`,
+    JSON-LD's website or publisher), exactly but for case and
+    punctuation, and whole even when it holds a separator (`- Mozilla
+    Hacks – the Web developer blog`), a year or names ending in one
+    (Wiley's and Sage's
     bylines), `Proceedings of …`, or a short title-cased segment (five
     words, 40 characters) after a title of three words or more (`| Brain
     |`). Prefixes go when they're a known site or the host before ` | `
@@ -272,8 +285,71 @@ scripts/       fixture recorders, one per provider
     "Download PDF", "View Article", "here", "doi"), a challenge or error
     page ("Just a moment...", "Page not found"), a site's name alone, an
     address or identifier; and a given title (a dragged link's name) at
-    least three words and 15 characters, a page's own two words.
-- **Scanning** (`id::scan`, `aspero scan`) finds every identifier
+    least three words and 15 characters, a page's own two words. The
+    title is as the page gives it, minus its site's own name: only
+    evidence takes a segment off (no site-by-site rules are added for
+    web pages), and when unsure it stays, since nothing downstream edits
+    it (a web page's goes to Zotero as read).
+  - *Scholarly work or web page* (#119). A page is a scholarly work's
+    (`PageKind::Work`, FFI `kind` `work`) when it gives an identifier
+    (in its tags, JSON-LD or address; an ISBN too, so a bookshop's page
+    tagged with one cites the book), citation tags (Highwire's with a
+    title, journal or identifier; PRISM's or Dublin Core's with a
+    journal or identifier: Dublin Core's title and creator alone are any
+    page's), or a `ScholarlyArticle` or `MedicalScholarlyArticle` in
+    JSON-LD; when it's on a publisher's site (Sites' table: an article
+    page giving only its title); or when no markup was given, so nothing
+    tells. Any other page with a title is a web page (`WebPage`): it has
+    no claim, so an app doesn't verify it as a work and report "not
+    found"; it is cited as itself. A work's page with a title gets the
+    record too, so the page can be cited when its work isn't found.
+  - *The web page record* (`webpage::WebPage`, FFI `WebPage`), each field
+    from the first that gives it. Title: a JSON-LD article's (any
+    article, news article, post or report) `name`, else `headline`;
+    `og:title`; `<title>`; a JSON-LD page's `name` (less sure: WHO names
+    its pages "Detail", the template's); the title given; each as above.
+    Site: `og:site_name`, JSON-LD's `WebSite` (the article's `isPartOf`,
+    else any), the site's name as the title writes it when that names
+    the host ("Wikipedia" of "Gene Hackman - Wikipedia" on
+    `en.wikipedia.org`), JSON-LD's publisher, else the host. Address:
+    `<link rel="canonical">`, `og:url`, JSON-LD's `url`, else the one
+    given, resolved against it (relative, `//host/…`) and normalised:
+    scheme and host lower case, default port, fragment and tracking
+    parameters (`utm_*`, `fbclid`, `gclid`, `msclkid`, …) dropped, the
+    rest of the query kept in order. Authors: people only, in page
+    order: JSON-LD's `Person` authors, else `author` meta tags, else
+    `article:author` ones that aren't addresses; never an organisation
+    (JSON-LD's, the publisher, the site), a byline holding one's name
+    ("Guardian staff reporter", then the page's `article:author`), or
+    "Contributors to …". Published: `datePublished`,
+    `article:published_time`, `citation_publication_date`,
+    `citation_date`; updated: `dateModified`, `article:modified_time`,
+    `og:updated_time`; as written (`2001-09-13T05:19:30Z`, `23 Oct 2017,
+    5:31 p.m.`), else the year. Language: `<html lang>`, JSON-LD's
+    `inLanguage`, `Content-Language`, `og:locale` (an app sending the
+    `<head>` alone has no `<html>` tag), tidied (`en_us` is `en-US`).
+    Key: `url:` and the normalised address, so a page shared twice is one
+    record (a string, not an identifier kind: addresses are still
+    scanned for identifiers first, and a page with one is a work).
+    Checked on modelled pages and 19 real pages' heads (news in three
+    languages, guidance, docs, blogs, a code repository: fixtures in
+    `tests/fixtures/pages/web`). One falls short: a title whose site
+    nothing names stays whole ("Announcing Rust 1.0 | Rust Blog").
+  - *Exported and cited* as a `Work` of type `webpage`
+    (`WorkType::WebPage`; `WebPage::to_work(accessed)`, FFI
+    `webPageWork(page, accessed)`): the site as container, published as
+    issued, the caller's access date (`Work::accessed`: when the page was
+    read; core has no clock) and language. BibTeX `@misc` (as plain and
+    natbib print it) with `howpublished = {\url{…}}` (`%` and `#`
+    escaped) and `note = {Site. Accessed 2026-11-16}`; RIS `TY - ELEC`
+    with `T2` the site, `UR`, `Y2` accessed, `LA`; CSL-JSON `webpage`
+    with `container-title`, `URL`, `issued`, `accessed`, `language`,
+    which Zotero imports as a Web Page (its Website Title, Accessed). The
+    styles get `accessed` too: APA cites "Shah, P. (2026, November 13).
+    Title. Site. URL", Harvard adds "(Accessed: …)". `verify --html FILE
+    --url URL` shows a web page's record instead of verifying it (exit
+    0), and with `--format bibtex|ris|csl-json|cite` writes it out, read
+    on `--accessed DATE` or today.
 - **Scanning** (`id::scan`, `aspero scan`) finds every identifier
   mentioned in a document, with its position and text as written; which
   mentions matter is the caller's call. Shapes that prose imitates (bare
@@ -293,7 +369,8 @@ scripts/       fixture recorders, one per provider
   DOI, so `lookup` retries not-found ones with the punctuation kept.
 - **ISBNs** canonicalise to ISBN-13 (ISBN-10s converted, checksums checked).
 - **Work** is CSL-shaped and all-optional: title, authors, issued, type,
-  container, publication details, abstract, URL, cited-by count, plus:
+  container, publication details, abstract, URL, cited-by count, access
+  date and language (a web page's, see Pages), plus:
   - `updates`: retractions, withdrawals, expressions of concern,
     corrections, and newer versions (Crossref `new_version` notices, which
     Cochrane deposits per `.pubN`, and `is-replaced-by`/`is-preprint-of`
@@ -914,21 +991,54 @@ first paid call.
 reported by OpenAlex, so it's told from the balance every response and
 refresh carries: the first balance seen in the budget day (the UTC day
 ending at `resets_at`, an hour back so a reset read a moment past midnight
-names the day before), raised by any top-up since, less the latest. A
-rise of a cent or more is a top-up; a smaller rise, or a sighting older
-than the latest, is responses arriving out of order and changes nothing.
-The day is kept in the cache file's `prepaid_day (provider, day,
-start_usd, last_usd, seen_at)` (`PrepaidDays`; one write transaction a
-sighting; a week kept), so every process sharing it (CLI, MCP, the app)
+names the day before), raised by any top-up since, less the balance now.
+Headers' balances are not to be trusted one by one: OpenAlex answers from
+many servers, some minutes behind, so requests made together say balances
+up to $0.30 apart, the stale ones higher (seen 2026-11-16 on the red
+team's tape: 9.84 and 9.66 interleaved within a second). Taking each rise
+of a cent as a top-up ran one day's count to $5.33 for $0.34 spent. So a
+header's balance only ever lowers the balance now (the lowest seen is the
+nearest the truth), and never raises the start. Only `/rate-limit`, which
+also says the credit bought (`prepaid_balance_usd`, `Usage.prepaid_bought`),
+sets the balance outright, either way, and only a rise in the credit
+bought is a top-up, raising the start by as much. A stop at the credit
+cap is checked first with a free `/rate-limit` (once a minute at most;
+with a key), so a stale low header can't stop calls for long. The day is
+kept in the cache file's `prepaid_day (provider, day, start_usd, last_usd,
+seen_at, bought_usd)` (`PrepaidDays`; one write transaction a sighting; a
+week kept; a table of the first shape, without `bought_usd`, is dropped),
+so every process sharing it (CLI, MCP, the app)
 and every restart tells the same figure, counting everything using the
 key from the day's first sighting by any of them; without a file, each
 engine keeps its own. Like the allowance's use it counts everything
 using the key, but a day first seen part-way through misses what was
-spent before: an undercount, accepted. `Budget::prepaid_expires_at` (FFI
+spent before, as does a top-up seen only in headers (until `/rate-limit`
+says it, it isn't one, and spend down to the old balance goes uncounted):
+undercounts, accepted. A day's first sighting from a stale server starts
+it high, an overcount of the staleness. `Budget::prepaid_expires_at` (FFI
 `prepaidExpiresAt`) is `/rate-limit`'s `prepaid_expires_at`, a JavaScript
 `Date` printed as a string ("Sun Feb 14 2027 12:08:05 GMT+0000
 (Coordinated Universal Time)", ISO also read); headers don't carry it, so
 it's kept from the last refresh.
+
+**Prices** (`Budget::prices`, a `Prices` of OpenAlex's kinds of call:
+`singleton`, `list`, `search`, `search_rerank`, `rerank_extra`, `content`,
+`semantic`, `text`; `Budget::search_price`) are `/rate-limit`'s
+`endpoint_costs_usd` (`Usage.prices`), so only with a key; headers don't
+carry them, so they're kept from the last refresh. A fixed struct, not a
+map, so `Usage` and `Budget` stay `Copy`: a kind OpenAlex adds is left out
+until named. FFI `Budget.searchPriceUsd` and `prices: [BudgetPrice
+{endpoint, usd}]`; `aspero budget` JSON `search_price_usd`, `prices_usd`.
+**What's spendable today** (`Engine::spendable_today`; `aspero budget`
+`spendable_today_usd`) follows `cap::reached`: the allowance left, held to
+the allowance cap (`cap − used`); then, if paid calls would use the
+allowance up (its cap at or above the allowance, or it's used up already),
+the prepaid balance, held to the credit cap less the credit spent today;
+without a credit cap, the whole balance only where the allowance cap is
+above the allowance or unset. Divided by the search price and rounded
+down, it's `aspero budget`'s "searches $0.001 each, about 850 left today"
+(`searches_left_today`): an estimate, since it counts everything using the
+key and lookups spend from the same budget.
 
 Pacing is **shared across processes** through the cache file: each
 request claims its provider's next slot in a `pacing` table (one write
@@ -1103,7 +1213,7 @@ CLI builds without it and serves stdio only) and, over it, the FFI's
   `dailyBudgetUsd` ($1). Then `setKeys` (at once), `hostToolsChanged`
   (re-reads the host's tools; throws on a clash, keeping the old ones),
   `port`, `status` (running, port, open sessions, the last request and
-  its key's name, each key's last use) and `stop` (ends the sessions and
+  its key's name, each key's last use and spend today) and `stop` (ends the sessions and
   frees the port before returning). The app implements `McpHost`:
   `tools()` (each a `HostTool`: name, title, description, input and
   output JSON Schemas, scope), `async call(name, arguments, caller)`
@@ -1177,7 +1287,14 @@ CLI builds without it and serves stdio only) and, over it, the FFI's
   keep it; days over a month old are pruned), so restarts don't reset it;
   in memory without a cache. A spend that can't be read refuses the
   key's paid calls; one that can't be written is kept in memory, counted,
-  and written with the key's next spend or check.
+  and written with the key's next spend or check. `status` says each
+  key's spend today (`McpKeyStatus.spentTodayUsd`): the same ledger
+  figure plus the unrecorded, as the budget is checked against, read
+  without writing (a read of the cache file per key; a figure it can't
+  read counts as $0, logged), so "$0.12 of its $0.50 today" agrees with
+  the refusal. The day is the UTC day (`McpStatus.spendDay`,
+  `YYYY-MM-DD`), ending at `spendResetsAt` (midnight UTC), when every
+  key's spend starts again from nothing.
 - **Activity.** After every tool call (engine or app, success, error or
   refusal), the app's `activity` gets the key's name, the tool, a few
   words ("searched ‘lactate clearance’", "looked up 3 works", "verified 2
@@ -1236,7 +1353,8 @@ given CSL style, with `citation_styles`, `style_project` and
 (citation links, related works among them), and
 for settings `budgets` (as last
 reported: free), `refresh_budgets` (OpenAlex's `/rate-limit` with a key,
-free; nothing asked without one), `check_openalex_key` (one free lookup), `cache_stats`,
+free; nothing asked without one; also each kind of call's price,
+`Budget.prices`, `searchPriceUsd`), `check_openalex_key` (one free lookup), `cache_stats`,
 `clear_cache` and `unavailable`. Network calls take a `Patience` (batch,
 interactive, offline, fresh).
 They return typed records (`Lookup`, `Verification`, `Work`, …), mirrors

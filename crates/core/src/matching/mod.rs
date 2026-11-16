@@ -408,8 +408,9 @@ fn cites_chapter(text: &str) -> bool {
 }
 
 /// A free-text reference's byline: a BibTeX entry's author field, else
-/// its text before the record's title (at `span`), or before the first of
-/// the title's words when it's cited otherwise.
+/// its text before the record's title (at `span`). When the title is cited
+/// otherwise, up to the first of the title's words or the first sentence's
+/// end ("Rivers E, et al." before another title), whichever comes first.
 fn byline(text: &Normalised, title: Option<&str>, span: Option<&Range<usize>>) -> Option<String> {
     if let Some(authors) = publication::bibtex_field(&text.raw, "author") {
         return Some(authors);
@@ -418,9 +419,18 @@ fn byline(text: &Normalised, title: Option<&str>, span: Option<&Range<usize>>) -
         span.start
     } else {
         let title = content_words(title?);
-        text.words.iter().position(|w| title.contains(w))?
+        let titled = text.words.iter().position(|w| title.contains(w))?;
+        // A word ending a sentence, not an initial ("RS.", "J.").
+        let ended = (0..titled).find(|&i| {
+            let raw = &text.raw[text.spans[i].clone()];
+            let initial = raw.chars().count() <= 3 && raw.chars().all(char::is_uppercase);
+            let after = &text.raw[text.spans[i].end..];
+            !initial
+                && (after.starts_with(". ") || after.starts_with(").") || after.starts_with("). "))
+        });
+        ended.map_or(titled, |i| i + 1)
     };
-    Some(text.raw[..text.spans[start].start].to_owned())
+    Some(text.raw[..text.spans.get(start).map_or(text.raw.len(), |s| s.start)].to_owned())
 }
 
 fn dedup_years(mut years: Vec<i16>) -> Vec<i16> {
@@ -615,12 +625,19 @@ pub fn assess(claim: &Claim, record: &SourceRecord) -> Assessment {
     // al. N Engl J Med 2017;376:2545"); with the journal and volume
     // agreeing, a title missing from the text is not a different one (the
     // page then decides between verified and a wrong page).
+    // Unless it gives one: a few words that are none of the work's authors,
+    // journal, numbers or furniture ("Niwa T. Transfection of plasmid DNA
+    // by nanocarriers. J Microbiol Methods. 2005;61:251" isn't titleless).
     let placed = container.agreement == Agreement::Match && volume.agreement == Agreement::Match;
-    let title = if placed && claim.title.is_none() && title.agreement == Agreement::Mismatch {
-        FieldCheck::UNKNOWN
-    } else {
-        title
-    };
+    let titled = text.as_ref().is_some_and(|t| {
+        t.title_run(&families, work.container_title.as_deref()) >= SHORT_TITLE_WORDS
+    });
+    let title =
+        if placed && claim.title.is_none() && title.agreement == Agreement::Mismatch && !titled {
+            FieldCheck::UNKNOWN
+        } else {
+            title
+        };
 
     let ids = id_agreement(&claim.ids, &record.ids);
     // A claim of identifiers alone is fully confirmed by a matching ID.
@@ -682,6 +699,17 @@ pub fn assess(claim: &Claim, record: &SourceRecord) -> Assessment {
     // Journal, volume and first page together name one work, title or no
     // title ("Injury 47 (2016) 797–804"), unless something contradicts
     // it.
+    // Another title at this work's place, by its authors: a title
+    // translated or paraphrased, or one work's title cited at another's
+    // place. Plausible, its title to check; never verified.
+    if located
+        && container.agreement == Agreement::Match
+        && title.agreement == Agreement::Mismatch
+        && authors.agreement == Agreement::Match
+        && year.agreement != Agreement::Mismatch
+    {
+        confidence = confidence.max(PLAUSIBLE);
+    }
     if located
         && container.agreement == Agreement::Match
         && title.agreement != Agreement::Mismatch

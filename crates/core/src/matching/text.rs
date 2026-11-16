@@ -360,20 +360,48 @@ impl Normalised {
     /// ("et al", "epub", a month). "Wittermans E, et al. ERJ Open Res.
     /// 2022. doi:…" has none.
     pub(super) fn untitled(&self, families: &[String], journal: Option<&str>) -> bool {
+        self.unaccounted(families, journal).iter().all(|u| !u)
+    }
+
+    /// The longest run of words, joining words aside, that aren't
+    /// accounted for as [`Normalised::untitled`] accounts for them: three
+    /// or more are a title ("Transfection of plasmid DNA by nanocarriers"),
+    /// not a journal's words the rule misses ("Int. J. Care Injured").
+    pub(super) fn title_run(&self, families: &[String], journal: Option<&str>) -> usize {
+        let mut longest = 0;
+        let mut run = 0;
+        for (word, unaccounted) in self.words.iter().zip(self.unaccounted(families, journal)) {
+            if unaccounted {
+                run += 1;
+                longest = longest.max(run);
+            } else if !STOPWORDS.contains(&word.as_str()) {
+                run = 0;
+            }
+        }
+        longest
+    }
+
+    /// For each word, whether it is none of the candidate's authors
+    /// (`families`, normalised), journal, an initial, a number, a link's
+    /// word or a reference's furniture.
+    fn unaccounted(&self, families: &[String], journal: Option<&str>) -> Vec<bool> {
         let author_words: Vec<&str> = families.iter().flat_map(|f| f.split(' ')).collect();
         let journal = journal.map(crate::publication::significant);
-        self.words.iter().filter(|w| !w.is_empty()).all(|w| {
-            w.chars().count() <= 2
-                || w.bytes().any(|b| b.is_ascii_digit())
-                || STOPWORDS.contains(&w.as_str())
-                || LINK_WORDS.contains(&w.as_str())
-                || FURNITURE.contains(&w.as_str())
-                || crate::publication::is_month(w)
-                || author_words.contains(&w.as_str())
-                || journal
-                    .as_ref()
-                    .is_some_and(|j| crate::publication::journal_word(w, j))
-        })
+        self.words
+            .iter()
+            .map(|w| {
+                !(w.chars().count() <= 2
+                    || w.bytes().any(|b| b.is_ascii_digit())
+                    || STOPWORDS.contains(&w.as_str())
+                    || LINK_WORDS.contains(&w.as_str())
+                    || FURNITURE.contains(&w.as_str())
+                    || crate::publication::is_month(w)
+                    || author_words.contains(&w.as_str())
+                    || journal
+                        .as_ref()
+                        .is_some_and(|j| crate::publication::journal_word(w, j)))
+            })
+            .collect()
     }
 
     /// Four-digit numbers that look like publication years, but for those

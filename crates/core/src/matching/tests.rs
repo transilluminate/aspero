@@ -1475,3 +1475,44 @@ fn a_copy_without_journal_or_place_cannot_confirm_the_journal_cited() {
     let a = assess(&Claim::from_text(text), &psycextra);
     assert!((PLAUSIBLE..VERIFIED).contains(&a.confidence), "{a:?}");
 }
+
+#[test]
+fn another_title_at_the_right_place_is_a_different_title() {
+    // Red team (#102): the title was treated as missing whenever journal
+    // and volume agreed, and the place verified another work's title.
+    let mut niwa = placed(
+        &[],
+        "Lytic enzyme, labiase for a broad range of Gram-positive bacteria",
+        &["Tomoko Niwa", "Yoshiaki Kawamura"],
+        2005,
+        ("Journal of Microbiological Methods", "61", "251-260"),
+    );
+    niwa.work.work_type = Some(crate::work::WorkType::JournalArticle);
+    for (text, record) in [
+        (
+            "Niwa T. Transfection of plasmid DNA by nanocarriers. J Microbiol Methods. 2005;61:251.",
+            niwa,
+        ),
+        (
+            "Rivers E, et al. Vasopressin versus norepinephrine for septic shock. N Engl J Med. \
+             2001;345(19):1368-1377.",
+            egdt(),
+        ),
+    ] {
+        let a = assess(&Claim::from_text(text), &record);
+        assert_eq!(a.title.agreement, Agreement::Mismatch, "{text}");
+        assert!(
+            (PLAUSIBLE..VERIFIED).contains(&a.confidence),
+            "{text}: {a:?}"
+        );
+    }
+    // Without a title, the place still names the work.
+    for text in [
+        "Rivers E, et al. N Engl J Med. 2001;345:1368.",
+        "Rivers E, Nguyen B. NEJM 2001;345(19):1368-77. Epub 2001 Nov 8.",
+    ] {
+        let a = assess(&Claim::from_text(text), &egdt());
+        assert_eq!(a.title.agreement, Agreement::Unknown, "{text}");
+        assert!(a.confidence >= VERIFIED, "{text}: {a:?}");
+    }
+}

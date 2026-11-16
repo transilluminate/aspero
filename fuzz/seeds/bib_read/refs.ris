@@ -1,0 +1,25 @@
+TY  - JOUR
+AU  - LeCun, Yann
+AU  - Bengio, Yoshua
+TI  - Deep
+  learning
+T2  - Nature
+PY  - 2015/05/27/
+VL  - 521
+SP  - 436
+EP  - 444
+SN  - 0028-0836
+DO  - 10.1038/nature14539
+ER  - 
+
+TY  - BOOK
+ID  - goodfellow
+AU  - Goodfellow, Ian
+TI  - Deep Learning
+PY  - 2016
+SN  - 978-0-262-03561-3
+DO  - not-a-doi
+ER  -
+TY - GEN
+TI - Attention is all you need
+UR - https://arxiv.org/abs/1706.03762

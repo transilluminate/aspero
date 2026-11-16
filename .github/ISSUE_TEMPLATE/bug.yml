@@ -1,0 +1,35 @@
+name: Bug
+description: Something broke or behaved unexpectedly (other than a verdict; for that, use "Wrong verdict").
+labels: ["bug"]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you ran, what you expected, and what happened instead.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: To reproduce
+      description: The command, tool call or code, and its output (with `-v` for the requests made).
+      render: shell
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: "`aspero --version`"
+  - type: dropdown
+    id: surface
+    attributes:
+      label: Where you ran it
+      options:
+        - CLI
+        - MCP server
+        - library/other
+  - type: input
+    id: platform
+    attributes:
+      label: Platform
+      placeholder: macOS 15 (arm64), Ubuntu 24.04, …

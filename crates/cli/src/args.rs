@@ -474,6 +474,13 @@ publisher's own works are searched for the title too (Crossref, free),
 and between works that match about as well the publisher's is chosen
 (JSON: `chosen_by_site`). It never makes a match verified on its own.
 
+A verdict that looks wrong: --report adds, after each result, a link to a
+new GitHub issue with the wrong-verdict form filled in (the citation, the
+verdict, the JSON output shortened to fit, the version); JSON gives it as
+`report_url`. Nothing is sent: open it if you choose, and read it first,
+as issues are public. How verdicts are measured:
+https://github.com/transilluminate/aspero/blob/main/docs/accuracy.md
+
 Examples:
   aspero verify \"Vaswani et al. 2017. Attention is all you need. arXiv:1706.03762\"
   aspero verify --title \"Deep learning\" --author LeCun --year 2015 --id 10.1038/nature14539
@@ -481,13 +488,18 @@ Examples:
   aspero verify --format jsonl - < citations.jsonl
   pbpaste | aspero verify --split -
   aspero verify --html page.html --url https://jamanetwork.com/journals/jama/fullarticle/2856706
-  aspero verify --url https://www.sciencedirect.com/science/article/pii/S2772940026000032 --title \"Air pollution and stroke - ScienceDirect\"")]
+  aspero verify --url https://www.sciencedirect.com/science/article/pii/S2772940026000032 --title \"Air pollution and stroke - ScienceDirect\"
+  aspero verify --report \"Smith J. A study it got wrong. 2020\"")]
     #[command(display_order = 1)]
     Verify {
         #[command(flatten)]
         claim: ClaimArgs,
         #[command(flatten)]
         page: PageArgs,
+        /// After each result, a link to report a wrong verdict: a new
+        /// GitHub issue, filled in. Nothing is sent.
+        #[arg(long)]
+        report: bool,
     },
 
     /// Check every entry of a reference file or Word document.
@@ -979,7 +991,7 @@ mod tests {
             "T",
         ])
         .unwrap();
-        let Command::Verify { claim, page } = cli.command else {
+        let Command::Verify { claim, page, .. } = cli.command else {
             panic!("not verify");
         };
         assert_eq!(page.html.as_deref(), Some("-"));

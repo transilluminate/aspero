@@ -1,11 +1,13 @@
-//! The engine's side of the [`HttpClient`] seam: a real client, and pacing.
+//! The engine's side of the [`HttpClient`] seam: a real client, pacing,
+//! and the HTTP tape that benchmarks replay.
 
+use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
 
 use aspero_core::http::Method;
 use aspero_core::{Error, HttpClient, HttpRequest, HttpResponse};
-use aspero_store::Pacing;
+use aspero_store::{Pacing, SqliteTape, StoreError, TapeKey};
 use async_trait::async_trait;
 use jiff::Timestamp;
 use tokio::sync::Mutex;
@@ -178,6 +180,221 @@ impl HttpClient for Paced {
     }
 }
 
+/// The tape's file: recorded and replayed (a developer tool, for benchmark
+/// and red-team runs; not in `--help`). Empty or `off`: no tape.
+pub const TAPE_ENV: &str = "ASPERO_HTTP_TAPE";
+
+/// `replay-only` (a request not on the tape fails, unsent: fully offline,
+/// reproducible runs) or `record` (the default: replay what's there, send
+/// and record the rest).
+pub const TAPE_MODE_ENV: &str = "ASPERO_HTTP_TAPE_MODE";
+
+/// Whether a tape may send what it hasn't recorded.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum TapeMode {
+    /// Replays what's recorded; sends the rest, recording deterministic
+    /// answers.
+    #[default]
+    Record,
+    /// Replays only: a request not on the tape fails with
+    /// [`Error::Offline`], unsent.
+    ReplayOnly,
+}
+
+/// Why a tape couldn't be set up.
+#[derive(Debug, thiserror::Error)]
+#[non_exhaustive]
+pub enum TapeError {
+    #[error("{TAPE_MODE_ENV}: {0:?} is neither `record` nor `replay-only`")]
+    Mode(String),
+    #[error("{TAPE_MODE_ENV}=replay-only needs a tape: set {TAPE_ENV}")]
+    NoTape,
+    #[error("{TAPE_ENV}: {source} ({path})")]
+    Open { path: String, source: StoreError },
+}
+
+/// An HTTP tape for [`StandardConfig::http_tape`](crate::StandardConfig::http_tape):
+/// the file, and whether misses may be sent.
+#[derive(Clone)]
+#[non_exhaustive]
+pub struct HttpTape {
+    pub tape: Arc<SqliteTape>,
+    pub mode: TapeMode,
+}
+
+impl HttpTape {
+    pub fn new(tape: Arc<SqliteTape>, mode: TapeMode) -> Self {
+        HttpTape { tape, mode }
+    }
+
+    /// The tape [`TAPE_ENV`] and [`TAPE_MODE_ENV`] say, if any.
+    pub fn from_env() -> Result<Option<Self>, TapeError> {
+        let var = |name: &str| std::env::var(name).ok();
+        Self::from_vars(var(TAPE_ENV).as_deref(), var(TAPE_MODE_ENV).as_deref())
+    }
+
+    /// The tape at `path` (empty or `off`: none) in `mode` (as
+    /// [`TAPE_MODE_ENV`] gives it).
+    pub fn from_vars(path: Option<&str>, mode: Option<&str>) -> Result<Option<Self>, TapeError> {
+        let mode = match mode.map(str::trim).filter(|m| !m.is_empty()) {
+            None | Some("record") => TapeMode::Record,
+            Some("replay-only") => TapeMode::ReplayOnly,
+            Some(other) => return Err(TapeError::Mode(other.to_owned())),
+        };
+        let Some(path) = path.map(str::trim).filter(|p| !p.is_empty() && *p != "off") else {
+            return match mode {
+                TapeMode::ReplayOnly => Err(TapeError::NoTape),
+                TapeMode::Record => Ok(None),
+            };
+        };
+        let tape = SqliteTape::open(Path::new(path)).map_err(|source| TapeError::Open {
+            path: path.to_owned(),
+            source,
+        })?;
+        Ok(Some(HttpTape::new(Arc::new(tape), mode)))
+    }
+}
+
+/// Replays responses recorded on an [`HttpTape`], and records the rest as
+/// they're sent, so each distinct request is paid for once, ever.
+///
+/// It wraps the paced client, so replays are instant: no pacing slot, no
+/// in-flight limit. What's recorded is what's deterministic data: 2xx
+/// answers, and 404s (a meaningful "not found"), never a 404 that says a
+/// budget is spent, a 429, a 5xx, another error, or a transport failure.
+/// Live state is never taped: OpenAlex's `/rate-limit`, whose answer is
+/// today's budget.
+///
+/// A replay costs nothing and says nothing of a budget: its usage headers
+/// (`x-ratelimit-*`, as recorded) are dropped and a recorded cost reads 0,
+/// so it neither counts towards a spend nor moves a daily cap. It's
+/// received when it was recorded. A miss sent counts as usual.
+pub struct TapeClient {
+    label: String,
+    inner: Arc<dyn HttpClient>,
+    tape: Arc<SqliteTape>,
+    mode: TapeMode,
+    secrets: Vec<String>,
+}
+
+impl TapeClient {
+    pub fn new(label: impl Into<String>, inner: Arc<dyn HttpClient>, tape: &HttpTape) -> Self {
+        TapeClient {
+            label: label.into(),
+            inner,
+            tape: tape.tape.clone(),
+            mode: tape.mode,
+            secrets: Vec::new(),
+        }
+    }
+
+    /// Also keeps `secrets` off the tape (redacted where a response echoes
+    /// them): a contact address sent only in the user agent.
+    pub fn scrub(mut self, secrets: impl IntoIterator<Item = String>) -> Self {
+        self.secrets.extend(secrets);
+        self
+    }
+
+    async fn untaped(&self, request: HttpRequest) -> Result<HttpResponse, Error> {
+        match self.mode {
+            TapeMode::Record => self.inner.send(request).await,
+            TapeMode::ReplayOnly => Err(Error::Offline),
+        }
+    }
+}
+
+#[async_trait]
+impl HttpClient for TapeClient {
+    async fn send(&self, request: HttpRequest) -> Result<HttpResponse, Error> {
+        let Some(key) = TapeKey::new(&request).filter(|_| !is_live(&request.url)) else {
+            return self.untaped(request).await;
+        };
+        let key = key.with_secrets(self.secrets.iter().cloned());
+        let url = loggable_url(key.url());
+        match self.tape.get(&key) {
+            Ok(Some(recorded)) => {
+                tracing::info!(
+                    target: "aspero::http",
+                    provider = %self.label, status = recorded.status, "replayed {url}"
+                );
+                return Ok(replayed(recorded));
+            }
+            Ok(None) => {}
+            Err(e) => tracing::warn!(
+                target: "aspero::tape",
+                provider = %self.label, error = %e, "tape unreadable; sending {url}"
+            ),
+        }
+        if self.mode == TapeMode::ReplayOnly {
+            tracing::warn!(
+                target: "aspero::tape",
+                provider = %self.label, "not on tape: {url}"
+            );
+            return Err(Error::Offline);
+        }
+        let response = self.inner.send(request).await?;
+        if recordable(&response)
+            && let Err(e) = self.tape.put(&key, &response)
+        {
+            tracing::warn!(
+                target: "aspero::tape",
+                provider = %self.label, error = %e, "couldn't record {url}"
+            );
+        }
+        Ok(response)
+    }
+}
+
+/// Whether `url` asks for live state rather than data: OpenAlex's
+/// `/rate-limit`, today's budget.
+fn is_live(url: &str) -> bool {
+    let path = url.split(['?', '#']).next().unwrap_or(url);
+    path.trim_end_matches('/').ends_with("/rate-limit")
+}
+
+/// Whether a response is deterministic data, worth replaying: a 2xx, or a
+/// 404 that isn't a spent budget (OpenAlex answers the request crossing
+/// its budget with an error status, and says so in its body or headers).
+fn recordable(resp: &HttpResponse) -> bool {
+    match resp.status {
+        200..=299 => true,
+        404 => {
+            let spent = resp
+                .header("x-ratelimit-remaining-usd")
+                .and_then(|v| v.trim().parse::<f64>().ok())
+                .is_some_and(|r| r <= 0.0);
+            !spent && !resp.text().contains("not_enough_credits")
+        }
+        _ => false,
+    }
+}
+
+/// A recorded response as replayed: without the budget it reported then,
+/// and costing nothing now.
+fn replayed(recorded: HttpResponse) -> HttpResponse {
+    let usage = |name: &str| {
+        ["x-ratelimit-", "x-rate-limit-", "ratelimit-"]
+            .iter()
+            .any(|p| name.starts_with(p))
+    };
+    let charged = recorded.header("x-ratelimit-cost-usd").is_some();
+    let mut headers: Vec<(String, String)> = recorded
+        .headers
+        .into_iter()
+        .filter(|(name, _)| !usage(name))
+        .collect();
+    if charged {
+        headers.push(("x-ratelimit-cost-usd".into(), "0".into()));
+    }
+    HttpResponse::new(
+        recorded.status,
+        headers,
+        recorded.body,
+        recorded.received_at,
+    )
+}
+
 /// A URL for logs: path and query only, contact and key parameters
 /// redacted (logs get pasted into issues), long queries shortened.
 fn loggable_url(url: &str) -> String {
@@ -310,5 +527,221 @@ mod tests {
         paced.send(HttpRequest::get("http://x")).await.unwrap();
         paced.send(HttpRequest::get("http://x")).await.unwrap();
         assert_eq!(start.elapsed().as_millis(), 100);
+    }
+
+    /// Answers every request with `status` (OpenAlex-style usage headers),
+    /// counting them.
+    struct Counting {
+        status: u16,
+        sent: std::sync::atomic::AtomicUsize,
+    }
+
+    impl Counting {
+        fn new(status: u16) -> Arc<Self> {
+            Arc::new(Counting {
+                status,
+                sent: std::sync::atomic::AtomicUsize::new(0),
+            })
+        }
+
+        fn sent(&self) -> usize {
+            self.sent.load(std::sync::atomic::Ordering::SeqCst)
+        }
+    }
+
+    #[async_trait]
+    impl HttpClient for Counting {
+        async fn send(&self, _: HttpRequest) -> Result<HttpResponse, Error> {
+            self.sent.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            Ok(HttpResponse::new(
+                self.status,
+                vec![
+                    ("x-ratelimit-cost-usd".into(), "0.001".into()),
+                    ("x-ratelimit-remaining-usd".into(), "0.5".into()),
+                    ("x-ratelimit-limit-usd".into(), "1".into()),
+                    ("content-type".into(), "application/json".into()),
+                ],
+                b"{}".to_vec(),
+                Timestamp::UNIX_EPOCH,
+            ))
+        }
+    }
+
+    fn taped(inner: &Arc<Counting>, mode: TapeMode) -> (TapeClient, HttpTape) {
+        let tape = HttpTape::new(Arc::new(SqliteTape::open_in_memory().unwrap()), mode);
+        (TapeClient::new("test", inner.clone(), &tape), tape)
+    }
+
+    fn get(url: &str) -> HttpRequest {
+        HttpRequest::get(url).header("accept", "application/json")
+    }
+
+    #[tokio::test]
+    async fn a_replay_costs_nothing_and_reports_no_budget() {
+        let inner = Counting::new(200);
+        let (client, _) = taped(&inner, TapeMode::Record);
+        let sent = client
+            .send(get("https://api.openalex.org/works?search=x"))
+            .await
+            .unwrap();
+        assert_eq!(
+            sent.header("x-ratelimit-cost-usd"),
+            Some("0.001"),
+            "a miss counts"
+        );
+        let again = client
+            .send(get("https://api.openalex.org/works?search=x"))
+            .await
+            .unwrap();
+        assert_eq!(inner.sent(), 1, "replayed");
+        assert_eq!(again.body, sent.body);
+        assert_eq!(
+            again.received_at, sent.received_at,
+            "received when recorded"
+        );
+        assert_eq!(again.header("x-ratelimit-cost-usd"), Some("0"));
+        assert_eq!(again.header("x-ratelimit-remaining-usd"), None);
+        assert_eq!(again.header("x-ratelimit-limit-usd"), None);
+        assert_eq!(again.header("content-type"), Some("application/json"));
+    }
+
+    #[tokio::test]
+    async fn only_deterministic_answers_are_recorded() {
+        for (status, kept) in [
+            (200, true),
+            (404, true),
+            (400, false),
+            (429, false),
+            (500, false),
+            (503, false),
+        ] {
+            let inner = Counting::new(status);
+            let (client, tape) = taped(&inner, TapeMode::Record);
+            for _ in 0..2 {
+                let resp = client
+                    .send(get("https://api.crossref.org/works/10.1/x"))
+                    .await;
+                assert_eq!(resp.unwrap().status, status);
+            }
+            assert_eq!(tape.tape.entries().unwrap(), u64::from(kept), "{status}");
+            assert_eq!(inner.sent(), if kept { 1 } else { 2 }, "{status}");
+        }
+
+        // A 404 crossing OpenAlex's budget is a spent budget, not "not found".
+        let spent = HttpResponse::new(
+            404,
+            vec![("x-ratelimit-remaining-usd".into(), "0".into())],
+            Vec::new(),
+            Timestamp::UNIX_EPOCH,
+        );
+        assert!(!recordable(&spent));
+        let credits = HttpResponse::new(
+            404,
+            vec![],
+            b"not_enough_credits".to_vec(),
+            Timestamp::UNIX_EPOCH,
+        );
+        assert!(!recordable(&credits));
+    }
+
+    #[tokio::test]
+    async fn transport_failures_are_not_recorded() {
+        struct Down;
+        #[async_trait]
+        impl HttpClient for Down {
+            async fn send(&self, _: HttpRequest) -> Result<HttpResponse, Error> {
+                Err(Error::Timeout)
+            }
+        }
+        let tape = HttpTape::new(
+            Arc::new(SqliteTape::open_in_memory().unwrap()),
+            TapeMode::Record,
+        );
+        let client = TapeClient::new("test", Arc::new(Down), &tape);
+        assert!(matches!(
+            client.send(get("https://doi.org/10.1/x")).await,
+            Err(Error::Timeout)
+        ));
+        assert_eq!(tape.tape.entries().unwrap(), 0);
+    }
+
+    #[tokio::test]
+    async fn replay_only_fails_a_miss_unsent() {
+        let inner = Counting::new(200);
+        let (client, tape) = taped(&inner, TapeMode::Record);
+        client.send(get("https://doi.org/10.1/x")).await.unwrap();
+        let replaying = TapeClient::new(
+            "test",
+            inner.clone(),
+            &HttpTape::new(tape.tape, TapeMode::ReplayOnly),
+        );
+        assert_eq!(
+            replaying
+                .send(get("https://doi.org/10.1/x"))
+                .await
+                .unwrap()
+                .status,
+            200
+        );
+        let miss = replaying.send(get("https://doi.org/10.1/y")).await;
+        assert!(matches!(miss, Err(Error::Offline)), "{miss:?}");
+        assert_eq!(inner.sent(), 1);
+    }
+
+    #[tokio::test]
+    async fn live_budget_asks_are_never_taped() {
+        let inner = Counting::new(200);
+        let (client, tape) = taped(&inner, TapeMode::Record);
+        for _ in 0..2 {
+            client
+                .send(get("https://api.openalex.org/rate-limit"))
+                .await
+                .unwrap();
+        }
+        assert_eq!(inner.sent(), 2);
+        assert_eq!(tape.tape.entries().unwrap(), 0);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn replays_skip_pacing() {
+        let inner = Counting::new(200);
+        let tape = HttpTape::new(
+            Arc::new(SqliteTape::open_in_memory().unwrap()),
+            TapeMode::Record,
+        );
+        let paced = Arc::new(Paced::new("test", inner.clone(), Duration::from_secs(1)));
+        let client = TapeClient::new("test", paced, &tape);
+        client.send(get("https://doi.org/10.1/x")).await.unwrap();
+        let start = Instant::now();
+        for _ in 0..5 {
+            client.send(get("https://doi.org/10.1/x")).await.unwrap();
+        }
+        assert_eq!(start.elapsed().as_millis(), 0);
+        assert_eq!(inner.sent(), 1);
+    }
+
+    #[test]
+    fn tape_settings_read_from_the_environment() {
+        assert!(HttpTape::from_vars(None, None).unwrap().is_none());
+        assert!(
+            HttpTape::from_vars(Some(" off "), Some("record"))
+                .unwrap()
+                .is_none()
+        );
+        assert!(matches!(
+            HttpTape::from_vars(None, Some("replay-only")),
+            Err(TapeError::NoTape)
+        ));
+        assert!(matches!(
+            HttpTape::from_vars(None, Some("replay")),
+            Err(TapeError::Mode(_))
+        ));
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("t/tape.sqlite");
+        let tape = HttpTape::from_vars(path.to_str(), Some("replay-only"))
+            .unwrap()
+            .unwrap();
+        assert_eq!(tape.mode, TapeMode::ReplayOnly);
+        assert!(path.exists());
     }
 }

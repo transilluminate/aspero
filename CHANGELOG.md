@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+Added:
+
+- Developer: an HTTP record/replay tape (`ASPERO_HTTP_TAPE`,
+  `ASPERO_HTTP_TAPE_MODE=replay-only`), on by default for `verify_bench`
+  and `scripts/redteam.py`: each distinct request is paid for once and
+  replayed free after, offline if asked (DESIGN "HTTP tape").
+
 Fixed (from a held-out red team 0.27.0's fixes never saw,
 `bench/redteam/holdout-1.jsonl`: wrong citations verified fell from 29
 of 351 to none, 229 of them answered, the rest at OpenAlex's daily cap;

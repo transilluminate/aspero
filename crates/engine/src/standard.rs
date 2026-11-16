@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use aspero_core::{Error, HttpClient, ProviderId, ResiliencePolicy};
 
-use crate::transport::{Paced, ReqwestClient};
+use crate::transport::{HttpTape, Paced, ReqwestClient, TapeClient};
 use crate::{Cache, CachePolicy, Engine, EngineBuilder, Pacing, SecretString};
 
 #[cfg(feature = "crossref")]
@@ -72,6 +72,10 @@ pub struct StandardConfig {
     /// it, shared by everything using the key) reaches this many USD,
     /// until the budget resets; see [`EngineBuilder::daily_cap`].
     pub openalex_daily_cap_usd: Option<f64>,
+    /// An HTTP tape every provider's requests go through, for benchmark
+    /// and red-team runs ([`TapeClient`]); usually
+    /// [`HttpTape::from_env`]. `None` (the default) sends every request.
+    pub http_tape: Option<HttpTape>,
     #[cfg(feature = "openalex")]
     pub openalex: Option<OpenAlexConfig>,
     #[cfg(feature = "crossref")]
@@ -225,10 +229,17 @@ pub fn standard(config: StandardConfig) -> Result<Engine, Error> {
         let inner = Arc::new(ReqwestClient::new(&user_agent, policy.attempt_timeout)?);
         let paced =
             Paced::new(label, inner, policy.min_interval).max_in_flight(policy.max_in_flight);
-        Ok(Arc::new(match &config.pacing {
+        let paced: Arc<dyn HttpClient> = Arc::new(match &config.pacing {
             Some(pacing) => paced.shared(pacing.clone()),
             None => paced,
-        }))
+        });
+        Ok(match &config.http_tape {
+            // Outside the pacing, so replays are instant.
+            Some(tape) => {
+                Arc::new(TapeClient::new(label, paced, tape).scrub(config.mailto.clone()))
+            }
+            None => paced,
+        })
     };
 
     let mut builder: EngineBuilder = Engine::builder();

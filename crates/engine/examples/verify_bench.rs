@@ -8,16 +8,22 @@
 //! the matched work must carry one of them; if `retracted` is given, the
 //! matched work must (not) be flagged as retracted.
 //!
-//! Runs live (`OPENALEX_API_KEY`, `ASPERO_MAILTO` from the environment) through a
-//! dedicated cache in `target/bench-cache`, so the first run costs a few cents
-//! of OpenAlex budget and re-runs within the cache TTLs are free. That makes
-//! it cheap to change scoring and re-measure. Exits non-zero if any case fails.
+//! Runs live (`OPENALEX_API_KEY`, `ASPERO_MAILTO` from the environment)
+//! through an HTTP tape, `target/bench-tape.sqlite` (or `ASPERO_HTTP_TAPE`):
+//! each distinct request is paid for once, ever, and re-runs replay it, so
+//! changing scoring and re-measuring is free and reproducible.
+//! `ASPERO_HTTP_TAPE_MODE=replay-only` runs offline, failing what isn't on
+//! the tape. With a tape, each run starts from an empty answer cache (in
+//! memory), so it asks what a first run asks and its results don't depend
+//! on the cache's age. `ASPERO_HTTP_TAPE=off` runs without a tape, through
+//! a dedicated cache in `target/bench-cache` (re-runs within its lifetimes
+//! free) as before. Exits non-zero if any case fails.
 
 use std::path::PathBuf;
 use std::sync::Arc;
 
 use aspero_core::{Claim, WorkId};
-use aspero_engine::{SecretString, SqliteCache, StandardConfig, Verification, standard};
+use aspero_engine::{HttpTape, SecretString, SqliteCache, StandardConfig, Verification, standard};
 use serde::Deserialize;
 
 #[derive(Deserialize)]
@@ -89,11 +95,22 @@ async fn main() -> std::process::ExitCode {
         .collect();
 
     let env = |name: &str| std::env::var(name).ok().filter(|v| !v.trim().is_empty());
-    let cache =
-        SqliteCache::open(&root.join("target/bench-cache/cache.sqlite")).expect("bench cache");
+    let tape_path = std::env::var("ASPERO_HTTP_TAPE")
+        .unwrap_or_else(|_| root.join("target/bench-tape.sqlite").display().to_string());
+    let tape = HttpTape::from_vars(
+        Some(&tape_path),
+        std::env::var("ASPERO_HTTP_TAPE_MODE").ok().as_deref(),
+    )
+    .unwrap_or_else(|e| panic!("{e}"));
+    let cache = match &tape {
+        Some(_) => SqliteCache::open_in_memory(),
+        None => SqliteCache::open(&root.join("target/bench-cache/cache.sqlite")),
+    }
+    .expect("bench cache");
     let mut config = StandardConfig::all(env("OPENALEX_API_KEY").map(SecretString::from));
     config.mailto = env("ASPERO_MAILTO");
     config.cache = Some(Arc::new(cache));
+    config.http_tape = tape;
     let engine = standard(config).expect("engine");
 
     let claims: Vec<Claim> = cases.iter().map(|c| c.claim.claim()).collect();
@@ -135,7 +152,7 @@ async fn main() -> std::process::ExitCode {
         }
     }
     println!(
-        "\n{passed}/{} passed; ${spent:.4} spent on searches",
+        "\n{passed}/{} passed; ${spent:.4} spent on searches (replays are free)",
         cases.len()
     );
     if passed == cases.len() {

@@ -24,6 +24,9 @@
 //! A size limit ([`SqliteCache::set_max_bytes`]) evicts the least recently
 //! used entries (records, "not found" answers, searches, links; never the
 //! pacing slots) once the database passes it; see [`ACCESS`].
+//!
+//! [`SqliteTape`] is the HTTP tape for benchmark and red-team runs: whole
+//! responses recorded once and replayed, kept in a file of its own.
 
 use std::path::Path;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -33,6 +36,9 @@ use std::time::Duration;
 use aspero_core::{Page, ProviderId, SearchQuery, SourceRecord, WorkId};
 use jiff::Timestamp;
 use rusqlite::{Connection, OptionalExtension, TransactionBehavior, params};
+
+mod tape;
+pub use tape::{SqliteTape, TapeKey};
 
 /// Bump on any schema change, *and* when cached records' shape or mapping
 /// changes (records are stored as mapped); older caches are dropped and

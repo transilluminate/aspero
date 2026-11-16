@@ -119,13 +119,15 @@ use aspero_core::{
     SourceRecord, Usage,
 };
 pub use aspero_store::{
-    Cache, Direction, Edges, Pacing, SqliteCache, Stats as CacheStats, StoreError, megabytes,
+    Cache, Direction, Edges, Pacing, SqliteCache, SqliteTape, Stats as CacheStats, StoreError,
+    megabytes,
 };
 pub use inputs::{Extras, InputLookup, InputsReport, Looked};
 use jiff::Timestamp;
 pub use lookup::{Attempt, LookupReport, LookupResult, Outcome};
 pub use options::CallOptions;
 pub use search::SearchReport;
+pub use transport::{HttpTape, TapeMode};
 
 use crate::budget::Budgets;
 use crate::health::Health;

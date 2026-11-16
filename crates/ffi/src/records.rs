@@ -1292,6 +1292,26 @@ pub struct Budget {
     /// asked by `refreshBudgets` with a key).
     #[uniffi(default = None)]
     pub prepaid_expires_at: Option<SystemTime>,
+    /// What a page of a keyword search costs, in US dollars, as the
+    /// provider says (OpenAlex: `$0.001`, asked by `refreshBudgets` with a
+    /// key; `nil` until then). With `remainingUsd` and the caps, says how
+    /// many searches are left.
+    #[uniffi(default = None)]
+    pub search_price_usd: Option<f64>,
+    /// What each kind of call costs, as the provider says (OpenAlex, asked
+    /// by `refreshBudgets` with a key: `singleton`, `list`, `search`,
+    /// `search_rerank`, `rerank_extra`, `content`, `semantic`, `text`, as
+    /// its `/rate-limit` names them), in a fixed order; empty until then.
+    #[uniffi(default = [])]
+    pub prices: Vec<BudgetPrice>,
+}
+
+/// What one kind of call costs.
+#[derive(Debug, Clone, PartialEq, uniffi::Record)]
+pub struct BudgetPrice {
+    /// The provider's name for it: OpenAlex's `search`, `list`, ….
+    pub endpoint: String,
+    pub usd: f64,
 }
 
 impl Budget {
@@ -1305,6 +1325,16 @@ impl Budget {
             prepaid_remaining_usd: b.prepaid_remaining,
             prepaid_spent_today_usd: b.prepaid_spent_today,
             prepaid_expires_at: b.prepaid_expires_at.map(time),
+            search_price_usd: b.search_price(),
+            prices: b
+                .prices
+                .iter()
+                .flat_map(aspero_core::Prices::iter)
+                .map(|(endpoint, usd)| BudgetPrice {
+                    endpoint: endpoint.to_owned(),
+                    usd,
+                })
+                .collect(),
         }
     }
 }
@@ -2851,6 +2881,28 @@ mod tests {
         assert_eq!(used[0].limit_usd, Some(1.0));
         assert_eq!(used[0].prepaid_remaining_usd, Some(4.5));
         assert_eq!(used[0].remaining_usd, None);
+    }
+
+    #[test]
+    fn a_budget_says_the_prices_the_provider_said() {
+        let openalex = ProviderId::from_static("openalex");
+        let mut b = engine::Budget::new(jiff::Timestamp::UNIX_EPOCH);
+        let none = Budget::new(&openalex, &b);
+        assert_eq!((none.search_price_usd, none.prices), (None, Vec::new()));
+        let mut prices = aspero_core::Prices::default();
+        prices.singleton = Some(0.0);
+        prices.search = Some(0.001);
+        b.prices = Some(prices);
+        let said = Budget::new(&openalex, &b);
+        assert_eq!(said.search_price_usd, Some(0.001));
+        let price = |endpoint: &str, usd| BudgetPrice {
+            endpoint: endpoint.into(),
+            usd,
+        };
+        assert_eq!(
+            said.prices,
+            [price("singleton", 0.0), price("search", 0.001)]
+        );
     }
 
     #[test]

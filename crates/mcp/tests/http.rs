@@ -1038,6 +1038,56 @@ async fn a_keys_daily_budget_outlasts_a_restart() {
     server.stop().await;
 }
 
+/// Each key's spend today, in the status, read from the ledger: what it
+/// spent before a restart, not other days'; two keys' spend apart.
+#[tokio::test(flavor = "multi_thread")]
+async fn the_status_says_what_each_key_spent_today() {
+    let ledger = Arc::new(MemoryLedger::default());
+    // Before a restart, and yesterday.
+    ledger.add("full", &today(), 0.5).unwrap();
+    ledger.add("other", "2000-01-01", 3.0).unwrap();
+    let mut config = config(free_port());
+    config.keys = vec![
+        key("full", FULL, &[Sources], 100.0),
+        key("other", READER, &[Sources], 100.0),
+        key("idle", "token-idle", &[Sources], 100.0),
+    ];
+    let server = start_with(config, None, ledger.clone()).await.unwrap();
+    let search = json!({"text": "Deep learning"});
+    let mut full = Agent::new(server.port(), FULL);
+    full.initialize().await;
+    for _ in 0..2 {
+        assert!(!is_error(&full.call("search", search.clone()).await));
+    }
+    let mut other = Agent::new(server.port(), READER);
+    other.initialize().await;
+    assert!(!is_error(&other.call("search", search).await));
+
+    let status = server.status();
+    let spent: Vec<(&str, f64)> = status
+        .keys
+        .iter()
+        .map(|k| (k.key_id.as_str(), k.spent_today_usd))
+        .collect();
+    assert_eq!(
+        spent,
+        [
+            ("full", 0.5 + 2.0 * SEARCH_COST),
+            ("other", SEARCH_COST),
+            ("idle", 0.0)
+        ]
+    );
+    // The figure the budget is checked against.
+    assert_eq!(ledger.spent("other", &today()).unwrap(), SEARCH_COST);
+    // The UTC day, ending at the next midnight UTC.
+    assert_eq!(status.spend_day, today());
+    let ends = status.spend_resets_at.to_zoned(jiff::tz::TimeZone::UTC);
+    assert_eq!(ends.date().yesterday().unwrap().to_string(), today());
+    assert_eq!((ends.hour(), ends.minute(), ends.second()), (0, 0, 0));
+    assert!(status.spend_resets_at > jiff::Timestamp::now());
+    server.stop().await;
+}
+
 /// UTC today, as the ledger keeps it.
 fn today() -> String {
     jiff::Timestamp::now()
@@ -1126,6 +1176,8 @@ async fn spend_the_ledger_cant_record_still_counts_and_is_written_later() {
     let search = json!({"text": "Deep learning"});
     assert!(!is_error(&agent.call("search", search.clone()).await));
     assert_eq!(ledger.spent("full", &today()).unwrap(), 0.0);
+    // Not on record, but in the status, as in the budget's check.
+    assert_eq!(server.status().keys[0].spent_today_usd, SEARCH_COST);
     // Not on record, but spent: the budget is.
     let result = agent.call("search", search.clone()).await;
     assert!(is_error(&result), "{result}");

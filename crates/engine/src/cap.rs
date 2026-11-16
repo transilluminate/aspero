@@ -80,7 +80,43 @@ pub(crate) fn reached(
     }
 }
 
+/// What paid calls may still spend today under `caps`, given the day so
+/// far (`b`), in the provider's units (OpenAlex: USD), as [`reached`]
+/// decides: the allowance left, held to its cap; then, if paid calls would
+/// use the allowance up (its cap at or above it, or it's used up already),
+/// the prepaid credit left, held to the credit cap less the credit spent
+/// today (unknown: none). Without a credit cap, credit only where the
+/// allowance's cap is above the allowance, or there's none. `None` when
+/// the allowance left is unknown; the day's use unknown counts as none.
+pub(crate) fn spendable(caps: Caps, b: &Budget) -> Option<f64> {
+    let remaining = b.remaining?.max(0.0);
+    let used = b.used().unwrap_or(0.0);
+    let allowance = caps
+        .allowance
+        .map_or(remaining, |cap| remaining.min((cap - used).max(0.0)));
+    let used_up = remaining < 1e-6;
+    let balance = b.prepaid_remaining.unwrap_or(0.0).max(0.0);
+    let credit = match caps.credit {
+        Some(cap) if used_up || caps.allowance.is_none_or(|a| a >= used + remaining) => {
+            balance.min((cap - b.prepaid_spent_today.unwrap_or(0.0)).max(0.0))
+        }
+        None if caps.allowance.is_none_or(|a| a > used + remaining) => balance,
+        _ => 0.0,
+    };
+    Some(((allowance + credit) * 1e6).round() / 1e6)
+}
+
 impl Engine {
+    /// What `provider`'s paid calls may still spend today, given `budget`
+    /// (as [`budgets`](Self::budgets) has it) and the caps set here: the
+    /// allowance left, up to its cap, then the prepaid credit left, up to
+    /// the credit cap, once paid calls would use the allowance up. Like
+    /// the caps, it counts everything using the key. `None` when the
+    /// allowance left is unknown.
+    pub fn spendable_today(&self, provider: &ProviderId, budget: &Budget) -> Option<f64> {
+        spendable(self.caps(provider), budget)
+    }
+
     /// The daily cap set on `provider`'s allowance, if any.
     pub fn daily_cap(&self, provider: &ProviderId) -> Option<f64> {
         find(&self.caps, provider)
@@ -275,5 +311,87 @@ mod tests {
             allowance(1.0, 1.0)
         );
         assert_eq!(reached(caps(Some(2.0), None), 1.0, true, Some(5.0)), go);
+    }
+
+    /// What's spendable agrees with where [`reached`] stops: the allowance
+    /// to its cap, then credit to its own.
+    #[test]
+    fn what_paid_calls_may_still_spend_today() {
+        let caps = |allowance, credit| Caps { allowance, credit };
+        let day = |remaining, prepaid, spent| {
+            let mut b = Budget::new(jiff::Timestamp::UNIX_EPOCH);
+            b.limit = Some(1.0);
+            b.remaining = remaining;
+            b.prepaid_remaining = prepaid;
+            b.prepaid_spent_today = spent;
+            b
+        };
+        let spend = |c, b: &Budget| spendable(c, b);
+
+        // No caps: the allowance left, then all the credit.
+        assert_eq!(
+            spend(caps(None, None), &day(Some(0.6), Some(5.0), None)),
+            Some(5.6)
+        );
+        // The allowance's cap holds the rest back, and no credit is reached.
+        assert_eq!(
+            spend(
+                caps(Some(0.5), Some(0.25)),
+                &day(Some(0.6), Some(5.0), None)
+            ),
+            Some(0.1)
+        );
+        assert_eq!(
+            spend(caps(Some(0.3), None), &day(Some(0.6), Some(5.0), None)),
+            Some(0.0)
+        );
+        // A cap at the allowance: all of it, then credit to the credit cap.
+        assert_eq!(
+            spend(
+                caps(Some(1.0), Some(0.25)),
+                &day(Some(0.6), Some(5.0), Some(0.05))
+            ),
+            Some(0.8)
+        );
+        // Used up (by anything), with a credit cap: what's left of it, at
+        // most the balance; whatever the allowance's cap.
+        assert_eq!(
+            spend(
+                caps(Some(0.5), Some(0.25)),
+                &day(Some(0.0), Some(5.0), Some(0.1))
+            ),
+            Some(0.15)
+        );
+        assert_eq!(
+            spend(caps(None, Some(0.25)), &day(Some(0.0), Some(0.1), None)),
+            Some(0.1)
+        );
+        assert_eq!(
+            spend(
+                caps(None, Some(0.25)),
+                &day(Some(0.0), Some(5.0), Some(0.3))
+            ),
+            Some(0.0)
+        );
+        assert_eq!(
+            spend(caps(None, Some(0.0)), &day(Some(0.0), Some(5.0), None)),
+            Some(0.0)
+        );
+        // Used up, no credit cap: credit only past an allowance's cap above
+        // the allowance.
+        assert_eq!(
+            spend(caps(Some(1.0), None), &day(Some(0.0), Some(5.0), None)),
+            Some(0.0)
+        );
+        assert_eq!(
+            spend(caps(Some(2.0), None), &day(Some(0.0), Some(5.0), None)),
+            Some(5.0)
+        );
+        // No balance known: none; the allowance left unknown: unknown.
+        assert_eq!(
+            spend(caps(None, None), &day(Some(0.0), None, None)),
+            Some(0.0)
+        );
+        assert_eq!(spend(caps(None, None), &day(None, Some(5.0), None)), None);
     }
 }

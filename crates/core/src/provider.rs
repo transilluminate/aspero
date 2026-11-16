@@ -515,6 +515,61 @@ pub struct Usage {
     /// minutes stale.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub prepaid_bought: Option<f64>,
+    /// What each kind of call costs, where the provider says so along with
+    /// its budget (OpenAlex's `/rate-limit`, not its headers).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub prices: Option<Prices>,
+}
+
+/// What a provider charges for each kind of call, in its units (OpenAlex:
+/// USD), by OpenAlex's names for them (`/rate-limit`'s
+/// `endpoint_costs_usd`); a kind it doesn't name is `None`. Kinds it adds
+/// later are left out until named here.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Serialize, Deserialize)]
+#[non_exhaustive]
+pub struct Prices {
+    /// One work by its id.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub singleton: Option<f64>,
+    /// A page of a filtered list (lookups by many ids, citing works).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub list: Option<f64>,
+    /// A page of a keyword search.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub search: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub search_rerank: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rerank_extra: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub content: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub semantic: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub text: Option<f64>,
+}
+
+impl Prices {
+    /// Each kind's price the provider said, by its name, in a fixed order.
+    pub fn iter(&self) -> impl Iterator<Item = (&'static str, f64)> + use<> {
+        [
+            ("singleton", self.singleton),
+            ("list", self.list),
+            ("search", self.search),
+            ("search_rerank", self.search_rerank),
+            ("rerank_extra", self.rerank_extra),
+            ("content", self.content),
+            ("semantic", self.semantic),
+            ("text", self.text),
+        ]
+        .into_iter()
+        .filter_map(|(name, usd)| Some((name, usd?)))
+    }
+
+    /// Whether no kind's price is said.
+    pub fn is_empty(&self) -> bool {
+        self.iter().next().is_none()
+    }
 }
 
 impl Usage {
@@ -536,6 +591,7 @@ impl Usage {
                 Some(_) => later.prepaid_bought,
                 None => later.prepaid_bought.or(self.prepaid_bought),
             },
+            prices: later.prices.or(self.prices),
         }
     }
 }

@@ -1,5 +1,25 @@
 # Changelog
 
+## Unreleased
+
+Added:
+
+- Each MCP key's spend today (#113): `HttpServer::status` gains
+  `KeyStatus.spent_today_usd`, `Status.spend_day` and `spend_resets_at`
+  (FFI `McpKeyStatus.spentTodayUsd`, `McpStatus.spendDay`,
+  `spendResetsAt`): the ledger's figure for the UTC day plus spend not yet
+  recorded, the same the key's daily budget is checked against.
+- What OpenAlex charges (#113), from `/rate-limit`'s `endpoint_costs_usd`
+  (so with a key): `Usage.prices` and `Budget::prices` (a `Prices` of
+  `singleton`, `list`, `search`, …), `Budget::search_price`; FFI
+  `Budget.searchPriceUsd` and `Budget.prices` (`[BudgetPrice { endpoint,
+  usd }]`). `Engine::spendable_today`: what paid calls may still spend
+  today under the caps (the allowance left to its cap, then credit to the
+  credit cap). `aspero budget` adds "searches $0.001 each, about 850 left
+  today" (spendable over the search price, rounded down) and JSON
+  `spendable_today_usd`, `search_price_usd`, `searches_left_today`,
+  `prices_usd`.
+
 ## 0.28.0
 
 Added:

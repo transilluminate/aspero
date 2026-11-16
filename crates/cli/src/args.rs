@@ -765,7 +765,7 @@ when stdin closes.")]
 With OPENALEX_API_KEY set, asks OpenAlex's /rate-limit, which costs nothing:
   openalex: free allowance $0.0498 of $1.00 used today (cap $0.50), resets
   00:00 UTC; credit $0.0300 spent today (cap $0.25), $4.97 left, expires
-  2027-02-14
+  2027-02-14; searches $0.001 each, about 450 left today
 
 Without a key, /rate-limit doesn't answer, so one work is looked up alone,
 past the cache (free), and its response's headers say the budget:
@@ -774,7 +774,15 @@ past the cache (free), and its response's headers say the budget:
 JSON: {\"budgets\": [{\"provider\", \"limit_usd\", \"spent_usd\",
 \"remaining_usd\", \"allowance_cap_usd\", \"prepaid_spent_today_usd\",
 \"credit_cap_usd\", \"prepaid_remaining_usd\", \"prepaid_expires_at\",
-\"resets_at\", \"seen_at\"}]}, and \"key\": false without one.
+\"spendable_today_usd\", \"search_price_usd\", \"searches_left_today\",
+\"prices_usd\": {\"search\": 0.001, ...}, \"resets_at\", \"seen_at\"}]},
+and \"key\": false without one.
+
+The prices are OpenAlex's own (/rate-limit, so with a key). Searches left:
+what paid calls may still spend today under the caps (the allowance left,
+held to --openalex-cap-usd; then, once the allowance would be used up,
+credit left, held to --openalex-credit-cap-usd less the credit spent
+today), divided by the search price, rounded down.
 
 Paid calls (searches, batch lookups), with \"used\" and \"spent\" counting
 everything using the key, not just aspero:

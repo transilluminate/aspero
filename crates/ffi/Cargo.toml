@@ -11,7 +11,8 @@ authors.workspace = true
 publish = false
 
 # Not the workspace lints: UniFFI's generated glue is `unsafe` by nature
-# (C ABI); this crate's own code has none. The clippy table is the
+# (C ABI); this crate's own code has none but the unified log's calls
+# (`src/system_log/oslog.rs`, over `oslog.c`). The clippy table is the
 # workspace's, copied (a crate inherits all its lints or none): keep the
 # two in step.
 [lints.clippy]
@@ -66,7 +67,12 @@ jiff.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
 tokio = { workspace = true, features = ["rt-multi-thread", "sync", "macros"] }
+tracing.workspace = true
 uniffi = "0.32.2"
+
+[build-dependencies]
+# The unified log's shim (`src/system_log/oslog.c`), on Apple targets.
+cc = "1.11.1"
 
 [dev-dependencies]
 async-trait.workspace = true

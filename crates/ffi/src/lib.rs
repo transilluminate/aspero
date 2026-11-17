@@ -23,8 +23,10 @@ mod config;
 pub mod mcp;
 mod notices;
 pub mod records;
+mod system_log;
 
 pub use config::{Config, Patience};
+pub use system_log::{LogLevel, enable_system_log};
 
 use records::Verification;
 

@@ -826,3 +826,36 @@ fn a_record_without_a_byline_confirms_no_names() {
         ),
     ]);
 }
+
+#[test]
+fn a_dois_words_are_no_title() {
+    // wild-2 #776, #782: authors, year, journal and a bare DOI, no title.
+    let mut babikova = article(
+        "Underground signals carried through common mycelial networks warn neighbouring plants \
+         of aphid attack",
+        &["Zdenka Babikova", "Lucy Gilbert", "Toby J. A. Bruce"],
+        2013,
+        ("Ecology Letters", "16", "835-843"),
+    );
+    babikova.ids = vec!["doi:10.1111/ele.12115".parse().unwrap()];
+    let mut henriksson = article(
+        "Re-examining the evidence for the mother tree hypothesis - resource sharing among \
+         trees via ectomycorrhizal networks",
+        &["Nils Henriksson", "John Marshall", "Mona N. Högberg"],
+        2023,
+        ("New Phytologist", "239", "19-28"),
+    );
+    henriksson.ids = vec!["doi:10.1111/nph.18935".parse().unwrap()];
+    all_verify(&[
+        (
+            "w2-776",
+            "Babikova et al. 2013, Ecology Letters | 10.1111/ele.12115",
+            &babikova,
+        ),
+        (
+            "w2-782",
+            "Henriksson et al. 2023 (New Phytologist, DOI 10.1111/nph.18935)",
+            &henriksson,
+        ),
+    ]);
+}

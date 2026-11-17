@@ -544,8 +544,10 @@ impl Normalised {
         let journal = journal.map(crate::publication::significant);
         self.words
             .iter()
-            .map(|w| {
-                !(w.chars().count() <= 2
+            .zip(&self.linked)
+            .map(|(w, &linked)| {
+                !(linked
+                    || w.chars().count() <= 2
                     || w.bytes().any(|b| b.is_ascii_digit())
                     || STOPWORDS.contains(&w.as_str())
                     || LINK_WORDS.contains(&w.as_str())

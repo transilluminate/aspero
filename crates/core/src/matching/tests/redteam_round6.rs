@@ -515,3 +515,48 @@ fn initials_and_parts_of_words_are_no_acronyms() {
         Some("Do Large Language Models Know What Humans Know?")
     );
 }
+
+#[test]
+fn an_article_reprinted_later_as_a_chapter_is_another_version() {
+    // wild-2 #394, #834: the free sources hold only the reprint.
+    let mut crone = chapter(
+        "Islam, Judeo-Christianity and Byzantine Iconoclasm",
+        &["Patricia Crone"],
+        2017,
+        "Arab-Byzantine Relations in Early Islamic Times",
+    );
+    crone.work.page = Some("361-397".into());
+    let kuznets = chapter(
+        "Economic Growth and Income Inequality",
+        &["Simon Kuznets"],
+        2019,
+        "Routledge eBooks",
+    );
+    for (claim, record) in [
+        (
+            "Crone, Patricia. \"Islam, Judeo-Christianity and Byzantine Iconoclasm.\" Jerusalem \
+             Studies in Arabic and Islam 2 (1980): 59–95.",
+            &crone,
+        ),
+        (
+            "Kuznets, S. (1955) 'Economic growth and income inequality', The American Economic \
+             Review, 45(1), pp. 1–28.",
+            &kuznets,
+        ),
+    ] {
+        let a = assess(&Claim::from_text(claim), record);
+        assert!(
+            (PLAUSIBLE..VERIFIED).contains(&a.confidence),
+            "{claim}: {a:?}"
+        );
+    }
+    // Cited after the chapter's year, it's no reprint of the article cited.
+    let a = assess(
+        &Claim::from_text(
+            "Kuznets, S. (2023) 'Economic growth and income inequality', The American Economic \
+             Review, 45(1), pp. 1–28.",
+        ),
+        &kuznets,
+    );
+    assert!(a.confidence < PLAUSIBLE, "{a:?}");
+}

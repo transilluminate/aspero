@@ -795,8 +795,18 @@ pub fn assess(claim: &Claim, record: &SourceRecord) -> Assessment {
             )
         })
     });
+    // So is a journal's article reprinted whole, later, as a chapter of a
+    // collection ("Islam, Judeo-Christianity and Byzantine Iconoclasm",
+    // Jerusalem Studies in Arabic and Islam 1980, found only in a 2017
+    // Variorum volume): an original and its reprint are versions.
+    let reprint = work.work_type == Some(WorkType::Chapter)
+        && (cites_journal || cited_place.volume.is_some())
+        && !claimed_years.is_empty()
+        && actual_years
+            .iter()
+            .all(|a| claimed_years.iter().all(|c| c < a));
     if (work.work_type == Some(WorkType::Book)
-        || (work.work_type == Some(WorkType::Chapter) && cites_book))
+        || (work.work_type == Some(WorkType::Chapter) && (cites_book || reprint)))
         && (title.agreement == Agreement::Match || extended)
         && authors.score.is_some_and(|s| s >= CORROBORATING_AUTHORS)
         && year.agreement == Agreement::Mismatch

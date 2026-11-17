@@ -560,3 +560,53 @@ fn an_article_reprinted_later_as_a_chapter_is_another_version() {
     );
     assert!(a.confidence < PLAUSIBLE, "{a:?}");
 }
+
+#[test]
+fn a_books_title_is_read_from_its_references_shape() {
+    // wild-2's monographs: Harvard's year before the title without a
+    // stop, and bylines written "Family, Given," before a title, place and
+    // publisher.
+    for (text, title) in [
+        (
+            "Blackburn, M.A.S. (2011) Viking coinage and currency in the British Isles. British \
+             Numismatic Society Special Publication no. 7. London: British Numismatic Society.",
+            "Viking coinage and currency in the British Isles",
+        ),
+        (
+            "Vidal-Naquet, Pierre, La torture dans la République, Paris, Minuit, 1972 (1re éd. \
+             Maspero, 1972).",
+            "La torture dans la République",
+        ),
+        (
+            "Ageron, Charles-Robert, Histoire de l'Algérie contemporaine, Paris, PUF, coll. « Que \
+             sais-je ? » (1re éd. 1964, nombreuses rééditions).",
+            "Histoire de l'Algérie contemporaine",
+        ),
+        (
+            "Einaudi, Jean-Luc, La bataille de Paris. 17 octobre 1961, Paris, Seuil, 1991.",
+            "La bataille de Paris",
+        ),
+        (
+            "Rioux, Jean-Pierre (dir.), La guerre d'Algérie et les Français, Paris, Fayard, 1990.",
+            "La guerre d'Algérie et les Français",
+        ),
+        (
+            "Kuhn, Thomas S., The Structure of Scientific Revolutions, Chicago, University of \
+             Chicago Press, 1962.",
+            "The Structure of Scientific Revolutions",
+        ),
+        // Two authors, the second's name after "and": the sentence after.
+        (
+            "Ragep, F. Jamil, and Sally P. Ragep, eds. Tradition, Transmission, Transformation. \
+             Leiden: Brill, 1996.",
+            "Tradition, Transmission, Transformation",
+        ),
+        (
+            "Noble, Thomas F. X. Images, Iconoclasm, and the Carolingians. Philadelphia: \
+             University of Pennsylvania Press, 2009.",
+            "Images, Iconoclasm, and the Carolingians",
+        ),
+    ] {
+        assert_eq!(probable_title(text).as_deref(), Some(title), "{text}");
+    }
+}

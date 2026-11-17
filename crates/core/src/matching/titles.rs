@@ -423,19 +423,143 @@ pub fn probable_title(text: &str) -> Option<String> {
     if let Some(given) = given_title(text) {
         return Some(given);
     }
+    if let Some(title) = after_comma_byline(text) {
+        return Some(title);
+    }
     // Of its sentences, not a byline, a publisher or locator (";"), the
-    // one most in sentence case, then the longest.
+    // one most in sentence case, then the longest; a year opening one
+    // (Harvard's "(2011) Viking coinage …", after initials) is the year's.
+    // Nor editors' names ("Ragep, eds").
+    let editors = |s: &str| {
+        s.split_whitespace().last().is_some_and(|w| {
+            matches!(
+                w.trim_matches(|c: char| !c.is_alphabetic())
+                    .to_lowercase()
+                    .as_str(),
+                "ed" | "eds" | "editor" | "editors" | "dir" | "hrsg"
+            )
+        })
+    };
     text.split(". ")
-        .filter(|s| !s.contains(';') && !super::authors::names_given(s))
+        .filter(|s| !s.contains(';') && !super::authors::names_given(s) && !editors(s))
+        .map(without_leading_year)
         .filter_map(title_like)
-        .max_by_key(|s| {
+        .enumerate()
+        // Of sentences alike, the first: a title precedes its place.
+        .max_by_key(|(i, s)| {
             let words: Vec<&str> = s.split_whitespace().collect();
             let lower = words
                 .iter()
                 .filter(|w| w.chars().count() >= 3 && w.starts_with(char::is_lowercase))
                 .count();
-            (lower, words.len())
+            (lower, words.len(), std::cmp::Reverse(*i))
         })
+        .map(|(_, s)| s)
+}
+
+/// A sentence without the year in brackets opening it: "(2011) Viking
+/// coinage …".
+fn without_leading_year(s: &str) -> &str {
+    let t = s.trim_start();
+    let Some(inner) = t.strip_prefix('(') else {
+        return s;
+    };
+    let digits = inner.chars().take_while(char::is_ascii_digit).count();
+    let rest = &inner[digits..];
+    let rest = rest
+        .strip_prefix(|c: char| c.is_ascii_lowercase())
+        .unwrap_or(rest);
+    match rest.strip_prefix(')') {
+        Some(after) if digits == 4 => after.trim_start_matches(['.', ',']).trim_start(),
+        _ => s,
+    }
+}
+
+/// The title after a byline written "Family, Given," (French and some
+/// Chicago references: "Vidal-Naquet, Pierre, La torture dans la
+/// République, Paris, Minuit, 1972"), up to a sentence's end, a place (a
+/// lone capitalised word before a comma or colon), a number or a bracket.
+/// Given names are written out ("Charles-Robert", "Thomas S."), unlike
+/// APA's initials; a second author ("…, and Jane Doe") is no title.
+fn after_comma_byline(text: &str) -> Option<String> {
+    let name = |w: &str| {
+        w.starts_with(char::is_uppercase)
+            && w.chars()
+                .all(|c| c.is_alphabetic() || matches!(c, '-' | '\'' | '’'))
+    };
+    // Initials in capitals ("Radford A, Kim JW,") are Vancouver's.
+    let capitals = |w: &str| {
+        let w = w.trim_end_matches('.');
+        w.chars().count() >= 2 && w.chars().all(|c| c.is_uppercase() || c == '.')
+    };
+    let (family, rest) = text.split_once(", ")?;
+    if !family.split_whitespace().all(name)
+        || family.split_whitespace().count() > 3
+        || family
+            .split_whitespace()
+            .any(|w| w.chars().count() <= 3 && w.chars().all(char::is_uppercase))
+    {
+        return None;
+    }
+    let (given, rest) = rest.split_once(", ")?;
+    let given = given
+        .trim_end_matches(|c: char| c == ' ')
+        .trim_end_matches(['.'])
+        .split(" (")
+        .next()
+        .unwrap_or_default();
+    let parts: Vec<&str> = given.split_whitespace().collect();
+    let initial = |w: &str| {
+        let w = w.trim_end_matches('.');
+        w.chars().count() == 1 && w.chars().all(char::is_uppercase)
+    };
+    let written_out = parts.iter().any(|w| {
+        name(w)
+            && w.chars().filter(|c| c.is_alphabetic()).count() >= 2
+            && w.chars().any(char::is_lowercase)
+    });
+    if parts.is_empty()
+        || parts.len() > 3
+        || !written_out
+        || !parts
+            .iter()
+            .all(|w| name(w.trim_end_matches('.')) || initial(w))
+        || parts.iter().any(|w| capitals(w))
+    {
+        return None;
+    }
+    let first = rest.split_whitespace().next()?;
+    if matches!(
+        first.to_lowercase().as_str(),
+        "and" | "&" | "et" | "y" | "und" | "e" | "ed" | "eds" | "dir"
+    ) || first.starts_with(|c: char| c.is_ascii_digit())
+    {
+        return None;
+    }
+    // The title ends at a sentence's end, a bracket or semicolon, or a
+    // comma before a place, a publisher's or a number.
+    let mut end = rest.len();
+    for stop in [". ", " (", ";"] {
+        if let Some(at) = rest.find(stop) {
+            end = end.min(at);
+        }
+    }
+    let mut from = 0;
+    while let Some(at) = rest[from..end].find(", ") {
+        let after = &rest[from + at + 2..];
+        let next = after.split_whitespace().next().unwrap_or_default();
+        let bare = next.trim_end_matches([',', ':', '.']);
+        let place = name(bare) && next.ends_with([',', ':']);
+        if place || next.starts_with(|c: char| c.is_ascii_digit()) {
+            end = from + at;
+            break;
+        }
+        from += at + 2;
+    }
+    let title = rest[..end].trim().trim_end_matches(['.', ',']);
+    (title.split_whitespace().count() >= 2)
+        .then(|| title.to_owned())
+        .and_then(|t| title_like(&t))
 }
 
 /// A span of a reference that may be a title: words, one of three letters

@@ -434,7 +434,7 @@ fn bibtex_ids(text: &str) -> Vec<WorkId> {
 
 /// The arXiv number a reference gives bare as its identifier, as models
 /// write them: the only number of that shape in it, after a colon
-/// ("NegotiationToM: 2404.13627"), as a table's cell ("… | 1706.03741 |
+/// ("`NegotiationToM`: 2404.13627"), as a table's cell ("… | 1706.03741 |
 /// NeurIPS 2017") or last ("… (2210.13312)"). [`crate::id::scan`] reads
 /// bare numbers in prose as none; a reference holding one there and no
 /// other identifier labels it by where it stands. Not after a colon
@@ -467,12 +467,13 @@ fn bare_arxiv(text: &str) -> Option<WorkId> {
             if bytes.get(end) == Some(&b'v') && digits(end + 1) > 0 {
                 end += 1 + digits(end + 1);
             }
-            if !bytes
+            // Not run on into letters, a path or more digits after a dot.
+            let run_on = bytes
                 .get(end)
                 .is_some_and(|b| b.is_ascii_alphanumeric() || *b == b'/')
-                && !(bytes.get(end) == Some(&b'.')
-                    && bytes.get(end + 1).is_some_and(u8::is_ascii_digit))
-            {
+                || (bytes.get(end) == Some(&b'.')
+                    && bytes.get(end + 1).is_some_and(u8::is_ascii_digit));
+            if !run_on {
                 shaped.push(i..end);
             }
             i = end;

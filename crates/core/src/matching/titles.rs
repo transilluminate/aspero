@@ -79,11 +79,6 @@ pub(super) fn dice(a: &[String], b: &[String]) -> f64 {
 /// consecutive words of the title, its joining words' optional; one the
 /// title holds as a word stays. `None` when there is none.
 pub fn expand_acronyms(text: &str, title: &str) -> Option<String> {
-    let title_words: Vec<&str> = title
-        .split(|c: char| !c.is_alphanumeric())
-        .filter(|w| !w.is_empty())
-        .collect();
-    let lower: Vec<String> = title_words.iter().map(|w| w.to_lowercase()).collect();
     // The run of title words from `at` whose initials spell `letters`.
     fn spelt(letters: &[char], words: &[String], at: usize) -> Option<usize> {
         let Some(&c) = letters.first() else {
@@ -103,6 +98,11 @@ pub fn expand_acronyms(text: &str, title: &str) -> Option<String> {
         }
         None
     }
+    let title_words: Vec<&str> = title
+        .split(|c: char| !c.is_alphanumeric())
+        .filter(|w| !w.is_empty())
+        .collect();
+    let lower: Vec<String> = title_words.iter().map(|w| w.to_lowercase()).collect();
     let mut out = String::with_capacity(text.len());
     let mut changed = false;
     let mut rest = text;
@@ -503,7 +503,7 @@ fn after_comma_byline(text: &str) -> Option<String> {
     }
     let (given, rest) = rest.split_once(", ")?;
     let given = given
-        .trim_end_matches(|c: char| c == ' ')
+        .trim_end_matches(' ')
         .trim_end_matches(['.'])
         .split(" (")
         .next()

@@ -90,9 +90,9 @@ fn shouted_name(name: &str) -> bool {
         && parts.iter().any(|w| letters(w) >= 2)
 }
 
-/// A family name alone, as some records give a byline ("McCarthy",
-/// "Silverman"): one capitalised word, in lower case after its first
-/// letter but for a prefix's capital ("McCarthy", "DeVries").
+/// A family name alone, as some records give a byline ("Silverman"): one
+/// capitalised word, in lower case after its first letter but for a
+/// prefix's capital (a Scottish or Dutch prefix's).
 fn family_alone(name: &str) -> bool {
     let name = name.trim();
     !name.contains(char::is_whitespace)

@@ -486,3 +486,32 @@ fn a_titles_words_abbreviated_are_its_words() {
     );
     assert!(a.confidence < VERIFIED, "{a:?}");
 }
+
+#[test]
+fn initials_and_parts_of_words_are_no_acronyms() {
+    // h5-1106: "Kishore CP" isn't "chronic peripheral"; h5-380:
+    // "DS-K3DOM" holds no "Dynamic Occupancy Mapping".
+    let title = "Effectiveness of vestibular rehabilitation therapy and yoga in the management \
+                 of chronic peripheral vertigo: A randomized controlled trial";
+    assert_eq!(
+        super::super::titles::expand_acronyms(
+            "Vaishali K, Kishore CP, Sampath CPR. Effectiveness …",
+            title
+        ),
+        None
+    );
+    let title = "DS-K3DOM: 3-D Dynamic Occupancy Mapping with Kernel Inference and \
+                 Dempster-Shafer Evidential Theory";
+    assert_eq!(
+        super::super::titles::expand_acronyms("DS-K3DOM: 3-D Dynamic Occupancy Mapping", title),
+        None
+    );
+    assert_eq!(
+        super::super::titles::expand_acronyms(
+            "Do LLMs Know What Humans Know?",
+            "Do Large Language Models Know What Humans Know?"
+        )
+        .as_deref(),
+        Some("Do Large Language Models Know What Humans Know?")
+    );
+}

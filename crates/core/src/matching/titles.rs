@@ -106,12 +106,13 @@ pub fn expand_acronyms(text: &str, title: &str) -> Option<String> {
     let mut out = String::with_capacity(text.len());
     let mut changed = false;
     let mut rest = text;
+    let mut previous = "";
     while !rest.is_empty() {
-        let start = rest.find(|c: char| c.is_alphabetic()).unwrap_or(rest.len());
+        let start = rest.find(char::is_alphanumeric).unwrap_or(rest.len());
         out.push_str(&rest[..start]);
         rest = &rest[start..];
         let end = rest
-            .find(|c: char| !c.is_alphabetic())
+            .find(|c: char| !c.is_alphanumeric())
             .unwrap_or(rest.len());
         let token = &rest[..end];
         rest = &rest[end..];
@@ -121,7 +122,13 @@ pub fn expand_acronyms(text: &str, title: &str) -> Option<String> {
             .filter(|_| token.len() > 2)
             .unwrap_or(token);
         let letters: Vec<char> = stem.to_lowercase().chars().collect();
+        // A name's initials ("Kishore CP,") are no acronym.
+        let initials = token.chars().all(|c| c.is_ascii_uppercase())
+            && previous.starts_with(char::is_uppercase)
+            && previous.chars().any(char::is_lowercase)
+            && (rest.is_empty() || rest.starts_with([',', '.', ';']));
         let expansion = (capitals >= 2
+            && !initials
             && (2..=8).contains(&letters.len())
             && token.chars().all(|c| c.is_ascii_alphabetic())
             && !lower
@@ -145,6 +152,7 @@ pub fn expand_acronyms(text: &str, title: &str) -> Option<String> {
             }
             None => out.push_str(token),
         }
+        previous = token;
     }
     changed.then_some(out)
 }

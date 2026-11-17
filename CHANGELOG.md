@@ -5,6 +5,38 @@ and 0.1 to 0.9 in [docs/changelog/0.0x.md](docs/changelog/0.0x.md).
 
 ## Unreleased
 
+Added:
+
+- Diagnostics events (#146; DESIGN "Diagnostics events", a contract):
+  a `request` per provider request as it completes (provider, op,
+  status or failure kind, ms, time waited for pacing, attempt, cache
+  `miss`/`replayed`, cost; `detached=true` for a paid request finished
+  after its caller left), a `request` per answer served from the cache
+  (`cache=hit` or `stale`), a `call` per engine call (op, items,
+  patience, providers asked, ms, outcome or `cancelled`), a `tool` per
+  MCP tool call, engine or host (tool, key name, outcome, ms, cost), and
+  `retry`. Info-level events hold counts, codes and times only; what was
+  asked (queries, titles, identifiers, URLs) is only in `debug`
+  companions (`request_url`, `call_input`, `tool_input`).
+- FFI: `enableSystemLog(subsystem:level:)` sends them to Apple's unified
+  log under the embedder's subsystem, by category (`net.<provider>`,
+  `cache`, `budget`, `engine`, `mcp`), at `LogLevel.info` or `.debug`;
+  debug lines are logged private, redacted outside a debug session. It
+  installs the process's global `tracing` subscriber, so it returns
+  false when called again, after another subscriber, or off Apple
+  platforms.
+
+Changed:
+
+- CLI `-v` no longer shows each request's URL, only its provider, op,
+  status and times: URLs (which carry queries and identifiers) moved to
+  `-vv`. Log targets are now `aspero::net` (was `aspero::http`,
+  `aspero::retry`, `aspero::decode`), `aspero::engine` (was
+  `aspero::graph`), `aspero::cache`, `aspero::budget` and `aspero::mcp`;
+  warnings and info events give errors by kind, their text at debug. The
+  default (no `-v`) now shows the network's warnings too: shared pacing
+  failing, paid calls still finishing at exit.
+
 Fixed:
 
 - `--split` reads a tagged record as a reference of its own: a line

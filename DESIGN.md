@@ -129,7 +129,13 @@ Front ends:
   `authenticate`; `handler.rs`; `host.rs`).
 - FFI `crates/ffi/src/`: `lib.rs` (`Aspero`), `config.rs`, `calls/` and
   `records/` (a file per domain; `records/verify.rs`: `Verification`),
-  `mcp.rs` (`McpServer`, `McpHost`).
+  `mcp.rs` (`McpServer`, `McpHost`), `system_log/` (`enable_system_log`:
+  the unified log; `oslog.c`, its shim).
+
+Diagnostics events (DESIGN "Diagnostics events"): `request` in
+`crates/engine/src/transport.rs` (`Paced`, `TapeClient`); `call`, cache
+hits and each request's op and attempt in `crates/engine/src/observe.rs`;
+`tool` in `crates/mcp/src/server.rs` (`tool_event`).
 - Bibliographies `crates/bib/src/`: `lib.rs` (BibTeX), `ris.rs`,
   `csl.rs`, `docx.rs`, `write.rs`, `cite.rs` (styles).
 
@@ -546,6 +552,94 @@ connection pool, and CLI keys anywhere but the environment (agents run
 headless, where a Keychain prompt after an upgrade would hang them). The
 app and the CLI keep separate caches (the sandbox puts the app's in its
 container, and different schema versions would rebuild each other's).
+
+## Diagnostics events
+
+aspero's events go through `tracing`, to the CLI's stderr (`-v` info,
+`-vv` debug) and, for an embedder, to Apple's unified log
+(`enable_system_log`). Three are a **contract**, parsed by an embedder's
+summariser to tune pacing and patience: their names, fields and values
+don't change; fields may be added at the end. Each is one line: its name,
+then `key=value` fields in this order (a value with spaces or quotes
+quoted). All three are at info.
+
+**`request`**: a provider request as it completes (target `aspero::net`;
+unified-log category `net.<provider>`).
+
+- `provider`; `op`: `lookup`, `search`, `citing` (a page of the works
+  citing others), `budget` (OpenAlex's free `/rate-limit`), `other`
+  (outside an engine call: a key check).
+- `status`: the HTTP code; or why there's none: `timeout`, `dns`,
+  `refused`, `reset`, `connect`, `body`, `network`, `cancelled` (dropped
+  once sent: a deadline passed, or its caller stopped waiting), or the
+  error's kind (`not_cached`, …).
+- `ms` (sending to answer), `waited_ms` (for a pacing slot or an
+  in-flight limit), `attempt` (from 1 within its retries; 0 outside an
+  engine call).
+- `cache`: `miss` (sent: not answered from the cache, which a call past
+  the cache or with none never is), `replayed` (from the HTTP tape).
+- `cost_usd`: six decimals, where the response says (OpenAlex; 0 for a
+  replay); absent otherwise.
+- `detached=true`, only for a paid request finishing after its caller
+  stopped waiting (#139).
+
+Answers from the answer cache never reach the transport, so they are a
+**`request`** too (target `aspero::cache`, category `cache`), one per
+cache read and provider: the same fields with `status=none` for
+`cache=hit`, or, for `cache=stale` (served because the provider failed),
+the failure's kind or `offline`; `ms`, `waited_ms` and `attempt` 0, no
+`cost_usd`, and `items`, the answers served (IDs, pages). Lookups of a
+work's references from the cache are `op=references`.
+
+**`call`**: an engine call as it completes, or is dropped (target
+`aspero::engine`, category `engine`).
+
+- `op`: `lookup` (identifiers or inputs), `resolve`, `verify`, `search`,
+  `identify`, `references`, `analyse`, `check`. Calls made within one
+  (verify's lookups, check's verifies) are its parts, not counted again;
+  each claim of a `verify_batch` is a call.
+- `items`: the inputs (identifiers, claims, seeds; 1 for a query, claim,
+  page or work).
+- `patience`: `batch`, `interactive` (a deadline or retries capped) or
+  `offline`; `fresh`: past the cache.
+- `providers`: those asked live, comma-separated, or `none` (all from the
+  cache); `ms`; `outcome`: `ok`, `cancelled` (dropped first), or the
+  error's kind.
+
+**`tool`**: an MCP tool call, engine or host tool, as the server sees it
+(target `aspero::mcp`, category `mcp`): `tool`, `key` (the key's *name*,
+as `Caller.key_name` has it; absent over stdio), `outcome` (`ok` or the
+error's kind: `refused`, `timeout`, `unknown_tool`, …), `ms`, `cost_usd`.
+
+Also at info: `retry` (target `aspero::net`: `provider`, `op`, `attempt`,
+the one that failed, `status`, its kind, `delay_ms`), and warnings (a
+record that doesn't decode, a budget unread, an analysis step failed,
+paced alone), all with kinds, never text.
+
+**Privacy.** Info and above hold counts, codes, kinds and times, never
+what was asked: no query text, titles, identifiers or URLs. Those are
+only in `debug` companions with fields of their own: `request_url`
+(`provider`, `op`, `attempt`, `url`: path and query, contact and key
+parameters redacted), `call_input` (`op`, `input`), `tool_input` (`tool`,
+`arguments`), and `*_error` and `*_detail` events (an error's text). The
+HTTP tape's warnings name requests: it's a developer tool, read from the
+environment by the CLI only. Tests assert no claim or query reaches an
+info event (`crates/engine/tests/events.rs`, `crates/mcp/tests/http.rs`).
+
+**Cost when off.** Fields are computed inside the macros (a URL only when
+debug is on), so with nobody listening an event costs a callsite check.
+
+**The unified log** (`crates/ffi/src/system_log/`) is a subscriber of our
+own, not `tracing-oslog`: that logs every message `%{public}s`, and its
+span bookkeeping can panic with several loggers. Ours logs events at
+debug `%{private}s`, so the system redacts them outside a debug session
+even when debug is on, and info and above `%{public}s`; through a C shim
+(`oslog.c`), as `os_log`'s format, privacy included, must be a literal.
+Levels as Apple's `Logger`: warn and error as errors, info as notices
+(kept in the log store), debug as debug. Categories by the target's area,
+the network's per provider (`net.openalex`, `net.crossref`, `net.doi`,
+…; `net` without one), and `aspero` for the rest. Only `aspero` targets,
+never spans; once per process, as it's the global subscriber.
 
 ## Future
 

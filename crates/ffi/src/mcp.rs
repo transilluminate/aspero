@@ -22,6 +22,9 @@ pub enum McpScope {
     ReadHistory,
     /// The app's tools that add to its history.
     WriteHistory,
+    /// The app's tools that remove, untag or delete from its history. Not
+    /// implied by `WriteHistory`: a key has it only when listed.
+    RemoveHistory,
 }
 
 impl From<McpScope> for Scope {
@@ -30,6 +33,7 @@ impl From<McpScope> for Scope {
             McpScope::Sources => Scope::Sources,
             McpScope::ReadHistory => Scope::ReadHistory,
             McpScope::WriteHistory => Scope::WriteHistory,
+            McpScope::RemoveHistory => Scope::RemoveHistory,
         }
     }
 }
@@ -40,6 +44,7 @@ impl From<Scope> for McpScope {
             Scope::Sources => McpScope::Sources,
             Scope::ReadHistory => McpScope::ReadHistory,
             Scope::WriteHistory => McpScope::WriteHistory,
+            Scope::RemoveHistory => McpScope::RemoveHistory,
         }
     }
 }

@@ -3,6 +3,16 @@
 Releases 0.10 to 0.19 are in [docs/changelog/0.1x.md](docs/changelog/0.1x.md),
 and 0.1 to 0.9 in [docs/changelog/0.0x.md](docs/changelog/0.0x.md).
 
+## Unreleased
+
+Added:
+
+- MCP: a fourth scope, `RemoveHistory` (`remove_history`; FFI
+  `McpScope.removeHistory`), for host tools that remove, untag or delete
+  (#144). Checked like the others and not implied by `WriteHistory`, so
+  a key may add without being able to remove; its tools are listed as
+  destructive, and a key gaining or losing it hears `tools/list_changed`.
+
 ## 0.31.0
 
 Added:

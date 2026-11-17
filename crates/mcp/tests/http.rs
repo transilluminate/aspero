@@ -1372,3 +1372,73 @@ async fn clients_that_never_listen_hold_up_no_one() {
     }
     server.stop().await;
 }
+
+/// #144: removing is a scope of its own. Writing doesn't imply it (nor it
+/// writing); a key gaining it is told, and its tools say they destroy.
+#[tokio::test(flavor = "multi_thread")]
+async fn removing_needs_its_own_scope() {
+    use aspero_mcp::Scope::RemoveHistory;
+    let host = FakeHost::new();
+    host.tools
+        .lock()
+        .unwrap()
+        .push(tool("history_remove", RemoveHistory, &["doi"]));
+    let server = start(&host).await;
+    let port = server.port();
+    let with_writer = |scopes: &[Scope]| {
+        vec![
+            key("full", FULL, &[Sources, ReadHistory, WriteHistory], 100.0),
+            key("reader", READER, scopes, 100.0),
+        ]
+    };
+    server.set_keys(with_writer(&[ReadHistory, WriteHistory]));
+
+    // Adding allowed, removing not: unlisted, and refused if called.
+    let mut writer = Agent::new(port, READER);
+    writer.initialize().await;
+    let listed = writer.tools().await;
+    assert!(listed.contains(&"history_add".to_owned()), "{listed:?}");
+    assert!(!listed.contains(&"history_remove".to_owned()), "{listed:?}");
+    let result = writer
+        .call("history_remove", json!({"doi": "10.1/x"}))
+        .await;
+    assert!(is_error(&result));
+    assert_eq!(
+        text(&result),
+        "Error (forbidden): this key can't use history_remove: it lacks the remove_history scope"
+    );
+    // The full key has write_history but not remove_history either.
+    let mut full = Agent::new(port, FULL);
+    full.initialize().await;
+    assert!(!full.tools().await.contains(&"history_remove".to_owned()));
+
+    // Granted: told, listed as destructive, and called.
+    let mut heard = writer.listen().await;
+    server.set_keys(with_writer(&[ReadHistory, WriteHistory, RemoveHistory]));
+    assert!(heard.told().await);
+    let answer = writer.rpc("tools/list", json!({})).await;
+    let remove = answer["result"]["tools"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|t| t["name"] == "history_remove")
+        .cloned()
+        .expect("listed once granted");
+    assert_eq!(remove["annotations"]["destructiveHint"], true, "{remove}");
+    assert_eq!(remove["annotations"]["readOnlyHint"], false, "{remove}");
+    let result = writer
+        .call("history_remove", json!({"doi": "10.1/x"}))
+        .await;
+    assert!(!is_error(&result), "{result}");
+
+    // Removing alone doesn't allow adding.
+    server.set_keys(with_writer(&[RemoveHistory]));
+    assert!(heard.told().await);
+    let result = writer.call("history_add", json!({"doi": "10.1/x"})).await;
+    assert!(is_error(&result), "{result}");
+    let result = writer
+        .call("history_remove", json!({"doi": "10.1/x"}))
+        .await;
+    assert!(!is_error(&result), "{result}");
+    server.stop().await;
+}

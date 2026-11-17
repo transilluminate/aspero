@@ -745,3 +745,52 @@ fn a_supplements_pages_are_read_with_their_volume() {
     assert_eq!(located.volume.as_deref(), Some("18"));
     assert_eq!(located.page.as_deref(), Some("ii5"));
 }
+
+#[test]
+fn a_journal_read_with_its_volume_is_one_though_the_title_has_its_word() {
+    // holdout-5 #268: "Physiotherapy, 40(8)" for Physiotherapy Theory and
+    // Practice, a title about physiotherapy.
+    let fors = article(
+        "Are illness perceptions and patient self-care enablement mediators of treatment effect \
+         in best practice physiotherapy low back pain care? Secondary mediation analyses in the \
+         BetterBack trial",
+        &["Maria Fors", "Birgitta Öberg", "Paul Enthoven"],
+        2023,
+        ("Physiotherapy theory and practice", "40", "1753-1766"),
+    );
+    // holdout-5 #925: an LNCS paper cited as a journal's, with an issue.
+    let mut stork = proceedings(
+        "Computer Vision and Computer Graphics Analysis of Paintings and Drawings: An \
+         Introduction to the Literature",
+        &["David G. Stork"],
+        2009,
+        "Lecture notes in computer science",
+        "9-24",
+    );
+    stork.work.work_type = Some(crate::work::WorkType::ConferencePaper);
+    none_verify(&[
+        (
+            "h5-268",
+            "Fors, M. et al. (2024) 'Are illness perceptions and patient self-care enablement \
+             mediators of treatment effect in best practice physiotherapy low back pain care? \
+             Secondary mediation analyses in the BetterBack trial', Physiotherapy, 40(8), pp. \
+             1753-1766.",
+            &fors,
+        ),
+        (
+            "h5-925",
+            "Stork, D. G. (2009). Computer Vision and Computer Graphics Analysis of Paintings and \
+             Drawings: An Introduction to the Literature. Computer Analysis of Images and \
+             Patterns, 12(4), 9–24.",
+            &stork,
+        ),
+    ]);
+    all_verify(&[(
+        "fors",
+        "Fors, M. et al. (2023) 'Are illness perceptions and patient self-care enablement \
+         mediators of treatment effect in best practice physiotherapy low back pain care? \
+         Secondary mediation analyses in the BetterBack trial', Physiotherapy Theory and \
+         Practice, 40(8), pp. 1753-1766.",
+        &fors,
+    )]);
+}

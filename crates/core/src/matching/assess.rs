@@ -276,12 +276,16 @@ pub fn assess(claim: &Claim, record: &SourceRecord) -> Assessment {
     let bibtex = text
         .as_ref()
         .is_some_and(|t| t.raw.trim_start().starts_with('@'));
+    // One given a volume and page is a journal ("Physiotherapy, 40(8),
+    // pp. 1753-1766"); a series' volume alone isn't.
+    let volume_given = claim.place().is_some();
     let journals: Vec<String> = claim
         .cited_containers()
         .into_iter()
         .filter(|cited| {
             claim.container.is_some()
                 || bibtex
+                || volume_given
                 || !publication::significant(cited)
                     .iter()
                     .all(|w| title_words.contains(w))
@@ -397,12 +401,20 @@ pub fn assess(claim: &Claim, record: &SourceRecord) -> Assessment {
     // in that shape: plausible; another journal is another venue too.
     // (A book series' volume, "Lecture Notes in Computer Science, vol.
     // 9351", has no issue; a chapter cited as one, "In: …", is none.)
-    let chapter_as_article = work.work_type == Some(WorkType::Chapter)
-        && work.volume.is_none()
+    // So is a conference paper in a series ("Lecture Notes in Computer
+    // Science"), no more a journal's.
+    let issue_cited = claim.text.as_deref().is_some_and(publication::cites_issue);
+    let chapter_as_article = work.volume.is_none()
         && cited_place.volume.is_some()
         && !claim.text.as_deref().is_some_and(cites_chapter)
-        && (claim.text.as_deref().is_some_and(publication::cites_issue)
-            || (claim.container.is_some() && container.agreement != Agreement::Match));
+        && match work.work_type {
+            Some(WorkType::Chapter) => {
+                issue_cited
+                    || (claim.container.is_some() && container.agreement != Agreement::Match)
+            }
+            Some(WorkType::ConferencePaper) => issue_cited,
+            _ => false,
+        };
     let container =
         if chapter_as_article && cites_journal && container.agreement != Agreement::Match {
             FieldCheck::exact(false)

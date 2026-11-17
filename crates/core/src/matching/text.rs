@@ -27,7 +27,8 @@ pub fn normalise(s: &str) -> String {
 }
 
 /// [`normalise`]'s words, each with where it stands in `s` (a byte
-/// range), so what surrounds a word can be read as written.
+/// range, in order and not overlapping), so what surrounds a word can be
+/// read as written.
 pub(super) fn spanned_words(s: &str) -> Vec<(String, Range<usize>)> {
     let mut found: Vec<(String, Range<usize>)> = Vec::new();
     let mut open = false;
@@ -45,8 +46,12 @@ pub(super) fn spanned_words(s: &str) -> Vec<(String, Range<usize>)> {
                     word.push(f);
                     span.end = end;
                 }
-                _ => {
-                    found.push((f.to_string(), at..end));
+                // A word begun inside the character that ended the last one
+                // ("½" folds to "1⁄2") starts where that word ends, so
+                // spans stay in order.
+                last => {
+                    let start = last.map_or(at, |(_, span)| span.end.max(at));
+                    found.push((f.to_string(), start..end));
                     open = true;
                 }
             }

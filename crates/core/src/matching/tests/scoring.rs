@@ -303,3 +303,21 @@ fn an_identified_work_with_other_authors_is_plausible() {
     bare.page = None;
     assert!(assess(&bare, &ruff).confidence < PLAUSIBLE);
 }
+
+/// A character that folds to two words ("½" to "1⁄2") gives them spans in
+/// order, never one inside the other, so the text between words reads
+/// without panicking (holdout-6: "A ½‐transitive graph …").
+#[test]
+fn a_character_folding_to_two_words_keeps_spans_in_order() {
+    let text = "Gonultas, O. (2024). A ½‐transitive graph of valency 4. European Journal of Wood and Wood Products, 82(4), 983–996.";
+    let n = Normalised::new(text);
+    assert!(n.spans.windows(2).all(|w| w[0].end <= w[1].start));
+    let record = article(
+        "A ½‐transitive graph of valency 4 with a nonsolvable group of automorphisms",
+        &["Marušič, D.", "Xu, M."],
+        1997,
+        ("Journal of Graph Theory", "25", "133-138"),
+    );
+    let claim = Claim::from_text(text);
+    let _ = assess(&claim, &record);
+}

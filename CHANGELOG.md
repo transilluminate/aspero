@@ -3,6 +3,14 @@
 Releases 0.10 to 0.19 are in [docs/changelog/0.1x.md](docs/changelog/0.1x.md),
 and 0.1 to 0.9 in [docs/changelog/0.0x.md](docs/changelog/0.0x.md).
 
+## Unreleased
+
+Fixed:
+
+- `verify` no longer panics on a reference holding a character that folds
+  to two words, such as "½" ("1⁄2"): their spans overlapped, and reading
+  the text between them sliced backwards.
+
 ## 0.31.0
 
 Added:

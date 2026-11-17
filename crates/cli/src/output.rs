@@ -222,6 +222,7 @@ fn checks(c: &Candidate) -> Vec<(&'static str, Agreement)> {
         ("journal", a.container.agreement),
         ("volume", a.volume.agreement),
         ("page", a.page.agreement),
+        ("publisher", a.publisher.agreement),
         ("id", a.ids),
     ]
     .into_iter()

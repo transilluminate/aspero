@@ -14,6 +14,7 @@ use crate::work::{PartialDate, Person, Work};
 mod authors;
 mod claim;
 mod journal;
+mod publisher;
 mod redteam;
 mod redteam_holdouts;
 mod redteam_round6;

@@ -85,7 +85,8 @@ Scoring, pure, `crates/core/src/`:
   `matching/caps.rs`: the numbers (weights, penalties, caps, `VERIFIED`,
   `PLAUSIBLE`, `JOURNAL_MISMATCH_CAP`, …).
 - `matching/`: `titles.rs`, `authors.rs`, `text.rs` (fields found in free
-  text), `derivative.rs` (replies, errata), `preprint.rs`, `same_work.rs`
+  text), `derivative.rs` (replies, errata), `preprint.rs`, `publisher.rs`
+  (a book's publisher cited, `publishers_differ`), `same_work.rs`
   (`same_work`: two records one work).
 - `publication/`: `journal.rs` (abbreviations, `other_journal_read`,
   sister journals), `cited_journal.rs` (`cited_journals`: the journal a
@@ -261,8 +262,10 @@ examples are comments at the rule in `matching/assess.rs`, its numbers in
   article (`claim.rs`: `cites_edited_book`; `locator.rs`: `cites_issue`).
 - **An identified work with other authors, another edition or version**
   (`EDITION`, `VERSION`): plausible, an article reprinted later as a
-  chapter too (the free sources may hold only the reprint). "RETRACTED:"
-  markers are ignored.
+  chapter too (the free sources may hold only the reprint). A book cited
+  with another publisher alone is an imprint or a reissue; with another
+  year than any of its own too, plausible (`OTHER_EDITION_CAP`), the
+  publisher and year named. "RETRACTED:" markers are ignored.
 
 **Sites** (#98, `crates/core/src/site.rs`). A claim's `site` is evidence
 of the publisher, never a claimed field, and only counts for a claim

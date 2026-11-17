@@ -44,6 +44,9 @@ pub(super) const OTHER_IN_SERIES: f64 = 0.3;
 pub(super) const NO_EVIDENCE_CAP: f64 = 0.5;
 /// Another edition of a cited book: plausible, with the year a difference.
 pub(super) const EDITION: f64 = PLAUSIBLE;
+/// Confidence ceiling for a book cited with another publisher and another
+/// year: perhaps another edition, so not confirmed as this one.
+pub(super) const OTHER_EDITION_CAP: f64 = LOCATION_MISMATCH_CAP;
 /// A dataset's or software's version, its identifier claimed, cited with
 /// another year: plausible, with the year a difference.
 pub(super) const VERSION: f64 = PLAUSIBLE;

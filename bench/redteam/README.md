@@ -43,6 +43,7 @@ plausible ≥ 0.6).
 | Reply, erratum, comment carrying the title, not cited as one | not the original (confidence halved) |
 | Erratum, editorial, letter cited as such | verified |
 | Another edition of a cited book | plausible |
+| A book cited with another publisher (an imprint, a reissue), otherwise right | verified; with another year than any of the record's too, plausible, the publisher and year named (never mismatch) |
 
 ## Corpus (`corpus.jsonl`, 322 entries)
 

@@ -51,14 +51,14 @@ struct Case {
 #[serde(untagged)]
 enum ClaimSpec {
     Text(String),
-    Fields(Claim),
+    Fields(Box<Claim>),
 }
 
 impl ClaimSpec {
     fn claim(&self) -> Claim {
         match self {
             ClaimSpec::Text(text) => Claim::from_input(text),
-            ClaimSpec::Fields(claim) => claim.clone(),
+            ClaimSpec::Fields(claim) => (**claim).clone(),
         }
     }
 }

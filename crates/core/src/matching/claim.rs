@@ -1,6 +1,7 @@
 //! Reading a claim: what a citation asserts, its identifiers (DOIs, arXiv
 //! IDs, BibTeX's fields), and what its free text says of its year,
-//! journal, place, byline, venue, and whether it cites a chapter.
+//! journal, place, byline, venue, and whether it cites a chapter. A
+//! book's publisher is read in `publisher.rs`.
 
 use std::ops::Range;
 
@@ -37,6 +38,10 @@ pub struct Claim {
     /// The first page (or a range, of which the first page counts).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub page: Option<String>,
+    /// A book's publisher, as given (BibTeX's `publisher`, RIS's `PB`);
+    /// free text's is read against the record it's compared with.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub publisher: Option<String>,
     /// Other readings of claimed identifiers (a DOI without the hyphen at
     /// a line break), to try only if the claimed one doesn't exist.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]

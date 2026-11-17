@@ -998,3 +998,45 @@ async fn a_site_changes_nothing_beside_identifiers() {
     assert!(!v.chosen_by_site);
     assert!(prefix_searches(&crossref).is_empty());
 }
+
+#[tokio::test]
+async fn a_book_with_another_publisher_and_year_names_both() {
+    let mut book = work(
+        "crossref",
+        &["10.1007/978-1-349-09556-8"],
+        "Colour and Experience in Nineteenth-Century Poetry",
+        &["Richard Cronin"],
+        1988,
+    );
+    book.work.work_type = Some(aspero_core::WorkType::Book);
+    book.work.publisher = Some("Palgrave Macmillan UK".into());
+    let crossref = Arc::new(Scripted::new("crossref").matcher(vec![book]));
+    let engine = engine(vec![crossref]);
+    let cite = |year: i16, publisher: &str| {
+        Claim::from_text(format!(
+            "Cronin, R. ({year}). Colour and Experience in Nineteenth-Century Poetry. {publisher}."
+        ))
+    };
+
+    let v = engine
+        .verify(&cite(1989, "Oxford University Press"), 5)
+        .await;
+    assert_eq!(v.verdict, Verdict::Plausible, "{}", v.reason_text);
+    let fields: Vec<CitedField> = v.reason.differs().iter().map(|d| d.field).collect();
+    assert_eq!(fields, [CitedField::Year, CitedField::Publisher], "{v:?}");
+    let publisher = &v.reason.differs()[1];
+    assert_eq!(publisher.actual.as_deref(), Some("Palgrave Macmillan UK"));
+    assert_eq!(publisher.cited.as_deref(), Some("Oxford University Press"));
+    assert!(
+        v.reason_text
+            .contains("year (1988) and publisher (\"Palgrave Macmillan UK\")"),
+        "{}",
+        v.reason_text
+    );
+
+    // Another publisher alone: an imprint or a reissue.
+    let v = engine
+        .verify(&cite(1988, "Oxford University Press"), 5)
+        .await;
+    assert_eq!(v.verdict, Verdict::Verified, "{}", v.reason_text);
+}

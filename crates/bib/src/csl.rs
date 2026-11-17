@@ -41,6 +41,7 @@ pub(crate) fn entry(item: &CslItem, position: usize) -> BibEntry {
     claim.container = work.container_title;
     claim.volume = work.volume;
     claim.page = work.page;
+    claim.publisher = work.publisher;
 
     let mut ids = Ids::default();
     if let Some(doi) = &item.doi {
@@ -84,7 +85,8 @@ mod tests {
            "container-title": "Nature", "volume": 521, "page": "436-444",
            "issued": {"date-parts": [["2015", 5]]}, "DOI": "10.1038/nature14539",
            "PMID": 26017442},
-          {"type": "book", "title": "Deep Learning", "ISBN": "9780262035613"}
+          {"type": "book", "title": "Deep Learning", "ISBN": "9780262035613",
+           "publisher": "MIT Press"}
         ]"#;
         let entries = parse_csl_json(src).unwrap();
         let lecun = &entries[0];
@@ -100,6 +102,7 @@ mod tests {
         assert_eq!(ids, ["doi:10.1038/nature14539", "pmid:26017442"]);
         assert_eq!(entries[1].key, "2");
         assert_eq!(entries[1].claim.ids[0].to_string(), "isbn:9780262035613");
+        assert_eq!(entries[1].claim.publisher.as_deref(), Some("MIT Press"));
 
         let one = parse_csl_json(r#"{"id": 7, "title": "Alone"}"#).unwrap();
         assert_eq!(one[0].key, "7");

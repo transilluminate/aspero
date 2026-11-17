@@ -1,6 +1,6 @@
 //! Works, candidates, search pages and usage.
 
-use aspero_core::{Person, ProviderId, SourceRecord, Usage};
+use aspero_core::{Agreement, Person, ProviderId, SourceRecord, Usage};
 use aspero_engine::{Abstract, Candidate, SearchReport};
 use serde_json::{Map, Value, json};
 
@@ -141,7 +141,7 @@ pub fn search_page(report: &SearchReport, full: bool) -> Value {
 /// work (with every identifier merged records asserted).
 pub fn candidate(c: &Candidate, full: bool) -> Value {
     let a = &c.assessment;
-    let checks = if full {
+    let mut checks = if full {
         json!({
             "title": a.title,
             "authors": a.authors,
@@ -162,6 +162,14 @@ pub fn candidate(c: &Candidate, full: bool) -> Value {
             "ids": a.ids,
         })
     };
+    // A book's publisher, only where compared: other works have none.
+    if a.publisher.agreement != Agreement::Unknown {
+        checks["publisher"] = if full {
+            json!(a.publisher)
+        } else {
+            json!(a.publisher.agreement)
+        };
+    }
     let found_by: Vec<Value> = c
         .sightings
         .iter()

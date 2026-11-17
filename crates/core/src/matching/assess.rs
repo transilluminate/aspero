@@ -8,12 +8,14 @@ use super::authors::{
 use super::caps::{
     CORROBORATING_AUTHORS, DERIVATIVE_CITED_CAP, DERIVATIVE_PENALTY, EDITION, EXTENDED_TITLE,
     EXTENDED_TITLE_CAP, JOURNAL_MISMATCH_CAP, JOURNAL_MISMATCH_PENALTY, LOCATION_MISMATCH_CAP,
-    NO_EVIDENCE_CAP, OTHER_IN_SERIES, PLACED, PLACED_YEAR_OFF, PLACED_YEAR_WRONG, PLAUSIBLE,
-    SHORT_TITLE_WORDS, STRANGERS_CAP, UNCORROBORATED_CAP, UNPLACED_CAP, VERSION, combine,
+    NO_EVIDENCE_CAP, OTHER_EDITION_CAP, OTHER_IN_SERIES, PLACED, PLACED_YEAR_OFF,
+    PLACED_YEAR_WRONG, PLAUSIBLE, SHORT_TITLE_WORDS, STRANGERS_CAP, UNCORROBORATED_CAP,
+    UNPLACED_CAP, VERSION, combine,
 };
 use super::claim::{byline, cited_venue, cites_chapter, cites_edited_book};
 use super::derivative::{self, WorkKind, record_derivative_kind};
 use super::preprint::{names_preprint, preprint_server, preprint_version_claimed};
+use super::publisher::{cited_publisher, publishers_differ};
 use super::same_work::{id_agreement, same_work_id};
 use super::text::{Normalised, content_words, words};
 use super::titles::{self, title_similarity, unmarked};
@@ -21,7 +23,7 @@ use super::{Agreement, Assessment, Claim, FieldCheck};
 use crate::id::{IdKind, is_digits, starts_with_ci};
 use crate::publication::{self, first_page, journal_in, other_journal, same_journal};
 use crate::record::SourceRecord;
-use crate::work::WorkType;
+use crate::work::{Work, WorkType};
 
 /// A title that is a URL.
 fn is_url(title: &str) -> bool {
@@ -32,16 +34,11 @@ fn is_url(title: &str) -> bool {
         || t.contains("://")
 }
 
-/// Scores how well `record` matches `claim`.
-// The caps and floors apply in order, each reading what the ones before
-// left; splitting them up hides that order. Follow-up: move the cap/floor
-// tail into `caps.rs` as one function over the field checks.
-#[allow(clippy::too_many_lines)]
-pub fn assess(claim: &Claim, record: &SourceRecord) -> Assessment {
-    let work = &record.work;
-    // A BibTeX entry's accents read as letters (`Veli{\v{c}}kovi{\'c}`);
-    // acronyms of the record's title's words read as its words ("LLMs").
-    let text = claim.text.as_deref().map(|t| {
+/// A claim's free text as compared with `work`: a BibTeX entry's accents
+/// read as letters (`Veli{\v{c}}kovi{\'c}`), acronyms of the work's
+/// title's words as its words ("LLMs").
+pub(super) fn claim_text(claim: &Claim, work: &Work) -> Option<Normalised> {
+    claim.text.as_deref().map(|t| {
         let t = if t.trim_start().starts_with('@') {
             publication::delatex(t)
         } else {
@@ -53,10 +50,24 @@ pub fn assess(claim: &Claim, record: &SourceRecord) -> Assessment {
             .and_then(|title| titles::expand_acronyms(&t, title))
             .unwrap_or(t);
         Normalised::new(&t)
-    });
-    // A placeholder record's "title" may be a URL (a registration agency's
-    // notice page): no title at all.
-    let work_title = work.title.clone().filter(|t| !is_url(t));
+    })
+}
+
+/// The work's title: a placeholder record's "title" may be a URL (a
+/// registration agency's notice page), no title at all.
+pub(super) fn own_title(work: &Work) -> Option<String> {
+    work.title.clone().filter(|t| !is_url(t))
+}
+
+/// Scores how well `record` matches `claim`.
+// The caps and floors apply in order, each reading what the ones before
+// left; splitting them up hides that order. Follow-up: move the cap/floor
+// tail into `caps.rs` as one function over the field checks.
+#[allow(clippy::too_many_lines)]
+pub fn assess(claim: &Claim, record: &SourceRecord) -> Assessment {
+    let work = &record.work;
+    let text = claim_text(claim, work);
+    let work_title = own_title(work);
 
     let families: Vec<String> = work.authors.iter().filter_map(family_name).collect();
     // A reference that gives no title ("Wittermans E, et al. ERJ Open Res.
@@ -847,6 +858,21 @@ pub fn assess(claim: &Claim, record: &SourceRecord) -> Assessment {
     {
         confidence = confidence.max(EDITION);
     }
+    // A book cited with another publisher: an imprint or a reissue
+    // (Routledge's of a Palgrave title). With another year than any of
+    // its own too, perhaps another edition: plausible, not confirmed.
+    let publisher = match (&work.publisher, work.work_type == Some(WorkType::Book)) {
+        (Some(actual), true) => cited_publisher(claim, text.as_ref(), title_span.as_ref(), actual)
+            .map_or(FieldCheck::UNKNOWN, |cited| {
+                FieldCheck::exact(!publishers_differ(&cited, actual))
+            }),
+        _ => FieldCheck::UNKNOWN,
+    };
+    if publisher.agreement == Agreement::Mismatch
+        && matches!(year.agreement, Agreement::Partial | Agreement::Mismatch)
+    {
+        confidence = confidence.min(OTHER_EDITION_CAP);
+    }
     // A dataset's or software's record carries its latest version's date:
     // the claimed identifier and title name it, whatever year is cited
     // (MIMIC-III's DOI, cited as of 2016, registered in 2023).
@@ -927,6 +953,7 @@ pub fn assess(claim: &Claim, record: &SourceRecord) -> Assessment {
         container,
         volume,
         page,
+        publisher,
         ids,
     }
 }

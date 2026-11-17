@@ -171,6 +171,7 @@ fn entry(e: &biblatex::Entry) -> BibEntry {
         .or_else(|| field("booktitle"));
     claim.volume = field("volume");
     claim.page = field("pages");
+    claim.publisher = field("publisher");
 
     if let Some(doi) = field("doi") {
         ids.doi("doi", &doi);
@@ -383,6 +384,7 @@ mod tests {
         );
         let book = &entries[3];
         assert_eq!(book.claim.ids[0].to_string(), "isbn:9780262035613");
+        assert_eq!(book.claim.publisher.as_deref(), Some("MIT Press"));
         assert_eq!(
             book.notes
                 .iter()

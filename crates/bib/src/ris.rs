@@ -104,6 +104,7 @@ impl Record {
         claim.year = self.first(&["PY", "Y1", "DA"]).and_then(|y| first_year(&y));
         claim.container = self.first(&["T2", "JO", "JF", "JA", "J2"]);
         claim.volume = self.first(&["VL"]);
+        claim.publisher = self.first(&["PB"]);
         claim.page = self.first(&["SP"]).map(|start| match self.first(&["EP"]) {
             Some(end) if !start.contains('-') => format!("{start}-{end}"),
             _ => start,
@@ -157,6 +158,7 @@ TY  - BOOK\r
 ID  - goodfellow\r
 AU  - Goodfellow, Ian\r
 TI  - Deep Learning\r
+PB  - MIT Press\r
 PY  - 2016\r
 SN  - 978-0-262-03561-3\r
 DO  - not-a-doi\r
@@ -185,6 +187,7 @@ UR - https://arxiv.org/abs/1706.03762\r
 
         let book = &entries[1];
         assert_eq!(book.claim.ids[0].to_string(), "isbn:9780262035613");
+        assert_eq!(book.claim.publisher.as_deref(), Some("MIT Press"));
         assert_eq!(
             book.notes[0].to_string(),
             "DO field \"not-a-doi\" is not a valid DOI"

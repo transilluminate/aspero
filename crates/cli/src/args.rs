@@ -463,8 +463,8 @@ what you know (more reliable than text):
   {\"key\": \"pe.md:7\", \"title\": \"...\", \"authors\": [\"Meyer G\"], \"year\": 2014,
    \"journal\": \"N Engl J Med\", \"volume\": 370, \"page\": \"1402-11\", \"doi\": \"...\"}
   keys: text, title, authors, year, journal (or container), volume, page,
-        doi, arxiv, id, ids, site (see below), and key: anything, echoed
-        back untouched as claim_key
+        publisher, doi, arxiv, id, ids, site (see below), and key:
+        anything, echoed back untouched as claim_key
 Unknown keys are refused. To paste a reference list as it is (numbered,
 one per paragraph, wrapped), use --split instead. With --format jsonl, one result per line as
 each finishes, in any order: match them up by `input` or `claim_key`. Each
@@ -473,6 +473,8 @@ also carries the `claim` as understood. Other formats keep input order.
 The journal, volume and first page are checked too, from fields or from
 the text (\"N Engl J Med 2017;376:2545\"). A different volume or page makes
 a match plausible at best; it also tells an article from replies to it.
+A book's publisher counts only with its year: both differing, perhaps
+another edition, is plausible; another publisher alone is an imprint.
 
 An article page, as a browser shows it: --url is its address, --html its
 markup (the page saved as HTML, or its <head>; `-` reads stdin), and

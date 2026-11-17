@@ -155,6 +155,9 @@ pub enum CitedField {
     /// The work is a reply, correction or commentary on the one cited;
     /// `actual` says which ("correction", "reply", "comment", …).
     Kind,
+    /// A book's publisher, named with its year when both differ: perhaps
+    /// another edition.
+    Publisher,
 }
 
 /// A cited field the work disagrees with, and the work's value when worth
@@ -206,7 +209,8 @@ impl From<engine::CitedField> for CitedField {
             engine::CitedField::Journal => CitedField::Journal,
             engine::CitedField::Volume => CitedField::Volume,
             engine::CitedField::Kind => CitedField::Kind,
-            _ => CitedField::FirstPage,
+            engine::CitedField::Publisher => CitedField::Publisher,
+            engine::CitedField::FirstPage | _ => CitedField::FirstPage,
         }
     }
 }

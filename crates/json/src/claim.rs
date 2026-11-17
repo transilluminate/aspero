@@ -35,6 +35,9 @@ pub struct ClaimInput {
     #[serde(default, alias = "pages", deserialize_with = "text_or_number")]
     #[cfg_attr(feature = "schemars", schemars(schema_with = "text_or_number_schema"))]
     pub page: Option<String>,
+    /// A book's publisher ("Routledge"). Another alone is an imprint or a
+    /// reissue; with another year, perhaps another edition.
+    pub publisher: Option<String>,
     /// The caller's own reference for this claim, echoed back untouched;
     /// allowed here, read from the raw line (see [`InputClaim::from_line`]).
     #[serde(rename = "key")]
@@ -128,6 +131,7 @@ impl ClaimInput {
         claim.container = self.container.or(claim.container);
         claim.volume = self.volume.or(claim.volume);
         claim.page = self.page.or(claim.page);
+        claim.publisher = self.publisher.or(claim.publisher);
         if let Some(site) = self.site {
             claim.site = Some(
                 aspero_core::site::site_of(&site)
@@ -223,6 +227,8 @@ mod tests {
         .unwrap();
         assert_eq!(c.year, Some(2017));
         assert_eq!(c.ids[0].to_string(), "arxiv:1706.03762");
+        let book = claim(r#"{"title": "Deep Learning", "publisher": "MIT Press"}"#).unwrap();
+        assert_eq!(book.publisher.as_deref(), Some("MIT Press"));
         assert!(
             claim(r#"{"titel": "typo"}"#)
                 .unwrap_err()

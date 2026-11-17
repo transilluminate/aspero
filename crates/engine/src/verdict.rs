@@ -184,10 +184,14 @@ pub enum CitedField {
     /// What kind of work it is: the work is a reply, correction or
     /// commentary on the one cited (`actual`: "correction", "reply", …).
     Kind,
+    /// A book's publisher, named with its year when both differ: perhaps
+    /// another edition. Another publisher alone is an imprint or a
+    /// reissue, no difference.
+    Publisher,
 }
 
 impl CitedField {
-    every_variant!(CitedField: Title, Authors, Year, Journal, Volume, FirstPage, Kind);
+    every_variant!(CitedField: Title, Authors, Year, Journal, Volume, FirstPage, Kind, Publisher);
 
     pub fn as_str(self) -> &'static str {
         match self {
@@ -198,6 +202,7 @@ impl CitedField {
             CitedField::Volume => "volume",
             CitedField::FirstPage => "first_page",
             CitedField::Kind => "kind",
+            CitedField::Publisher => "publisher",
         }
     }
 }
@@ -206,7 +211,7 @@ impl std::fmt::Display for Difference {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(&self.field.as_str().replace('_', " "))?;
         match (&self.actual, self.field) {
-            (Some(v), CitedField::Journal) => write!(f, " (\"{v}\")"),
+            (Some(v), CitedField::Journal | CitedField::Publisher) => write!(f, " (\"{v}\")"),
             (Some(v), _) => write!(f, " ({v})"),
             (None, _) => Ok(()),
         }
@@ -262,6 +267,17 @@ fn differences(claim: &Claim, c: &Candidate, known_only: bool) -> Vec<Difference
                 CitedField::Year,
                 actual_year.map(|y| y.to_string()),
                 cited_year.map(|y| y.to_string()),
+            )
+        }),
+        // Only with the year: another publisher alone is an imprint or a
+        // reissue.
+        (a.publisher.agreement == Agreement::Mismatch
+            && matches!(a.year.agreement, Agreement::Mismatch | Agreement::Partial))
+        .then(|| {
+            diff(
+                CitedField::Publisher,
+                w.publisher.clone(),
+                matching::publisher_cited(claim, &c.record),
             )
         }),
         // The journal's article, cited by its preprint's DOI: the

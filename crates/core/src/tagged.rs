@@ -4,7 +4,7 @@
 //! and an EndNote record (`%0 Journal Article %A … %T …`).
 //!
 //! Each names its fields, so a reader takes them as given: title,
-//! authors, year, journal, volume, first page and identifiers, as the
+//! authors, year, journal, volume, first page, publisher and identifiers, as the
 //! bibliography readers (`aspero-bib`) take a file's entries. Free text's
 //! readings (a byline before the title, a journal before the locator)
 //! would misread the tags: "Journal Article" after `%0` is no author's
@@ -38,6 +38,7 @@ struct Fields {
     container: Option<String>,
     volume: Option<String>,
     page: Option<String>,
+    publisher: Option<String>,
     /// Identifiers as `kind:value`, or text to scan (a URL).
     ids: Vec<String>,
     links: Vec<String>,
@@ -63,6 +64,7 @@ impl Fields {
             container: self.container,
             volume: self.volume,
             page: self.page,
+            publisher: self.publisher,
             ids,
             ..Claim::default()
         }
@@ -156,6 +158,7 @@ fn template(text: &str) -> Option<Fields> {
     fields.year = get(&["year", "date", "publication-date"]).and_then(|y| first_year(&y));
     fields.volume = get(&["volume"]);
     fields.page = get(&["pages", "page", "at"]);
+    fields.publisher = get(&["publisher"]);
     for (key, kind) in [
         ("doi", "doi"),
         ("pmid", "pmid"),
@@ -349,6 +352,7 @@ fn ris(fields: &[(String, String)]) -> Fields {
         container: first(&["T2", "JO", "JF", "JA", "J2"]),
         volume: first(&["VL"]),
         page: pages(first(&["SP"]), first(&["EP"])),
+        publisher: first(&["PB"]),
         ..Fields::default()
     };
     out.ids
@@ -370,8 +374,8 @@ fn endnote_tag(text: &str, at: usize) -> Option<(String, usize)> {
 }
 
 /// EndNote's fields: `%A` each author, `%T` the title, `%J` the journal
-/// (`%B` the book or proceedings), `%D` the year, `%V`, `%P`, `%R` the
-/// DOI, `%@` the ISBN, `%U` a link.
+/// (`%B` the book or proceedings), `%D` the year, `%V`, `%P`, `%I` the
+/// publisher, `%R` the DOI, `%@` the ISBN, `%U` a link.
 fn endnote(fields: &[(String, String)]) -> Fields {
     let first = |tag: &str| {
         fields
@@ -390,6 +394,7 @@ fn endnote(fields: &[(String, String)]) -> Fields {
         container: first("J").or_else(|| first("B")),
         volume: first("V"),
         page: first("P"),
+        publisher: first("I"),
         ..Fields::default()
     };
     if let Some(doi) = first("R") {
@@ -446,6 +451,7 @@ mod tests {
         assert_eq!(book.authors, ["Keynes, John Maynard"]);
         assert_eq!(book.year, Some(1936));
         assert!(book.container.is_none(), "a publisher is no container");
+        assert_eq!(book.publisher.as_deref(), Some("Macmillan"));
         assert_eq!(book.ids[0].to_string(), "isbn:9780262035613");
 
         let chapter = claim(
@@ -482,9 +488,15 @@ mod tests {
         assert_eq!(ris.page.as_deref(), Some("359-362"));
         let ids: Vec<String> = ris.ids.iter().map(ToString::to_string).collect();
         assert_eq!(ids, ["doi:10.1126/science.2523562"], "an ISSN is no ISBN");
-        let book =
-            claim("TY  - BOOK  TI  - Deep Learning  SN  - 978-0-262-03561-3  ER  -").unwrap();
+        let book = claim(
+            "TY  - BOOK  TI  - Deep Learning  PB  - MIT Press  SN  - 978-0-262-03561-3  ER  -",
+        )
+        .unwrap();
         assert_eq!(book.ids[0].to_string(), "isbn:9780262035613");
+        assert_eq!(book.publisher.as_deref(), Some("MIT Press"));
+        let endnote_book =
+            claim("%0 Book %A Goodfellow, Ian %T Deep Learning %I MIT Press %D 2016").unwrap();
+        assert_eq!(endnote_book.publisher.as_deref(), Some("MIT Press"));
         // Its lines kept, too.
         let lines =
             claim("TY  - BOOK\nAU  - 西田幾多郎\nTI  - 善の研究\nPY  - 1911\nER  - ").unwrap();

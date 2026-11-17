@@ -28,6 +28,7 @@
 //! - `preprint.rs`: preprint servers, and a preprint's DOI cited for a
 //!   journal's article.
 //! - `derivative.rs`: replies, corrections and notices about a work.
+//! - `publisher.rs`: a book's publisher, cited and compared.
 //! - `same_work.rs`: identifier agreement, and whether two records are one
 //!   work.
 
@@ -37,6 +38,7 @@ mod caps;
 mod claim;
 mod derivative;
 mod preprint;
+mod publisher;
 mod same_work;
 mod text;
 mod titles;
@@ -51,6 +53,7 @@ pub use derivative::{
     record_derivative_kind,
 };
 pub use preprint::preprint_version_claimed;
+pub use publisher::{publisher_cited, publishers_differ};
 pub use same_work::{id_agreement, same_work, same_work_id};
 pub use text::normalise;
 pub use titles::{
@@ -114,6 +117,10 @@ pub struct Assessment {
     pub volume: FieldCheck,
     /// The first page.
     pub page: FieldCheck,
+    /// A book's publisher: `Mismatch` when the claim cites one clearly
+    /// another ([`publishers_differ`]). Alone, an imprint or a reissue;
+    /// with another year, perhaps another edition.
+    pub publisher: FieldCheck,
     /// Whether the claim's identifiers are the record's: `Match` if any
     /// claimed ID is the record's, `Mismatch` if the record has a different
     /// ID of the same kind, else `Unknown`.

@@ -5,6 +5,23 @@ and 0.1 to 0.9 in [docs/changelog/0.0x.md](docs/changelog/0.0x.md).
 
 ## Unreleased
 
+Changed:
+
+- A book cited with another publisher and another year than any of its
+  record's is `plausible`, not `verified`, the reason naming both ("its
+  year (1988) and publisher ("Palgrave Macmillan UK") differ"): it may be
+  another edition. Another publisher alone stays `verified` (imprints and
+  reissues change it: Routledge's of a Palgrave title, CRC Press for
+  Taylor & Francis). A claim's publisher is read from its fields (JSON
+  `publisher`, BibTeX `publisher`, RIS `PB`, EndNote `%I`, CSL
+  `publisher`, a citation template's `publisher=`), or from free text
+  after the title: a part naming the record's publisher, or a publisher
+  by its words ("… Press", "Verlag") or place ("London: Routledge,
+  2013"). Names compare by their own words, so "Palgrave Macmillan" is
+  Palgrave Macmillan UK and "OUP" Oxford University Press. A difference
+  names `publisher` (`CitedField::Publisher`, added last); a book's
+  candidate carries a `publisher` check where compared.
+
 Fixed:
 
 - `verify` no longer panics on a reference holding a character that folds

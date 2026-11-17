@@ -610,3 +610,138 @@ fn a_books_title_is_read_from_its_references_shape() {
         assert_eq!(probable_title(text).as_deref(), Some(title), "{text}");
     }
 }
+
+#[test]
+fn a_byline_in_capitals_or_of_family_names_is_complete() {
+    // holdout-5: invented co-authors beside records whose names are in
+    // capitals ("JOHN R. JAENIKE") or family names alone ("McCarthy").
+    let jaenike = article(
+        "PARASITE PRESSURE AND THE EVOLUTION OF AMANITIN TOLERANCE IN DROSOPHILA",
+        &["JOHN R. JAENIKE"],
+        1985,
+        ("Evolution", "39", "1295"),
+    );
+    let guessous = article(
+        "Genome-wide association studies in pharmacogenomics: untapped potential for translation",
+        &["Idris Guessous", "MARTA L. GWINN", "Muin J. Khoury"],
+        2009,
+        ("Genome Medicine", "1", "46"),
+    );
+    let mccarthy = article(
+        "The setting up and implementation of a venous thromboembolism prophylaxis policy in \
+         clinical hospital practice",
+        &["McCarthy", "Ged J. Byrne", "Silverman"],
+        1998,
+        ("Journal of Evaluation in Clinical Practice", "4", "1"),
+    );
+    none_verify(&[
+        (
+            "h5-641",
+            "Jaenike, J., & Okonjo-Ashdown, N. (1985). Parasite Pressure and the Evolution of \
+             Amanitin Tolerance in Drosophila. Evolution, 39(6), 1295.",
+            &jaenike,
+        ),
+        (
+            "h5-995",
+            "Guessous, I., Kaszuba-Ilunga, K., & Khoury, M. J. (2009). Genome-wide association \
+             studies in pharmacogenomics: untapped potential for translation. Genome Medicine, \
+             1(4), 46.",
+            &guessous,
+        ),
+        (
+            "h5-269",
+            "McCarthy MJ, Kaszuba-Whitlock S, Silverman SH. The setting up and implementation of \
+             a venous thromboembolism prophylaxis policy in clinical hospital practice. J Eval \
+             Clin Pract. 1998;4(1):1.",
+            &mccarthy,
+        ),
+    ]);
+    all_verify(&[
+        (
+            "jaenike",
+            "Jaenike, J. (1985). Parasite Pressure and the Evolution of Amanitin Tolerance in \
+             Drosophila. Evolution, 39(6), 1295.",
+            &jaenike,
+        ),
+        (
+            "guessous",
+            "Guessous, I., Gwinn, M., & Khoury, M. J. (2009). Genome-wide association studies in \
+             pharmacogenomics: untapped potential for translation. Genome Medicine, 1(4), 46.",
+            &guessous,
+        ),
+        (
+            "mccarthy",
+            "McCarthy MJ, Byrne GJ, Silverman SH. The setting up and implementation of a venous \
+             thromboembolism prophylaxis policy in clinical hospital practice. J Eval Clin Pract. \
+             1998;4(1):1.",
+            &mccarthy,
+        ),
+    ]);
+}
+
+#[test]
+fn an_article_cited_as_a_chapter_of_a_book_named_as_its_journal_is_another_container() {
+    // holdout-5 #86, #994: "In: …, editor. Journal of Applied
+    // Probability. Wiley-Blackwell; 1994. p. 185-197.", no volume.
+    let lagrangian = article(
+        "Aspects of Lagrangian probability distributions",
+        &["Masaaki Sibuya", "Norihiko Miyawaki", "Ushio Sumita"],
+        1994,
+        ("Journal of Applied Probability", "31", "185-197"),
+    );
+    let separation = article(
+        "Separation index of a graph",
+        &["Andrew Vince"],
+        2002,
+        ("Journal of Graph Theory", "41", "53-61"),
+    );
+    none_verify(&[
+        (
+            "h5-86",
+            "Sibuya M, Miyawaki N, Sumita U. Aspects of Lagrangian probability distributions. In: \
+             Whitcombe-Pryce E, editor. Journal of Applied Probability. Wiley-Blackwell; 1994. \
+             p. 185-197.",
+            &lagrangian,
+        ),
+        (
+            "h5-994",
+            "Vince, A. (2002). Separation index of a graph. In C. Gudmundsdottir-Lindgren (Ed.), \
+             Journal of Graph Theory (pp. 53–61). Oxford University Press.",
+            &separation,
+        ),
+    ]);
+}
+
+#[test]
+fn a_word_replaced_after_the_main_title_is_another_title() {
+    // holdout-5 #976.
+    let quixote = article(
+        "\"High and Noble Adventures\": Reading the Novel in \"The Female Quixote\"",
+        &["Mary Patricia Martin"],
+        1997,
+        ("NOVEL: A Forum on Fiction", "31", "45"),
+    );
+    none_verify(&[(
+        "h5-976",
+        "M. P. Martin, “\"High and Noble Adventures\": Reading the Novel in \"The Male \
+         Quixote\",” NOVEL: A Forum on Fiction, vol. 31, no. 1, Art. no. 45, 1997.",
+        &quixote,
+    )]);
+    all_verify(&[(
+        "quixote",
+        "M. P. Martin, “\"High and Noble Adventures\": Reading the Novel in \"The Female \
+         Quixote\",” NOVEL: A Forum on Fiction, vol. 31, no. 1, Art. no. 45, 1997.",
+        &quixote,
+    )]);
+}
+
+#[test]
+fn a_supplements_pages_are_read_with_their_volume() {
+    // holdout-5 #645: "2009;18:ii5-ii8", an older edition's place.
+    let located = publication::locator(
+        "Pestalozzi B. Primary breast cancer: ESMO Clinical Recommendations for diagnosis, \
+         treatment and follow-up. Annals of Oncology. 2009;18:ii5-ii8.",
+    );
+    assert_eq!(located.volume.as_deref(), Some("18"));
+    assert_eq!(located.page.as_deref(), Some("ii5"));
+}

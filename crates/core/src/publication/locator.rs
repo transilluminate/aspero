@@ -327,13 +327,18 @@ pub(super) fn volume_number(s: &str) -> Option<String> {
 }
 
 /// "2545-55", "e1234", "S12" or "R3" (a letter for a section or
-/// supplement: Nucleic Acids Research's "D1", a review's "R3"): the first
-/// page.
+/// supplement: Nucleic Acids Research's "D1", a review's "R3"), or a
+/// supplement's roman number ("ii5", Annals of Oncology's): the first page.
 pub(super) fn page_number(s: &str) -> Option<String> {
     let page = first_page(s.trim_end_matches(['.', ',', ';']));
-    let digits = page
-        .strip_prefix(|c: char| c.is_ascii_alphabetic())
-        .unwrap_or(page);
+    let roman = page
+        .find(|c: char| !matches!(c, 'i' | 'v' | 'x'))
+        .filter(|&n| (2..=4).contains(&n))
+        .map(|n| &page[n..]);
+    let digits = roman.unwrap_or_else(|| {
+        page.strip_prefix(|c: char| c.is_ascii_alphabetic())
+            .unwrap_or(page)
+    });
     (digits.len() <= 8 && is_digits(digits)).then(|| page.to_ascii_lowercase())
 }
 

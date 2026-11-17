@@ -187,11 +187,22 @@ pub fn assess(claim: &Claim, record: &SourceRecord) -> Assessment {
     // Determinants Associated With …" for "Risk Factors Associated With
     // …", "A Controlled Study" for "A Randomized Trial" (synonyms, as an
     // invented reference's or a paraphrase's are).
+    // Where only its main title was found ("\"High and Noble Adventures\":
+    // Reading the Novel in \"The Male Quixote\"" for "… The Female
+    // Quixote"), a word put in place in the rest.
+    let main_only = title_span.as_ref().is_some_and(|span| {
+        work_title
+            .as_deref()
+            .is_some_and(|t| span.len() < words(unmarked(t)).len())
+    });
     let reworded = match (&work_title, &text) {
         (Some(actual), Some(text)) if found && title_span.is_none() && claim.title.is_none() => {
             text.substitutes_in(actual)
                 .or_else(|| text.inserts_in(actual).then_some(false))
                 .or_else(|| text.replaces_in(actual).then_some(false))
+        }
+        (Some(actual), Some(text)) if found && main_only && claim.title.is_none() => {
+            text.substitutes_in(actual)
         }
         (Some(actual), _) if found => claim
             .title
@@ -408,8 +419,18 @@ pub fn assess(claim: &Claim, record: &SourceRecord) -> Assessment {
     // Corvaro IR, Mirkrand P, editors. Handbook of Nurse-Midwifery"): the
     // reverse, another container (a meeting's proceedings aside, and a
     // series named as its journal: "In: …, editor. Methods in Enzymology").
+    // So too when the book named is its journal, but in no volume ("In:
+    // …, editor. Journal of Applied Probability. Wiley-Blackwell; 1994.
+    // p. 185-197."): a series' volume is cited with its number ("Methods
+    // in Enzymology. Vol 182").
+    let volume_cited = work.volume.as_deref().is_some_and(|v| {
+        cited_place.volume.as_deref() == Some(v)
+            || text
+                .as_ref()
+                .is_some_and(|t| t.words.iter().any(|w| w == v))
+    });
     let article_as_chapter = article
-        && container.agreement != Agreement::Match
+        && (container.agreement != Agreement::Match || !volume_cited)
         && claim.text.as_deref().is_some_and(cites_edited_book)
         && !venue.as_deref().is_some_and(publication::proceedings);
     let container = if article_as_chapter {

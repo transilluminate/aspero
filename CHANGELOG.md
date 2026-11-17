@@ -7,6 +7,18 @@ and 0.1 to 0.9 in [docs/changelog/0.0x.md](docs/changelog/0.0x.md).
 
 Fixed:
 
+- A paid OpenAlex request already sent is finished and counted when its
+  caller stops waiting (#139). A claim verified while its other searches
+  were still out cancelled them mid-flight: OpenAlex charged for them,
+  but their cost was missing from the usage, the credit spent here and
+  the caps, and their answers from the cache and the tape (29% of a live
+  run's OpenAlex requests; the balance fell 1.37× the costs counted).
+  They now finish in the background, counted and cached as an awaited
+  request is. Requests still waiting for a pacing slot are cancelled, as
+  before, so the early stop still saves them. New `Engine::settle`
+  waits, with a bound, for those finishing; the CLI waits up to 10 s
+  before it exits, and `verify` and `check` add their usage to what they
+  report.
 - `verify` no longer panics on a reference holding a character that folds
   to two words, such as "½" ("1⁄2"): their spans overlapped, and reading
   the text between them sliced backwards.

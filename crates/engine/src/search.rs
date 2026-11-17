@@ -21,7 +21,7 @@
 use std::sync::Arc;
 
 use aspero_core::{
-    Error, FieldSet, Filter, FilterValue, IdKind, Page, Provider, ProviderId, QueryNode,
+    Error, FieldSet, Filter, FilterValue, IdKind, Page, Provider, ProviderId, QueryNode, Response,
     SearchMode, SearchQuery, Sort, Usage, WorkId, YearRange,
 };
 use jiff::civil::Date;
@@ -204,11 +204,22 @@ impl Engine {
             tracing::info!(target: "aspero::cache", provider = %provider, text = %sent.text, "search served from cache");
             return Ok(report(page, None, Served::Cache));
         }
-        match self.call_paid(entry, || entry.provider.search(&sent)).await {
-            Ok(resp) => {
-                self.remember_search(&provider, &sent, &resp.value);
-                Ok(report(resp.value, resp.usage, Served::Live))
+        // Finished and cached, once sent, even if the caller stops waiting.
+        let live = {
+            let (engine, entry, sent) = (self.clone(), entry.clone(), sent.clone());
+            async move {
+                let answer = engine
+                    .call_paid(&entry, || entry.provider.search(&sent))
+                    .await;
+                if let Ok(resp) = &answer {
+                    engine.remember_search(&entry.provider.id(), &sent, &resp.value);
+                }
+                answer
             }
+        };
+        let usage = |answer: &Result<Response<Page>, Error>| answer.as_ref().ok()?.usage;
+        match self.finish_paid(entry, live, usage).await {
+            Ok(resp) => Ok(report(resp.value, resp.usage, Served::Live)),
             Err(error) => match cached {
                 Some((page, _)) => Ok(report(page, None, Served::Stale)),
                 None => Err(EngineError::Provider {

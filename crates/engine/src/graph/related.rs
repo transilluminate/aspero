@@ -39,7 +39,9 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use aspero_core::{Cursor, ErrorKind, Page, ProviderId, SearchQuery, SourceRecord, Usage, WorkId};
+use aspero_core::{
+    Cursor, Error, ErrorKind, Page, ProviderId, Response, SearchQuery, SourceRecord, Usage, WorkId,
+};
 use aspero_store::{Direction, Edges};
 use futures::StreamExt;
 
@@ -604,9 +606,7 @@ impl Engine {
                 read.budget = true;
                 break;
             }
-            let answer = self
-                .call_paid(entry, || entry.provider.search(&query))
-                .await;
+            let answer = self.citing_page(entry, query.clone(), remember).await;
             let cost = match &answer {
                 Ok(resp) => resp.usage.as_ref().and_then(|u| u.cost),
                 Err(_) => Some(0.0),
@@ -617,9 +617,6 @@ impl Engine {
                     read.paid += 1;
                     if let Some(u) = resp.usage {
                         crate::add_usage(&mut read.usage, &provider, u);
-                    }
-                    if remember && let Some(cache) = &self.cache {
-                        let _ = cache.put_search(&provider, &query, &resp.value, (self.clock)());
                     }
                     let empty = resp.value.hits.is_empty();
                     cursor = read.take(resp.value, years);
@@ -640,6 +637,31 @@ impl Engine {
             }
         }
         read
+    }
+
+    /// One page of works citing others, live, cached if `remember`:
+    /// finished and cached, once sent, even if the caller stops waiting
+    /// ([`finish_paid`](Self::finish_paid)).
+    async fn citing_page(
+        &self,
+        entry: &Entry,
+        query: SearchQuery,
+        remember: bool,
+    ) -> Result<Response<Page>, Error> {
+        let (engine, owned) = (self.clone(), entry.clone());
+        let ask = async move {
+            let entry = &owned;
+            let answer = engine
+                .call_paid(entry, || entry.provider.search(&query))
+                .await;
+            if let (Ok(resp), true, Some(cache)) = (&answer, remember, &engine.cache) {
+                let provider = entry.provider.id();
+                let _ = cache.put_search(&provider, &query, &resp.value, (engine.clock)());
+            }
+            answer
+        };
+        self.finish_paid(entry, ask, |answer| answer.as_ref().ok()?.usage)
+            .await
     }
 
     /// The pages of a `cites:` filter the search cache holds fresh (or, offline, at all), from the first.

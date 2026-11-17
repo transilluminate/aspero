@@ -564,12 +564,19 @@ impl Normalised {
     pub(super) fn years_beside(&self, title: Option<&str>) -> Vec<i16> {
         let span = title.and_then(|t| self.title_span(t)).unwrap_or(0..0);
         // A volume numbered like a year, with its part and issue
-        // ("2007.0(52)", a working-paper series'), is no year.
+        // ("2007.0(52)", a working-paper series'), is no year; nor an arXiv
+        // number's year and month ("1811.07871").
         let decimal = |i: usize| {
-            self.raw[self.spans[i].end..]
-                .strip_prefix('.')
-                .map(|s| s.trim_start_matches(|c: char| c.is_ascii_digit()))
-                .is_some_and(|rest| rest.starts_with('('))
+            let Some(after) = self.raw[self.spans[i].end..].strip_prefix('.') else {
+                return false;
+            };
+            let digits = after.len() - after.trim_start_matches(|c: char| c.is_ascii_digit()).len();
+            let rest = &after[digits..];
+            let month = self.words[i].get(2..).and_then(|m| m.parse::<u8>().ok());
+            rest.starts_with('(')
+                || ((4..=5).contains(&digits)
+                    && month.is_some_and(|m| (1..=12).contains(&m))
+                    && !rest.starts_with(|c: char| c.is_alphanumeric() && c != 'v'))
         };
         let years = |skip: &Range<usize>| -> Vec<i16> {
             self.words

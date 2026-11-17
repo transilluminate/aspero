@@ -71,6 +71,84 @@ pub(super) fn dice(a: &[String], b: &[String]) -> f64 {
     2.0 * shared as f64 / (a.len() + b.len()) as f64
 }
 
+/// A reference with the acronyms it writes for a run of `title`'s words
+/// written out as those words ("Theory of Mind in LLMs" for "… in Large
+/// Language Models", "RLHF" for "Reinforcement Learning from Human
+/// Feedback", "ToM"): models abbreviate titles so. An acronym is two
+/// capitals or more, a plural's "s" aside, spelling the initials of
+/// consecutive words of the title, its joining words' optional; one the
+/// title holds as a word stays. `None` when there is none.
+pub fn expand_acronyms(text: &str, title: &str) -> Option<String> {
+    let title_words: Vec<&str> = title
+        .split(|c: char| !c.is_alphanumeric())
+        .filter(|w| !w.is_empty())
+        .collect();
+    let lower: Vec<String> = title_words.iter().map(|w| w.to_lowercase()).collect();
+    // The run of title words from `at` whose initials spell `letters`.
+    fn spelt(letters: &[char], words: &[String], at: usize) -> Option<usize> {
+        let Some(&c) = letters.first() else {
+            return Some(at);
+        };
+        let word = words.get(at)?;
+        let joining = STOPWORDS.contains(&word.as_str());
+        if word.starts_with(c)
+            && let Some(end) = spelt(&letters[1..], words, at + 1)
+        {
+            return Some(end);
+        }
+        // A joining word inside the run may give no letter ("Learning
+        // from Human" in "RLHF").
+        if joining && at > 0 {
+            return spelt(letters, words, at + 1);
+        }
+        None
+    }
+    let mut out = String::with_capacity(text.len());
+    let mut changed = false;
+    let mut rest = text;
+    while !rest.is_empty() {
+        let start = rest.find(|c: char| c.is_alphabetic()).unwrap_or(rest.len());
+        out.push_str(&rest[..start]);
+        rest = &rest[start..];
+        let end = rest
+            .find(|c: char| !c.is_alphabetic())
+            .unwrap_or(rest.len());
+        let token = &rest[..end];
+        rest = &rest[end..];
+        let capitals = token.chars().filter(char::is_ascii_uppercase).count();
+        let stem = token
+            .strip_suffix('s')
+            .filter(|_| token.len() > 2)
+            .unwrap_or(token);
+        let letters: Vec<char> = stem.to_lowercase().chars().collect();
+        let expansion = (capitals >= 2
+            && (2..=8).contains(&letters.len())
+            && token.chars().all(|c| c.is_ascii_alphabetic())
+            && !lower
+                .iter()
+                .any(|w| w.eq_ignore_ascii_case(token) || *w == stem.to_lowercase()))
+        .then(|| {
+            (0..lower.len())
+                .filter(|&i| !STOPWORDS.contains(&lower[i].as_str()))
+                .find_map(|i| {
+                    let end = spelt(&letters, &lower, i)?;
+                    // A run ends on a word of its own, not a joining word.
+                    (end - i >= 2 && !STOPWORDS.contains(&lower[end - 1].as_str()))
+                        .then(|| title_words[i..end].join(" "))
+                })
+        })
+        .flatten();
+        match expansion {
+            Some(words) => {
+                out.push_str(&words);
+                changed = true;
+            }
+            None => out.push_str(token),
+        }
+    }
+    changed.then_some(out)
+}
+
 /// Whether `cited` (a reference's words, or a title cited apart) has
 /// every content word of `title`, but for misspellings ("Ailgnment",
 /// "colour"); with `both`, and no content words of its own either.

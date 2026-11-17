@@ -328,3 +328,161 @@ fn a_title_reworded_is_plausible_unless_the_id_or_place_says() {
         ),
     ]);
 }
+
+#[test]
+fn an_arxiv_number_holds_no_year() {
+    // wild-2 #641, #644, #645: "1811.07871" isn't 1811, nor "2009.01325"
+    // 2009.
+    for (text, years) in [
+        (
+            "Leike et al., Scalable Agent Alignment via Reward Modeling | 1811.07871 | \
+             Preprint (DeepMind)",
+            vec![],
+        ),
+        (
+            "Stiennon et al., Learning to Summarize from Human Feedback | 2009.01325 | \
+             NeurIPS 2020",
+            vec![2020],
+        ),
+        (
+            "Vaswani A, et al. Attention is all you need. arXiv:1706.03762. 2017.",
+            vec![2017],
+        ),
+        // A year ending a sentence before a number is still a year.
+        (
+            "Smith J. A study of things. Lancet. 2009. 12345",
+            vec![2009],
+        ),
+    ] {
+        assert_eq!(Claim::from_text(text).cited_years(), years, "{text}");
+    }
+}
+
+#[test]
+fn a_bare_arxiv_number_standing_as_a_references_identifier_is_one() {
+    // wild-2: model-written references giving the arXiv number alone,
+    // after a colon, as a table's cell, or last.
+    let arxiv = |id: &str| -> Vec<WorkId> { vec![format!("arxiv:{id}").parse().unwrap()] };
+    for (text, ids) in [
+        (
+            "Kosinski, Theory of Mind May Have Spontaneously Emerged in LLMs (later retitled \
+             Evaluating LLMs in Theory of Mind Tasks, PNAS 2024): 2302.02083",
+            arxiv("2302.02083"),
+        ),
+        (
+            "Chan et al., NegotiationToM: 2404.13627",
+            arxiv("2404.13627"),
+        ),
+        (
+            "Christiano et al., Deep RL from Human Preferences | 1706.03741 | NeurIPS 2017",
+            arxiv("1706.03741"),
+        ),
+        (
+            "Sap et al.'s Neural Theory-of-Mind? (2210.13312)",
+            arxiv("2210.13312"),
+        ),
+        (
+            "RAGTruth: A Hallucination Corpus for Trustworthy RAG (2024) | 2401.00396",
+            arxiv("2401.00396"),
+        ),
+        (
+            "Vaswani A, et al. Attention is all you need. 1706.03762v5.",
+            arxiv("1706.03762v5"),
+        ),
+    ] {
+        assert_eq!(Claim::from_text(text).ids, ids, "{text}");
+    }
+    // Not in prose, nor beside another identifier, nor two of them, nor a
+    // number that isn't one (no month 13).
+    for text in [
+        "We trained on 1706.03762 examples and report the mean.",
+        "Smith J. A paper. 2017. doi:10.1000/xyz123 | 1706.03762",
+        "Two papers: 1706.03762 and 1810.04805",
+        "Smith J. A paper. Results: 1713.03762",
+        "Smith J. Gene expression in mice. Nature. 2016;533:1706.03762",
+        "1706.03762",
+    ] {
+        let ids = Claim::from_text(text).ids;
+        assert!(
+            ids.iter().all(|id| id.kind() != crate::id::IdKind::Arxiv),
+            "{text}: {ids:?}"
+        );
+    }
+}
+
+#[test]
+fn a_titles_words_abbreviated_are_its_words() {
+    // wild-2: models abbreviate titles' words ("LLMs", "ToM", "RAG",
+    // "RLHF"), and a title's acronym ("Advanced RAG") is no byline.
+    let mut found = 0;
+    for (claim, title, authors, year, bar) in [
+        (
+            "van Duijn et al., Theory of Mind in LLMs: 11 Models vs. Children Aged 7-10 on \
+             Advanced Tests: 2310.20320",
+            "Theory of Mind in Large Language Models: Examining Performance of 11 State-of-the-Art \
+             models vs. Children Aged 7-10 on Advanced Tests",
+            &["Max J. van Duijn", "Bram van Dijk", "Tom Kouwenhoven"][..],
+            2023,
+            // Words dropped from its middle too: plausible.
+            PLAUSIBLE,
+        ),
+        (
+            "Li et al., Theory of Mind for Multi-Agent Collaboration via LLMs: 2310.10701",
+            "Theory of Mind for Multi-Agent Collaboration via Large Language Models",
+            &["Huao Li", "Yu Quan Chong", "Simon Stepputtis"][..],
+            2023,
+            VERIFIED,
+        ),
+        (
+            "Casper et al., Open Problems and Fundamental Limitations of RLHF | 2307.15217 | \
+             TMLR 2023",
+            "Open Problems and Fundamental Limitations of Reinforcement Learning from Human \
+             Feedback",
+            &["Stephen Casper", "Xander Davies", "Claudia Shi"][..],
+            2023,
+            VERIFIED,
+        ),
+        (
+            "Trott et al.'s Do LLMs Know What Humans Know? (2209.01515)",
+            "Do Large Language Models Know What Humans Know?",
+            &["Sean Trott", "Cameron Jones", "Tyler Chang"][..],
+            2023,
+            VERIFIED,
+        ),
+        (
+            "ARAGOG: Advanced RAG Output Grading (2024) | 2404.01037",
+            "ARAGOG: Advanced RAG Output Grading",
+            &["Matouš Eibich", "Shivay Nagpal", "Alexander Fred-Ojala"][..],
+            2024,
+            VERIFIED,
+        ),
+        (
+            "Zhou et al., How FaR Are LLMs From Agents with Theory-of-Mind?: 2310.03051",
+            "How FaR Are Large Language Models From Agents with Theory-of-Mind?",
+            &["Pei Zhou", "Aman Madaan", "Srividya Pranavi Potharaju"][..],
+            2023,
+            VERIFIED,
+        ),
+    ] {
+        let claim = Claim::from_text(claim);
+        let id = claim.ids[0].to_string();
+        let r = arxiv_preprint(&id, title, authors, year);
+        let a = assess(&claim, &r);
+        assert!(a.confidence >= bar, "{title}: {a:?}");
+        found += 1;
+    }
+    assert_eq!(found, 6);
+    // An acronym the title's words don't spell is another word.
+    let r = arxiv_preprint(
+        "arxiv:2401.00396",
+        "RAGTruth: A Hallucination Corpus for Developing Trustworthy Retrieval-Augmented \
+         Language Models",
+        &["Cheng Niu", "Yuanhao Wu", "Juno Zhu"],
+        2024,
+    );
+    let a = assess(
+        &Claim::from_text("RAGTruth: A Hallucination Corpus for Trustworthy RAG (2024)"),
+        &r,
+    );
+    assert!(a.confidence < VERIFIED, "{a:?}");
+}

@@ -39,13 +39,20 @@ fn is_url(title: &str) -> bool {
 #[allow(clippy::too_many_lines)]
 pub fn assess(claim: &Claim, record: &SourceRecord) -> Assessment {
     let work = &record.work;
-    // A BibTeX entry's accents read as letters (`Veli{\v{c}}kovi{\'c}`).
+    // A BibTeX entry's accents read as letters (`Veli{\v{c}}kovi{\'c}`);
+    // acronyms of the record's title's words read as its words ("LLMs").
     let text = claim.text.as_deref().map(|t| {
-        if t.trim_start().starts_with('@') {
-            Normalised::new(&publication::delatex(t))
+        let t = if t.trim_start().starts_with('@') {
+            publication::delatex(t)
         } else {
-            Normalised::new(t)
-        }
+            t.to_owned()
+        };
+        let t = work
+            .title
+            .as_deref()
+            .and_then(|title| titles::expand_acronyms(&t, title))
+            .unwrap_or(t);
+        Normalised::new(&t)
     });
     // A placeholder record's "title" may be a URL (a registration agency's
     // notice page): no title at all.
@@ -100,8 +107,17 @@ pub fn assess(claim: &Claim, record: &SourceRecord) -> Assessment {
         // pasted title) doesn't name others. One whose byline names
         // people, as any style writes them ("F. Eskdale-Mora", "Nadler,
         // Steven.", BibTeX's author), none of them the record's, does.
+        // Not in the work's own title ("ARAGOG: Advanced RAG Output
+        // Grading" names no one).
+        let outside_title = || match &title_span {
+            Some(span) if !span.is_empty() => {
+                let (from, to) = (text.spans[span.start].start, text.spans[span.end - 1].end);
+                format!("{} {}", &text.raw[..from], &text.raw[to..])
+            }
+            _ => text.raw.clone(),
+        };
         let others = || {
-            authors::names_given(&text.raw)
+            authors::names_given(&outside_title())
                 || byline(text, work_title.as_deref(), title_span.as_ref()).is_some_and(|b| {
                     byline_strangers(&b, &work.authors, work.container_title.as_deref())
                 })

@@ -5,6 +5,19 @@ the bar a release has to clear, and where it stands. This applies the same
 to the CLI, the MCP server and the library: they share one engine and one
 verdict.
 
+> **The results below measure the hard tail on purpose.** The wrong
+> citations in every red-team corpus are built to be difficult. Each is a
+> real work with one field subtly off: a sister journal, one co-author
+> swapped, the year one out, an older Cochrane version, a chapter cited
+> as an article. These are mistakes a careful reader misses too. The
+> obvious errors are invented works, identifiers that don't exist, and
+> another paper's DOI or PMID. aspero has caught every one of those in
+> every round. So "wrong → `verified` 7.4%" means 7.4% of near-misses,
+> not 7.4% of what gets pasted. The real citations are messy on purpose
+> too: typos, abbreviations, missing fields, bare arXiv numbers, model
+> output. The targets are set high, and each round climbs the hardest
+> cases that are left.
+
 ## What `verify` promises
 
 **A fabricated or miscited reference should not come back `verified`.**
@@ -135,6 +148,9 @@ harm, are reported separately as well as in the totals.
 recorded fixture), so it stays fixed without the network.
 
 ## Results
+
+These are the hardest cases (see the note at the top), not typical
+input.
 
 **Round 6 (0.32.0 candidate), held out** — `bench/redteam/holdout-6.jsonl`:
 1,049 citations built the same way as holdout-5, weighted towards books

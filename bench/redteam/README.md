@@ -516,6 +516,43 @@ API response seen in this round contained instruction-like text (one
 wild-1 title, "Training language models to follow instructions…", is a
 paper's).
 
+## Round 6: books, reprints and model output (2026-11-17, unreleased)
+
+Tuned on holdout-5 and wild-2, which are no longer held out (their 0.31.0
+results re-recorded live on a new tape; round 6 measured offline from it,
+`--replay-only`, then live on `holdout-6.jsonl`, 1,049 citations, see
+[holdout-6.md](holdout-6.md)). Rules: a bare arXiv number at a reference's
+end or after a colon is that identifier; title acronyms ("LLMs") read as
+the words they spell; book title searches chosen by position; reprints
+found only as a later chapter are another edition (plausible); another
+meeting of the same society told apart by acronym; reworded titles capped
+at plausible unless the identifier or the place agrees. Holdout-6 also
+found a panic on "½" (#138).
+
+```
+holdout-5 (replay)                           0.31.0           round 6
+wrong -> verified                         36/613 (5.9%)   13/613 (2.1%)    <= 2%
+real -> mismatch or not_found             12/583 (2.1%)    9/583 (1.5%)    <= 3%
+real -> verified                         532/583 (91.3%) 531/583 (91.1%)   >= 85%
+
+wild-2 (replay)                              0.31.0           round 6
+wrong -> verified                          5/122 (4.1%)    5/122 (4.1%)    <= 2%
+real -> mismatch or not_found             52/910 (5.7%)    6/910 (0.7%)    <= 3%
+real -> verified                         777/910 (85.4%) 798/910 (87.7%)   >= 85%
+
+holdout-6 (held out, live)                   0.31.0           round 6
+wrong -> verified                         45/516 (8.7%)   38/516 (7.4%)    <= 2%
+invented, fake ID, DOI swap -> verified    0/182           0/182           <= 0%
+real -> mismatch or not_found             11/503 (2.2%)   10/503 (2.0%)    <= 3%
+real -> verified                         471/503 (93.6%) 473/503 (94.0%)   >= 85%
+real -> verified or plausible            492/503 (97.8%) 493/503 (98.0%)   >= 95%
+```
+
+The wild-2 replay leaves 104 claims whose new requests aren't on the tape
+(unverifiable offline), so its real figures understate the change. The
+earlier corpora weren't re-run (their tape was gone and re-recording them
+would cost credit); the offline tests stand in.
+
 ## Failures (`failures.jsonl`)
 
 Every false VERIFIED from the corpus (31) and the adversarial round (48),

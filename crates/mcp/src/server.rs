@@ -65,7 +65,6 @@ fn engine_tool(s: &ToolSpec) -> Tool {
 /// protocol error.
 pub(crate) fn engine_result(
     session: &Session,
-    name: &str,
     result: Result<Output, ToolError>,
 ) -> Result<CallToolResult, ErrorData> {
     Ok(match result {
@@ -77,15 +76,39 @@ pub(crate) fn engine_result(
         Err(e) if e.kind == ToolErrorKind::UnknownTool => {
             return Err(ErrorData::invalid_params(e.message, None));
         }
-        Err(e) => {
-            tracing::info!(target: "aspero::mcp", tool = %name, error = %e, "tool failed");
-            CallToolResult::error(vec![ContentBlock::text(format!(
-                "{}\n{}",
-                error_text(&e),
-                session.line()
-            ))])
-        }
+        Err(e) => CallToolResult::error(vec![ContentBlock::text(format!(
+            "{}\n{}",
+            error_text(&e),
+            session.line()
+        ))]),
     })
+}
+
+/// A tool call's `tool` event (target `aspero::mcp`, DESIGN "Diagnostics
+/// events") as it completes: the tool, the key's name (HTTP; none over
+/// stdio), `ok` or the error's kind, its time since `started` and what it
+/// cost.
+pub(crate) fn tool_event(
+    tool: &str,
+    key: Option<&str>,
+    outcome: &str,
+    started: tokio::time::Instant,
+    cost_usd: f64,
+) {
+    tracing::info!(
+        target: "aspero::mcp",
+        tool = %tool, key = key.map(tracing::field::display), outcome = %outcome,
+        ms = u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX),
+        cost_usd = %format_args!("{cost_usd:.6}"), "tool"
+    );
+}
+
+/// The `debug` companion of a tool call: what it was asked.
+pub(crate) fn tool_input(tool: &str, arguments: &serde_json::Map<String, Value>) {
+    tracing::debug!(
+        target: "aspero::mcp",
+        tool = %tool, arguments = %serde_json::Value::Object(arguments.clone()), "tool_input"
+    );
 }
 
 /// A tool error as the agent reads it: "Error (kind): message".
@@ -136,12 +159,19 @@ impl ServerHandler for Handler {
         request: CallToolRequestParams,
         _: RequestContext<RoleServer>,
     ) -> Result<CallToolResponse, ErrorData> {
-        let arguments = Value::Object(request.arguments.unwrap_or_default());
+        let started = tokio::time::Instant::now();
+        let arguments = request.arguments.unwrap_or_default();
+        tool_input(&request.name, &arguments);
         let result = self
             .tools
-            .call(&self.session, &request.name, arguments)
+            .call(&self.session, &request.name, Value::Object(arguments))
             .await;
-        Ok(engine_result(&self.session, &request.name, result)?.into())
+        let (outcome, cost) = match &result {
+            Ok(output) => ("ok", output.cost_usd),
+            Err(e) => (e.kind.as_str(), e.cost_usd),
+        };
+        tool_event(&request.name, None, outcome, started, cost);
+        Ok(engine_result(&self.session, result)?.into())
     }
 }
 

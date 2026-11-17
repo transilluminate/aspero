@@ -6,9 +6,10 @@
 
 mod common;
 
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
 
+use aspero_core::testing::Events;
 use aspero_mcp::Scope::{ReadHistory, Sources, WriteHistory};
 use aspero_mcp::http::{
     ACTIVITY_QUEUE, Activity, Host, HostError, HostOutput, HostTool, HttpConfig, HttpServer, Key,
@@ -1441,4 +1442,83 @@ async fn removing_needs_its_own_scope() {
         .await;
     assert!(!is_error(&result), "{result}");
     server.stop().await;
+}
+
+/// Every event in this test binary, from the first call: the server's
+/// tasks run on other threads, so the subscriber is global.
+fn global_events() -> Events {
+    static EVENTS: OnceLock<Events> = OnceLock::new();
+    EVENTS
+        .get_or_init(|| {
+            let events = Events::default();
+            tracing::subscriber::set_global_default(events.clone()).unwrap();
+            events
+        })
+        .clone()
+}
+
+/// A `tool` event per call (DESIGN "Diagnostics events"), engine tools
+/// and the host's, by the key's name; what was asked only at debug.
+#[tokio::test(flavor = "multi_thread")]
+async fn each_tool_call_is_logged_with_the_keys_name_and_no_query() {
+    let events = global_events();
+    let host = FakeHost::new();
+    let mut config = config(free_port());
+    config.keys = vec![key(
+        "events",
+        "token-events",
+        &[Sources, ReadHistory],
+        100.0,
+    )];
+    let server = start_with(config, Some(host), Arc::new(MemoryLedger::default()))
+        .await
+        .unwrap();
+    let mut agent = Agent::new(server.port(), "token-events");
+    agent.initialize().await;
+    agent
+        .call("search", json!({"text": "Lactate clearance"}))
+        .await;
+    agent
+        .call("history_search", json!({"q": "septic shock"}))
+        .await;
+    agent.call("history_fail", json!({})).await;
+    server.stop().await;
+
+    let logged: Vec<_> = events
+        .named("aspero::mcp", "tool")
+        .into_iter()
+        .filter(|e| e.field("key") == Some("events agent"))
+        .collect();
+    let said: Vec<(&str, &str, &str)> = logged
+        .iter()
+        .map(|e| {
+            (
+                e.field("tool").unwrap(),
+                e.field("outcome").unwrap(),
+                e.field("cost_usd").unwrap(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        said,
+        [
+            ("search", "ok", "0.250000"),
+            ("history_search", "ok", "0.000000"),
+            ("history_fail", "refused", "0.000000"),
+        ]
+    );
+    for e in &logged {
+        assert_eq!(e.names(), ["tool", "key", "outcome", "ms", "cost_usd"]);
+        assert_eq!(e.level, tracing::Level::INFO);
+    }
+    let all = events.all();
+    let ours = all.iter().filter(|e| e.target.starts_with("aspero"));
+    let (info, debug): (Vec<_>, Vec<_>) = ours.partition(|e| e.level <= tracing::Level::INFO);
+    let says = |e: &&aspero_core::testing::Captured, text: &str| {
+        e.name.contains(text) || e.fields.iter().any(|(_, v)| v.contains(text))
+    };
+    for text in ["Lactate", "septic"] {
+        assert!(!info.iter().any(|e| says(e, text)), "{text} at info");
+        assert!(debug.iter().any(|e| says(e, text)), "{text} not at debug");
+    }
 }

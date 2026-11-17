@@ -862,6 +862,21 @@ pub fn assess(claim: &Claim, record: &SourceRecord) -> Assessment {
     if strangers {
         confidence = confidence.min(STRANGERS_CAP);
     }
+    // Nor can a record without a byline confirm the people a citation
+    // names (holdout-5: invented authors of a JAMA piece whose record
+    // lists none; a correction notice's record for its original's).
+    let names_people = claim.authors.iter().any(|a| !authors::is_body(a))
+        || (claim.authors.is_empty()
+            && text.as_ref().is_some_and(|t| {
+                let raw = match &title_span {
+                    Some(span) if !span.is_empty() => &t.raw[..t.spans[span.start].start],
+                    _ => t.raw.as_str(),
+                };
+                authors::names_given(raw)
+            }));
+    if work.authors.is_empty() && names_people && ids != Agreement::Match {
+        confidence = confidence.min(STRANGERS_CAP);
+    }
     // So is a title with words the work's lacks, or one of its own
     // replaced, whatever else agrees.
     if extended || substituted {

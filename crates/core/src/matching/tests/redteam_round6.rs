@@ -794,3 +794,35 @@ fn a_journal_read_with_its_volume_is_one_though_the_title_has_its_word() {
         &fors,
     )]);
 }
+
+#[test]
+fn a_record_without_a_byline_confirms_no_names() {
+    // holdout-5 #75: every author invented, the record listing none.
+    let mut jama = article(
+        "New Surgical Approaches to Parkinson Disease",
+        &[],
+        1999,
+        ("JAMA", "282", "1117-1118"),
+    );
+    jama.work.authors.clear();
+    none_verify(&[(
+        "h5-75",
+        "Ostrowski-Featherstone, L. (1999). New surgical approaches to Parkinson disease. JAMA, \
+         282(12), 1117–1118.",
+        &jama,
+    )]);
+    // Cited without a byline, or by an organisation, it verifies.
+    all_verify(&[
+        (
+            "untitled byline",
+            "New surgical approaches to Parkinson disease. JAMA. 1999;282(12):1117-1118.",
+            &jama,
+        ),
+        (
+            "organisation",
+            "American Medical Association. New surgical approaches to Parkinson disease. JAMA. \
+             1999;282(12):1117-1118.",
+            &jama,
+        ),
+    ]);
+}

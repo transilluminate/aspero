@@ -462,11 +462,14 @@ pub fn assess(claim: &Claim, record: &SourceRecord) -> Assessment {
             || v.starts_with("In:")
     });
     // A journal's article cited in a meeting's proceedings ("In
-    // Proceedings of the 8th International Symposium on …") is another
-    // version, if any, of the paper cited.
+    // Proceedings of the 8th International Symposium on …", BibTeX's
+    // `booktitle`) is another version, if any, of the paper cited.
+    let booktitle = text
+        .as_ref()
+        .is_some_and(|t| publication::bibtex_field(&t.raw, "booktitle").is_some());
     let in_proceedings = |v: &str| {
         let v = v.trim_start_matches(|c: char| !c.is_alphanumeric());
-        (v.starts_with("In ") || v.starts_with("In:")) && publication::proceedings(v)
+        (booktitle || v.starts_with("In ") || v.starts_with("In:")) && publication::proceedings(v)
     };
     let other_meeting = !other_conference
         && !confirmed
@@ -483,8 +486,16 @@ pub fn assess(claim: &Claim, record: &SourceRecord) -> Assessment {
             {
                 claim.container.is_none() && in_proceedings(cited)
             }
+            // A conference paper's container is its meeting's, whatever
+            // its name ("Interaction Design and Children"), when a
+            // meeting's proceedings are cited.
             (Some(cited), Some(actual)) => {
-                publication::meeting_name(actual, work.work_type != Some(WorkType::JournalArticle))
+                ((work.work_type == Some(WorkType::ConferencePaper)
+                    && publication::proceedings(cited))
+                    || publication::meeting_name(
+                        actual,
+                        work.work_type != Some(WorkType::JournalArticle),
+                    ))
                     && publication::proceedings_agree(cited, actual) == Some(false)
             }
             _ => false,
@@ -795,6 +806,20 @@ pub fn assess(claim: &Claim, record: &SourceRecord) -> Assessment {
     // So is a title with words the work's lacks, or one of its own
     // replaced, whatever else agrees.
     if extended || substituted {
+        confidence = confidence.min(EXTENDED_TITLE_CAP);
+    }
+    // And a title only partly the work's, words of the work's missing (not
+    // misspelt: "Ailgnment"): reworded, as another version's title is
+    // ("Preliminary adaptation of cognitive behavioral therapy …" for a
+    // preprint's "Preliminary adaptation process of …"), or another
+    // work's. Plausible, unless the claimed identifier or the place says
+    // which work is cited.
+    let misspelt = match (&claimed_title, &work_title, &text) {
+        (Some(claimed), Some(actual), _) => titles::misspelt_only(&words(claimed), actual, true),
+        (None, Some(actual), Some(text)) => titles::misspelt_only(&text.words, actual, false),
+        _ => true,
+    };
+    if title.agreement == Agreement::Partial && !misspelt && ids != Agreement::Match && !located {
         confidence = confidence.min(EXTENDED_TITLE_CAP);
     }
     // A reply, correction or commentary is not the work it responds to,

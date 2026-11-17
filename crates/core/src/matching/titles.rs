@@ -4,12 +4,17 @@
 use super::text::{STOPWORDS, content_words, dedup, words};
 
 /// A title without a leading status marker publishers add to retracted or
-/// withdrawn works ("RETRACTED: Ileal-lymphoid…", "RETRACTED ARTICLE: …"),
-/// so a citation of the original title still matches. Notices themselves
-/// ("Retraction: …") are left alone.
+/// withdrawn works ("RETRACTED: Ileal-lymphoid…", "RETRACTED ARTICLE: …",
+/// IEEE's "Notice of Retraction: …"), so a citation of the original title
+/// still matches. Notices themselves ("Retraction: …") are left alone.
 pub fn unmarked(title: &str) -> &str {
     let trimmed = title.trim_start();
-    for marker in ["retracted article", "retracted", "withdrawn"] {
+    for marker in [
+        "retracted article",
+        "retracted",
+        "withdrawn",
+        "notice of retraction",
+    ] {
         if let Some(head) = trimmed.get(..marker.len())
             && head.eq_ignore_ascii_case(marker)
         {
@@ -64,6 +69,16 @@ pub(super) fn dice(a: &[String], b: &[String]) -> f64 {
     }
     let shared = a.iter().filter(|w| b.contains(w)).count();
     2.0 * shared as f64 / (a.len() + b.len()) as f64
+}
+
+/// Whether `cited` (a reference's words, or a title cited apart) has
+/// every content word of `title`, but for misspellings ("Ailgnment",
+/// "colour"); with `both`, and no content words of its own either.
+pub(super) fn misspelt_only(cited: &[String], title: &str, both: bool) -> bool {
+    let near = |w: &String, among: &[String]| among.iter().any(|o| super::authors::near(w, o));
+    let title = content_words(unmarked(title));
+    let cited_content = content_words(&cited.join(" "));
+    title.iter().all(|w| near(w, cited)) && (!both || cited_content.iter().all(|w| near(w, &title)))
 }
 
 /// The title before a subtitle separator (":" or a dash), if there is one.

@@ -295,7 +295,9 @@ impl Normalised {
     /// its own among them ("… for Sepsis and Septic Shock in Adults and
     /// Children (Sepsis-3)" for "… Septic Shock (Sepsis-3)"): another
     /// title. Joining words inserted don't count, nor words dropped (a
-    /// title shortened is the same title).
+    /// title shortened is the same title), and the title's own joining
+    /// words may be left out ("Multiple HPV 16 infection with two strains:
+    /// a possible marker" for "Multiple HPV infection as possible marker").
     pub(super) fn inserts_in(&self, title: &str) -> bool {
         /// Words inserted, at most, before the title is taken as not there.
         const GAP: usize = 8;
@@ -313,6 +315,11 @@ impl Normalised {
                     }
                     if *word == title[j] {
                         j += 1;
+                        end = k;
+                    } else if STOPWORDS.contains(&title[j].as_str())
+                        && title.get(j + 1) == Some(word)
+                    {
+                        j += 2;
                         end = k;
                     } else if !STOPWORDS.contains(&word.as_str()) {
                         inserted += 1;

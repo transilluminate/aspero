@@ -54,13 +54,16 @@ where
         if wake.is_none_or(|w| deadline.is_some_and(|d| w >= d)) {
             return Err(error);
         }
+        let (provider, op) = crate::observe::retrying().unzip();
         tracing::info!(
-            target: "aspero::retry",
-            retry = retry + 1,
+            target: "aspero::net",
+            provider = provider.as_ref().map(tracing::field::display),
+            op = op.map(tracing::field::display), attempt = retry + 1,
+            status = %error.kind().as_str(),
             delay_ms = u64::try_from(delay.as_millis()).unwrap_or(u64::MAX),
-            error = %error,
-            "backing off"
+            "retry"
         );
+        tracing::debug!(target: "aspero::net", error = %error, "retry_error");
         tokio::time::sleep(delay).await;
         retry += 1;
     }

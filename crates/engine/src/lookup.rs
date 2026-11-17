@@ -7,6 +7,7 @@ use aspero_core::{
 };
 
 use crate::inflight::Answer;
+use crate::observe::{self, op};
 use crate::{Engine, Entry, Served, add_usage, transport};
 
 /// The outcome of one provider's attempt at one ID.
@@ -101,7 +102,15 @@ impl Engine {
     /// Looks up every ID, falling through providers by priority. Never fails
     /// as a whole: per-ID outcomes are in the report.
     pub async fn lookup(&self, ids: &[WorkId], fields: FieldSet) -> LookupReport {
-        self.lookup_skipping(ids, fields, None).await
+        let input = || {
+            ids.iter()
+                .map(ToString::to_string)
+                .collect::<Vec<_>>()
+                .join(" ")
+        };
+        let work = Box::pin(self.lookup_skipping(ids, fields, None));
+        self.observed(op::LOOKUP, ids.len(), input, work, observe::never_fails)
+            .await
     }
 
     /// As [`lookup`](Self::lookup), without asking `skip` (a provider
@@ -247,9 +256,7 @@ impl Engine {
             };
         }
 
-        if from_cache > 0 {
-            tracing::info!(target: "aspero::cache", provider = %provider, ids = from_cache, "lookups served from cache");
-        }
+        observe::served(&provider, op::LOOKUP, "hit", "none", from_cache);
         // Ask about the rest, unless another caller is already asking.
         let wanted: Vec<(usize, WorkId)> = pending.iter().map(|&i| (i, ids[i].clone())).collect();
         let (mut leads, joined) = self.inflight.claim(&provider, &wanted, fields);
@@ -310,15 +317,21 @@ impl Engine {
             };
             // Stale-on-error: an old answer beats none.
             let affected_ids: Vec<WorkId> = affected.iter().map(|&i| ids[i].clone()).collect();
+            let mut stale_served = 0;
             for (&i, stale) in affected
                 .iter()
                 .zip(self.fallback_lookups(&provider, &affected_ids))
             {
                 answers[i] = Some(match stale.answer() {
-                    Some((outcome, record)) => (attempt(outcome, Served::Stale), record),
+                    Some((outcome, record)) => {
+                        stale_served += 1;
+                        (attempt(outcome, Served::Stale), record)
+                    }
                     None => (attempt(Outcome::Failed(error.clone()), Served::Live), None),
                 });
             }
+            let status = error.kind().as_str();
+            observe::served(&provider, op::LOOKUP, "stale", status, stale_served);
         }
         leads.publish(&answers);
         drop(leads);
@@ -360,9 +373,9 @@ impl Engine {
             let entry = &owned;
             let ask = || entry.provider.lookup(&batch, fields);
             let answer = if batch.len() > free {
-                engine.call_paid(entry, ask).await
+                engine.call_paid(entry, op::LOOKUP, ask).await
             } else {
-                engine.call(entry, ask).await
+                engine.call(entry, op::LOOKUP, ask).await
             };
             answer.map(|resp| {
                 let answered = engine.answered(&entry.provider.id(), &batch, resp.value);
@@ -515,7 +528,7 @@ impl Engine {
             outcome,
             served,
         };
-        fresh
+        let answers: Vec<Answer> = fresh
             .into_iter()
             .zip(any)
             .map(|(fresh, any)| match (fresh.answer(), any) {
@@ -523,7 +536,17 @@ impl Engine {
                 (None, Some(record)) => (attempt(Outcome::Found, Served::Stale), Some(record)),
                 (None, None) => (attempt(Outcome::Failed(Error::Offline), Served::Live), None),
             })
-            .collect()
+            .collect();
+        let count = |served| answers.iter().filter(|(a, _)| a.served == served).count();
+        observe::served(provider, op::LOOKUP, "hit", "none", count(Served::Cache));
+        observe::served(
+            provider,
+            op::LOOKUP,
+            "stale",
+            "offline",
+            count(Served::Stale),
+        );
+        answers
     }
 
     /// For each ID, any cached record, however old.

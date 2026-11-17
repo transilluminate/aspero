@@ -14,6 +14,9 @@ use jiff::Timestamp;
 use tokio::sync::Mutex;
 use tokio::time::Instant;
 
+use crate::detach;
+use crate::observe::{self, Usd};
+
 /// `HttpClient` over `reqwest` (rustls). One per provider, so each gets its
 /// own attempt timeout and connection pool.
 pub struct ReqwestClient {
@@ -78,8 +81,11 @@ fn transport_error(e: reqwest::Error) -> Error {
 /// before it's sent; one whose caller has gone by then isn't sent (see
 /// `detach`).
 ///
-/// Logs each request (at `info`, target `aspero::http`) with the provider
-/// label, status, duration and time spent waiting for a slot.
+/// Emits a `request` event (target `aspero::net`, DESIGN "Diagnostics
+/// events") as each request completes, or is dropped once sent: the
+/// provider label, what it was for and which attempt, its status, its
+/// time and its wait for a slot, and its cost; its URL only at `debug`
+/// (`request_url`).
 pub struct Paced {
     label: String,
     inner: Arc<dyn HttpClient>,
@@ -144,7 +150,7 @@ impl Paced {
                     slot = slot.max(now + wait);
                 }
                 Err(e) => tracing::warn!(
-                    target: "aspero::http",
+                    target: "aspero::net",
                     provider = %self.label, error = %e, "shared pacing failed; pacing this process alone"
                 ),
             }
@@ -169,25 +175,114 @@ impl HttpClient for Paced {
             // this is never sent.
             std::future::pending::<()>().await;
         }
-        let started = Instant::now();
-        let url = loggable_url(&request.url);
-        let result = self.inner.send(request).await;
-        let ms = |since: Instant, until: Instant| {
-            u64::try_from(until.duration_since(since).as_millis()).unwrap_or(u64::MAX)
+        let mut event = RequestEvent {
+            provider: &self.label,
+            started: Instant::now(),
+            waited_ms: observe::ms(queued, Instant::now()),
+            url: tracing::enabled!(target: "aspero::net", tracing::Level::DEBUG)
+                .then(|| loggable_url(&request.url)),
+            done: false,
         };
-        let (waited_ms, took_ms) = (ms(queued, started), ms(started, Instant::now()));
+        let result = self.inner.send(request).await;
         match &result {
-            Ok(resp) => tracing::info!(
-                target: "aspero::http",
-                provider = %self.label, status = resp.status, took_ms, waited_ms, "{url}"
-            ),
-            Err(e) => tracing::warn!(
-                target: "aspero::http",
-                provider = %self.label, error = %e, took_ms, waited_ms, "{url}"
-            ),
+            Ok(resp) => event.emit(&resp.status, cost(resp)),
+            Err(e) => event.emit(&Failed(e), None),
         }
         result
     }
+}
+
+/// A request sent, until its event is emitted: as it completes, or, if
+/// it's dropped first (a deadline passed, or its caller stopped waiting),
+/// as `cancelled`.
+struct RequestEvent<'a> {
+    provider: &'a str,
+    started: Instant,
+    waited_ms: u64,
+    /// For the `debug` companion, only when that's on.
+    url: Option<String>,
+    done: bool,
+}
+
+impl RequestEvent<'_> {
+    fn emit(&mut self, status: &dyn std::fmt::Display, cost: Option<f64>) {
+        self.done = true;
+        let (op, attempt) = observe::request();
+        let ms = observe::ms(self.started, Instant::now());
+        tracing::info!(
+            target: "aspero::net",
+            provider = %self.provider, op = %op, status = %status, ms, waited_ms = self.waited_ms,
+            attempt, cache = %"miss", cost_usd = cost.map(|c| tracing::field::display(Usd(c))),
+            detached = detach::detached().then_some(true), "request"
+        );
+        if let Some(url) = &self.url {
+            tracing::debug!(
+                target: "aspero::net",
+                provider = %self.provider, op = %op, attempt, url = %url, "request_url"
+            );
+        }
+    }
+}
+
+impl Drop for RequestEvent<'_> {
+    fn drop(&mut self) {
+        if !self.done {
+            self.emit(&"cancelled", None);
+        }
+    }
+}
+
+/// A response's cost, where it says one (OpenAlex's
+/// `x-ratelimit-cost-usd`).
+fn cost(resp: &HttpResponse) -> Option<f64> {
+    resp.header("x-ratelimit-cost-usd")?.trim().parse().ok()
+}
+
+/// A failed request's `status`, worked out only when it's logged.
+struct Failed<'a>(&'a Error);
+
+impl std::fmt::Display for Failed<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(failure(self.0))
+    }
+}
+
+/// A failed request's `status`: what went wrong, by kind (`timeout`,
+/// `dns`, `refused`, `reset`, `connect`, `body`, `network`), or the
+/// error's kind when it isn't the network's.
+fn failure(e: &Error) -> &'static str {
+    let Error::Network(source) = e else {
+        return e.kind().as_str();
+    };
+    let mut cause: Option<&(dyn std::error::Error + 'static)> = Some(source.as_ref());
+    let mut connect = false;
+    while let Some(err) = cause {
+        if let Some(r) = err.downcast_ref::<reqwest::Error>() {
+            if r.is_timeout() {
+                return "timeout";
+            }
+            connect |= r.is_connect();
+            if r.is_body() || r.is_decode() {
+                return "body";
+            }
+        }
+        if let Some(io) = err.downcast_ref::<std::io::Error>() {
+            match io.kind() {
+                std::io::ErrorKind::ConnectionRefused => return "refused",
+                std::io::ErrorKind::ConnectionReset | std::io::ErrorKind::ConnectionAborted => {
+                    return "reset";
+                }
+                std::io::ErrorKind::TimedOut => return "timeout",
+                _ => {}
+            }
+        }
+        // hyper-util's resolver failure says so only in words.
+        if err.to_string().starts_with("dns error") {
+            return "dns";
+        }
+        cause = err.source();
+    }
+    if connect { "connect" } else { "network" }
 }
 
 /// The tape's file: recorded and replayed (a developer tool, for benchmark
@@ -334,11 +429,20 @@ impl HttpClient for TapeClient {
         let url = loggable_url(key.url());
         match self.tape.get(&key) {
             Ok(Some(recorded)) => {
+                let replayed = replayed(recorded);
+                let (op, attempt) = observe::request();
                 tracing::info!(
-                    target: "aspero::http",
-                    provider = %self.label, status = recorded.status, "replayed {url}"
+                    target: "aspero::net",
+                    provider = %self.label, op = %op, status = replayed.status, ms = 0u64,
+                    waited_ms = 0u64, attempt, cache = %"replayed",
+                    cost_usd = cost(&replayed).map(|c| tracing::field::display(Usd(c))),
+                    "request"
                 );
-                return Ok(replayed(recorded));
+                tracing::debug!(
+                    target: "aspero::net",
+                    provider = %self.label, op = %op, attempt, url = %url, "request_url"
+                );
+                return Ok(replayed);
             }
             Ok(None) => {}
             Err(e) => tracing::warn!(

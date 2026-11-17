@@ -359,7 +359,7 @@ impl Engine {
     /// Asks one provider its budget, which [`call`](Self::call) remembers.
     pub(crate) async fn refresh_budget(&self, entry: &Entry) {
         let asked = self
-            .call(entry, || async {
+            .call(entry, crate::observe::op::BUDGET, || async {
                 let usage = entry.provider.budget().await?;
                 Ok(Response::with_usage((), usage))
             })
@@ -367,8 +367,9 @@ impl Engine {
         if let Err(e) = asked {
             tracing::warn!(
                 target: "aspero::budget",
-                provider = %entry.provider.id(), error = %e, "couldn't ask the budget"
+                provider = %entry.provider.id(), status = %e.kind().as_str(), "couldn't ask the budget"
             );
+            tracing::debug!(target: "aspero::budget", error = %e, "budget_detail");
         }
     }
 }

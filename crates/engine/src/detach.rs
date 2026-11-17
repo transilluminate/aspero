@@ -74,6 +74,14 @@ pub(crate) fn may_send() -> bool {
     .unwrap_or(true)
 }
 
+/// Whether the request being made is of a detached call whose caller has
+/// stopped waiting: finishing in the background (its `request` event says
+/// `detached=true`).
+pub(crate) fn detached() -> bool {
+    GATE.try_with(|gate| lock(&gate.state).abandoned)
+        .unwrap_or(false)
+}
+
 /// Whether `caps` say a provider charges: it can say its budget, or some
 /// of its calls cost (OpenAlex, with a key or without).
 fn charges(caps: &Capabilities) -> bool {
@@ -218,7 +226,7 @@ impl Engine {
                 drop(finished);
             })
         };
-        let task = runtime.spawn(task);
+        let task = runtime.spawn(crate::observe::carried(task));
         lock(&gate.state).abort = Some(task.abort_handle());
         Waiting {
             gate,
@@ -248,7 +256,7 @@ impl Engine {
             .is_err()
         {
             tracing::warn!(
-                target: "aspero::http",
+                target: "aspero::net",
                 running = *running.borrow(),
                 "paid calls still finishing after their callers stopped waiting; exiting cancels them"
             );

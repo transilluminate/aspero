@@ -108,9 +108,10 @@ pub struct Global {
     #[arg(long, global = true)]
     pub full: bool,
 
-    /// Log each provider request, cache hit and retry to stderr, timed from
-    /// start, so concurrency and pacing are visible. `-vv` adds the HTTP
-    /// stack's own debug output.
+    /// Log each provider request, cache hit, retry and engine call to
+    /// stderr, timed from start, so concurrency and pacing are visible.
+    /// `-vv` adds each request's URL, what each call was asked, and the
+    /// HTTP stack's own debug output.
     #[arg(short, long, global = true, action = clap::ArgAction::Count, hide_short_help = true)]
     pub verbose: u8,
 

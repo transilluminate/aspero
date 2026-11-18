@@ -1482,6 +1482,9 @@ async fn each_tool_call_is_logged_with_the_keys_name_and_no_query() {
         .call("history_search", json!({"q": "septic shock"}))
         .await;
     agent.call("history_fail", json!({})).await;
+    // A name no tool has is the client's text: `unknown` at info.
+    let unknown = json!({"name": "find Biomarkers on sepsis", "arguments": {}});
+    agent.rpc("tools/call", unknown).await;
     server.stop().await;
 
     let logged: Vec<_> = events
@@ -1505,6 +1508,7 @@ async fn each_tool_call_is_logged_with_the_keys_name_and_no_query() {
             ("search", "ok", "0.250000"),
             ("history_search", "ok", "0.000000"),
             ("history_fail", "refused", "0.000000"),
+            ("unknown", "unknown_tool", "0.000000"),
         ]
     );
     for e in &logged {
@@ -1517,7 +1521,7 @@ async fn each_tool_call_is_logged_with_the_keys_name_and_no_query() {
     let says = |e: &&aspero_core::testing::Captured, text: &str| {
         e.name.contains(text) || e.fields.iter().any(|(_, v)| v.contains(text))
     };
-    for text in ["Lactate", "septic"] {
+    for text in ["Lactate", "septic", "Biomarkers"] {
         assert!(!info.iter().any(|e| says(e, text)), "{text} at info");
         assert!(debug.iter().any(|e| says(e, text)), "{text} not at debug");
     }

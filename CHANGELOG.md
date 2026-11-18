@@ -14,7 +14,8 @@ Added:
   after its caller left), a `request` per answer served from the cache
   (`cache=hit` or `stale`), a `call` per engine call (op, items,
   patience, providers asked, ms, outcome or `cancelled`), a `tool` per
-  MCP tool call, engine or host (tool, key name, outcome, ms, cost), and
+  MCP tool call, engine or host (tool, or `unknown` for a name no tool
+  has, key name, outcome, ms, cost), and
   `retry`. Info-level events hold counts, codes and times only; what was
   asked (queries, titles, identifiers, URLs) is only in `debug`
   companions (`request_url`, `call_input`, `tool_input`).

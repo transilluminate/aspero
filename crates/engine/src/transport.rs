@@ -149,10 +149,13 @@ impl Paced {
                     let wait = Duration::try_from(at.duration_since(wall)).unwrap_or_default();
                     slot = slot.max(now + wait);
                 }
-                Err(e) => tracing::warn!(
-                    target: "aspero::net",
-                    provider = %self.label, error = %e, "shared pacing failed; pacing this process alone"
-                ),
+                Err(e) => {
+                    tracing::warn!(
+                        target: "aspero::net",
+                        provider = %self.label, "shared pacing failed; pacing this process alone"
+                    );
+                    tracing::debug!(target: "aspero::net", provider = %self.label, error = %e, "pacing_detail");
+                }
             }
         }
         *next = Some(slot + self.min_interval);

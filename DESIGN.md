@@ -589,7 +589,9 @@ cache read and provider: the same fields with `status=none` for
 `cache=hit`, or, for `cache=stale` (served because the provider failed),
 the failure's kind or `offline`; `ms`, `waited_ms` and `attempt` 0, no
 `cost_usd`, and `items`, the answers served (IDs, pages). Lookups of a
-work's references from the cache are `op=references`.
+work's references from the cache are `op=references`. A caller that
+joins another's lookup already in flight shares its answer without a
+`request` of its own, and doesn't count its provider as asked.
 
 **`call`**: an engine call as it completes, or is dropped (target
 `aspero::engine`, category `engine`).
@@ -597,7 +599,9 @@ work's references from the cache are `op=references`.
 - `op`: `lookup` (identifiers or inputs), `resolve`, `verify`, `search`,
   `identify`, `references`, `analyse`, `check`. Calls made within one
   (verify's lookups, check's verifies) are its parts, not counted again;
-  each claim of a `verify_batch` is a call.
+  each claim of a `verify_batch` is a call, and a batch of more than one
+  is first a `lookup` of their identifiers, together (so N + 1 calls), its
+  claims' own lookups then `providers=none`.
 - `items`: the inputs (identifiers, claims, seeds; 1 for a query, claim,
   page or work).
 - `patience`: `batch`, `interactive` (a deadline or retries capped) or
@@ -610,11 +614,14 @@ work's references from the cache are `op=references`.
 (target `aspero::mcp`, category `mcp`): `tool`, `key` (the key's *name*,
 as `Caller.key_name` has it; absent over stdio), `outcome` (`ok` or the
 error's kind: `refused`, `timeout`, `unknown_tool`, …), `ms`, `cost_usd`.
+A name no tool has is the client's text: `tool=unknown`, the name only in
+`tool_input`.
 
 Also at info: `retry` (target `aspero::net`: `provider`, `op`, `attempt`,
 the one that failed, `status`, its kind, `delay_ms`), and warnings (a
 record that doesn't decode, a budget unread, an analysis step failed,
-paced alone), all with kinds, never text.
+paced alone, a store or ledger unwritten), all with kinds, never text:
+an error's text is in a `*_detail` debug companion.
 
 **Privacy.** Info and above hold counts, codes, kinds and times, never
 what was asked: no query text, titles, identifiers or URLs. Those are
@@ -635,6 +642,9 @@ span bookkeeping can panic with several loggers. Ours logs events at
 debug `%{private}s`, so the system redacts them outside a debug session
 even when debug is on, and info and above `%{public}s`; through a C shim
 (`oslog.c`), as `os_log`'s format, privacy included, must be a literal.
+The unified log bounds a message's length, so a long debug companion (a
+large `check`'s `call_input`) may be cut short there; the CLI's stderr
+has it whole.
 Levels as Apple's `Logger`: warn and error as errors, info as notices
 (kept in the log store), debug as debug. Categories by the target's area,
 the network's per provider (`net.openalex`, `net.crossref`, `net.doi`,

@@ -339,7 +339,8 @@ impl Shared {
             .copied()
             .unwrap_or(0.0);
         let recorded = self.ledger.spent(key_id, day).unwrap_or_else(|e| {
-            tracing::warn!(target: "aspero::mcp", key = key_id, error = %e, "could not read a key's spend");
+            tracing::warn!(target: "aspero::mcp", key = key_id, "could not read a key's spend");
+            tracing::debug!(target: "aspero::mcp", key = key_id, error = %e, "ledger_detail");
             0.0
         });
         recorded + owed
@@ -355,7 +356,8 @@ impl Shared {
             match self.ledger.add(key, day, *usd) {
                 Ok(()) => false,
                 Err(e) => {
-                    tracing::warn!(target: "aspero::mcp", key = key_id, error = %e, "could not record a key's spend; kept to try again");
+                    tracing::warn!(target: "aspero::mcp", key = key_id, "could not record a key's spend; kept to try again");
+                    tracing::debug!(target: "aspero::mcp", key = key_id, error = %e, "ledger_detail");
                     true
                 }
             }
@@ -689,7 +691,7 @@ impl HttpServer {
                     }
                 });
             if let Err(e) = spawned {
-                tracing::warn!(target: "aspero::mcp", error = %e, "no activity thread");
+                tracing::warn!(target: "aspero::mcp", status = %e.kind(), "no activity thread");
             }
             tx
         });
@@ -752,11 +754,15 @@ impl HttpServer {
     pub fn set_keys(&self, keys: Vec<Key>) {
         let credentials: Vec<Arc<Credential>> = keys
             .into_iter()
-            .filter_map(|k| match Credential::new(k) {
-                Ok(c) => Some(Arc::new(c)),
-                Err(e) => {
-                    tracing::warn!(target: "aspero::mcp", "{e}; key ignored");
-                    None
+            .filter_map(|k| {
+                let id = k.id.clone();
+                match Credential::new(k) {
+                    Ok(c) => Some(Arc::new(c)),
+                    Err(e) => {
+                        tracing::warn!(target: "aspero::mcp", key = %id, "key ignored: its hash or budget is invalid");
+                        tracing::debug!(target: "aspero::mcp", key = %id, error = %e, "key_detail");
+                        None
+                    }
                 }
             })
             .collect();
@@ -948,7 +954,7 @@ async fn accept(listener: TcpListener, state: Arc<State>, cancel: CancellationTo
                 }
                 Err(e) => {
                     // Out of file descriptors, say: wait, then go on.
-                    tracing::warn!(target: "aspero::mcp", error = %e, "accept failed");
+                    tracing::warn!(target: "aspero::mcp", status = %e.kind(), "accept failed");
                     tokio::time::sleep(Duration::from_millis(50)).await;
                 }
             }

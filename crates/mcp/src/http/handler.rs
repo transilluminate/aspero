@@ -284,7 +284,11 @@ impl ServerHandler for Handler {
                 ToolErrorKind::NoSession,
                 "start a session (initialize) first: budgets are per session",
             );
-            tool_event(&name, Some(&key.key.name), e.kind.as_str(), started, 0.0);
+            let known = self.shared.tools.spec(&name).is_some()
+                || self.shared.catalog().iter().any(|l| l.tool.name == name);
+            tool_input(&name, &request.arguments.unwrap_or_default());
+            let tool = known.then_some(name.as_str());
+            tool_event(tool, Some(&key.key.name), e.kind.as_str(), started, 0.0);
             return Ok(tool_error(&e).into());
         };
         let arguments = request.arguments.unwrap_or_default();
@@ -323,7 +327,8 @@ impl ServerHandler for Handler {
             Some(a) => (a.error.map_or("ok", ToolErrorKind::as_str), a.cost_usd),
             None => (ToolErrorKind::UnknownTool.as_str(), 0.0),
         };
-        tool_event(&name, Some(&key.key.name), outcome, started, cost);
+        let tool = activity.is_some().then_some(name.as_str());
+        tool_event(tool, Some(&key.key.name), outcome, started, cost);
         if let Some(activity) = activity {
             self.shared.report(activity);
         }

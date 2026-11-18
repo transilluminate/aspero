@@ -670,11 +670,13 @@ impl Engine {
     /// The pages of a `cites:` filter the search cache holds fresh (or, offline, at all), from the first.
     fn cached_pages(&self, provider: &ProviderId, filter: &str) -> Vec<Page> {
         let mut pages = Vec::new();
+        let mut stale = 0;
         let mut cursor = None;
         while pages.len() < COUPLING_PAGES {
             let query = citing_query(filter, cursor.take());
             match self.cached_search(provider, &query) {
                 Some((page, fresh)) if fresh || self.options.offline => {
+                    stale += usize::from(!fresh);
                     cursor.clone_from(&page.next);
                     pages.push(page);
                     if cursor.is_none() {
@@ -684,7 +686,8 @@ impl Engine {
                 _ => break,
             }
         }
-        observe::served(provider, op::CITING, "hit", "none", pages.len());
+        observe::served(provider, op::CITING, "hit", "none", pages.len() - stale);
+        observe::served(provider, op::CITING, "stale", "offline", stale);
         pages
     }
 

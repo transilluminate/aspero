@@ -85,11 +85,12 @@ pub(crate) fn engine_result(
 }
 
 /// A tool call's `tool` event (target `aspero::mcp`, DESIGN "Diagnostics
-/// events") as it completes: the tool, the key's name (HTTP; none over
-/// stdio), `ok` or the error's kind, its time since `started` and what it
-/// cost.
+/// events") as it completes: the tool (`None`, logged `unknown`, for a
+/// name no tool has: the client's text, kept to [`tool_input`]), the key's
+/// name (HTTP; none over stdio), `ok` or the error's kind, its time since
+/// `started` and what it cost.
 pub(crate) fn tool_event(
-    tool: &str,
+    tool: Option<&str>,
     key: Option<&str>,
     outcome: &str,
     started: tokio::time::Instant,
@@ -97,7 +98,8 @@ pub(crate) fn tool_event(
 ) {
     tracing::info!(
         target: "aspero::mcp",
-        tool = %tool, key = key.map(tracing::field::display), outcome = %outcome,
+        tool = %tool.unwrap_or("unknown"), key = key.map(tracing::field::display),
+        outcome = %outcome,
         ms = u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX),
         cost_usd = %format_args!("{cost_usd:.6}"), "tool"
     );
@@ -170,7 +172,14 @@ impl ServerHandler for Handler {
             Ok(output) => ("ok", output.cost_usd),
             Err(e) => (e.kind.as_str(), e.cost_usd),
         };
-        tool_event(&request.name, None, outcome, started, cost);
+        let known = self.tools.spec(&request.name).is_some();
+        tool_event(
+            known.then_some(&*request.name),
+            None,
+            outcome,
+            started,
+            cost,
+        );
         Ok(engine_result(&self.session, result)?.into())
     }
 }

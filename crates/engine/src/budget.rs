@@ -243,11 +243,14 @@ impl Budgets {
         if let Some(days) = &self.prepaid_days {
             match days.see_prepaid(provider.as_str(), day, balance, bought, now) {
                 Ok(seen) => return seen,
-                Err(e) => tracing::warn!(
-                    target: "aspero::budget",
-                    provider = %provider, error = %e,
-                    "couldn't share the day's prepaid balance; keeping it in this process"
-                ),
+                Err(e) => {
+                    tracing::warn!(
+                        target: "aspero::budget",
+                        provider = %provider,
+                        "couldn't share the day's prepaid balance; keeping it in this process"
+                    );
+                    tracing::debug!(target: "aspero::budget", provider = %provider, error = %e, "prepaid_detail");
+                }
             }
         }
         let mut own = lock(&self.own_days);
@@ -310,11 +313,14 @@ impl Budgets {
             };
             match shared {
                 Ok(total) => return total,
-                Err(e) => tracing::warn!(
-                    target: "aspero::budget",
-                    provider = %provider, error = %e,
-                    "couldn't share the credit spent here; keeping it in this process"
-                ),
+                Err(e) => {
+                    tracing::warn!(
+                        target: "aspero::budget",
+                        provider = %provider,
+                        "couldn't share the credit spent here; keeping it in this process"
+                    );
+                    tracing::debug!(target: "aspero::budget", provider = %provider, error = %e, "credit_detail");
+                }
             }
         }
         own

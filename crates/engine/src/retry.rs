@@ -30,14 +30,24 @@ where
     let deadline = Instant::now().checked_add(policy.deadline);
     let mut retry = 0;
     loop {
-        let attempt = match deadline {
-            Some(deadline) => tokio::time::timeout_at(deadline, op()).await,
-            None => Ok(op().await),
-        };
-        let error = match attempt {
-            Ok(Ok(value)) => return Ok(value),
-            Ok(Err(e)) => e,
-            Err(_elapsed) => return Err(Error::Timeout),
+        let error = match deadline {
+            Some(deadline) => {
+                // Boxed, so an attempt the deadline cuts off is dropped
+                // here, its requests saying why.
+                let mut attempt = Box::pin(op());
+                match tokio::time::timeout_at(deadline, &mut attempt).await {
+                    Ok(Ok(value)) => return Ok(value),
+                    Ok(Err(e)) => e,
+                    Err(_elapsed) => {
+                        crate::observe::drop_for(crate::observe::Why::Deadline, attempt);
+                        return Err(Error::Timeout);
+                    }
+                }
+            }
+            None => match op().await {
+                Ok(value) => return Ok(value),
+                Err(e) => e,
+            },
         };
         if !error.is_retryable() || retry >= policy.max_retries {
             return Err(error);

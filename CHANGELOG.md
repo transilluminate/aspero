@@ -29,6 +29,15 @@ Changed (breaking):
   - The cache is unchanged: it stores a work's notices under their old
     names, so caches read the same in versions before and after.
 
+Added:
+
+- Diagnostics: a `request` with `status=cancelled` says why, last (#156;
+  DESIGN "Diagnostics events"): `why=deadline` (its attempt's deadline
+  passed), `why=done` (its call no longer needed it: a verify found its
+  verdict while other searches were still out) or `why=caller` (its
+  caller stopped waiting). An embedder tuning deadlines can now tell an
+  early verdict's cancels from a deadline's.
+
 Changed:
 
 - MCP: the tool list is about 38% smaller (#157): from ~46,000 to

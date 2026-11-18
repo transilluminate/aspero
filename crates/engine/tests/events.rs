@@ -339,3 +339,112 @@ mod openalex {
         assert_eq!(ids(&inputs), [searched, cached, looked]);
     }
 }
+
+/// A request dropped in flight is `status=cancelled` and says why, last
+/// (#156): its deadline passed, its call was done with it (a verify found
+/// its verdict), or its caller stopped waiting.
+#[cfg(feature = "crossref")]
+mod cancelled {
+    use aspero_core::{Error, HttpClient, HttpRequest, HttpResponse, ResiliencePolicy};
+    use aspero_crossref::{Crossref, CrossrefConfig};
+    use aspero_engine::Engine;
+    use aspero_engine::transport::Paced;
+    use async_trait::async_trait;
+
+    use super::*;
+
+    /// Never answers.
+    struct Hang;
+
+    #[async_trait]
+    impl HttpClient for Hang {
+        async fn send(&self, _: HttpRequest) -> Result<HttpResponse, Error> {
+            std::future::pending().await
+        }
+    }
+
+    /// Crossref (free, so its calls run in place), never answering, after
+    /// `first`.
+    fn engine(first: Option<Arc<Scripted>>, deadline: Duration) -> Engine {
+        let paced = Arc::new(Paced::new("crossref", Arc::new(Hang), Duration::ZERO));
+        let crossref = Arc::new(Crossref::new(CrossrefConfig::default(), paced));
+        let mut policy = ResiliencePolicy::default();
+        policy.deadline = deadline;
+        policy.max_retries = 0;
+        let mut builder = Engine::builder();
+        if let Some(first) = first {
+            builder = builder.provider(first, ResiliencePolicy::default(), 0);
+        }
+        builder.provider(crossref, policy, 1).build()
+    }
+
+    /// The cancelled requests' `why`, checking it's said last.
+    fn whys(events: &Events) -> Vec<String> {
+        events
+            .named("aspero::net", "request")
+            .iter()
+            .filter(|e| e.field("status") == Some("cancelled"))
+            .map(|e| {
+                assert_eq!(e.names().last(), Some(&"why"), "{:?}", e.names());
+                e.field("why").unwrap().to_owned()
+            })
+            .collect()
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_request_past_its_deadline_says_deadline() {
+        let (events, _guard) = Events::install();
+        let engine = engine(None, Duration::from_secs(2));
+        let query = aspero_core::SearchQuery::new("lactate");
+        let result = engine.search(Some("crossref"), &query).await;
+        assert!(result.is_err());
+        assert_eq!(whys(&events), ["deadline"]);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_request_its_caller_stops_waiting_for_says_caller() {
+        let (events, _guard) = Events::install();
+        let engine = engine(None, Duration::from_secs(60));
+        let query = aspero_core::SearchQuery::new("lactate");
+        let stopped = tokio::time::timeout(
+            Duration::from_secs(1),
+            engine.search(Some("crossref"), &query),
+        )
+        .await;
+        assert!(stopped.is_err());
+        assert_eq!(whys(&events), ["caller"]);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_request_a_verdict_makes_needless_says_done() {
+        let (events, _guard) = Events::install();
+        // The DOI's lookup verifies the claim, while Crossref's citation
+        // matcher is still out.
+        let lookup = Arc::new(
+            Scripted::new("openalex")
+                .with(vec![common::deep_learning()])
+                .slow_lookups(Duration::from_millis(100)),
+        );
+        let engine = engine(Some(lookup), Duration::from_secs(60));
+        let claim = Claim::from_text(
+            "LeCun Y, Bengio Y, Hinton G. Deep learning. Nature. 2015;521:436-444. \
+             doi:10.1038/nature14539",
+        );
+        let v = engine.verify(&claim, 5).await;
+        assert_eq!(v.verdict.as_str(), "verified", "{v:?}");
+        assert!(!whys(&events).is_empty());
+        assert!(
+            whys(&events).iter().all(|w| w == "done"),
+            "{:?}",
+            whys(&events)
+        );
+        // A request that completes says no why.
+        assert!(
+            events
+                .named("aspero::net", "request")
+                .iter()
+                .filter(|e| e.field("status") != Some("cancelled"))
+                .all(|e| e.field("why").is_none())
+        );
+    }
+}

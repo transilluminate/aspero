@@ -602,8 +602,7 @@ unified-log category `net.<provider>`).
   (outside an engine call: a key check).
 - `status`: the HTTP code; or why there's none: `timeout`, `dns`,
   `refused`, `reset`, `connect`, `body`, `network`, `cancelled` (dropped
-  once sent: a deadline passed, or its caller stopped waiting), or the
-  error's kind (`not_cached`, …).
+  once sent; `why` says why), or the error's kind (`not_cached`, …).
 - `ms` (sending to answer), `waited_ms` (for a pacing slot or an
   in-flight limit), `attempt` (from 1 within its retries; 0 outside an
   engine call).
@@ -618,6 +617,11 @@ unified-log category `net.<provider>`).
   made for a call's part (a verify's lookups, a check's verifies) is
   the call's. One shared by callers who joined it in flight is the
   sender's.
+- `why`, only with `status=cancelled` (#156): `deadline` (its attempt's
+  deadline passed), `done` (its call no longer needed it: a verify found
+  its verdict with other searches still out), or `caller` (its caller
+  stopped waiting: a token cancelled, a client gone, a caller's own
+  timeout).
 
 Answers from the answer cache never reach the transport, so they are a
 **`request`** too (target `aspero::cache`, category `cache`), one per

@@ -16,7 +16,9 @@ use super::Shared;
 use super::auth::Credential;
 use super::host::{Activity, HostError};
 use crate::scope::SOURCES;
-use crate::server::{INSTRUCTIONS, engine_result, error_text, server_info, tool_event, tool_input};
+use crate::server::{
+    INSTRUCTIONS, engine_result, error_text, server_info, tool_event, tool_input, with_call_id,
+};
 use crate::session::usd;
 use crate::{Caller, Session, ToolError, ToolErrorKind, tools};
 
@@ -289,14 +291,24 @@ impl ServerHandler for Handler {
                 || self.shared.catalog().iter().any(|l| l.tool.name == name);
             tool_input(&name, &request.arguments.unwrap_or_default());
             let tool = known.then_some(name.as_str());
-            tool_event(tool, Some(&key.key.name), e.kind.as_str(), started, 0.0);
+            tool_event(
+                tool,
+                Some(&key.key.name),
+                e.kind.as_str(),
+                started,
+                0.0,
+                None,
+            );
             return Ok(tool_error(&e).into());
         };
         let arguments = request.arguments.unwrap_or_default();
         tool_input(&name, &arguments);
         let engine = self.shared.engine_tools && self.shared.tools.spec(&name).is_some();
+        let mut call = None;
         let (result, activity) = if engine {
-            let (result, activity) = self.engine_call(session, &key, &name, arguments).await;
+            let ((result, activity), id) =
+                with_call_id(self.engine_call(session, &key, &name, arguments)).await;
+            call = id;
             (result, Some(activity))
         } else {
             // The host's tools as they are now, kept for the call.
@@ -329,7 +341,7 @@ impl ServerHandler for Handler {
             None => (ToolErrorKind::UnknownTool.as_str(), 0.0),
         };
         let tool = activity.is_some().then_some(name.as_str());
-        tool_event(tool, Some(&key.key.name), outcome, started, cost);
+        tool_event(tool, Some(&key.key.name), outcome, started, cost, call);
         if let Some(activity) = activity {
             self.shared.report(activity);
         }

@@ -133,8 +133,9 @@ Front ends:
   the unified log; `oslog.c`, its shim).
 
 Diagnostics events (DESIGN "Diagnostics events"): `request` in
-`crates/engine/src/transport.rs` (`Paced`, `TapeClient`); `call`, cache
-hits and each request's op and attempt in `crates/engine/src/observe.rs`;
+`crates/engine/src/transport.rs` (`Paced`, `TapeClient`); `call`, call
+ids (`CallId`), cache hits and each request's op and attempt in
+`crates/engine/src/observe.rs`;
 `tool` in `crates/mcp/src/server.rs` (`tool_event`).
 - Bibliographies `crates/bib/src/`: `lib.rs` (BibTeX), `ris.rs`,
   `csl.rs`, `docx.rs`, `write.rs`, `cite.rs` (styles).
@@ -607,16 +608,22 @@ unified-log category `net.<provider>`).
   replay); absent otherwise.
 - `detached=true`, only for a paid request finishing after its caller
   stopped waiting (#139).
+- `call`: the id of the engine call it was made for (below; #152),
+  including a detached one's; absent outside an engine call. A request
+  made for a call's part (a verify's lookups, a check's verifies) is
+  the call's. One shared by callers who joined it in flight is the
+  sender's.
 
 Answers from the answer cache never reach the transport, so they are a
 **`request`** too (target `aspero::cache`, category `cache`), one per
 cache read and provider: the same fields with `status=none` for
 `cache=hit`, or, for `cache=stale` (served because the provider failed),
 the failure's kind or `offline`; `ms`, `waited_ms` and `attempt` 0, no
-`cost_usd`, and `items`, the answers served (IDs, pages). Lookups of a
-work's references from the cache are `op=references`. A caller that
-joins another's lookup already in flight shares its answer without a
-`request` of its own, and doesn't count its provider as asked.
+`cost_usd`, `items`, the answers served (IDs, pages), then `call`.
+Lookups of a work's references from the cache are `op=references`. A
+caller that joins another's lookup already in flight shares its answer
+without a `request` of its own, and doesn't count its provider as
+asked.
 
 **`call`**: an engine call as it completes, or is dropped (target
 `aspero::engine`, category `engine`).
@@ -634,29 +641,41 @@ joins another's lookup already in flight shares its answer without a
 - `providers`: those asked live, comma-separated, or `none` (all from the
   cache); `ms`; `outcome`: `ok`, `cancelled` (dropped first), or the
   error's kind.
+- `call`: its id, a number unique within the process (one counter for
+  every engine call). An embedder can choose it beforehand (FFI
+  `CallToken.id()`, Rust `CallId`), to log beside the call; calls made
+  without one (the CLI's, the engine's own) take the next.
+- `parent`, only for a claim's call (or the prefetch) in a `verify_batch`
+  of more than one claim: the batch's id. A batch has no event of its
+  own: its id is the caller's (the token's; for MCP, the `tool` event's
+  `call`), else a new one, seen only as its parts' `parent`. A batch of
+  one is its claim's call. A check's batch is its part, so its verifies
+  have neither event nor id: their requests carry the check's.
 
 **`tool`**: an MCP tool call, engine or host tool, as the server sees it
 (target `aspero::mcp`, category `mcp`): `tool`, `key` (the key's *name*,
 as `Caller.key_name` has it; absent over stdio), `outcome` (`ok` or the
-error's kind: `refused`, `timeout`, `unknown_tool`, …), `ms`, `cost_usd`.
-A name no tool has is the client's text: `tool=unknown`, the name only in
-`tool_input`.
+error's kind: `refused`, `timeout`, `unknown_tool`, …), `ms`, `cost_usd`,
+`call`: the id of the engine call the tool made, absent where it made
+none (host tools, a refused or invalid call). A name no tool has is the
+client's text: `tool=unknown`, the name only in `tool_input`.
 
 Also at info: `retry` (target `aspero::net`: `provider`, `op`, `attempt`,
-the one that failed, `status`, its kind, `delay_ms`), and warnings (a
-record that doesn't decode, a budget unread, an analysis step failed,
-paced alone, a store or ledger unwritten), all with kinds, never text:
-an error's text is in a `*_detail` debug companion.
+the one that failed, `status`, its kind, `delay_ms`, `call`), and
+warnings (a record that doesn't decode, a budget unread, an analysis
+step failed, paced alone, a store or ledger unwritten), all with kinds,
+never text: an error's text is in a `*_detail` debug companion.
 
 **Privacy.** Info and above hold counts, codes, kinds and times, never
 what was asked: no query text, titles, identifiers or URLs. Those are
 only in `debug` companions with fields of their own: `request_url`
 (`provider`, `op`, `attempt`, `url`: path and query, contact and key
-parameters redacted), `call_input` (`op`, `input`), `tool_input` (`tool`,
-`arguments`), and `*_error` and `*_detail` events (an error's text). The
-HTTP tape's warnings name requests: it's a developer tool, read from the
-environment by the CLI only. Tests assert no claim or query reaches an
-info event (`crates/engine/tests/events.rs`, `crates/mcp/tests/http.rs`).
+parameters redacted, `call`), `call_input` (`op`, `input`, `call`),
+`tool_input` (`tool`, `arguments`), and `*_error` and `*_detail` events
+(an error's text). The HTTP tape's warnings name requests: it's a
+developer tool, read from the environment by the CLI only. Tests assert
+no claim or query reaches an info event
+(`crates/engine/tests/events.rs`, `crates/mcp/tests/http.rs`).
 
 **Cost when off.** Fields are computed inside the macros (a URL only when
 debug is on), so with nobody listening an event costs a callsite check.

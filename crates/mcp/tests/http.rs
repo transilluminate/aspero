@@ -1636,7 +1636,9 @@ fn global_events() -> Events {
 }
 
 /// A `tool` event per call (DESIGN "Diagnostics events"), engine tools
-/// and the host's, by the key's name; what was asked only at debug.
+/// and the host's, by the key's name; what was asked only at debug. An
+/// engine tool's says the id of the engine call it made; the host's make
+/// none.
 #[tokio::test(flavor = "multi_thread")]
 async fn each_tool_call_is_logged_with_the_keys_name_and_no_query() {
     let events = global_events();
@@ -1684,10 +1686,23 @@ async fn each_tool_call_is_logged_with_the_keys_name_and_no_query() {
             ("unknown", "unknown_tool", "0.000000"),
         ]
     );
+    let fields = ["tool", "key", "outcome", "ms", "cost_usd"];
+    assert_eq!(logged[0].names(), [&fields[..], &["call"]].concat());
+    for e in &logged[1..] {
+        assert_eq!(e.names(), fields);
+    }
     for e in &logged {
-        assert_eq!(e.names(), ["tool", "key", "outcome", "ms", "cost_usd"]);
         assert_eq!(e.level, tracing::Level::INFO);
     }
+    // The search tool's engine call, by its id.
+    let call = logged[0].field("call").unwrap();
+    let made: Vec<_> = events
+        .named("aspero::engine", "call")
+        .into_iter()
+        .filter(|e| e.field("call") == Some(call))
+        .collect();
+    assert_eq!(made.len(), 1, "{made:?}");
+    assert_eq!(made[0].field("op"), Some("search"));
     let all = events.all();
     let ours = all.iter().filter(|e| e.target.starts_with("aspero"));
     let (info, debug): (Vec<_>, Vec<_>) = ours.partition(|e| e.level <= tracing::Level::INFO);

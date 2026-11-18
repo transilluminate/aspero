@@ -13,7 +13,7 @@
 
 use std::sync::Arc;
 
-use aspero_engine::{Engine, SecretString, SqliteCache, StandardConfig, standard};
+use aspero_engine::{CallId, Engine, SecretString, SqliteCache, StandardConfig, standard};
 use tokio::sync::watch;
 use tokio::task::JoinHandle;
 
@@ -58,9 +58,16 @@ pub trait VerifyListener: Send + Sync {
 /// Cancels the calls it's passed. One token may cancel several calls; a
 /// call given a token already cancelled ends at once. Cancelled calls stop
 /// their requests and throw [`AsperoError::Cancelled`].
+///
+/// Its [`id`](Self::id) is the id of the engine call it's passed, which
+/// that call's diagnostics events carry as `call` (DESIGN "Diagnostics
+/// events"). A call verifying more than one claim gives each claim's call
+/// an id of its own, with the token's as its `parent`. Several calls given
+/// one token share its id.
 #[derive(uniffi::Object)]
 pub struct CallToken {
     cancelled: watch::Sender<bool>,
+    call: CallId,
 }
 
 #[uniffi::export]
@@ -69,7 +76,14 @@ impl CallToken {
     pub fn new() -> Arc<Self> {
         Arc::new(CallToken {
             cancelled: watch::Sender::new(false),
+            call: CallId::new(),
         })
+    }
+
+    /// The id its call's diagnostics events carry as `call`: unique within
+    /// the process, from the counter every engine call's id comes from.
+    pub fn id(&self) -> u64 {
+        self.call.get()
     }
 
     pub fn cancel(&self) {
@@ -166,7 +180,8 @@ impl Aspero {
 
     /// Runs `work` on the handle's runtime until it finishes or `cancel`
     /// is cancelled; dropping the returned future (where the caller's
-    /// executor does) also cancels it.
+    /// executor does) also cancels it. The engine calls `work` makes take
+    /// `cancel`'s id.
     async fn run<T: Send + 'static>(
         &self,
         work: impl Future<Output = T> + Send + 'static,
@@ -175,6 +190,13 @@ impl Aspero {
         if cancel.as_ref().is_some_and(|c| c.is_cancelled()) {
             return Err(AsperoError::Cancelled);
         }
+        let call = cancel.as_ref().map(|c| c.call.clone());
+        let work = async move {
+            match call {
+                Some(call) => call.scope(work).await,
+                None => work.await,
+            }
+        };
         let mut task = Abortable(self.runtime.spawn(work));
         let cancelled = async {
             match &cancel {

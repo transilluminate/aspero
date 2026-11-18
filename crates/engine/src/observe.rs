@@ -14,6 +14,15 @@
 //!   or is dropped ([`Engine::observed`]); calls made within one aren't
 //!   counted again.
 //!
+//! Every engine call has an id, from one counter for the process, which
+//! its `call` event and everything done for it carry as `call` (last):
+//! its requests, cache answers, retries and debug companions. A task-local
+//! holds the call in progress, so its parts (lookups within a verify) and
+//! a paid request finished detached ([`carried`]) carry its id. A caller
+//! can choose the id beforehand ([`CallId`]). A `verify_batch` of more
+//! than one claim is a call only as an id: its claims' calls and its
+//! prefetch take ids of their own and say it as `parent` ([`batch`]).
+//!
 //! Info-level fields are counts, codes, kinds and times, never what was
 //! asked: queries, titles, identifiers and URLs go only in `debug`
 //! companions (`request_url`, `call_input`). Field values are computed
@@ -24,7 +33,7 @@ use std::fmt;
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 
 use aspero_core::ProviderId;
 use tokio::time::Instant;
@@ -50,6 +59,109 @@ tokio::task_local! {
     static REQUEST: Arc<RequestScope>;
     /// The engine call this task works for.
     static CALL: Arc<CallScope>;
+    /// The id a caller gave the engine calls it makes ([`CallId::scope`]).
+    static GIVEN: Arc<Given>;
+}
+
+/// The next engine call's id: one counter for the process, from 1.
+static NEXT_ID: AtomicU64 = AtomicU64::new(1);
+
+fn next_id() -> u64 {
+    NEXT_ID.fetch_add(1, Ordering::Relaxed)
+}
+
+struct Given {
+    id: u64,
+    taken: AtomicBool,
+}
+
+/// An engine call's id, chosen before the call is made, so a caller can
+/// log it beside the call's diagnostics events (DESIGN "Diagnostics
+/// events"): from the counter every engine call's id comes from, so
+/// unique within the process.
+///
+/// Engine calls made in [`scope`](Self::scope), and not within another
+/// engine call, take it as their `call`; a `verify_batch` of more than
+/// one claim takes it as the `parent` of its claims' calls. Calls made
+/// outside any scope take ids of their own.
+#[derive(Clone)]
+pub struct CallId(Arc<Given>);
+
+impl CallId {
+    /// A new id.
+    pub fn new() -> Self {
+        CallId(Arc::new(Given {
+            id: next_id(),
+            taken: AtomicBool::new(false),
+        }))
+    }
+
+    /// The id, as the events say it.
+    pub fn get(&self) -> u64 {
+        self.0.id
+    }
+
+    /// Runs `work` with this id given to the engine calls it makes. Every
+    /// such call takes it: give each call its own to tell them apart.
+    pub fn scope<F: Future>(&self, work: F) -> impl Future<Output = F::Output> + use<F> {
+        GIVEN.scope(self.0.clone(), work)
+    }
+
+    /// Whether an engine call (or batch) made in its scope has taken it.
+    pub fn taken(&self) -> bool {
+        self.0.taken.load(Ordering::Relaxed)
+    }
+}
+
+impl Default for CallId {
+    fn default() -> Self {
+        CallId::new()
+    }
+}
+
+impl fmt::Debug for CallId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "CallId({})", self.0.id)
+    }
+}
+
+/// The id a caller gave the calls made here, now taken; else a new one.
+fn given_or_next() -> u64 {
+    GIVEN
+        .try_with(|g| {
+            g.taken.store(true, Ordering::Relaxed);
+            g.id
+        })
+        .unwrap_or_else(|_| next_id())
+}
+
+/// The id of the engine call this task works for, if any: the `call` of
+/// its events.
+pub(crate) fn call_id() -> Option<u64> {
+    CALL.try_with(|c| c.id).ok()
+}
+
+/// A batch's scope, for a `verify_batch` of more than one claim made
+/// outside any engine call: an id (the caller's, if it gave one) its
+/// claims' calls name as their `parent`, and no event. Within an engine
+/// call (a check), the batch is that call's part: `None`.
+pub(crate) fn batch() -> Option<Arc<CallScope>> {
+    if CALL.try_with(|_| ()).is_ok() {
+        return None;
+    }
+    Some(Arc::new(CallScope {
+        id: given_or_next(),
+        batch: true,
+        asked: std::sync::Mutex::default(),
+    }))
+}
+
+/// Runs `f` (a poll of a batch's work) within the batch's scope, if any.
+pub(crate) fn within<R>(scope: Option<Arc<CallScope>>, f: impl FnOnce() -> R) -> R {
+    match scope {
+        Some(scope) => CALL.sync_scope(scope, f),
+        None => f(),
+    }
 }
 
 /// A provider call ([`Engine::call`]) in progress: its op and attempt.
@@ -106,7 +218,8 @@ impl RequestScope {
 }
 
 /// Runs `work` in a spawned task with the engine call in progress here, so
-/// its providers are still counted (a detached paid call).
+/// its providers are still counted and its requests carry the call's id (a
+/// detached paid call).
 pub(crate) fn carried<F: Future>(work: F) -> impl Future<Output = F::Output> {
     let call = CALL.try_with(Arc::clone).ok();
     async move {
@@ -132,7 +245,7 @@ pub(crate) fn served(
         tracing::info!(
             target: "aspero::cache",
             provider = %provider, op = %op, status = %status, ms = 0u64, waited_ms = 0u64,
-            attempt = 0u32, cache = %cache, items, "request"
+            attempt = 0u32, cache = %cache, items, call = call_id(), "request"
         );
     }
 }
@@ -151,9 +264,11 @@ impl fmt::Display for Usd {
     }
 }
 
-/// An engine call in progress: the providers it has asked.
-#[derive(Default)]
+/// An engine call in progress: its id and the providers it has asked. Or
+/// a batch ([`batch`]): an id only, its claims' calls' parent.
 pub(crate) struct CallScope {
+    id: u64,
+    batch: bool,
     asked: std::sync::Mutex<Vec<ProviderId>>,
 }
 
@@ -184,6 +299,7 @@ struct CallEvent {
     scope: Arc<CallScope>,
     started: Instant,
     outcome: &'static str,
+    parent: Option<u64>,
 }
 
 impl Drop for CallEvent {
@@ -193,7 +309,7 @@ impl Drop for CallEvent {
             target: "aspero::engine",
             op = %self.op, items = self.items, patience = %self.patience, fresh = self.fresh,
             providers = %Asked(&asked), ms = ms(self.started, Instant::now()),
-            outcome = %self.outcome, "call"
+            outcome = %self.outcome, call = self.scope.id, parent = self.parent, "call"
         );
     }
 }
@@ -204,7 +320,8 @@ impl Engine {
     /// `None` for `ok`, else the error kind) or `cancelled` if it's
     /// dropped first. `input` describes what was asked, for the `debug`
     /// companion only. Within another engine call, it's that call's part:
-    /// no event.
+    /// no event, and its requests carry that call's id. Within a batch,
+    /// it's a call of its own, the batch its `parent`.
     pub(crate) async fn observed<T, F: Future<Output = T>>(
         &self,
         op: &'static str,
@@ -213,11 +330,19 @@ impl Engine {
         work: Pin<Box<F>>,
         outcome: impl FnOnce(&T) -> Option<&'static str>,
     ) -> T {
-        if CALL.try_with(|_| ()).is_ok() {
-            return work.await;
-        }
-        tracing::debug!(target: "aspero::engine", op = %op, input = %input(), "call_input");
-        let scope = Arc::new(CallScope::default());
+        let (id, parent) = match CALL.try_with(Arc::clone).ok() {
+            Some(outer) if !outer.batch => return work.await,
+            Some(batch) => (next_id(), Some(batch.id)),
+            None => (given_or_next(), None),
+        };
+        tracing::debug!(
+            target: "aspero::engine", op = %op, input = %input(), call = id, "call_input"
+        );
+        let scope = Arc::new(CallScope {
+            id,
+            batch: false,
+            asked: std::sync::Mutex::default(),
+        });
         let mut event = CallEvent {
             op,
             items,
@@ -226,6 +351,7 @@ impl Engine {
             scope: scope.clone(),
             started: Instant::now(),
             outcome: "cancelled",
+            parent,
         };
         let result = CALL.scope(scope, work).await;
         event.outcome = outcome(&result).unwrap_or("ok");

@@ -5,6 +5,25 @@ and 0.1 to 0.9 in [docs/changelog/0.0x.md](docs/changelog/0.0x.md).
 
 ## Unreleased
 
+Added:
+
+- An id per engine call on its diagnostics events (#152; DESIGN
+  "Diagnostics events"): `call=<id>`, last, on the `call` event, on
+  each `request` made for it (cache answers, replays and paid requests
+  finished detached included), on `retry`, and on the debug companions
+  `request_url` and `call_input`. Ids are unique within the process,
+  from one counter. Each claim's call in a `verify_batch` of more than
+  one claim, and its prefetch, has an id of its own and `parent=<id>`,
+  the batch's, so a batch reads as a tree; a check's verifies are still
+  its parts, their requests carrying the check's id. The MCP `tool`
+  event says `call=` of the engine call the tool made (host tools make
+  none).
+- FFI: `CallToken.id()`, the id of the call the token is passed to: an
+  embedder can log the same number beside its call. A verify of more
+  than one claim gives it as each claim's call's `parent`.
+- Rust: `CallId`, an id chosen before an engine call
+  (`CallId::new().scope(work)`), which the calls made in its scope take.
+
 Changed (breaking for embedders):
 
 - MCP: host tools' scopes are declared by the host, not enumerated by

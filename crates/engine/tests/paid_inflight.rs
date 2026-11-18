@@ -5,7 +5,7 @@
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use aspero_core::testing::{Events, FIXTURE_TIME, fixture, response};
+use aspero_core::testing::{Captured, Events, FIXTURE_TIME, fixture, response};
 use aspero_core::{
     Error, ErrorKind, HttpClient, HttpRequest, HttpResponse, ProviderId, ResiliencePolicy,
     SearchQuery,
@@ -270,7 +270,7 @@ async fn an_awaited_search_is_answered_as_before() {
 
 /// DESIGN "Diagnostics events": a paid request finished after its caller
 /// left says `detached=true`, and its caller's call was cancelled; one
-/// awaited says nothing of it.
+/// awaited says nothing of it. Each keeps its call's id.
 #[tokio::test(start_paused = true)]
 async fn a_request_finished_after_its_caller_left_says_detached() {
     let s = setup(
@@ -302,4 +302,15 @@ async fn a_request_finished_after_its_caller_left_says_detached() {
     let calls = s.events.named("aspero::engine", "call");
     let outcomes: Vec<_> = calls.iter().map(|e| e.field("outcome")).collect();
     assert_eq!(outcomes, [Some("cancelled"), Some("ok")]);
+    // Finished in a task of its own, after its call's event: its call's id.
+    let ids = |events: &[Captured]| -> Vec<Option<String>> {
+        events
+            .iter()
+            .map(|e| e.field("call").map(str::to_owned))
+            .collect()
+    };
+    let called = ids(&calls);
+    assert!(called.iter().all(Option::is_some));
+    assert_ne!(called[0], called[1]);
+    assert_eq!(ids(&searches), called);
 }

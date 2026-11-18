@@ -62,6 +62,19 @@ impl Engine {
     /// DOIs not found unless their trailing punctuation is kept, then
     /// `extras`. Never fails as a whole.
     pub async fn lookup_inputs(&self, inputs: &[String], extras: Extras) -> InputsReport {
+        let work = Box::pin(self.lookup_inputs_now(inputs, extras));
+        let input = || inputs.join(" ");
+        self.observed(
+            "lookup",
+            inputs.len(),
+            input,
+            work,
+            crate::observe::never_fails,
+        )
+        .await
+    }
+
+    async fn lookup_inputs_now(&self, inputs: &[String], extras: Extras) -> InputsReport {
         let parsed: Vec<Result<WorkId, IdError>> = inputs.iter().map(|s| s.parse()).collect();
         let (positions, valid): (Vec<usize>, Vec<WorkId>) = parsed
             .iter()

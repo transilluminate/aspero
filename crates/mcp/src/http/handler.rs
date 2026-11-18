@@ -15,7 +15,7 @@ use serde_json::{Map, Value};
 use super::Shared;
 use super::auth::Credential;
 use super::host::{Activity, HostError};
-use crate::server::{INSTRUCTIONS, engine_result, error_text, server_info};
+use crate::server::{INSTRUCTIONS, engine_result, error_text, server_info, tool_event, tool_input};
 use crate::session::usd;
 use crate::{Caller, Scope, Session, ToolError, ToolErrorKind, tools};
 
@@ -104,7 +104,7 @@ impl Handler {
             Err(e) => Err(e),
         };
         let activity = activity(k, name, query, outcome, cost);
-        (engine_result(session, name, result), activity)
+        (engine_result(session, result), activity)
     }
 
     /// What's left of the key's daily budget; refuses a paid call once it's
@@ -277,15 +277,22 @@ impl ServerHandler for Handler {
         context: RequestContext<RoleServer>,
     ) -> Result<CallToolResponse, ErrorData> {
         let key = authed(&context)?;
+        let started = tokio::time::Instant::now();
+        let name = request.name.to_string();
         let Some(session) = self.session.get() else {
-            return Ok(tool_error(&ToolError::new(
+            let e = ToolError::new(
                 ToolErrorKind::NoSession,
                 "start a session (initialize) first: budgets are per session",
-            ))
-            .into());
+            );
+            let known = self.shared.tools.spec(&name).is_some()
+                || self.shared.catalog().iter().any(|l| l.tool.name == name);
+            tool_input(&name, &request.arguments.unwrap_or_default());
+            let tool = known.then_some(name.as_str());
+            tool_event(tool, Some(&key.key.name), e.kind.as_str(), started, 0.0);
+            return Ok(tool_error(&e).into());
         };
-        let name = request.name.to_string();
         let arguments = request.arguments.unwrap_or_default();
+        tool_input(&name, &arguments);
         let engine = self.shared.engine_tools && self.shared.tools.spec(&name).is_some();
         let (result, activity) = if engine {
             let (result, activity) = self.engine_call(session, &key, &name, arguments).await;
@@ -316,6 +323,12 @@ impl ServerHandler for Handler {
                 ),
             }
         };
+        let (outcome, cost) = match &activity {
+            Some(a) => (a.error.map_or("ok", ToolErrorKind::as_str), a.cost_usd),
+            None => (ToolErrorKind::UnknownTool.as_str(), 0.0),
+        };
+        let tool = activity.is_some().then_some(name.as_str());
+        tool_event(tool, Some(&key.key.name), outcome, started, cost);
         if let Some(activity) = activity {
             self.shared.report(activity);
         }

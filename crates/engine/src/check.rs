@@ -169,6 +169,24 @@ impl Engine {
         &self,
         claims: &[Claim],
         limit: u32,
+        progress: impl FnMut(usize),
+    ) -> CheckReport {
+        let work = Box::pin(self.check_claims(claims, limit, progress));
+        let input = || format!("{claims:?}");
+        self.observed(
+            "check",
+            claims.len(),
+            input,
+            work,
+            crate::observe::never_fails,
+        )
+        .await
+    }
+
+    async fn check_claims(
+        &self,
+        claims: &[Claim],
+        limit: u32,
         mut progress: impl FnMut(usize),
     ) -> CheckReport {
         let mut slots: Vec<Option<Checked>> = (0..claims.len()).map(|_| None).collect();

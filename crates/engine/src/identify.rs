@@ -107,6 +107,18 @@ impl Engine {
         title: Option<&str>,
         title_hint: Option<&str>,
     ) -> IdentifyReport {
+        let work = Box::pin(self.identify_page(first_page, title, title_hint));
+        let input = || format!("{:?}", title_hint.or(title));
+        self.observed("identify", 1, input, work, crate::observe::never_fails)
+            .await
+    }
+
+    async fn identify_page(
+        &self,
+        first_page: &str,
+        title: Option<&str>,
+        title_hint: Option<&str>,
+    ) -> IdentifyReport {
         // Metadata titles of a word or two are more often placeholders than
         // titles; the largest type on the page is the title, however short.
         let titles: Vec<&str> = [(title_hint, 1), (title, 3)]

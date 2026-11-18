@@ -62,6 +62,18 @@ impl CallOptions {
         !self.fresh || self.offline
     }
 
+    /// The patience as the `call` event names it: `offline`,
+    /// `interactive` (a deadline or retries capped) or `batch`.
+    pub(crate) fn patience(&self) -> &'static str {
+        if self.offline {
+            "offline"
+        } else if self.deadline.is_some() || self.max_retries.is_some() {
+            "interactive"
+        } else {
+            "batch"
+        }
+    }
+
     /// `policy`, capped by these options.
     pub(crate) fn apply(&self, policy: &ResiliencePolicy) -> ResiliencePolicy {
         let mut p = policy.clone();

@@ -243,11 +243,14 @@ impl Budgets {
         if let Some(days) = &self.prepaid_days {
             match days.see_prepaid(provider.as_str(), day, balance, bought, now) {
                 Ok(seen) => return seen,
-                Err(e) => tracing::warn!(
-                    target: "aspero::budget",
-                    provider = %provider, error = %e,
-                    "couldn't share the day's prepaid balance; keeping it in this process"
-                ),
+                Err(e) => {
+                    tracing::warn!(
+                        target: "aspero::budget",
+                        provider = %provider,
+                        "couldn't share the day's prepaid balance; keeping it in this process"
+                    );
+                    tracing::debug!(target: "aspero::budget", provider = %provider, error = %e, "prepaid_detail");
+                }
             }
         }
         let mut own = lock(&self.own_days);
@@ -310,11 +313,14 @@ impl Budgets {
             };
             match shared {
                 Ok(total) => return total,
-                Err(e) => tracing::warn!(
-                    target: "aspero::budget",
-                    provider = %provider, error = %e,
-                    "couldn't share the credit spent here; keeping it in this process"
-                ),
+                Err(e) => {
+                    tracing::warn!(
+                        target: "aspero::budget",
+                        provider = %provider,
+                        "couldn't share the credit spent here; keeping it in this process"
+                    );
+                    tracing::debug!(target: "aspero::budget", provider = %provider, error = %e, "credit_detail");
+                }
             }
         }
         own
@@ -359,7 +365,7 @@ impl Engine {
     /// Asks one provider its budget, which [`call`](Self::call) remembers.
     pub(crate) async fn refresh_budget(&self, entry: &Entry) {
         let asked = self
-            .call(entry, || async {
+            .call(entry, crate::observe::op::BUDGET, || async {
                 let usage = entry.provider.budget().await?;
                 Ok(Response::with_usage((), usage))
             })
@@ -367,8 +373,9 @@ impl Engine {
         if let Err(e) = asked {
             tracing::warn!(
                 target: "aspero::budget",
-                provider = %entry.provider.id(), error = %e, "couldn't ask the budget"
+                provider = %entry.provider.id(), status = %e.kind().as_str(), "couldn't ask the budget"
             );
+            tracing::debug!(target: "aspero::budget", error = %e, "budget_detail");
         }
     }
 }

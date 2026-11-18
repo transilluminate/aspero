@@ -14,7 +14,8 @@
 //! - [`site`]: an article page's site, and its publisher's DOI prefixes.
 //! - [`webpage`]: a claim from a publisher's article page's markup.
 //! - [`http`]: the [`HttpClient`] transport seam.
-//! - `testing` (feature): fixture replay for provider tests.
+//! - `testing` (feature): fixture replay for provider tests; log events
+//!   captured for tests of the diagnostics events.
 
 pub mod csl;
 pub mod error;

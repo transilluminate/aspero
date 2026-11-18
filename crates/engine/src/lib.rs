@@ -65,6 +65,7 @@ mod inflight;
 mod inputs;
 mod keys;
 mod lookup;
+mod observe;
 mod options;
 mod registry;
 mod resolve;
@@ -496,9 +497,15 @@ impl Engine {
         self.budgets.all()
     }
 
-    /// Runs one provider operation with retries, unless the provider is
-    /// refusing calls, and remembers how it went.
-    async fn call<T, F, Fut>(&self, entry: &Entry, op: F) -> Result<Response<T>, Error>
+    /// Runs one provider operation, `what` it asks (the `op` of its
+    /// requests' events), with retries, unless the provider is refusing
+    /// calls, and remembers how it went.
+    async fn call<T, F, Fut>(
+        &self,
+        entry: &Entry,
+        what: &'static str,
+        mut op: F,
+    ) -> Result<Response<T>, Error>
     where
         F: FnMut() -> Fut,
         Fut: std::future::Future<Output = Result<Response<T>, Error>>,
@@ -506,7 +513,13 @@ impl Engine {
         let provider = entry.provider.id();
         let pass = self.health.admit(&provider, (self.clock)())?;
         let policy = self.options.apply(&entry.policy);
-        let result = with_retries(&policy, self.jitter, op).await;
+        let result = observe::requesting(&provider, what, |scope| {
+            with_retries(&policy, self.jitter, move || {
+                scope.next();
+                op()
+            })
+        })
+        .await;
         let now = (self.clock)();
         pass.record(&entry.policy, result.as_ref().err(), now);
         let usage = result.as_ref().ok().and_then(|r| r.usage.as_ref());

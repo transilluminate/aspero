@@ -26,6 +26,7 @@ use aspero_core::{
 };
 use jiff::civil::Date;
 
+use crate::observe::{self, op};
 use crate::{Engine, EngineError, Entry, Served};
 
 #[derive(Debug, Clone)]
@@ -129,6 +130,17 @@ impl Engine {
         source: Option<&str>,
         query: &SearchQuery,
     ) -> Result<SearchReport, EngineError> {
+        let work = Box::pin(self.search_now(source, query));
+        let input = || format!("{query:?}");
+        self.observed(op::SEARCH, 1, input, work, observe::kind_of)
+            .await
+    }
+
+    async fn search_now(
+        &self,
+        source: Option<&str>,
+        query: &SearchQuery,
+    ) -> Result<SearchReport, EngineError> {
         let citation = query.mode == SearchMode::Citation;
         let fields = [Filter::Author, Filter::Title, Filter::Container];
         let has_field = fields.iter().any(|f| query.field(*f).is_some());
@@ -189,11 +201,19 @@ impl Engine {
         let cached = self.cached_search(&provider, &sent);
         if self.options.offline {
             return match cached {
-                Some((page, fresh)) => Ok(report(
-                    page,
-                    None,
-                    if fresh { Served::Cache } else { Served::Stale },
-                )),
+                Some((page, fresh)) => {
+                    let (cache, status) = if fresh {
+                        ("hit", "none")
+                    } else {
+                        ("stale", "offline")
+                    };
+                    observe::served(&provider, op::SEARCH, cache, status, 1);
+                    Ok(report(
+                        page,
+                        None,
+                        if fresh { Served::Cache } else { Served::Stale },
+                    ))
+                }
                 None => Err(EngineError::Provider {
                     provider: provider.clone(),
                     error: Error::Offline,
@@ -201,7 +221,7 @@ impl Engine {
             };
         }
         if let Some((page, true)) = cached {
-            tracing::info!(target: "aspero::cache", provider = %provider, text = %sent.text, "search served from cache");
+            observe::served(&provider, op::SEARCH, "hit", "none", 1);
             return Ok(report(page, None, Served::Cache));
         }
         // Finished and cached, once sent, even if the caller stops waiting.
@@ -209,7 +229,7 @@ impl Engine {
             let (engine, entry, sent) = (self.clone(), entry.clone(), sent.clone());
             async move {
                 let answer = engine
-                    .call_paid(&entry, || entry.provider.search(&sent))
+                    .call_paid(&entry, op::SEARCH, || entry.provider.search(&sent))
                     .await;
                 if let Ok(resp) = &answer {
                     engine.remember_search(&entry.provider.id(), &sent, &resp.value);
@@ -221,7 +241,10 @@ impl Engine {
         match self.finish_paid(entry, live, usage).await {
             Ok(resp) => Ok(report(resp.value, resp.usage, Served::Live)),
             Err(error) => match cached {
-                Some((page, _)) => Ok(report(page, None, Served::Stale)),
+                Some((page, _)) => {
+                    observe::served(&provider, op::SEARCH, "stale", error.kind().as_str(), 1);
+                    Ok(report(page, None, Served::Stale))
+                }
                 None => Err(EngineError::Provider {
                     provider: provider.clone(),
                     error,

@@ -100,3 +100,116 @@ pub fn block_on<F: Future>(fut: F) -> F::Output {
         Poll::Pending => panic!("future was not immediately ready"),
     }
 }
+
+/// One `tracing` event as captured: its level, target, name (the message)
+/// and fields as text (`%` and `?` values as they display).
+#[derive(Debug, Clone)]
+pub struct Captured {
+    pub level: tracing::Level,
+    pub target: String,
+    pub name: String,
+    pub fields: Vec<(String, String)>,
+}
+
+impl Captured {
+    /// A field's value, if the event has it.
+    pub fn field(&self, name: &str) -> Option<&str> {
+        self.fields
+            .iter()
+            .find(|(n, _)| n == name)
+            .map(|(_, v)| v.as_str())
+    }
+
+    /// The field names, in order.
+    pub fn names(&self) -> Vec<&str> {
+        self.fields.iter().map(|(n, _)| n.as_str()).collect()
+    }
+}
+
+/// Captures the `tracing` events of this thread while installed
+/// ([`Events::install`]): a test subscriber, no spans.
+#[derive(Clone, Default)]
+pub struct Events(std::sync::Arc<Mutex<Vec<Captured>>>);
+
+impl Events {
+    /// Captures this thread's events until the guard is dropped (a
+    /// current-thread runtime's tasks included).
+    pub fn install() -> (Events, tracing::subscriber::DefaultGuard) {
+        let events = Events::default();
+        let guard = tracing::subscriber::set_default(events.clone());
+        (events, guard)
+    }
+
+    /// Every event so far.
+    pub fn all(&self) -> Vec<Captured> {
+        self.0.lock().unwrap().clone()
+    }
+
+    /// The events named `name` on `target`.
+    pub fn named(&self, target: &str, name: &str) -> Vec<Captured> {
+        self.all()
+            .into_iter()
+            .filter(|e| e.target == target && e.name == name)
+            .collect()
+    }
+}
+
+struct Fields<'a>(&'a mut Captured);
+
+impl tracing::field::Visit for Fields<'_> {
+    fn record_str(&mut self, field: &tracing::field::Field, value: &str) {
+        self.put(field, value.to_owned());
+    }
+
+    fn record_debug(&mut self, field: &tracing::field::Field, value: &dyn std::fmt::Debug) {
+        self.put(field, format!("{value:?}"));
+    }
+}
+
+impl Fields<'_> {
+    fn put(&mut self, field: &tracing::field::Field, value: String) {
+        if field.name() == "message" {
+            self.0.name = value;
+        } else {
+            self.0.fields.push((field.name().to_owned(), value));
+        }
+    }
+}
+
+impl tracing::Subscriber for Events {
+    fn register_callsite(
+        &self,
+        _: &'static tracing::Metadata<'static>,
+    ) -> tracing::subscriber::Interest {
+        // Sometimes: another thread's test may have no subscriber.
+        tracing::subscriber::Interest::sometimes()
+    }
+
+    fn enabled(&self, _: &tracing::Metadata<'_>) -> bool {
+        true
+    }
+
+    fn new_span(&self, _: &tracing::span::Attributes<'_>) -> tracing::span::Id {
+        tracing::span::Id::from_u64(1)
+    }
+
+    fn record(&self, _: &tracing::span::Id, _: &tracing::span::Record<'_>) {}
+
+    fn record_follows_from(&self, _: &tracing::span::Id, _: &tracing::span::Id) {}
+
+    fn event(&self, event: &tracing::Event<'_>) {
+        let meta = event.metadata();
+        let mut captured = Captured {
+            level: *meta.level(),
+            target: meta.target().to_owned(),
+            name: String::new(),
+            fields: Vec::new(),
+        };
+        event.record(&mut Fields(&mut captured));
+        self.0.lock().unwrap().push(captured);
+    }
+
+    fn enter(&self, _: &tracing::span::Id) {}
+
+    fn exit(&self, _: &tracing::span::Id) {}
+}

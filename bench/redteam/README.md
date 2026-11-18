@@ -35,6 +35,7 @@ plausible ≥ 0.6).
 | First author right, listed co-authors invented | not specified: DESIGN makes the first author alone a match (for "et al."). This red team counts listed-but-wrong co-authors as a wrong citation: plausible |
 | Real title or real place, the rest from another work (chimera) | mismatch or not_found |
 | Claimed DOI/PMID/arXiv ID is another work's | mismatch |
+| The work's DOI (or PMID) beside another work's PMID (or DOI) | plausible, the identifier named (round 7, #148) |
 | Well-formed ID that doesn't exist, details real | mismatch (the right work suggested) |
 | ID that doesn't exist, details invented; wholly invented work | not_found |
 | Retracted, cited plainly | verified or plausible, **with a retraction note** (`check`: error) |

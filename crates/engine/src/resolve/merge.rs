@@ -321,8 +321,40 @@ impl Accumulator<'_> {
     }
 
     pub(super) fn finish(mut self) -> ResolveReport {
+        contest(&mut self.report.candidates, self.claim);
         self.report.chosen_by_site = rank(&mut self.report.candidates, self.claim);
         self.report
+    }
+}
+
+/// A candidate one claimed identifier names while another is carried by a
+/// different work's record (wild-3: a paper's PMID beside another paper's
+/// DOI, which its lookup found): the identifiers name two works, so they
+/// don't confirm this one. Its identifiers partly agree, and it is
+/// plausible at most, the identifier to check (#148). Two records of one
+/// work that weren't merged ([`matching::same_work`]) aren't two works.
+fn contest(candidates: &mut [Candidate], claim: &Claim) {
+    let carries = |c: &Candidate, id: &WorkId| c.ids.iter().any(|k| same_work_id(k, id));
+    let contested: Vec<bool> = candidates
+        .iter()
+        .enumerate()
+        .map(|(i, c)| {
+            c.assessment.ids == Agreement::Match
+                && claim.ids.iter().any(|id| {
+                    !carries(c, id)
+                        && candidates.iter().enumerate().any(|(j, other)| {
+                            j != i
+                                && carries(other, id)
+                                && !matching::same_work(&other.record, &c.record)
+                        })
+                })
+        })
+        .collect();
+    for (c, contested) in candidates.iter_mut().zip(contested) {
+        if contested {
+            c.assessment.ids = Agreement::Partial;
+            c.assessment.confidence = c.assessment.confidence.min(matching::ID_CONFLICT_CAP);
+        }
     }
 }
 

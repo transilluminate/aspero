@@ -17,6 +17,7 @@ mod journal;
 mod redteam;
 mod redteam_holdouts;
 mod redteam_round6;
+mod redteam_round7;
 mod scoring;
 mod titles;
 mod venue;

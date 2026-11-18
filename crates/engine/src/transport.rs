@@ -216,12 +216,13 @@ impl RequestEvent<'_> {
             target: "aspero::net",
             provider = %self.provider, op = %op, status = %status, ms, waited_ms = self.waited_ms,
             attempt, cache = %"miss", cost_usd = cost.map(|c| tracing::field::display(Usd(c))),
-            detached = detach::detached().then_some(true), "request"
+            detached = detach::detached().then_some(true), call = observe::call_id(), "request"
         );
         if let Some(url) = &self.url {
             tracing::debug!(
                 target: "aspero::net",
-                provider = %self.provider, op = %op, attempt, url = %url, "request_url"
+                provider = %self.provider, op = %op, attempt, url = %url,
+                call = observe::call_id(), "request_url"
             );
         }
     }
@@ -439,11 +440,12 @@ impl HttpClient for TapeClient {
                     provider = %self.label, op = %op, status = replayed.status, ms = 0u64,
                     waited_ms = 0u64, attempt, cache = %"replayed",
                     cost_usd = cost(&replayed).map(|c| tracing::field::display(Usd(c))),
-                    "request"
+                    call = observe::call_id(), "request"
                 );
                 tracing::debug!(
                     target: "aspero::net",
-                    provider = %self.label, op = %op, attempt, url = %url, "request_url"
+                    provider = %self.label, op = %op, attempt, url = %url,
+                    call = observe::call_id(), "request_url"
                 );
                 return Ok(replayed);
             }

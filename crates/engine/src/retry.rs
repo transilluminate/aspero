@@ -61,7 +61,7 @@ where
             op = op.map(tracing::field::display), attempt = retry + 1,
             status = %error.kind().as_str(),
             delay_ms = u64::try_from(delay.as_millis()).unwrap_or(u64::MAX),
-            "retry"
+            call = crate::observe::call_id(), "retry"
         );
         tracing::debug!(target: "aspero::net", error = %error, "retry_error");
         tokio::time::sleep(delay).await;

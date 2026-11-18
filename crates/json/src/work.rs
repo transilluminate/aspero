@@ -31,16 +31,20 @@ pub fn work(record: &SourceRecord, full: bool) -> Value {
     put("cited_by_count", w.cited_by_count.map(|c| json!(c)));
     put("url", w.url.as_ref().map(|u| json!(u)));
     // Never lean enough to leave out: a retracted work is not citable.
-    put("updates", (!w.updates.is_empty()).then(|| json!(w.updates)));
+    put("notices", (!w.notices.is_empty()).then(|| json!(w.notices)));
     put(
-        "update_to",
-        (!w.update_to.is_empty()).then(|| json!(w.update_to)),
+        "notice_for",
+        (!w.notice_for.is_empty()).then(|| json!(w.notice_for)),
     );
     // Whether a free copy can be fetched instead of asking a human.
     put("open_access", w.open_access.as_ref().map(|oa| json!(oa)));
     if full {
         // Everything else, in the core `Work` shape (structured authors).
-        if let Ok(Value::Object(all)) = serde_json::to_value(w) {
+        if let Ok(Value::Object(mut all)) = serde_json::to_value(w) {
+            // Stored under their old names (`Work`), said above as
+            // `notices` and `notice_for`.
+            all.remove("updates");
+            all.remove("update_to");
             for (k, v) in all {
                 out.entry(k).or_insert(v);
             }

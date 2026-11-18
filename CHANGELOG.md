@@ -5,6 +5,30 @@ and 0.1 to 0.9 in [docs/changelog/0.0x.md](docs/changelog/0.0x.md).
 
 ## Unreleased
 
+Changed (breaking):
+
+- One name for a notice, and "note" kept free for what people write about
+  a work (#160). A retraction, correction or newer version is a
+  **notice** everywhere; a bibliography entry's malformed field is a
+  **field problem**.
+  - CLI JSON and MCP results: a work's `updates` is `notices`, and its
+    `update_to` is `notice_for` (as the FFI already called them). A
+    `check` finding of kind `updated` is kind `notice`, its detail under
+    `notice` (was `update`). A verdict's English reason says
+    `notice: RETRACTED …` (was `note:`).
+  - FFI: `Verification.notes` is `notices`; `BibNote` is
+    `BibFieldProblem`, and `BibEntry.notes` is `problems` (`BibProblem`
+    stays). No new enum cases.
+  - Rust: core's `Update`, `UpdateKind` and `UpdateTo` are `Notice`,
+    `NoticeKind` and `NoticeFor`; `Work.updates` and `Work.update_to` are
+    `notices` and `notice_for`; the engine's `Verification.notes` is
+    `notices`, and `Finding::Updated { update }` is
+    `Finding::Notice { notice }`. aspero-bib's `Note` is `FieldProblem`,
+    `BibEntry.notes` is `problems`, and `Finding::Entry { note }` is
+    `Finding::Entry { problem }`.
+  - The cache is unchanged: it stores a work's notices under their old
+    names, so caches read the same in versions before and after.
+
 Changed:
 
 - MCP: the tool list is about 38% smaller (#157): from ~46,000 to

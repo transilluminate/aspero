@@ -246,9 +246,12 @@ fn bibliography_files_become_claims() {
         .read_references("@article{x, title = {T}, doi = {nope}}".into())
         .unwrap();
     assert_eq!(bib.format, BibFormat::Bibtex);
-    let note = &bib.entries[0].notes[0];
-    assert_eq!((note.field.as_str(), note.value.as_str()), ("doi", "nope"));
-    assert_eq!(note.problem, BibProblem::NotADoi);
+    let problem = &bib.entries[0].problems[0];
+    assert_eq!(
+        (problem.field.as_str(), problem.value.as_str()),
+        ("doi", "nope")
+    );
+    assert_eq!(problem.problem, BibProblem::NotADoi);
 
     let err = handle.read_references("1. Smith J. A study.".into());
     assert_eq!(err.unwrap_err(), ReadError::Unrecognised);

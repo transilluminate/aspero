@@ -215,7 +215,7 @@ fn summary_text(path: &str, s: &CheckSummary) -> String {
 }
 #[cfg(test)]
 mod tests {
-    use aspero_core::{Update, UpdateKind};
+    use aspero_core::{Notice, NoticeKind};
 
     use super::*;
     use crate::cmd::testing::{Scripted, engine, pinned, work};
@@ -231,9 +231,9 @@ mod tests {
             &["Jane Doe"],
             2019,
         );
-        let mut retraction = Update::new(UpdateKind::Retraction);
+        let mut retraction = Notice::new(NoticeKind::Retraction);
         retraction.notice = Some("10.1234/notice".parse().unwrap());
-        retracted.work.updates = vec![retraction];
+        retracted.work.notices = vec![retraction];
         let works = vec![
             work(&["10.1038/nature14539"], "Deep learning", &lecun, 2015),
             work(&["10.1145/3448250"], "Deep learning for AI", &lecun, 2021),

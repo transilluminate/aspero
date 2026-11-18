@@ -3,9 +3,9 @@
 
 use aspero_core::matching::{PLAUSIBLE, VERIFIED};
 use aspero_core::{
-    Agreement, Hit, IdKind, ProviderId, SourceRecord, UpdateKind, Usage, Work, WorkId,
+    Agreement, Hit, IdKind, NoticeKind, ProviderId, SourceRecord, Usage, Work, WorkId,
 };
-use aspero_engine::{Abstract, Candidate, describe_update};
+use aspero_engine::{Abstract, Candidate, describe_notice};
 pub use aspero_json::{candidate, set_abstract, usage};
 
 use crate::grid::{self, Col, Text};
@@ -147,13 +147,13 @@ pub fn work_text(record: &SourceRecord, indent: &str) -> String {
     }
     let ids: Vec<String> = record.ids.iter().map(ToString::to_string).collect();
     lines.push(format!("{indent}{}", ids.join("  ")));
-    for update in &w.updates {
+    for update in &w.notices {
         let paint = match update.kind {
-            UpdateKind::Correction => continue,
-            UpdateKind::Retraction | UpdateKind::Withdrawal => Paint::Error,
+            NoticeKind::Correction => continue,
+            NoticeKind::Retraction | NoticeKind::Withdrawal => Paint::Error,
             _ => Paint::Warning,
         };
-        let note = format!("⚠ {}", describe_update(update));
+        let note = format!("⚠ {}", describe_notice(update));
         lines.push(format!("{indent}{}", term::paint(&note, paint)));
     }
     if let Some(oa) = w.open_access.as_ref().filter(|oa| oa.is_oa) {
@@ -401,7 +401,7 @@ pub fn candidate_row(rank: usize, c: &Candidate) -> Vec<Text> {
     let w = &c.record.work;
     let mut title = w.title.clone().unwrap_or_default();
     if let Some(r) = c.retraction() {
-        title = format!("{title}\n⚠ {}", describe_update(r));
+        title = format!("{title}\n⚠ {}", describe_notice(r));
     }
     vec![
         Text::from(rank.to_string()),

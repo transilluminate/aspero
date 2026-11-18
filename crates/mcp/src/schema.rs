@@ -32,8 +32,8 @@ fn work() -> Value {
         "description": "a work: source (the provider), ids (doi:…, pmid:…, …), canonical_id \
             (dedupe on it), title, authors [{name, orcid}], authors_more (left out of a lean \
             list), issued, type (CSL), container (the journal, or the book for a chapter), \
-            cited_by_count, url, updates (notices: retraction, correction, …), update_to (for \
-            a notice, the works it updates), open_access",
+            cited_by_count, url, notices (retraction, correction, …), notice_for (for a \
+            notice, the works it updates), open_access",
         "required": ["source", "ids"],
     })
 }

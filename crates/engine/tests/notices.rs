@@ -5,7 +5,7 @@ mod common;
 
 use std::sync::Arc;
 
-use aspero_core::{FieldSet, PartialDate, Update, UpdateKind, UpdateTo, WorkId};
+use aspero_core::{FieldSet, Notice, NoticeFor, NoticeKind, PartialDate, WorkId};
 use common::*;
 
 fn id(s: &str) -> WorkId {
@@ -25,11 +25,11 @@ async fn originals_and_their_corrections_point_at_each_other() {
     let openalex =
         Arc::new(Scripted::new("openalex").with(vec![guideline.clone(), erratum.clone()]));
 
-    let mut correction = Update::new(UpdateKind::Correction);
+    let mut correction = Notice::new(NoticeKind::Correction);
     correction.notice = Some(id("10.1161/cir.1462"));
-    guideline.work.updates = vec![correction.clone()];
-    erratum.work.update_to = vec![UpdateTo::new(
-        UpdateKind::Correction,
+    guideline.work.notices = vec![correction.clone()];
+    erratum.work.notice_for = vec![NoticeFor::new(
+        NoticeKind::Correction,
         id("10.1161/cir.1415"),
     )];
     let mut crossref = Scripted::new("crossref").with(vec![guideline, erratum]);
@@ -61,13 +61,13 @@ async fn originals_and_their_corrections_point_at_each_other() {
     // Dated from the notice's own record, which the source didn't give.
     let mut dated = correction.clone();
     dated.date = Some(PartialDate::from_year(2026));
-    assert_eq!(work(0).updates, [dated]);
-    assert_eq!(work(1).update_to[0].work, id("10.1161/cir.1415"));
+    assert_eq!(work(0).notices, [dated]);
+    assert_eq!(work(1).notice_for[0].work, id("10.1161/cir.1415"));
 
     // Merging again adds nothing.
     engine.add_notices(&mut report).await;
     let work = |i: usize| &report.results[i].record.as_ref().unwrap().work;
-    assert_eq!((work(0).updates.len(), work(1).update_to.len()), (1, 1));
+    assert_eq!((work(0).notices.len(), work(1).notice_for.len()), (1, 1));
 }
 
 #[tokio::test]
@@ -80,7 +80,7 @@ async fn a_notice_flagged_as_retracted_names_itself_as_the_notice() {
         &[],
         2015,
     );
-    flagged.work.updates = vec![Update::new(UpdateKind::Retraction)];
+    flagged.work.notices = vec![Notice::new(NoticeKind::Retraction)];
     let openalex = Arc::new(Scripted::new("openalex").with(vec![flagged]));
     // Crossref knows it is the notice withdrawing .pub2.
     let mut notice = work(
@@ -90,7 +90,7 @@ async fn a_notice_flagged_as_retracted_names_itself_as_the_notice() {
         &[],
         2015,
     );
-    notice.work.update_to = vec![UpdateTo::new(UpdateKind::Withdrawal, id("10.1002/x.pub2"))];
+    notice.work.notice_for = vec![NoticeFor::new(NoticeKind::Withdrawal, id("10.1002/x.pub2"))];
     let mut crossref = Scripted::new("crossref").with(vec![notice]);
     crossref.caps.notices = true;
 
@@ -101,6 +101,6 @@ async fn a_notice_flagged_as_retracted_names_itself_as_the_notice() {
     engine.add_notices(&mut report).await;
 
     let work = &report.results[0].record.as_ref().unwrap().work;
-    assert_eq!(work.updates.len(), 1, "flagged, still");
-    assert_eq!(work.updates[0].notice, Some(id("10.1002/x.pub3")));
+    assert_eq!(work.notices.len(), 1, "flagged, still");
+    assert_eq!(work.notices[0].notice, Some(id("10.1002/x.pub3")));
 }

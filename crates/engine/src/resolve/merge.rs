@@ -3,7 +3,7 @@
 
 use aspero_core::matching::{self, id_agreement, same_work_id};
 use aspero_core::{
-    Agreement, Claim, IdKind, OpenAccess, PartialDate, ProviderId, SourceRecord, Update, Usage,
+    Agreement, Claim, IdKind, Notice, OpenAccess, PartialDate, ProviderId, SourceRecord, Usage,
     WorkId, WorkType,
 };
 
@@ -53,7 +53,7 @@ fn absorb(
     c: &mut Candidate,
     counts: (bool, bool),
     ids: &[WorkId],
-    updates: &[Update],
+    notices: &[Notice],
     sightings: Vec<Sighting>,
     mut record: SourceRecord,
 ) -> bool {
@@ -63,8 +63,8 @@ fn absorb(
             c.ids.push(id.clone());
         }
     }
-    merge_updates(&mut c.updates, updates);
-    merge_updates(&mut c.updates, &record.work.updates);
+    merge_notices(&mut c.notices, notices);
+    merge_notices(&mut c.notices, &record.work.notices);
     // Pool the years every source reports (online-first vs print,
     // editions), then keep the better-matching record.
     let pooled: Vec<i16> = years(&c.record).chain(years(&record)).collect();
@@ -165,9 +165,9 @@ fn earliest(a: PartialDate, b: PartialDate) -> PartialDate {
 /// Adds notices not already known. A detailed notice (with the notice's
 /// identifier) replaces a bare one of the same kind, such as OpenAlex's
 /// `is_retracted` flag.
-pub(crate) fn merge_updates(known: &mut Vec<Update>, new: &[Update]) {
+pub(crate) fn merge_notices(known: &mut Vec<Notice>, new: &[Notice]) {
     for update in new {
-        let same_kind = |k: &Update| k.kind == update.kind;
+        let same_kind = |k: &Notice| k.kind == update.kind;
         if known
             .iter()
             .any(|k| same_kind(k) && k.notice == update.notice)
@@ -220,11 +220,11 @@ impl Accumulator<'_> {
             i
         } else {
             self.counted.push(from_counts(&record));
-            let mut updates = Vec::new();
-            merge_updates(&mut updates, &record.work.updates);
+            let mut notices = Vec::new();
+            merge_notices(&mut notices, &record.work.notices);
             candidates.push(Candidate {
                 ids: record.ids.clone(),
-                updates,
+                notices,
                 sightings: vec![sighting],
                 assessment: matching::assess(claim, &record),
                 record,
@@ -245,7 +245,7 @@ impl Accumulator<'_> {
                 c,
                 counts,
                 &gone.ids,
-                &gone.updates,
+                &gone.notices,
                 gone.sightings,
                 gone.record,
             );
@@ -441,7 +441,7 @@ fn add_years(record: &mut SourceRecord, pooled: &[i16]) {
 
 #[cfg(test)]
 mod tests {
-    use aspero_core::{FieldSet, Raw, UpdateKind, Work};
+    use aspero_core::{FieldSet, NoticeKind, Raw, Work};
     use jiff::Timestamp;
 
     use super::*;
@@ -668,23 +668,23 @@ mod tests {
         }
     }
 
-    fn update(kind: UpdateKind, notice: Option<&str>) -> Update {
-        let mut u = Update::new(kind);
+    fn update(kind: NoticeKind, notice: Option<&str>) -> Notice {
+        let mut u = Notice::new(kind);
         u.notice = notice.map(|n| n.parse().unwrap());
         u
     }
 
     #[test]
     fn detailed_notices_replace_bare_flags_without_duplicates() {
-        let mut known = vec![update(UpdateKind::Retraction, None)];
+        let mut known = vec![update(NoticeKind::Retraction, None)];
         let crossref = [
-            update(UpdateKind::Correction, Some("10.1000/c1")),
-            update(UpdateKind::Retraction, Some("10.1000/r")),
-            update(UpdateKind::Correction, Some("10.1000/c2")),
+            update(NoticeKind::Correction, Some("10.1000/c1")),
+            update(NoticeKind::Retraction, Some("10.1000/r")),
+            update(NoticeKind::Correction, Some("10.1000/c2")),
         ];
-        merge_updates(&mut known, &crossref);
-        merge_updates(&mut known, &crossref); // again: nothing new
-        merge_updates(&mut known, &[update(UpdateKind::Retraction, None)]);
+        merge_notices(&mut known, &crossref);
+        merge_notices(&mut known, &crossref); // again: nothing new
+        merge_notices(&mut known, &[update(NoticeKind::Retraction, None)]);
         let summary: Vec<(String, Option<String>)> = known
             .iter()
             .map(|u| {

@@ -141,7 +141,7 @@ mod tests {
                 ids: r.ids.clone(),
                 sightings: Vec::new(),
                 assessment: matching::assess(claim, r),
-                updates: Vec::new(),
+                notices: Vec::new(),
             })
             .collect();
         let chosen = rank(&mut candidates, claim);

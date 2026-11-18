@@ -30,7 +30,7 @@
 
 use aspero_core::matching::id_agreement;
 use aspero_core::{
-    Assessment, Claim, FieldSet, IdKind, ProviderId, SourceRecord, Update, Usage, WorkId,
+    Assessment, Claim, FieldSet, IdKind, Notice, ProviderId, SourceRecord, Usage, WorkId,
 };
 
 use futures::stream::{self, Stream, StreamExt};
@@ -43,7 +43,7 @@ mod merge;
 mod rank;
 
 use merge::assess;
-pub(crate) use merge::merge_updates;
+pub(crate) use merge::merge_notices;
 use rank::rank;
 
 /// Claims verified at once in batches. Providers pace themselves, so this
@@ -95,13 +95,13 @@ pub struct Candidate {
     pub sightings: Vec<Sighting>,
     pub assessment: Assessment,
     /// Editorial notices from every merged record, most detailed kept.
-    pub updates: Vec<Update>,
+    pub notices: Vec<Notice>,
 }
 
 impl Candidate {
     /// The first retraction or withdrawal notice, if any.
-    pub fn retraction(&self) -> Option<&Update> {
-        self.updates.iter().find(|u| u.kind.is_retraction())
+    pub fn retraction(&self) -> Option<&Notice> {
+        self.notices.iter().find(|u| u.kind.is_retraction())
     }
 }
 
@@ -198,7 +198,7 @@ impl Engine {
     /// flagged works.
     async fn detail_notices(&self, report: &mut ResolveReport) {
         let bare = |c: &Candidate| {
-            c.updates
+            c.notices
                 .iter()
                 .any(|u| u.kind.is_retraction() && u.notice.is_none())
         };
@@ -226,7 +226,7 @@ impl Engine {
                 .await;
             for ((i, _), (_, record)) in wanted.into_iter().zip(answers) {
                 if let Some(record) = record {
-                    merge_updates(&mut report.candidates[i].updates, &record.work.updates);
+                    merge_notices(&mut report.candidates[i].notices, &record.work.notices);
                 }
             }
         }

@@ -130,7 +130,7 @@ impl Record {
             key: self.first(&["ID"]).unwrap_or_else(|| position.to_string()),
             entry_type: self.entry_type,
             claim,
-            notes: ids.notes,
+            problems: ids.problems,
         }
     }
 }
@@ -181,12 +181,12 @@ UR - https://arxiv.org/abs/1706.03762\r
         assert_eq!(lecun.claim.volume.as_deref(), Some("521"));
         assert_eq!(lecun.claim.page.as_deref(), Some("436-444"));
         assert_eq!(lecun.claim.ids[0].to_string(), "doi:10.1038/nature14539");
-        assert!(lecun.notes.is_empty(), "an ISSN isn't a bad ISBN");
+        assert!(lecun.problems.is_empty(), "an ISSN isn't a bad ISBN");
 
         let book = &entries[1];
         assert_eq!(book.claim.ids[0].to_string(), "isbn:9780262035613");
         assert_eq!(
-            book.notes[0].to_string(),
+            book.problems[0].to_string(),
             "DO field \"not-a-doi\" is not a valid DOI"
         );
 

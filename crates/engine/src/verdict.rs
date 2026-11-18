@@ -3,7 +3,7 @@
 
 use aspero_core::matching::{self, PLAUSIBLE, VERIFIED, WorkKind};
 use aspero_core::publication::first_page;
-use aspero_core::{Agreement, Claim, Update, UpdateKind};
+use aspero_core::{Agreement, Claim, Notice, NoticeKind};
 
 use crate::resolve::{Candidate, ClaimExt, ResolveReport};
 
@@ -42,13 +42,13 @@ impl Verdict {
 pub struct Verification {
     pub verdict: Verdict,
     /// One sentence, for logs and agents: [`reason`](Self::reason) and
-    /// [`notes`](Self::notes) in English.
+    /// [`notices`](Self::notices) in English.
     pub reason_text: String,
     /// Why, as data, for front ends that word it themselves.
     pub reason: Reason,
     /// What to know about the work the verdict is about, whatever the
     /// verdict: its retraction or withdrawal, and its newer version.
-    pub notes: Vec<Update>,
+    pub notices: Vec<Notice>,
     /// The claim as read: its identifiers as written (a DOI cut short at a
     /// line break, with the readings tried in `alternatives`), and from
     /// free text the year, journal (where it can be told), volume and
@@ -355,28 +355,28 @@ pub(crate) fn judge(claim: &Claim, report: ResolveReport) -> Verification {
     let (verdict, why, best) = decide(claim, &report);
     // Existing is not the same as citable or current: say so whatever the
     // verdict.
-    let notes: Vec<Update> = best
+    let notices: Vec<Notice> = best
         .map(|i| &report.candidates[i])
         .into_iter()
         .flat_map(|c| {
             [
                 c.retraction(),
-                c.updates.iter().find(|u| u.kind == UpdateKind::NewVersion),
+                c.notices.iter().find(|u| u.kind == NoticeKind::NewVersion),
             ]
         })
         .flatten()
         .cloned()
         .collect();
     let mut reason = explain(claim, &report, &why, best);
-    if !notes.is_empty() {
-        let notes: Vec<String> = notes.iter().map(describe_update).collect();
-        reason = format!("{reason}; note: {}", notes.join("; "));
+    if !notices.is_empty() {
+        let described: Vec<String> = notices.iter().map(describe_notice).collect();
+        reason = format!("{reason}; notice: {}", described.join("; "));
     }
     Verification {
         verdict,
         reason_text: reason,
         reason: why,
-        notes,
+        notices,
         read: claim.as_read(),
         best_match: best,
         chosen_by_site: report.chosen_by_site && best == Some(0),
@@ -494,7 +494,7 @@ fn weigh(claim: &Claim, report: &ResolveReport) -> (Verdict, Reason, Option<usiz
     }
 }
 
-/// The reason in English, without notes.
+/// The reason in English, without notices.
 fn explain(claim: &Claim, report: &ResolveReport, why: &Reason, best: Option<usize>) -> String {
     let claimed = claim
         .ids
@@ -551,9 +551,9 @@ fn explain(claim: &Claim, report: &ResolveReport, why: &Reason, best: Option<usi
 }
 
 /// "RETRACTED (2010-02-06, notice doi:…, via retraction-watch)".
-pub fn describe_update(u: &Update) -> String {
+pub fn describe_notice(u: &Notice) -> String {
     // The notice of a new version is the newer work itself.
-    if u.kind == UpdateKind::NewVersion {
+    if u.kind == NoticeKind::NewVersion {
         let by = u
             .notice
             .as_ref()
@@ -563,10 +563,10 @@ pub fn describe_update(u: &Update) -> String {
         return format!("superseded{by}{date}");
     }
     let what = match &u.kind {
-        UpdateKind::Retraction => "RETRACTED".to_owned(),
-        UpdateKind::Withdrawal => "WITHDRAWN".to_owned(),
-        UpdateKind::ExpressionOfConcern => "expression of concern".to_owned(),
-        UpdateKind::Correction => "corrected".to_owned(),
+        NoticeKind::Retraction => "RETRACTED".to_owned(),
+        NoticeKind::Withdrawal => "WITHDRAWN".to_owned(),
+        NoticeKind::ExpressionOfConcern => "expression of concern".to_owned(),
+        NoticeKind::Correction => "corrected".to_owned(),
         other => other.as_str().replace('_', " "),
     };
     let details: Vec<String> = [

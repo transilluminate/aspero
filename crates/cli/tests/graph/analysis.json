@@ -182,14 +182,14 @@
             "doi:10.1234/retracted"
           ],
           "issued": "2019",
-          "source": "openalex",
-          "title": "A retracted study",
-          "updates": [
+          "notices": [
             {
               "kind": "retraction",
               "source": "openalex"
             }
-          ]
+          ],
+          "source": "openalex",
+          "title": "A retracted study"
         },
         "seed": 0,
         "source": "openalex"

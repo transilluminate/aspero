@@ -4,7 +4,7 @@ mod common;
 
 use std::sync::Arc;
 
-use aspero_core::{SourceRecord, Update, UpdateKind, WorkId};
+use aspero_core::{Notice, NoticeKind, SourceRecord, WorkId};
 use common::*;
 
 fn id(s: &str) -> WorkId {
@@ -21,9 +21,9 @@ fn version(doi: &str, year: i16, newer: Option<&str>) -> SourceRecord {
         year,
     );
     if let Some(newer) = newer {
-        let mut u = Update::new(UpdateKind::NewVersion);
+        let mut u = Notice::new(NoticeKind::NewVersion);
         u.notice = Some(id(newer));
-        r.work.updates.push(u);
+        r.work.notices.push(u);
     }
     r
 }

@@ -2,7 +2,7 @@
 
 use std::io::IsTerminal;
 
-use aspero_engine::{Engine, Extras, InputLookup, Looked, LookupResult, describe_update};
+use aspero_engine::{Engine, Extras, InputLookup, Looked, LookupResult, describe_notice};
 use aspero_json::Status;
 use serde_json::Value;
 
@@ -198,7 +198,7 @@ fn row(item: &Value, result: Option<&LookupResult>) -> Vec<Text> {
     let mut title = w.title.clone().unwrap_or_default();
     let status = match (w.retraction(), w.newer_version()) {
         (Some(r), _) => {
-            title = format!("{title}\n⚠ {}", describe_update(r));
+            title = format!("{title}\n⚠ {}", describe_notice(r));
             grid::status("retracted", Level::Error)
         }
         (None, Some(newer)) => {

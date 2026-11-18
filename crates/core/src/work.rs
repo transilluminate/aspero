@@ -47,12 +47,16 @@ pub struct Work {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cited_by_count: Option<u64>,
     /// Retractions, corrections and other editorial notices about the work.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub updates: Vec<Update>,
+    ///
+    /// Stored as `updates`, its name before 0.35, so caches written by
+    /// either read in both.
+    #[serde(default, rename = "updates", skip_serializing_if = "Vec::is_empty")]
+    pub notices: Vec<Notice>,
     /// When the work is itself a notice, the works it updates: what an
     /// erratum corrects or a retraction notice retracts.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub update_to: Vec<UpdateTo>,
+    /// Stored as `update_to`, as `notices` is as `updates`.
+    #[serde(default, rename = "update_to", skip_serializing_if = "Vec::is_empty")]
+    pub notice_for: Vec<NoticeFor>,
     /// Whether, and where, the work can be read free and legally.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub open_access: Option<OpenAccess>,
@@ -74,8 +78,8 @@ pub struct Work {
 /// concern, withdrawal.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[non_exhaustive]
-pub struct Update {
-    pub kind: UpdateKind,
+pub struct Notice {
+    pub kind: NoticeKind,
     /// The notice's own identifier (usually a DOI), if known.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub notice: Option<crate::id::WorkId>,
@@ -91,9 +95,9 @@ pub struct Update {
     pub deposited: Option<PartialDate>,
 }
 
-impl Update {
-    pub fn new(kind: UpdateKind) -> Self {
-        Update {
+impl Notice {
+    pub fn new(kind: NoticeKind) -> Self {
+        Notice {
             kind,
             notice: None,
             date: None,
@@ -133,11 +137,11 @@ pub struct OpenAccess {
 }
 
 /// A notice's link to the work it updates (Crossref's `update-to`): the
-/// other direction of an [`Update`].
+/// other direction of an [`Notice`].
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[non_exhaustive]
-pub struct UpdateTo {
-    pub kind: UpdateKind,
+pub struct NoticeFor {
+    pub kind: NoticeKind,
     /// The updated work.
     pub work: crate::id::WorkId,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -146,9 +150,9 @@ pub struct UpdateTo {
     pub source: Option<String>,
 }
 
-impl UpdateTo {
-    pub fn new(kind: UpdateKind, work: crate::id::WorkId) -> Self {
-        UpdateTo {
+impl NoticeFor {
+    pub fn new(kind: NoticeKind, work: crate::id::WorkId) -> Self {
+        NoticeFor {
             kind,
             work,
             date: None,
@@ -159,7 +163,7 @@ impl UpdateTo {
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 #[non_exhaustive]
-pub enum UpdateKind {
+pub enum NoticeKind {
     Retraction,
     Withdrawal,
     ExpressionOfConcern,
@@ -171,15 +175,15 @@ pub enum UpdateKind {
     Other(String),
 }
 
-impl UpdateKind {
+impl NoticeKind {
     pub fn as_str(&self) -> &str {
         match self {
-            UpdateKind::Retraction => "retraction",
-            UpdateKind::Withdrawal => "withdrawal",
-            UpdateKind::ExpressionOfConcern => "expression_of_concern",
-            UpdateKind::Correction => "correction",
-            UpdateKind::NewVersion => "new_version",
-            UpdateKind::Other(s) => s,
+            NoticeKind::Retraction => "retraction",
+            NoticeKind::Withdrawal => "withdrawal",
+            NoticeKind::ExpressionOfConcern => "expression_of_concern",
+            NoticeKind::Correction => "correction",
+            NoticeKind::NewVersion => "new_version",
+            NoticeKind::Other(s) => s,
         }
     }
 
@@ -187,48 +191,48 @@ impl UpdateKind {
     /// `expression_of_concern`, `erratum`, …); never fails.
     pub fn parse(s: &str) -> Self {
         match s.to_ascii_lowercase().replace('-', "_").as_str() {
-            "retraction" | "partial_retraction" => UpdateKind::Retraction,
-            "withdrawal" | "removal" => UpdateKind::Withdrawal,
-            "expression_of_concern" => UpdateKind::ExpressionOfConcern,
-            "correction" | "erratum" | "corrigendum" | "addendum" => UpdateKind::Correction,
-            "new_version" | "new_edition" => UpdateKind::NewVersion,
-            _ => UpdateKind::Other(s.to_owned()),
+            "retraction" | "partial_retraction" => NoticeKind::Retraction,
+            "withdrawal" | "removal" => NoticeKind::Withdrawal,
+            "expression_of_concern" => NoticeKind::ExpressionOfConcern,
+            "correction" | "erratum" | "corrigendum" | "addendum" => NoticeKind::Correction,
+            "new_version" | "new_edition" => NoticeKind::NewVersion,
+            _ => NoticeKind::Other(s.to_owned()),
         }
     }
 
     /// Whether citing the work is unsafe: retracted or withdrawn.
     pub fn is_retraction(&self) -> bool {
-        matches!(self, UpdateKind::Retraction | UpdateKind::Withdrawal)
+        matches!(self, NoticeKind::Retraction | NoticeKind::Withdrawal)
     }
 }
 
-impl Serialize for UpdateKind {
+impl Serialize for NoticeKind {
     fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
         s.serialize_str(self.as_str())
     }
 }
 
-impl<'de> Deserialize<'de> for UpdateKind {
+impl<'de> Deserialize<'de> for NoticeKind {
     fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
-        Ok(UpdateKind::parse(&String::deserialize(d)?))
+        Ok(NoticeKind::parse(&String::deserialize(d)?))
     }
 }
 
 impl Work {
     /// The first retraction or withdrawal notice, if any.
-    pub fn retraction(&self) -> Option<&Update> {
-        self.updates.iter().find(|u| u.kind.is_retraction())
+    pub fn retraction(&self) -> Option<&Notice> {
+        self.notices.iter().find(|u| u.kind.is_retraction())
     }
 
-    /// Types a work that is itself a notice (it has `update_to`) as one:
+    /// Types a work that is itself a notice (it has `notice_for`) as one:
     /// `retraction` for retractions and withdrawals, `erratum` for other
     /// notices, as OpenAlex names them. Registries type notices as plain
     /// articles. New versions are works in their own right and keep theirs.
     pub fn type_as_notice(&mut self) {
-        let kinds = || self.update_to.iter().map(|t| &t.kind);
-        let name = if kinds().any(UpdateKind::is_retraction) {
+        let kinds = || self.notice_for.iter().map(|t| &t.kind);
+        let name = if kinds().any(NoticeKind::is_retraction) {
             "retraction"
-        } else if kinds().any(|k| *k != UpdateKind::NewVersion) {
+        } else if kinds().any(|k| *k != NoticeKind::NewVersion) {
             "erratum"
         } else {
             return;
@@ -238,9 +242,9 @@ impl Work {
 
     /// The newer version superseding this work, if one is known.
     pub fn newer_version(&self) -> Option<&crate::id::WorkId> {
-        self.updates
+        self.notices
             .iter()
-            .filter(|u| u.kind == UpdateKind::NewVersion)
+            .filter(|u| u.kind == NoticeKind::NewVersion)
             .find_map(|u| u.notice.as_ref())
     }
 }
@@ -719,6 +723,23 @@ impl<'de> Deserialize<'de> for PartialDate {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn notices_are_stored_under_their_old_names() {
+        // Caches are shared across versions: a work stored by this one
+        // reads in one before the rename (#160), and the other way round.
+        let mut w = Work::default();
+        w.notices.push(Notice::new(NoticeKind::Retraction));
+        let doi: crate::id::WorkId = "10.1234/x".parse().unwrap();
+        w.notice_for
+            .push(NoticeFor::new(NoticeKind::Correction, doi));
+        let stored = serde_json::to_value(&w).unwrap();
+        assert_eq!(stored["updates"][0]["kind"], "retraction");
+        assert_eq!(stored["update_to"][0]["kind"], "correction");
+        assert!(stored.get("notices").is_none());
+        let read: Work = serde_json::from_value(stored).unwrap();
+        assert_eq!(read, w);
+    }
 
     #[test]
     fn names_split_and_shorten_as_vancouver_writes_them() {

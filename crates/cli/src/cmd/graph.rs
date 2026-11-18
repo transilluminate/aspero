@@ -500,7 +500,7 @@ fn analysis_text(a: &Analysis, doc: &Value, related: bool) -> String {
 
 #[cfg(test)]
 mod tests {
-    use aspero_core::{Update, UpdateKind};
+    use aspero_core::{Notice, NoticeKind};
 
     use super::*;
     use crate::cmd::testing::{Scripted, engine, pinned, work};
@@ -517,9 +517,9 @@ mod tests {
             &["Jane Doe"],
             2019,
         );
-        let mut retraction = Update::new(UpdateKind::Retraction);
+        let mut retraction = Notice::new(NoticeKind::Retraction);
         retraction.source = Some("openalex".into());
-        retracted.work.updates = vec![retraction];
+        retracted.work.notices = vec![retraction];
         let cited = |mut record: SourceRecord, times| {
             record.work.cited_by_count = Some(times);
             record

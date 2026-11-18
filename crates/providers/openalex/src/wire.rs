@@ -8,8 +8,8 @@ use std::collections::BTreeMap;
 
 use aspero_core::csl::{null_default, plain_text};
 use aspero_core::{
-    ArxivId, Doi, FieldSet, OpenAccess, OpenAlexId, PartialDate, Person, Pmcid, Pmid, Raw,
-    SourceRecord, Update, UpdateKind, Work, WorkId, WorkType, orcid, tidy_abstract,
+    ArxivId, Doi, FieldSet, Notice, NoticeKind, OpenAccess, OpenAlexId, PartialDate, Person, Pmcid,
+    Pmid, Raw, SourceRecord, Work, WorkId, WorkType, orcid, tidy_abstract,
 };
 use jiff::Timestamp;
 use serde::Deserialize;
@@ -281,9 +281,9 @@ impl WireWork {
             out
         });
         if self.is_retracted {
-            let mut retraction = Update::new(UpdateKind::Retraction);
+            let mut retraction = Notice::new(NoticeKind::Retraction);
             retraction.source = Some("openalex".into());
-            work.updates.push(retraction);
+            work.notices.push(retraction);
         }
         work
     }

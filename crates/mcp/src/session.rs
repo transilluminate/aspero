@@ -22,6 +22,10 @@ pub enum Scope {
     ReadHistory,
     /// An app's tools that add to its history.
     WriteHistory,
+    /// An app's tools that take something away from its history: remove,
+    /// untag, delete. Apart from [`Scope::WriteHistory`], which doesn't
+    /// imply it, so a key may add without being able to remove.
+    RemoveHistory,
 }
 
 impl Scope {
@@ -30,6 +34,7 @@ impl Scope {
             Scope::Sources => "sources",
             Scope::ReadHistory => "read_history",
             Scope::WriteHistory => "write_history",
+            Scope::RemoveHistory => "remove_history",
         }
     }
 }

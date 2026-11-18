@@ -165,12 +165,13 @@ pub(crate) fn catalog(host: &dyn Host, engine: &[&str]) -> Result<Vec<Listed>, S
                 .collect(),
             _ => Vec::new(),
         };
-        let writes = spec.scope == Scope::WriteHistory;
+        let writes = matches!(spec.scope, Scope::WriteHistory | Scope::RemoveHistory);
+        let removes = spec.scope == Scope::RemoveHistory;
         let mut tool = Tool::new(name.to_owned(), spec.description.clone(), input)
             .with_annotations(
                 ToolAnnotations::with_title(spec.title.clone())
                     .read_only(!writes)
-                    .destructive(false)
+                    .destructive(removes)
                     .idempotent(!writes)
                     .open_world(false),
             );

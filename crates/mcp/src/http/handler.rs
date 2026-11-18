@@ -15,9 +15,10 @@ use serde_json::{Map, Value};
 use super::Shared;
 use super::auth::Credential;
 use super::host::{Activity, HostError};
+use crate::scope::SOURCES;
 use crate::server::{INSTRUCTIONS, engine_result, error_text, server_info, tool_event, tool_input};
 use crate::session::usd;
-use crate::{Caller, Scope, Session, ToolError, ToolErrorKind, tools};
+use crate::{Caller, Session, ToolError, ToolErrorKind, tools};
 
 const HOST_INSTRUCTIONS: &str = "Tools provided by the app that embeds aspero.";
 
@@ -46,14 +47,14 @@ impl Handler {
     fn listed(&self, key: &Credential) -> Vec<Tool> {
         let scopes = &key.key.scopes;
         let mut tools = Vec::new();
-        if self.shared.engine_tools && scopes.contains(&Scope::Sources) {
+        if self.shared.engine_tools && holds(scopes, SOURCES) {
             tools.extend(self.shared.engine_listed.iter().cloned());
         }
         tools.extend(
             self.shared
                 .catalog()
                 .iter()
-                .filter(|l| scopes.contains(&l.scope))
+                .filter(|l| holds(scopes, &l.scope))
                 .map(|l| l.tool.clone()),
         );
         tools
@@ -74,8 +75,8 @@ impl Handler {
         // The key's sessions' paid calls in flight hold their estimates, as
         // a session's do.
         let paid = self.shared.paid(&k.id);
-        let held = if !k.scopes.contains(&Scope::Sources) {
-            Err(lacks(name, Scope::Sources))
+        let held = if !holds(&k.scopes, SOURCES) {
+            Err(lacks(name, SOURCES))
         } else if spends {
             let estimate = tools::estimate(name, &arguments);
             paid.hold(estimate, || self.daily_left(key)).await.map(Some)
@@ -135,14 +136,14 @@ impl Handler {
         key: &Credential,
         context: &RequestContext<RoleServer>,
         name: &str,
-        scope: Scope,
+        scope: &str,
         required: &[String],
         arguments: Map<String, Value>,
     ) -> (CallToolResult, Activity) {
         let k = &key.key;
         // The app words its own tools: no query or count.
         let fail = |e: ToolError| (tool_error(&e), activity(k, name, None, Err(&e), 0.0));
-        if !k.scopes.contains(&scope) {
+        if !holds(&k.scopes, scope) {
             return fail(lacks(name, scope));
         }
         let missing: Vec<&str> = required
@@ -307,7 +308,7 @@ impl ServerHandler for Handler {
                             &key,
                             &context,
                             &name,
-                            listed.scope,
+                            &listed.scope,
                             &listed.required,
                             arguments,
                         )
@@ -358,13 +359,15 @@ fn caller(key: &super::Key, context: &RequestContext<RoleServer>) -> Caller {
     }
 }
 
-fn lacks(tool: &str, scope: Scope) -> ToolError {
+/// Whether a key's scopes hold `scope`, exactly: no scope implies another.
+fn holds(scopes: &[String], scope: &str) -> bool {
+    scopes.iter().any(|s| s == scope)
+}
+
+fn lacks(tool: &str, scope: &str) -> ToolError {
     ToolError::new(
         ToolErrorKind::Forbidden,
-        format!(
-            "this key can't use {tool}: it lacks the {} scope",
-            scope.as_str()
-        ),
+        format!("this key can't use {tool}: it lacks the {scope} scope"),
     )
 }
 

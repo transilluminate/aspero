@@ -14,7 +14,8 @@
 //!
 //! - With the `http` feature, `http::HttpServer`: Streamable HTTP on
 //!   loopback for apps that embed aspero, with bearer keys and their
-//!   [`Scope`]s, budgets per session and per key per day, and tools the
+//!   [`scope`]s (aspero's `sources`, and the scopes the host declares for
+//!   its tools), budgets per session and per key per day, and tools the
 //!   app provides (`http::Host`).
 //!
 //! A session is one connection: over stdio, the agent that launched the
@@ -25,13 +26,14 @@ mod args;
 #[cfg(feature = "http")]
 pub mod http;
 mod schema;
+pub mod scope;
 mod server;
 mod session;
 mod summary;
 mod tools;
 
 pub use server::{serve, serve_stdio};
-pub use session::{Caller, DEFAULT_BUDGET_USD, Scope, Session};
+pub use session::{Caller, DEFAULT_BUDGET_USD, Session};
 pub use tools::{
     MAX_CITATIONS, MAX_IDS, MAX_LIMIT, Output, ToolError, ToolErrorKind, ToolSpec, Tools,
 };

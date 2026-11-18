@@ -11,10 +11,13 @@
 //!   `Origin` (403: browsers send one, agents don't); a bearer token whose
 //!   SHA-256 is a key's, compared in constant time (401, no detail); a
 //!   session id, if any, that this key opened.
-//! - **Scopes:** the engine tools need [`Scope::Sources`], a host tool
-//!   its declared scope. `tools/list` shows a key what it may call, from
-//!   its scopes and the host's tools at the time; a call without the scope
-//!   is a tool error, and the host isn't asked.
+//! - **Scopes:** strings ([`crate::scope`]). The engine tools need
+//!   `sources`, aspero's own; a host tool the scope its host declared for
+//!   it ("history.read"), exactly: no scope implies another. `tools/list`
+//!   shows a key what it may call, from its scopes and the host's tools at
+//!   the time; a call without the scope is a tool error naming it, and the
+//!   host isn't asked. A host tool's annotations are the hints its host
+//!   declared ([`HostTool::read_only`] and the others).
 //! - **Changes:** when [`HttpServer::set_keys`] changes a key's scopes
 //!   (same id, same hash), that key's open sessions are sent
 //!   `notifications/tools/list_changed`; after
@@ -68,7 +71,7 @@ use host::Listed;
 
 use crate::server::engine_tools;
 use crate::session::Reservations;
-use crate::{DEFAULT_BUDGET_USD, Scope, Tools};
+use crate::{DEFAULT_BUDGET_USD, Tools};
 
 /// The port unless the app picks another.
 pub const DEFAULT_PORT: u16 = 23130;
@@ -103,7 +106,11 @@ pub struct Key {
     pub id: String,
     /// Shown to the user in activity ("Claude Code").
     pub name: String,
-    pub scopes: Vec<Scope>,
+    /// What it may do, exactly: `sources` ([`crate::scope::SOURCES`]) for
+    /// the engine tools, and the scopes of the host's tools it may use
+    /// ([`crate::scope::check_key`] says which names it may hold). A scope
+    /// no host tool declares grants nothing.
+    pub scopes: Vec<String>,
     /// The SHA-256 of the token, as hex ([`sha256_hex`]).
     pub sha256: String,
     /// Engine spend allowed per UTC day, in USD.
@@ -749,8 +756,9 @@ impl HttpServer {
     /// or whose hash changed, end; their next request is refused (401).
     /// Sessions of a key whose scopes changed (same id, same hash) are sent
     /// `notifications/tools/list_changed`, and list and call by the new
-    /// scopes from now on. A key whose hash isn't 64 hex digits is left out
-    /// (and logged): it could never match. Doesn't wait on any client.
+    /// scopes from now on. A key whose hash isn't 64 hex digits, or that
+    /// holds a scope no key may ([`crate::scope::check_key`]), is left out
+    /// (and logged). Doesn't wait on any client.
     pub fn set_keys(&self, keys: Vec<Key>) {
         let credentials: Vec<Arc<Credential>> = keys
             .into_iter()
@@ -759,7 +767,7 @@ impl HttpServer {
                 match Credential::new(k) {
                     Ok(c) => Some(Arc::new(c)),
                     Err(e) => {
-                        tracing::warn!(target: "aspero::mcp", key = %id, "key ignored: its hash or budget is invalid");
+                        tracing::warn!(target: "aspero::mcp", key = %id, "key ignored: its hash, budget or a scope is invalid");
                         tracing::debug!(target: "aspero::mcp", key = %id, error = %e, "key_detail");
                         None
                     }
@@ -825,8 +833,8 @@ impl HttpServer {
 
     /// Asks the host for its tools again, lists them from now on, and
     /// sends every open session `notifications/tools/list_changed`
-    /// (without waiting on any client). On a clash or a bad schema, keeps
-    /// the tools it had, and tells no one.
+    /// (without waiting on any client). On a clash, a bad scope or a bad
+    /// schema, keeps the tools it had, and tells no one.
     pub fn host_tools_changed(&self) -> Result<(), StartError> {
         let shared = &self.state.shared;
         let Some(host) = &shared.host else {
@@ -926,7 +934,7 @@ impl Drop for HttpServer {
 }
 
 /// Whether two keys may do the same things, in whatever order.
-fn same_scopes(a: &[Scope], b: &[Scope]) -> bool {
+fn same_scopes(a: &[String], b: &[String]) -> bool {
     a.iter().all(|s| b.contains(s)) && b.iter().all(|s| a.contains(s))
 }
 
@@ -1030,7 +1038,7 @@ mod tests {
         let key = Key {
             id: "k".into(),
             name: "agent".into(),
-            scopes: vec![Scope::Sources],
+            scopes: vec![crate::scope::SOURCES.into()],
             sha256: sha256_hex("token"),
             daily_budget_usd: 1.0,
         };

@@ -3,6 +3,38 @@
 Releases 0.10 to 0.19 are in [docs/changelog/0.1x.md](docs/changelog/0.1x.md),
 and 0.1 to 0.9 in [docs/changelog/0.0x.md](docs/changelog/0.0x.md).
 
+## Unreleased
+
+Changed (breaking for embedders):
+
+- MCP: host tools' scopes are declared by the host, not enumerated by
+  aspero (#153). A scope is a string: `sources` is aspero's own, for the
+  engine tools; every other names a host tool's scope as the host chose
+  it (`history.read`, `history.remove`, `notes.write`), at most 64 ASCII
+  letters, digits, `.`, `_` and `-`, never `sources`. A key may list and
+  call a host tool only if it holds exactly that tool's scope; none
+  implies another. A malformed scope on a key fails `start` (and leaves
+  the key out of `setKeys`), on a tool fails `start` or
+  `hostToolsChanged()`; a scope no tool declares grants nothing. Errors
+  name the scope string ("it lacks the history.write scope").
+- FFI: `McpScope` is gone. `McpKey.scopes` and `McpCaller.scopes` are
+  `[String]`, and `HostTool.scope` a `String`. The old cases become
+  `"sources"` and the app's own names: `.readHistory` →
+  `"history.read"`, `.writeHistory` → `"history.write"`,
+  `.removeHistory` → `"history.remove"`, for example, on the keys and
+  the tools alike.
+- FFI: `HostTool` declares its hints, which were derived from the scope:
+  `readOnly` (default false), `destructive` (default true) and
+  `idempotent` (default false), MCP's own defaults, listed as the tool's
+  annotations; a read-only tool is never listed as destructive. The old
+  annotations were: reading `readOnly: true, destructive: false,
+  idempotent: true`; writing `readOnly: false, destructive: false`;
+  removing `readOnly: false` (`destructive` left on).
+- Rust: `aspero_mcp::Scope` is gone for `aspero_mcp::scope` (`SOURCES`,
+  `check_host`, `check_key`); `http::Key::scopes`, `Caller::scopes` and
+  `http::HostTool::scope` are strings, and `http::HostTool` gains
+  `read_only`, `destructive` and `idempotent`.
+
 ## 0.33.0
 
 Added:

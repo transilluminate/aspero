@@ -47,7 +47,7 @@ pub fn verification(echo: Value, v: &Verification, full: bool) -> Value {
     item
 }
 
-/// The reason as data: `{"code", "differs": [{"field", "actual", "cited"}],
+/// The reason as data: `{"code", "differs": [{"field", "actual", "cited", "kind"}],
 /// "cited": candidate}`, so a front end can word it itself.
 fn reason(v: &Verification, full: bool) -> Value {
     let mut out = json!({"code": v.reason.as_str()});
@@ -62,6 +62,10 @@ fn reason(v: &Verification, full: bool) -> Value {
             }
             if let Some(cited) = &d.cited {
                 out["cited"] = json!(cited);
+            }
+            // What the work is, for `kind`: `reply`, `expression_of_concern`, ….
+            if let Some(kind) = d.kind {
+                out["kind"] = json!(kind.as_str().replace(' ', "_"));
             }
             out
         })

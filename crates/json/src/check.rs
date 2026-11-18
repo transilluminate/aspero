@@ -54,11 +54,11 @@ pub fn finding(f: &Finding, keys: &[&str]) -> Value {
         },
         Finding::YearDiffers { claimed, actual } => json!({"claimed": claimed, "actual": actual}),
         Finding::Duplicate { of } => json!({"of": keys.get(*of).copied().unwrap_or("?")}),
-        Finding::Updated { update } => json!({"update": update}),
-        Finding::Entry { note } => json!({
-            "field": note.field,
-            "value": note.value,
-            "problem": note.problem.as_str(),
+        Finding::Notice { notice } => json!({"notice": notice}),
+        Finding::Entry { problem } => json!({
+            "field": problem.field,
+            "value": problem.value,
+            "problem": problem.problem.as_str(),
         }),
         _ => Value::Null,
     };

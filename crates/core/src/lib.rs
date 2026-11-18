@@ -56,6 +56,6 @@ pub use references::{IndentedLine, LineReference, Reference, split_lines, split_
 pub use resilience::ResiliencePolicy;
 pub use webpage::{PageClaim, PageId, PageKind, PageSource, WebPage, claim_from_page};
 pub use work::{
-    OpenAccess, PartialDate, Person, Update, UpdateKind, UpdateTo, Work, WorkType, orcid,
+    Notice, NoticeFor, NoticeKind, OpenAccess, PartialDate, Person, Work, WorkType, orcid,
     tidy_abstract,
 };

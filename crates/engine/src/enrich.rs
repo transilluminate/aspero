@@ -1,7 +1,7 @@
 //! Filling in what a record's provider didn't say, from the providers
 //! that know: notices (both directions) and open access.
 
-use aspero_core::{Field, FieldSet, IdKind, ProviderId, SourceRecord, Update, Usage, WorkId};
+use aspero_core::{Field, FieldSet, IdKind, Notice, ProviderId, SourceRecord, Usage, WorkId};
 
 use crate::{Engine, Entry, LookupReport, LookupResult, resolve};
 
@@ -19,10 +19,10 @@ impl Engine {
                     continue;
                 };
                 let work = &mut record.work;
-                resolve::merge_updates(&mut work.updates, &found.work.updates);
-                for target in found.work.update_to {
-                    if !work.update_to.contains(&target) {
-                        work.update_to.push(target);
+                resolve::merge_notices(&mut work.notices, &found.work.notices);
+                for target in found.work.notice_for {
+                    if !work.notice_for.contains(&target) {
+                        work.notice_for.push(target);
                     }
                 }
                 work.type_as_notice();
@@ -30,11 +30,11 @@ impl Engine {
                 // retracted, without details: name the record as its own
                 // notice, so every row about the one event shares `notice`.
                 let own_doi = record.ids.iter().find(|id| id.kind() == IdKind::Doi);
-                if work.update_to.iter().any(|t| t.kind.is_retraction())
+                if work.notice_for.iter().any(|t| t.kind.is_retraction())
                     && let Some(own) = own_doi
                 {
-                    let bare = |u: &&mut Update| u.kind.is_retraction() && u.notice.is_none();
-                    for update in work.updates.iter_mut().filter(bare) {
+                    let bare = |u: &&mut Notice| u.kind.is_retraction() && u.notice.is_none();
+                    for update in work.notices.iter_mut().filter(bare) {
                         update.notice = Some(own.clone());
                     }
                 }

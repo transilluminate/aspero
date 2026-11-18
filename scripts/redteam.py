@@ -97,7 +97,9 @@ def run(cases, binary, cache_dir, tape, replay_only):
 
 def retraction_flagged(result):
     work = (result.get("best_match") or {}).get("work") or {}
-    return any(u.get("kind") == "retraction" for u in work.get("updates", []))
+    # `notices` since 0.35 (#160), `updates` before: older binaries still run.
+    notices = work.get("notices", work.get("updates", []))
+    return any(u.get("kind") == "retraction" for u in notices)
 
 
 def id_form(work_id):

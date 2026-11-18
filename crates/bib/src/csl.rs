@@ -67,7 +67,7 @@ pub(crate) fn entry(item: &CslItem, position: usize) -> BibEntry {
             .map_or_else(|| position.to_string(), Scalar::text),
         entry_type: item.item_type.clone().unwrap_or_default().to_lowercase(),
         claim,
-        notes: ids.notes,
+        problems: ids.problems,
     }
 }
 

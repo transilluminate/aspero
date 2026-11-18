@@ -2,7 +2,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use aspero_core::{ErrorKind, IdKind, ProviderId, SearchQuery, SourceRecord, Update, WorkId};
+use aspero_core::{ErrorKind, IdKind, Notice, ProviderId, SearchQuery, SourceRecord, WorkId};
 
 use super::{
     Incomplete, IncompleteKind, MAX_FILTER, OPENALEX, RetractedReference, Section, Seed, Spend,
@@ -139,7 +139,7 @@ impl Engine {
 }
 
 /// Who reported a retraction: the notice's source, or `fallback`.
-fn notice_source(update: &Update, fallback: &str) -> String {
+fn notice_source(update: &Notice, fallback: &str) -> String {
     update.source.clone().unwrap_or_else(|| fallback.to_owned())
 }
 

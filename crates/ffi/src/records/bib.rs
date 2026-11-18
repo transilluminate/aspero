@@ -37,7 +37,7 @@ pub struct BibEntry {
     /// `jour` (RIS), `article-journal` (CSL-JSON).
     pub entry_type: String,
     /// Problems with the entry's own fields: a `doi` that isn't a DOI.
-    pub notes: Vec<BibNote>,
+    pub problems: Vec<BibFieldProblem>,
     /// Whether there is anything to verify: a title or an identifier.
     pub checkable: bool,
 }
@@ -61,7 +61,7 @@ impl From<aspero_bib::BibEntry> for BibEntry {
                 site: None,
             },
             entry_type: e.entry_type,
-            notes: e.notes.iter().map(Into::into).collect(),
+            problems: e.problems.iter().map(Into::into).collect(),
             checkable,
         }
     }
@@ -69,7 +69,7 @@ impl From<aspero_bib::BibEntry> for BibEntry {
 
 /// A problem with one of an entry's own fields.
 #[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
-pub struct BibNote {
+pub struct BibFieldProblem {
     /// The field as the file names it: `doi`, `eprint`, `DO`, `ISBN`.
     pub field: String,
     pub value: String,
@@ -98,9 +98,9 @@ impl From<aspero_bib::Problem> for BibProblem {
     }
 }
 
-impl From<&aspero_bib::Note> for BibNote {
-    fn from(n: &aspero_bib::Note) -> Self {
-        BibNote {
+impl From<&aspero_bib::FieldProblem> for BibFieldProblem {
+    fn from(n: &aspero_bib::FieldProblem) -> Self {
+        BibFieldProblem {
             field: n.field.clone(),
             value: n.value.clone(),
             problem: n.problem.into(),

@@ -4,7 +4,7 @@
 
 use aspero_core::matching::title_similarity;
 use aspero_core::publication::first_page;
-use aspero_core::{IdKind, PartialDate, ProviderId, SourceRecord, UpdateKind, WorkId};
+use aspero_core::{IdKind, NoticeKind, PartialDate, ProviderId, SourceRecord, WorkId};
 
 use crate::{Engine, Entry, LookupReport};
 
@@ -105,9 +105,9 @@ impl Engine {
         };
         let mut notices: Vec<WorkId> = Vec::new();
         for record in report.results.iter().filter_map(|r| r.record.as_ref()) {
-            for u in &record.work.updates {
+            for u in &record.work.notices {
                 if let Some(n) = &u.notice
-                    && u.kind != UpdateKind::NewVersion
+                    && u.kind != NoticeKind::NewVersion
                     && n.kind() == IdKind::Doi
                     && !notices.contains(n)
                 {
@@ -147,7 +147,7 @@ impl Engine {
             })
             .collect();
         for record in report.results.iter_mut().filter_map(|r| r.record.as_mut()) {
-            for u in &mut record.work.updates {
+            for u in &mut record.work.notices {
                 let Some(at) = u
                     .notice
                     .as_ref()

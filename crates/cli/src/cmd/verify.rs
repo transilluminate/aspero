@@ -5,7 +5,7 @@ use std::fmt::Write as _;
 
 use aspero_core::{PageClaim, PageKind, PageSource, PartialDate, ProviderId, Usage, WebPage};
 use aspero_engine::{
-    Candidate, Difference, Engine, Reason, Verdict, Verification, describe_update,
+    Candidate, Difference, Engine, Reason, Verdict, Verification, describe_notice,
 };
 use aspero_json::{ClaimInput, InputClaim};
 use futures::StreamExt;
@@ -442,7 +442,11 @@ fn row(input: &str, v: &Verification) -> Vec<Text> {
         found.push(described(c));
         found.push(output::main_id(&c.ids));
     }
-    found.extend(v.notes.iter().map(|n| format!("⚠ {}", describe_update(n))));
+    found.extend(
+        v.notices
+            .iter()
+            .map(|n| format!("⚠ {}", describe_notice(n))),
+    );
     vec![
         grid::status(verdict_word(v.verdict), level(v.verdict)),
         Text::from(confidence),

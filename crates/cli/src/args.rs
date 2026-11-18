@@ -328,7 +328,7 @@ JSON works:
                DOI, else arXiv, PMID, PMCID, …): dedupe works on it
   authors      [{\"name\": \"Yann LeCun\", \"orcid\": \"...\"}, ...], the same
                shape with or without --full (which adds given and family)
-  updates      notices about the work: [{\"kind\": \"retraction\", \"notice\":
+  notices      editorial notices about the work: [{\"kind\": \"retraction\", \"notice\":
                \"doi:...\", \"date\": \"...\", \"source\": \"...\"}]; kinds:
                retraction, withdrawal, expression_of_concern, correction,
                new_version (superseded; the notice is the newer work), …
@@ -343,7 +343,7 @@ JSON works:
                another provider answers that wrongly; --full then shows
                `disagreements` there.
   type         CSL types; notices themselves are \"erratum\" or \"retraction\"
-  update_to    for a notice itself, the works it updates: [{\"kind\",
+  notice_for   for a notice itself, the works it updates: [{\"kind\",
                \"work\", \"date\", \"source\"}]
   open_access  whether a free, legal copy exists: {\"is_oa\": true,
                \"status\": gold|diamond|hybrid|bronze|green|closed, \"pdf_url\",

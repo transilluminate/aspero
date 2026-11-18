@@ -116,10 +116,10 @@ fn retracted(
     notice: Option<&str>,
     source: &str,
 ) -> aspero_core::SourceRecord {
-    let mut u = aspero_core::Update::new(aspero_core::UpdateKind::Retraction);
+    let mut u = aspero_core::Notice::new(aspero_core::NoticeKind::Retraction);
     u.notice = notice.map(|n| n.parse().unwrap());
     u.source = Some(source.into());
-    record.work.updates.push(u);
+    record.work.notices.push(u);
     record
 }
 
@@ -159,16 +159,16 @@ async fn retractions_are_errors_with_the_detailed_notice() {
         "the marker doesn't hide the title"
     );
     assert!(
-        c.verification.reason_text.contains("note: RETRACTED"),
+        c.verification.reason_text.contains("notice: RETRACTED"),
         "{}",
         c.verification.reason_text
     );
-    assert!(c.verification.notes[0].kind.is_retraction());
+    assert!(c.verification.notices[0].kind.is_retraction());
     let notices: Vec<_> = c
         .findings
         .iter()
         .filter_map(|f| match f {
-            Finding::Updated { update } => Some(update.notice.as_ref().map(ToString::to_string)),
+            Finding::Notice { notice } => Some(notice.notice.as_ref().map(ToString::to_string)),
             _ => None,
         })
         .collect();

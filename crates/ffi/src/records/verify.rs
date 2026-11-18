@@ -382,12 +382,12 @@ pub struct Verification {
     pub verdict: Verdict,
     /// Why, as data, for the app to word.
     pub reason: Reason,
-    /// One sentence in English, `reason` and `notes`: for logs and agents,
+    /// One sentence in English, `reason` and `notices`: for logs and agents,
     /// not for display in an app UI.
     pub reason_text: String,
     /// About `bestMatch`, whatever the verdict: its retraction or
     /// withdrawal, and its newer version.
-    pub notes: Vec<Notice>,
+    pub notices: Vec<Notice>,
     /// The claim as read: identifiers as written (with the other readings
     /// tried in `alternativeIds`), and from free text the year, journal
     /// (`container`, where it can be told), volume and first page. `nil`
@@ -421,7 +421,7 @@ impl Verification {
             verdict: v.verdict.into(),
             reason: Reason::new(&v.reason, &v.report.candidates),
             reason_text: v.reason_text.clone(),
-            notes: v.notes.iter().map(Notice::from).collect(),
+            notices: v.notices.iter().map(Notice::from).collect(),
             read: Some(Claim::read(&v.read, key(claim))),
             best_match: v
                 .best_match
@@ -446,7 +446,7 @@ impl Verification {
                 why: why.to_owned(),
             },
             reason_text: why.to_owned(),
-            notes: Vec::new(),
+            notices: Vec::new(),
             read: None,
             best_match: None,
             candidates: Vec::new(),

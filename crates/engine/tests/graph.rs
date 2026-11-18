@@ -8,9 +8,9 @@ use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
 
 use aspero_core::{
-    Capabilities, Cursor, Error, FieldSet, Hit, IdKind, Lookup, Page, PartialDate, Person,
-    Provider, ProviderId, Raw, ResiliencePolicy, Response, Result, SearchQuery, SourceRecord,
-    Update, UpdateKind, Usage, Work, WorkId,
+    Capabilities, Cursor, Error, FieldSet, Hit, IdKind, Lookup, Notice, NoticeKind, Page,
+    PartialDate, Person, Provider, ProviderId, Raw, ResiliencePolicy, Response, Result,
+    SearchQuery, SourceRecord, Usage, Work, WorkId,
 };
 use aspero_engine::{
     Analysis, AnalysisKind, Cache, Engine, Incomplete, IncompleteKind, OddOne, OddReason,
@@ -274,9 +274,9 @@ fn work(
 }
 
 fn retracted(mut record: SourceRecord, source: &str) -> SourceRecord {
-    let mut update = Update::new(UpdateKind::Retraction);
+    let mut update = Notice::new(NoticeKind::Retraction);
     update.source = Some(source.into());
-    record.work.updates.push(update);
+    record.work.notices.push(update);
     record
 }
 

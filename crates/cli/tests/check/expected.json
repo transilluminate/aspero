@@ -285,25 +285,25 @@
             "doi:10.1234/retracted"
           ],
           "issued": "2019",
-          "source": "openalex",
-          "title": "A retracted study",
-          "updates": [
+          "notices": [
             {
               "kind": "retraction",
               "notice": "doi:10.1234/notice"
             }
-          ]
+          ],
+          "source": "openalex",
+          "title": "A retracted study"
         }
       },
       "findings": [
         {
-          "kind": "updated",
+          "kind": "notice",
           "message": "RETRACTED (notice doi:10.1234/notice)",
-          "severity": "error",
-          "update": {
+          "notice": {
             "kind": "retraction",
             "notice": "doi:10.1234/notice"
-          }
+          },
+          "severity": "error"
         }
       ],
       "key": "retracted",

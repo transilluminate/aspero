@@ -775,7 +775,7 @@ fn unretracted_works_have_no_updates() {
             .as_ref()
             .unwrap()
             .work
-            .updates
+            .notices
             .is_empty()
     );
 }

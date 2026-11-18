@@ -5,7 +5,7 @@ mod common;
 
 use std::sync::Arc;
 
-use aspero_core::{FieldSet, PartialDate, SourceRecord, Update, UpdateKind, WorkId};
+use aspero_core::{FieldSet, Notice, NoticeKind, PartialDate, SourceRecord, WorkId};
 use common::*;
 
 fn id(s: &str) -> WorkId {
@@ -20,10 +20,10 @@ fn dated(mut r: SourceRecord, y: i16, m: u8, d: Option<u8>, page: &str) -> Sourc
 
 fn corrected_by(mut r: SourceRecord, notices: &[(&str, PartialDate)]) -> SourceRecord {
     for (notice, date) in notices {
-        let mut u = Update::new(UpdateKind::Correction);
+        let mut u = Notice::new(NoticeKind::Correction);
         u.notice = Some(id(notice));
         u.date = Some(*date);
-        r.work.updates.push(u);
+        r.work.notices.push(u);
     }
     r
 }
@@ -64,7 +64,7 @@ async fn notices_are_dated_by_when_they_appeared_unless_records_conflict() {
         .await;
     engine.add_notices(&mut report).await;
 
-    let updates = &report.results[0].record.as_ref().unwrap().work.updates;
+    let updates = &report.results[0].record.as_ref().unwrap().work.notices;
     let a = updates
         .iter()
         .find(|u| u.notice == Some(id("10.1234/fix.a")))

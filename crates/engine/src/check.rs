@@ -7,12 +7,12 @@
 //! ([`Engine::check_entries`]), malformed fields and entries with nothing
 //! to check are findings too.
 
-use aspero_bib::{BibEntry, Note};
+use aspero_bib::{BibEntry, FieldProblem};
 use aspero_core::matching::same_work_id;
-use aspero_core::{Claim, IdKind, ProviderId, Update, UpdateKind, Usage, WorkId};
+use aspero_core::{Claim, IdKind, Notice, NoticeKind, ProviderId, Usage, WorkId};
 use futures::StreamExt;
 
-use crate::{Candidate, Engine, Verdict, Verification, describe_update};
+use crate::{Candidate, Engine, Verdict, Verification, describe_notice};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 #[non_exhaustive]
@@ -51,9 +51,9 @@ pub enum Finding {
     /// Another entry (by index) cites the same work.
     Duplicate { of: usize },
     /// The work has an editorial notice: retraction, correction, ….
-    Updated { update: Update },
+    Notice { notice: Notice },
     /// One of a bibliography entry's own fields is malformed.
-    Entry { note: Note },
+    Entry { problem: FieldProblem },
     /// The bibliography entry has nothing to check: no title or identifier.
     Skipped,
 }
@@ -75,9 +75,9 @@ impl Finding {
             Finding::Duplicate { .. } | Finding::Entry { .. } | Finding::Skipped => {
                 Severity::Warning
             }
-            Finding::Updated { update } => match update.kind {
-                UpdateKind::Retraction | UpdateKind::Withdrawal => Severity::Error,
-                UpdateKind::ExpressionOfConcern | UpdateKind::NewVersion => Severity::Warning,
+            Finding::Notice { notice } => match notice.kind {
+                NoticeKind::Retraction | NoticeKind::Withdrawal => Severity::Error,
+                NoticeKind::ExpressionOfConcern | NoticeKind::NewVersion => Severity::Warning,
                 _ => Severity::Info,
             },
         }
@@ -91,7 +91,7 @@ impl Finding {
             Finding::ReplaceId { .. } => "replace_id",
             Finding::YearDiffers { .. } => "year_differs",
             Finding::Duplicate { .. } => "duplicate",
-            Finding::Updated { .. } => "updated",
+            Finding::Notice { .. } => "notice",
             Finding::Entry { .. } => "entry",
             Finding::Skipped => "skipped",
         }
@@ -122,8 +122,8 @@ impl Finding {
             Finding::Duplicate { of } => {
                 format!("duplicate of {}", keys.get(*of).copied().unwrap_or("?"))
             }
-            Finding::Updated { update } => describe_update(update),
-            Finding::Entry { note } => note.to_string(),
+            Finding::Notice { notice } => describe_notice(notice),
+            Finding::Entry { problem } => problem.to_string(),
             Finding::Skipped => "nothing to check: no title or identifier".into(),
         }
     }
@@ -237,9 +237,11 @@ impl Engine {
             .iter()
             .map(|entry| {
                 let mut findings: Vec<Finding> = entry
-                    .notes
+                    .problems
                     .iter()
-                    .map(|note| Finding::Entry { note: note.clone() })
+                    .map(|problem| Finding::Entry {
+                        problem: problem.clone(),
+                    })
                     .collect();
                 if !entry.is_checkable() {
                     findings.push(Finding::Skipped);
@@ -351,9 +353,9 @@ pub fn findings(claim: &Claim, v: &Verification) -> Vec<Finding> {
     };
     let suggested = preferred_doi(&best.ids);
     out.extend(
-        best.updates
+        best.notices
             .iter()
-            .map(|u| Finding::Updated { update: u.clone() }),
+            .map(|n| Finding::Notice { notice: n.clone() }),
     );
 
     // Each claimed identifier that isn't the matched work's: flagged when

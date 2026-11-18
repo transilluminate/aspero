@@ -68,7 +68,7 @@ pub struct BibEntry {
     pub entry_type: String,
     pub claim: Claim,
     /// Problems with the entry's own fields.
-    pub notes: Vec<Note>,
+    pub problems: Vec<FieldProblem>,
 }
 
 impl BibEntry {
@@ -199,14 +199,14 @@ fn entry(e: &biblatex::Entry) -> BibEntry {
         key: e.key.clone(),
         entry_type: e.entry_type.to_string().to_lowercase(),
         claim,
-        notes: ids.notes,
+        problems: ids.problems,
     }
 }
 
 /// A problem with one of an entry's own fields.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
-pub struct Note {
+pub struct FieldProblem {
     /// The field as the file names it: `doi`, `eprint`, `DO`, `ISBN`.
     pub field: String,
     pub value: String,
@@ -233,7 +233,7 @@ impl Problem {
     }
 }
 
-impl fmt::Display for Note {
+impl fmt::Display for FieldProblem {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let what = match self.problem {
             Problem::NotADoi => "DOI",
@@ -253,7 +253,7 @@ impl fmt::Display for Note {
 #[derive(Default)]
 struct Ids {
     ids: Vec<WorkId>,
-    notes: Vec<Note>,
+    problems: Vec<FieldProblem>,
 }
 
 impl Ids {
@@ -264,7 +264,7 @@ impl Ids {
     }
 
     fn note(&mut self, field: &str, value: &str, problem: Problem) {
-        self.notes.push(Note {
+        self.problems.push(FieldProblem {
             field: field.into(),
             value: value.into(),
             problem,
@@ -384,7 +384,7 @@ mod tests {
         let book = &entries[3];
         assert_eq!(book.claim.ids[0].to_string(), "isbn:9780262035613");
         assert_eq!(
-            book.notes
+            book.problems
                 .iter()
                 .map(ToString::to_string)
                 .collect::<Vec<_>>(),
@@ -413,7 +413,7 @@ mod tests {
     fn field_problems_are_noted_and_urls_yield_ids() {
         let entries = parse(BIB).unwrap();
         let broken = &entries[2];
-        let note = &broken.notes[0];
+        let note = &broken.problems[0];
         assert_eq!(
             (note.field.as_str(), note.value.as_str()),
             ("doi", "not-a-doi")

@@ -208,8 +208,13 @@ ids (`CallId`), cache hits and each request's op and attempt in
   them so), since nothing else in it could be that number; and a table
   row's one cell of 7 or 8 digits beside a DOI for its PMID.
 - **Work** (`crates/core/src/work.rs`): CSL-shaped, all-optional, plus
-  `updates` (retractions, corrections, newer versions), `update_to`,
-  `other_years`, `open_access`. Guideline editions aren't linked in any
+  `notices` (retractions, corrections, newer versions: `Notice`,
+  `NoticeKind`), `notice_for` (a notice's own link to what it updates:
+  `NoticeFor`), `other_years`, `open_access`. One name for a notice
+  everywhere (#160); the cache stores the two under their names before
+  0.35 (`updates`, `update_to`), so caches read across versions. "Note"
+  is kept for what people write about a work: a bibliography entry's
+  bad field is a `FieldProblem`. Guideline editions aren't linked in any
   source, so aren't followed.
 - **Registry checks**: Crossref registered most DOIs, so its record is the
   reference; with `--full` a record contradicting it is reported, not

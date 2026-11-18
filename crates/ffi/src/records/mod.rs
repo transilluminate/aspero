@@ -174,7 +174,7 @@ mod tests {
             record,
             ids: Vec::new(),
             sightings: Vec::new(),
-            updates: Vec::new(),
+            notices: Vec::new(),
         }];
         for r in engine::Reason::ALL {
             assert_eq!(name(Reason::new(r, &candidates)), r.as_str());

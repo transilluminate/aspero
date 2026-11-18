@@ -5,8 +5,8 @@ use std::sync::Arc;
 
 use aspero_core::testing::{ReplayClient, block_on, fixture, response};
 use aspero_core::{
-    Cursor, Error, FieldSet, FilterValue, HttpResponse, Provider, QueryNode, SearchQuery, Sort,
-    TermField, UpdateKind, WorkId, WorkType, YearRange,
+    Cursor, Error, FieldSet, FilterValue, HttpResponse, NoticeKind, Provider, QueryNode,
+    SearchQuery, Sort, TermField, WorkId, WorkType, YearRange,
 };
 use aspero_europepmc::{EuropePmc, EuropePmcConfig};
 
@@ -91,7 +91,7 @@ fn batch_lookup_of_pmids_pmcids_and_dois() {
 
     let r = wakefield.record.as_ref().unwrap();
     let retraction = r.work.retraction().expect("Retracted Publication flag");
-    assert_eq!(retraction.kind, UpdateKind::Retraction);
+    assert_eq!(retraction.kind, NoticeKind::Retraction);
     assert_eq!(retraction.source.as_deref(), Some("europepmc"));
 
     assert!(missing.record.is_none());
@@ -324,7 +324,7 @@ fn trees_are_lucene_queries_across_fields() {
                 .to_lowercase()
                 .contains("review")
         );
-        assert!(w.updates.iter().all(|u| u.kind != UpdateKind::Retraction));
+        assert!(w.notices.iter().all(|u| u.kind != NoticeKind::Retraction));
     }
 }
 

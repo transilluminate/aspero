@@ -492,9 +492,9 @@ fn retraction_watch_notices_are_mapped() {
     );
     assert_eq!(r.source.as_deref(), Some("retraction-watch"));
     assert!(
-        w.updates
+        w.notices
             .iter()
-            .any(|u| u.kind == aspero_core::UpdateKind::Correction)
+            .any(|u| u.kind == aspero_core::NoticeKind::Correction)
     );
 }
 

@@ -3,7 +3,7 @@
 
 use std::time::SystemTime;
 
-use aspero_core::{SourceRecord, UpdateKind};
+use aspero_core::SourceRecord;
 use aspero_engine::Candidate as CoreCandidate;
 
 use super::time;
@@ -100,8 +100,8 @@ impl Work {
             publisher: w.publisher.clone(),
             url: w.url.clone(),
             abstract_text: w.abstract_text.clone(),
-            notices: w.updates.iter().map(Notice::from).collect(),
-            notice_for: w.update_to.iter().map(NoticeFor::from).collect(),
+            notices: w.notices.iter().map(Notice::from).collect(),
+            notice_for: w.notice_for.iter().map(NoticeFor::from).collect(),
             open_access: w.open_access.as_ref().map(OpenAccess::from),
             cited_by_count: w.cited_by_count,
             fetched_at: time(record.fetched_at),
@@ -132,14 +132,14 @@ pub enum NoticeKind {
     },
 }
 
-impl From<&UpdateKind> for NoticeKind {
-    fn from(kind: &UpdateKind) -> Self {
+impl From<&aspero_core::NoticeKind> for NoticeKind {
+    fn from(kind: &aspero_core::NoticeKind) -> Self {
         match kind {
-            UpdateKind::Retraction => NoticeKind::Retraction,
-            UpdateKind::Withdrawal => NoticeKind::Withdrawal,
-            UpdateKind::ExpressionOfConcern => NoticeKind::ExpressionOfConcern,
-            UpdateKind::Correction => NoticeKind::Correction,
-            UpdateKind::NewVersion => NoticeKind::NewVersion,
+            aspero_core::NoticeKind::Retraction => NoticeKind::Retraction,
+            aspero_core::NoticeKind::Withdrawal => NoticeKind::Withdrawal,
+            aspero_core::NoticeKind::ExpressionOfConcern => NoticeKind::ExpressionOfConcern,
+            aspero_core::NoticeKind::Correction => NoticeKind::Correction,
+            aspero_core::NoticeKind::NewVersion => NoticeKind::NewVersion,
             other => NoticeKind::Other {
                 name: other.as_str().to_owned(),
             },
@@ -158,8 +158,8 @@ pub struct Notice {
     pub source: Option<String>,
 }
 
-impl From<&aspero_core::Update> for Notice {
-    fn from(u: &aspero_core::Update) -> Self {
+impl From<&aspero_core::Notice> for Notice {
+    fn from(u: &aspero_core::Notice) -> Self {
         Notice {
             kind: (&u.kind).into(),
             notice: u.notice.as_ref().map(ToString::to_string),
@@ -177,8 +177,8 @@ pub struct NoticeFor {
     pub date: Option<String>,
 }
 
-impl From<&aspero_core::UpdateTo> for NoticeFor {
-    fn from(u: &aspero_core::UpdateTo) -> Self {
+impl From<&aspero_core::NoticeFor> for NoticeFor {
+    fn from(u: &aspero_core::NoticeFor) -> Self {
         NoticeFor {
             kind: (&u.kind).into(),
             work: u.work.to_string(),

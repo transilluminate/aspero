@@ -20,9 +20,9 @@ use aspero_core::query::{
 };
 use aspero_core::{
     BooleanSupport, Capabilities, Cursor, Doi, Error, FieldSet, Filter, FilterValue, Hit,
-    HttpClient, HttpRequest, HttpResponse, IdKind, Lookup, Nbk, OpenAccess, Page, PartialDate,
-    Person, Pmcid, Pmid, Provider, ProviderId, QueryNode, Raw, ResiliencePolicy, Response, Result,
-    SearchMode, SearchQuery, Sort, SourceRecord, TermField, Update, UpdateKind, Work, WorkId,
+    HttpClient, HttpRequest, HttpResponse, IdKind, Lookup, Nbk, Notice, NoticeKind, OpenAccess,
+    Page, PartialDate, Person, Pmcid, Pmid, Provider, ProviderId, QueryNode, Raw, ResiliencePolicy,
+    Response, Result, SearchMode, SearchQuery, Sort, SourceRecord, TermField, Work, WorkId,
     WorkType, tidy_abstract,
 };
 use async_trait::async_trait;
@@ -408,9 +408,9 @@ fn to_record(value: &serde_json::Value, at: Timestamp) -> serde_json::Result<Sou
     work.cited_by_count = r.cited_by_count;
     work.open_access = open_access;
     if has("Retracted Publication") {
-        let mut retraction = Update::new(UpdateKind::Retraction);
+        let mut retraction = Notice::new(NoticeKind::Retraction);
         retraction.source = Some("europepmc".into());
-        work.updates.push(retraction);
+        work.notices.push(retraction);
     }
     Ok(SourceRecord::new(
         ID,

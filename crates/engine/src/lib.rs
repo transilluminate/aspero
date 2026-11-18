@@ -112,7 +112,7 @@ pub use standard::OpenLibraryConfig;
 pub use standard::{
     DEFAULT_OPENALEX_CREDIT_CAP_USD, SOURCES, SourcesError, StandardConfig, source_name, standard,
 };
-pub use verdict::{CitedField, Difference, Reason, Verdict, Verification, describe_update};
+pub use verdict::{CitedField, Difference, Reason, Verdict, Verification, describe_notice};
 pub use versions::VersionsReport;
 
 use std::sync::Arc;
@@ -552,7 +552,7 @@ impl Candidate {
     pub fn merged_record(&self) -> SourceRecord {
         let mut record = self.record.clone();
         record.ids.clone_from(&self.ids);
-        record.work.updates.clone_from(&self.updates);
+        record.work.notices.clone_from(&self.notices);
         record
     }
 }

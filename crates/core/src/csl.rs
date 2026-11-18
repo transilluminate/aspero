@@ -13,7 +13,7 @@ use serde::Deserialize;
 
 use crate::id::{Doi, WorkId};
 use crate::work::{
-    PartialDate, Person, Update, UpdateKind, UpdateTo, Work, WorkType, orcid, tidy_abstract,
+    Notice, NoticeFor, NoticeKind, PartialDate, Person, Work, WorkType, orcid, tidy_abstract,
 };
 
 /// For `#[serde(deserialize_with)]`: an explicit `null` reads as the
@@ -69,7 +69,7 @@ pub struct CslItem {
     #[serde(deserialize_with = "null_default")]
     pub update_to: Vec<CrossrefUpdate>,
     /// Typed links to other works, e.g. `{"is-replaced-by": [{"id-type":
-    /// "doi", "id": "10.…"}]}`; see [`relation_updates`].
+    /// "doi", "id": "10.…"}]}`; see [`relation_notices`].
     #[serde(deserialize_with = "null_default")]
     pub relation: BTreeMap<String, Vec<CrossrefRelation>>,
 }
@@ -84,7 +84,7 @@ pub struct CrossrefRelation {
 
 /// Newer versions from Crossref relations: a replacement
 /// (`is-replaced-by`) or a preprint's published article (`is-preprint-of`).
-pub fn relation_updates(relation: &BTreeMap<String, Vec<CrossrefRelation>>) -> Vec<Update> {
+pub fn relation_notices(relation: &BTreeMap<String, Vec<CrossrefRelation>>) -> Vec<Notice> {
     ["is-replaced-by", "is-preprint-of"]
         .iter()
         .filter_map(|kind| relation.get(*kind))
@@ -92,7 +92,7 @@ pub fn relation_updates(relation: &BTreeMap<String, Vec<CrossrefRelation>>) -> V
         .filter(|r| r.id_type.as_deref() == Some("doi"))
         .filter_map(|r| r.id.as_deref()?.parse::<Doi>().ok())
         .map(|doi| {
-            let mut update = Update::new(UpdateKind::NewVersion);
+            let mut update = Notice::new(NoticeKind::NewVersion);
             update.notice = Some(WorkId::Doi(doi));
             update.source = Some("publisher".into());
             update
@@ -117,8 +117,8 @@ pub struct CrossrefUpdate {
 }
 
 impl CrossrefUpdate {
-    pub fn to_update(&self) -> Option<Update> {
-        let mut update = Update::new(UpdateKind::parse(self.update_type.as_deref()?));
+    pub fn to_notice(&self) -> Option<Notice> {
+        let mut update = Notice::new(NoticeKind::parse(self.update_type.as_deref()?));
         update.notice = self
             .doi
             .as_deref()
@@ -129,10 +129,10 @@ impl CrossrefUpdate {
         Some(update)
     }
 
-    pub fn to_update_to(&self) -> Option<UpdateTo> {
-        let kind = UpdateKind::parse(self.update_type.as_deref()?);
+    pub fn to_notice_for(&self) -> Option<NoticeFor> {
+        let kind = NoticeKind::parse(self.update_type.as_deref()?);
         let work = WorkId::Doi(self.doi.as_deref()?.parse::<Doi>().ok()?);
-        let mut update = UpdateTo::new(kind, work);
+        let mut update = NoticeFor::new(kind, work);
         update.date = self.updated.as_ref().and_then(CslDate::to_partial);
         update.source.clone_from(&self.source);
         Some(update)
@@ -397,16 +397,16 @@ impl CslItem {
                 .filter(|a| !a.is_empty()),
             url: self.url.clone(),
             cited_by_count: self.is_referenced_by_count,
-            updates: self
+            notices: self
                 .updated_by
                 .iter()
-                .filter_map(CrossrefUpdate::to_update)
-                .chain(relation_updates(&self.relation))
+                .filter_map(CrossrefUpdate::to_notice)
+                .chain(relation_notices(&self.relation))
                 .collect(),
-            update_to: self
+            notice_for: self
                 .update_to
                 .iter()
-                .filter_map(CrossrefUpdate::to_update_to)
+                .filter_map(CrossrefUpdate::to_notice_for)
                 .collect(),
             other_years: Vec::new(),
             open_access: None,
@@ -522,9 +522,9 @@ mod tests {
             ]
         }))
         .to_work();
-        assert_eq!(w.updates.len(), 2);
+        assert_eq!(w.notices.len(), 2);
         let r = w.retraction().unwrap();
-        assert_eq!(r.kind, UpdateKind::Retraction);
+        assert_eq!(r.kind, NoticeKind::Retraction);
         assert_eq!(r.date.unwrap().to_string(), "2010-02-06");
         assert_eq!(
             r.notice.as_ref().unwrap().to_string(),
@@ -541,7 +541,7 @@ mod tests {
                             "source": "publisher", "updated": {"date-parts": [[2018, 8, 3]]}}]
         }))
         .to_work();
-        assert_eq!(w.updates[0].kind, UpdateKind::NewVersion);
+        assert_eq!(w.notices[0].kind, NoticeKind::NewVersion);
         assert_eq!(
             w.newer_version().unwrap().to_string(),
             "doi:10.1002/14651858.cd000567.pub7"
@@ -554,7 +554,7 @@ mod tests {
             }
         }))
         .to_work();
-        assert_eq!(w.updates.len(), 1);
+        assert_eq!(w.notices.len(), 1);
         assert_eq!(
             w.newer_version().unwrap().to_string(),
             "doi:10.1038/s41586-021-03819-2"
@@ -569,14 +569,16 @@ mod tests {
                            "source": "publisher", "updated": {"date-parts": [[2026, 7, 13]]}}]
         }))
         .to_work();
-        assert!(w.updates.is_empty());
+        assert!(w.notices.is_empty());
         assert_eq!(
             w.work_type.unwrap().as_csl(),
             "erratum",
             "a notice, not an article"
         );
-        let [target] = &w.update_to[..] else { panic!() };
-        assert_eq!(target.kind, UpdateKind::Correction);
+        let [target] = &w.notice_for[..] else {
+            panic!()
+        };
+        assert_eq!(target.kind, NoticeKind::Correction);
         assert_eq!(target.work.to_string(), "doi:10.1161/cir.0000000000001415");
         assert_eq!(target.date.unwrap().to_string(), "2026-07-13");
         assert_eq!(target.source.as_deref(), Some("publisher"));

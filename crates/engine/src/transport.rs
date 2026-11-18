@@ -188,16 +188,16 @@ impl HttpClient for Paced {
         };
         let result = self.inner.send(request).await;
         match &result {
-            Ok(resp) => event.emit(&resp.status, cost(resp)),
-            Err(e) => event.emit(&Failed(e), None),
+            Ok(resp) => event.emit(&resp.status, cost(resp), None),
+            Err(e) => event.emit(&Failed(e), None, None),
         }
         result
     }
 }
 
 /// A request sent, until its event is emitted: as it completes, or, if
-/// it's dropped first (a deadline passed, or its caller stopped waiting),
-/// as `cancelled`.
+/// it's dropped first, as `cancelled`, saying why: its deadline passed,
+/// its call was done with it, or its caller stopped waiting.
 struct RequestEvent<'a> {
     provider: &'a str,
     started: Instant,
@@ -208,7 +208,8 @@ struct RequestEvent<'a> {
 }
 
 impl RequestEvent<'_> {
-    fn emit(&mut self, status: &dyn std::fmt::Display, cost: Option<f64>) {
+    /// `why` only for a request dropped in flight ([`observe::why_dropped`]).
+    fn emit(&mut self, status: &dyn std::fmt::Display, cost: Option<f64>, why: Option<&str>) {
         self.done = true;
         let (op, attempt) = observe::request();
         let ms = observe::ms(self.started, Instant::now());
@@ -216,7 +217,8 @@ impl RequestEvent<'_> {
             target: "aspero::net",
             provider = %self.provider, op = %op, status = %status, ms, waited_ms = self.waited_ms,
             attempt, cache = %"miss", cost_usd = cost.map(|c| tracing::field::display(Usd(c))),
-            detached = detach::detached().then_some(true), call = observe::call_id(), "request"
+            detached = detach::detached().then_some(true), call = observe::call_id(),
+            why = why.map(tracing::field::display), "request"
         );
         if let Some(url) = &self.url {
             tracing::debug!(
@@ -231,7 +233,7 @@ impl RequestEvent<'_> {
 impl Drop for RequestEvent<'_> {
     fn drop(&mut self) {
         if !self.done {
-            self.emit(&"cancelled", None);
+            self.emit(&"cancelled", None, Some(observe::why_dropped()));
         }
     }
 }

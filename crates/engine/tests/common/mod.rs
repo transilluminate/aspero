@@ -27,6 +27,8 @@ pub struct Scripted {
     pub search_delay: std::time::Duration,
     /// What each lookup costs.
     pub lookup_cost: Option<f64>,
+    /// How long each lookup takes.
+    pub lookup_delay: std::time::Duration,
 }
 
 impl Scripted {
@@ -43,12 +45,19 @@ impl Scripted {
             queries: Mutex::default(),
             search_delay: std::time::Duration::ZERO,
             lookup_cost: None,
+            lookup_delay: std::time::Duration::ZERO,
         }
     }
 
     /// Each lookup costs `cost`.
     pub fn costing(mut self, cost: f64) -> Self {
         self.lookup_cost = Some(cost);
+        self
+    }
+
+    /// Lookups take `delay`.
+    pub fn slow_lookups(mut self, delay: std::time::Duration) -> Self {
+        self.lookup_delay = delay;
         self
     }
 
@@ -117,6 +126,7 @@ impl Provider for Scripted {
     }
 
     async fn lookup(&self, ids: &[WorkId], _: FieldSet) -> Result<Response<Vec<Lookup>>> {
+        tokio::time::sleep(self.lookup_delay).await;
         let lookups = ids
             .iter()
             .map(|id| Lookup {

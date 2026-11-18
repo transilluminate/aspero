@@ -54,7 +54,7 @@ pub enum CiteFormat {
 pub struct CitedEntry {
     /// The work's position in the input.
     pub index: u32,
-    /// The style's number or label for it ("1.", "[1]"), when the style
+    /// The style's number or label for it ("1.", "\[1\]"), when the style
     /// sets it apart from the reference.
     pub label: Option<String>,
     pub text: String,

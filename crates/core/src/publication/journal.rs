@@ -105,9 +105,9 @@ const DESCRIPTIVE_WORDS: &[&str] = &[
 /// side tells the journal apart, unless it's what an acronym stands for
 /// ("JAMA: The Journal of the American Medical Association", "MMWR Morb
 /// Mortal Wkly Rep"), a series letter, a structural word ("Section",
-/// "Royal Society"), a place, edition or article ([`QUALIFIER_WORDS`]),
+/// "Royal Society"), a place, edition or article (`QUALIFIER_WORDS`),
 /// in brackets ("BMJ (Clinical research ed.)"), or a subtitle that
-/// describes the journal ([`DESCRIPTIVE_WORDS`], or one after a series
+/// describes the journal (`DESCRIPTIVE_WORDS`, or one after a series
 /// letter: "Physical review. B, Condensed matter"). An abbreviation
 /// leaving words out in order ("Proc Biol Sci" for "Proceedings of the
 /// Royal Society B: Biological Sciences") is the same journal, not a

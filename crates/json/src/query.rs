@@ -31,7 +31,7 @@ use serde_json::{Map, Value, json};
 
 /// A query tree in its JSON form, as a serde type: it reads with
 /// [`parse_query`] (so mistakes are explained the same way) and writes with
-/// [`query_json`]. With the `schemars` feature, it describes itself as a
+/// `query_json`. With the `schemars` feature, it describes itself as a
 /// JSON Schema.
 #[derive(Debug, Clone, PartialEq)]
 pub struct QueryTree(pub QueryNode);

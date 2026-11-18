@@ -32,6 +32,10 @@ jobs:
       - run: cargo clippy --workspace --all-targets --all-features -- -D warnings
       # Provider tests replay recorded fixtures: no network or API keys needed.
       - run: cargo test --workspace --all-features
+      # Doc links resolve, as docs.rs builds them (default features).
+      - run: cargo doc --workspace --no-deps
+        env:
+          RUSTDOCFLAGS: -D warnings
       # The engine builds without its default providers (as a library user
       # picking its own), and with one of them alone.
       - run: cargo check -p aspero-engine --no-default-features

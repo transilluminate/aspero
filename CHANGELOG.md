@@ -3,6 +3,18 @@
 Releases 0.10 to 0.19 are in [docs/changelog/0.1x.md](docs/changelog/0.1x.md),
 and 0.1 to 0.9 in [docs/changelog/0.0x.md](docs/changelog/0.0x.md).
 
+## Unreleased
+
+Fixed:
+
+- `--split` reads a tagged record as a reference of its own: a line
+  starting a `{{cite …}}` template, an RIS record (`TY  -`) or an
+  EndNote one (`%0`) starts a reference, and a template with its braces
+  closed or an RIS record at `ER  -` ends one (#141). A template and a
+  one-line RIS record pasted together were one reference, blending two
+  works; RIS records written a tag per line, one after another, were
+  one too.
+
 ## 0.32.0
 
 Added:

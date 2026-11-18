@@ -14,6 +14,11 @@
 //!    identifier, ends as a reference ends, and doesn't start in lower
 //!    case; otherwise wrapped, split as within a paragraph.
 //!
+//! Unnumbered, a tagged record (a `{{cite …}}` template, an RIS or
+//! EndNote record, as [`tagged`](crate::tagged) reads them) is a
+//! reference of its own: a line starting one starts a reference, and a
+//! finished one (its braces closed, RIS's `ER  -`) ends it.
+//!
 //! Wrapped lines are joined with a space; a word hyphenated across lines
 //! is mended, and DOIs and URLs broken after `/` or `-` are rejoined.
 //! Headings such as "References" are dropped.
@@ -361,7 +366,9 @@ impl<'a> List<'a> {
             && lines.iter().all(|l| dated(self.line(l)))
             && lines.windows(2).all(|w| {
                 let (line, next) = (self.line(&w[0]), self.line(&w[1]));
-                ends_reference(line) && !continues(next) && !link_continues(line, next)
+                (ends_reference(line) || ends_tagged(line))
+                    && !continues(next)
+                    && !link_continues(line, next)
             });
         if one_per_line {
             return lines.into_iter().map(|l| vec![l]).collect();
@@ -374,9 +381,11 @@ impl<'a> List<'a> {
                 // A reference so far without a year or identifier (an author
                 // line ending "et al.") still needs its title and the rest.
                 Some((group, joined))
-                    if !(ends_sentence(&joined.text)
-                        && joined.dated
-                        && starts_with_author(text)) =>
+                    if !(starts_tagged(text)
+                        || ends_tagged(&joined.text)
+                        || ends_sentence(&joined.text)
+                            && joined.dated
+                            && starts_with_author(text)) =>
                 {
                     group.push(line);
                     joined.push(text);
@@ -496,6 +505,28 @@ fn ends_reference(line: &str) -> bool {
 /// references often do without one.
 fn ends_sentence(line: &str) -> bool {
     line.ends_with(['.', '?', '!']) || in_link(line) && !line.ends_with(['/', '-'])
+}
+
+/// Starts a tagged record: a citation template, or an RIS or EndNote
+/// record's first tag.
+fn starts_tagged(line: &str) -> bool {
+    line.starts_with("{{")
+        || line.starts_with("TY  -")
+        || line.starts_with("TY -")
+        || line.starts_with("%0 ")
+}
+
+/// A whole tagged record so far: a template with its braces closed, or
+/// text ending with RIS's end tag.
+fn ends_tagged(text: &str) -> bool {
+    let text = text.trim_end();
+    if text.starts_with("{{") {
+        return text.ends_with("}}") && text.matches("{{").count() <= text.matches("}}").count();
+    }
+    text.strip_suffix('-')
+        .map(str::trim_end)
+        .and_then(|t| t.strip_suffix("ER"))
+        .is_some_and(|t| t.is_empty() || t.ends_with(char::is_whitespace))
 }
 
 /// Has a year (1600 to 2100) or an identifier, as a whole reference does.
@@ -1028,6 +1059,34 @@ mod tests {
             ["Smith J. A study. Journal 2020;1:2."]
         );
         assert!(texts("  \n\n").is_empty());
+    }
+
+    #[test]
+    fn tagged_records_are_references_of_their_own() {
+        let template = "{{cite journal |last=Smith |first=J. |title=A study of things \
+                        |journal=Nature |year=2001 |volume=410 |pages=1-5}}";
+        let ris = "TY  - JOUR TI  - Another paper entirely AU  - Jones, K. PY  - 1999 \
+                   JO  - Science ER  -";
+        let prose = "Brown A. A third work. Cell. 2010;5:1-2.";
+        // #141: a template and a one-line RIS record, either way round.
+        assert_eq!(texts(&format!("{template}\n{ris}")), [template, ris]);
+        assert_eq!(texts(&format!("{ris}\n{template}")), [ris, template]);
+        // Beside free text, before or after it.
+        assert_eq!(texts(&format!("{template}\n{prose}")), [template, prose]);
+        assert_eq!(texts(&format!("{prose}\n{ris}")), [prose, ris]);
+        // RIS records a tag per line, one after another.
+        assert_eq!(
+            texts("TY  - JOUR\nTI  - One\nPY  - 2001\nER  -\nTY  - BOOK\nTI  - Two\nER  -"),
+            [
+                "TY  - JOUR TI  - One PY  - 2001 ER  -",
+                "TY  - BOOK TI  - Two ER  -"
+            ]
+        );
+        // A template over several lines, a nested one ending a line.
+        assert_eq!(
+            texts("{{cite journal\n|title=One\n|date={{date|2001}}\n|journal=Two}}"),
+            ["{{cite journal |title=One |date={{date|2001}} |journal=Two}}"]
+        );
     }
 
     #[test]

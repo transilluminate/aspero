@@ -107,7 +107,8 @@ Engine, `crates/engine/src/`:
 - `graph.rs` and `graph/` (citation links): `seeds.rs`, `spend.rs`,
   `missing.rs`, `retracted.rs`, `references.rs`, `related.rs`,
   `related/plan.rs`, `related/score.rs`, `types.rs`.
-- `retry.rs`, `health.rs` (breaker, spent quotas); `cap.rs` (`reached`,
+- `detach.rs` (`finish_paid`, `settle`: paid calls finished once sent);
+  `retry.rs`, `health.rs` (breaker, spent quotas); `cap.rs` (`reached`,
   `spendable_today`); `budget.rs` (`Budget`, `PrepaidDay`,
   `credit_part`); `transport.rs`
   (HTTP client, pacing, `TapeClient`).
@@ -401,6 +402,19 @@ into credit itself; only other tools can. A stop is `BudgetCapped` (exit
 time. With the day's use unknown and a key, one free `/rate-limit`
 decides the first paid call. Overshoots: a call's cost is known only
 after it, and others' spending shows only in the next response.
+
+**A paid request once sent is finished** (#139): OpenAlex charges for
+what it has started, so a caller that stops waiting (a claim verified
+while its other searches are out) mustn't cancel it. A charging
+provider's call runs as a task of its own (`detach.rs`), the call and
+what's done with its answer: a caller dropped leaves it running only if
+`Paced` has marked one of its requests sent (its slot come, just before
+sending); otherwise it's cancelled, so the early stop still saves what
+it stops, and one left running sends no retry. The task is whole above
+the provider, not in the transport, because that's where costs are
+counted (`Engine::call`), answers cached, and, below, taped: it needs no
+second path for any of them. Its usage, which no report carries, waits
+for `Engine::settle`, which the CLI calls (up to 10 s) before exiting.
 
 **Credit spent here** is each paid response's cost (`x-ratelimit-cost-usd`)
 once the allowance is gone, added up per budget day in the cache file's

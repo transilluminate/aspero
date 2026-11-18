@@ -12,7 +12,7 @@ use futures::StreamExt;
 use serde_json::{Value, json};
 
 use super::claim::claims;
-use super::{Failure, Out, print, print_line, read_stdin};
+use super::{Failure, Out, SETTLE, print, print_line, read_stdin};
 use crate::args::{ClaimArgs, Format, PageArgs};
 use crate::exit::Exit;
 use crate::grid::{self, Col, Grid, Text};
@@ -129,6 +129,9 @@ pub async fn run(
             },
         );
     }
+    // Searches a verified claim stopped waiting for, finished (and paid
+    // for) since: their usage is the batch's too.
+    verified.add_usage(&engine.settle(SETTLE).await);
     let exit = results.finish(verified.usage());
     print!("{}", export.finish());
     Ok(exit)

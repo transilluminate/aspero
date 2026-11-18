@@ -206,7 +206,7 @@ async fn run(cli: Cli, out: Out) -> Result<Exit, Failure> {
     if cli.global.fresh {
         engine = engine.with_options(CallOptions::fresh());
     }
-    match cli.command {
+    let result = match cli.command {
         Command::Lookup { ids } => cmd::lookup::run(&engine, ids, out).await,
         Command::Search { query, options } => cmd::search::run(&engine, query, options, out).await,
         Command::Resolve { claim } => cmd::resolve::run(&engine, claim, out).await,
@@ -235,7 +235,7 @@ async fn run(cli: Cli, out: Out) -> Result<Exit, Failure> {
             budget,
             estimate,
         } => cmd::graph::analyse(&engine, inputs, kinds, limit, budget, estimate, out).await,
-        Command::Mcp { budget } => cmd::mcp::run(engine, budget).await,
+        Command::Mcp { budget } => cmd::mcp::run(engine.clone(), budget).await,
         Command::Budget => cmd::budget::run(&engine, out).await,
         Command::Cache { .. }
         | Command::Scan { .. }
@@ -243,5 +243,9 @@ async fn run(cli: Cli, out: Out) -> Result<Exit, Failure> {
         | Command::Licences => {
             unreachable!("handled above")
         }
-    }
+    };
+    // Exiting would cancel paid requests a caller stopped waiting for,
+    // already charged: let them finish and be counted.
+    engine.settle(cmd::SETTLE).await;
+    result
 }

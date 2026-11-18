@@ -56,6 +56,7 @@ mod batch;
 mod budget;
 mod cap;
 mod check;
+mod detach;
 mod enrich;
 mod graph;
 mod health;
@@ -238,6 +239,8 @@ pub struct Engine {
     /// Providers' requests go through an HTTP tape: identifiers are looked
     /// up one per request (see [`EngineBuilder::taped`]).
     taped: bool,
+    /// Paid calls finishing after their callers stopped waiting.
+    background: Arc<detach::Background>,
 }
 
 #[derive(Clone)]
@@ -369,6 +372,7 @@ impl EngineBuilder {
             refreshing: Arc::default(),
             refreshed: Arc::default(),
             taped: self.taped,
+            background: Arc::default(),
         }
     }
 }

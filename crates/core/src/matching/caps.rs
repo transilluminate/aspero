@@ -73,6 +73,10 @@ pub(super) const EXTENDED_TITLE: f64 = 0.75;
 /// Confidence ceiling then: the claim may cite another work whose title
 /// contains this one's, or this one with a subtitle its record lacks.
 pub(super) const EXTENDED_TITLE_CAP: f64 = LOCATION_MISMATCH_CAP;
+/// Confidence ceiling when a claimed identifier is the work's but another
+/// isn't (#148): a PMID or PMCID other than the work's, or (judged where
+/// the identifiers are looked up) one another work's record carries.
+pub const ID_CONFLICT_CAP: f64 = LOCATION_MISMATCH_CAP;
 /// Confidence ceiling for a work with no journal, volume or page when the
 /// claim cites a journal: a lookalike copy can't confirm it.
 pub(super) const UNPLACED_CAP: f64 = LOCATION_MISMATCH_CAP;

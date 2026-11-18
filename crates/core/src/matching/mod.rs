@@ -44,14 +44,14 @@ mod titles;
 use serde::{Deserialize, Serialize};
 
 pub use assess::assess;
-pub use caps::{PLAUSIBLE, VERIFIED};
+pub use caps::{ID_CONFLICT_CAP, PLAUSIBLE, VERIFIED};
 pub use claim::{Alternative, Claim, find_ids};
 pub use derivative::{
     WorkKind, claim_mentions_derivative, derivative_kind, derivative_work_kind, is_derivative,
     record_derivative_kind,
 };
 pub use preprint::preprint_version_claimed;
-pub use same_work::{id_agreement, same_work, same_work_id};
+pub use same_work::{conflicting_id, id_agreement, same_work, same_work_id};
 pub use text::normalise;
 pub use titles::{
     given_title, probable_title, search_terms, shared_title, title_similarity, unmarked,
@@ -115,8 +115,10 @@ pub struct Assessment {
     /// The first page.
     pub page: FieldCheck,
     /// Whether the claim's identifiers are the record's: `Match` if any
-    /// claimed ID is the record's, `Mismatch` if the record has a different
-    /// ID of the same kind, else `Unknown`.
+    /// claimed ID is the record's, `Partial` if one is but another (a PMID
+    /// or PMCID) differs from the record's of its kind ([`conflicting_id`]),
+    /// `Mismatch` if none is and the record has a different ID of the same
+    /// kind, else `Unknown`.
     pub ids: Agreement,
 }
 

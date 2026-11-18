@@ -8,8 +8,17 @@ use super::titles::title_similarity;
 use crate::id::{IdKind, WorkId};
 use crate::record::SourceRecord;
 
+/// Kinds of identifier an article has one of: a claimed one of these that
+/// isn't among the work's, where the work has one of the kind, is
+/// another's. Not DOIs, arXiv IDs or ISBNs, of which one work may have
+/// several (a preprint's and the article's, a Zenodo version's, each
+/// edition's).
+const ONE_PER_WORK: &[IdKind] = &[IdKind::Pmid, IdKind::Pmcid];
+
 /// Whether claimed identifiers are among a work's identifiers (see
-/// [`super::Assessment::ids`]).
+/// [`super::Assessment::ids`]): `Partial` when one is, but another is of a
+/// kind the work has one of (`ONE_PER_WORK`) and isn't the work's (a
+/// paper's DOI beside another paper's PMID, #148).
 pub fn id_agreement(claimed: &[WorkId], actual: &[WorkId]) -> Agreement {
     if claimed.is_empty() {
         return Agreement::Unknown;
@@ -18,7 +27,11 @@ pub fn id_agreement(claimed: &[WorkId], actual: &[WorkId]) -> Agreement {
         .iter()
         .any(|c| actual.iter().any(|a| same_work_id(c, a)))
     {
-        return Agreement::Match;
+        return if conflicting_id(claimed, actual).is_some() {
+            Agreement::Partial
+        } else {
+            Agreement::Match
+        };
     }
     let shares_kind = claimed
         .iter()
@@ -28,6 +41,21 @@ pub fn id_agreement(claimed: &[WorkId], actual: &[WorkId]) -> Agreement {
     } else {
         Agreement::Unknown
     }
+}
+
+/// The first claimed identifier of a kind a work has one of (`ONE_PER_WORK`)
+/// that isn't the work's, with the work's of that kind: `pmid:19623055`
+/// cited, `pmid:19623052` the work's. None when the work has none of the
+/// kind (a Crossref record has no PMID): nothing contradicts it.
+pub fn conflicting_id<'a>(
+    claimed: &'a [WorkId],
+    actual: &'a [WorkId],
+) -> Option<(&'a WorkId, &'a WorkId)> {
+    claimed
+        .iter()
+        .filter(|c| ONE_PER_WORK.contains(&c.kind()))
+        .filter(|c| !actual.iter().any(|a| same_work_id(c, a)))
+        .find_map(|c| Some((c, actual.iter().find(|a| a.kind() == c.kind())?)))
 }
 
 /// Identifier equality at the level of works: arXiv versions are the same work.

@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 
 use super::same_work::same_work_id;
 use super::text::{Normalised, content_words};
-use crate::id::WorkId;
+use crate::id::{IdKind, WorkId};
 use crate::provider::Place;
 use crate::publication::{self, first_page};
 
@@ -91,6 +91,7 @@ impl Claim {
         if ids.is_empty() {
             ids.extend(bare_arxiv(&text));
         }
+        ids.extend(bare_pmid(&text, &ids));
         Claim {
             ids,
             text: Some(text),
@@ -498,6 +499,43 @@ fn bare_arxiv(text: &str) -> Option<WorkId> {
         return None;
     }
     format!("arxiv:{}", &text[span.clone()]).parse().ok()
+}
+
+/// The PMID a Markdown table's row gives bare in a cell of its own, beside
+/// a DOI, as models write them ("… JAMA Cardiol. 2016;1(4):397-404. |
+/// 10.1001/jamacardio.2016.0695 | 27438392 (verify)"): the only cell of 7
+/// or 8 digits, alone or with a bracketed note. [`crate::id::scan`] reads
+/// bare numbers as none; a row citing a DOI and no PMID labels this one by
+/// where it stands. Not in prose, nor as a cell's part ("2016;1(4)"), nor
+/// in a row without a DOI.
+fn bare_pmid(text: &str, ids: &[WorkId]) -> Option<WorkId> {
+    let has = |kind| ids.iter().any(|id| id.kind() == kind);
+    if !has(IdKind::Doi) || has(IdKind::Pmid) {
+        return None;
+    }
+    let numbered: Vec<&str> = text
+        .split('|')
+        .skip(1)
+        .filter_map(|cell| {
+            let cell = cell.trim();
+            let digits = cell
+                .find(|c: char| !c.is_ascii_digit())
+                .unwrap_or(cell.len());
+            let (number, note) = cell.split_at(digits);
+            let note = note.trim();
+            let noted = note.is_empty()
+                || (note.starts_with('(')
+                    && note.ends_with(')')
+                    && note[1..note.len() - 1]
+                        .chars()
+                        .all(|c| c.is_alphabetic() || c == ' ' || c == '?'));
+            ((7..=8).contains(&number.len()) && !number.starts_with('0') && noted).then_some(number)
+        })
+        .collect();
+    let [pmid] = numbered[..] else {
+        return None;
+    };
+    format!("pmid:{pmid}").parse().ok()
 }
 
 /// The distinct identifiers mentioned in free text (see [`crate::id::scan`]).

@@ -7,9 +7,10 @@ use super::authors::{
 };
 use super::caps::{
     CORROBORATING_AUTHORS, DERIVATIVE_CITED_CAP, DERIVATIVE_PENALTY, EDITION, EXTENDED_TITLE,
-    EXTENDED_TITLE_CAP, JOURNAL_MISMATCH_CAP, JOURNAL_MISMATCH_PENALTY, LOCATION_MISMATCH_CAP,
-    NO_EVIDENCE_CAP, OTHER_IN_SERIES, PLACED, PLACED_YEAR_OFF, PLACED_YEAR_WRONG, PLAUSIBLE,
-    SHORT_TITLE_WORDS, STRANGERS_CAP, UNCORROBORATED_CAP, UNPLACED_CAP, VERSION, combine,
+    EXTENDED_TITLE_CAP, ID_CONFLICT_CAP, JOURNAL_MISMATCH_CAP, JOURNAL_MISMATCH_PENALTY,
+    LOCATION_MISMATCH_CAP, NO_EVIDENCE_CAP, OTHER_IN_SERIES, PLACED, PLACED_YEAR_OFF,
+    PLACED_YEAR_WRONG, PLAUSIBLE, SHORT_TITLE_WORDS, STRANGERS_CAP, UNCORROBORATED_CAP,
+    UNPLACED_CAP, VERSION, combine,
 };
 use super::claim::{byline, cited_venue, cites_chapter, cites_edited_book};
 use super::derivative::{self, WorkKind, record_derivative_kind};
@@ -57,6 +58,10 @@ pub fn assess(claim: &Claim, record: &SourceRecord) -> Assessment {
     // A placeholder record's "title" may be a URL (a registration agency's
     // notice page): no title at all.
     let work_title = work.title.clone().filter(|t| !is_url(t));
+    // A claimed identifier names the work, even beside another (a PMID)
+    // that is another's: identified, though not confirmed (#148).
+    let ids = id_agreement(&claim.ids, &record.ids);
+    let named = matches!(ids, Agreement::Match | Agreement::Partial);
 
     let families: Vec<String> = work.authors.iter().filter_map(family_name).collect();
     // A reference that gives no title ("Wittermans E, et al. ERJ Open Res.
@@ -311,9 +316,7 @@ pub fn assess(claim: &Claim, record: &SourceRecord) -> Assessment {
         && work.volume.is_none()
         && cites_journal
         && journals.iter().all(|j| !preprint_server(j))
-        && ((cited_place.volume.is_some() && cited_place.page.is_some())
-            || id_agreement(&claim.ids, &record.ids) != Agreement::Match
-            || !by_arxiv);
+        && ((cited_place.volume.is_some() && cited_place.page.is_some()) || !named || !by_arxiv);
     // And the published version's record, merged with its preprint's,
     // cited in its journal by the preprint's DOI: the journal the record's,
     // the identifier the preprint's.
@@ -554,7 +557,7 @@ pub fn assess(claim: &Claim, record: &SourceRecord) -> Assessment {
         && posted
         && !confirmed
         && venue.as_deref().is_some_and(publication::proceedings)
-        && id_agreement(&claim.ids, &record.ids) != Agreement::Match;
+        && !named;
     // Nor can a copy in no venue at all (a repository's typed an article,
     // a talk's video record at DataCite), cited as a meeting's: "in Proc.
     // 2010 IEEE International Conference on Robotics and Automation (ICRA)"
@@ -571,7 +574,7 @@ pub fn assess(claim: &Claim, record: &SourceRecord) -> Assessment {
         && given_venue
         && meeting_cited
         && venue.as_deref().is_some_and(publication::proceedings)
-        && id_agreement(&claim.ids, &record.ids) != Agreement::Match;
+        && !named;
     let preprint_at_conference = preprint_at_conference || unplaced_at_meeting;
     let container = if other_conference
         || (preprint_at_conference && container.agreement != Agreement::Match)
@@ -641,10 +644,9 @@ pub fn assess(claim: &Claim, record: &SourceRecord) -> Assessment {
             title
         };
 
-    let ids = id_agreement(&claim.ids, &record.ids);
     // A claim of identifiers alone is fully confirmed by a matching ID.
     let id_only = [title, authors, year].iter().all(|c| c.score.is_none());
-    let mut confidence = if id_only && ids == Agreement::Match {
+    let mut confidence = if id_only && named {
         1.0
     } else {
         combine(title, authors, year)
@@ -654,9 +656,8 @@ pub fn assess(claim: &Claim, record: &SourceRecord) -> Assessment {
     // and corrections often carry the original's title without authors.
     // Corroboration means the first author matches, or a claimed ID does.
     // So does citing the exact place.
-    let corroborated = authors.score.is_some_and(|s| s >= CORROBORATING_AUTHORS)
-        || ids == Agreement::Match
-        || located;
+    let corroborated =
+        authors.score.is_some_and(|s| s >= CORROBORATING_AUTHORS) || named || located;
     if !id_only && !corroborated {
         confidence = confidence.min(UNCORROBORATED_CAP);
     }
@@ -681,9 +682,8 @@ pub fn assess(claim: &Claim, record: &SourceRecord) -> Assessment {
     }
     // Without a title, authors, a year and a journal fit many works: it
     // takes an identifier, the place, or the journal, volume and authors.
-    let pinned = ids == Agreement::Match
-        || located
-        || (placed && authors.score.is_some_and(|s| s >= CORROBORATING_AUTHORS));
+    let pinned =
+        named || located || (placed && authors.score.is_some_and(|s| s >= CORROBORATING_AUTHORS));
     if untitled && !pinned {
         confidence = confidence.min(NO_EVIDENCE_CAP);
     }
@@ -693,7 +693,7 @@ pub fn assess(claim: &Claim, record: &SourceRecord) -> Assessment {
     let agrees = |c: &FieldCheck| matches!(c.agreement, Agreement::Match | Agreement::Partial);
     if title.agreement == Agreement::Partial
         && ![authors, year, container].iter().any(agrees)
-        && ids != Agreement::Match
+        && !named
         && !located
     {
         confidence = confidence.min(NO_EVIDENCE_CAP);
@@ -740,7 +740,7 @@ pub fn assess(claim: &Claim, record: &SourceRecord) -> Assessment {
     // work: authors that differ are the citation's error, or a record's
     // garbled byline ("Ruff, Paul Jurica, Ronald M" as one name).
     // Plausible, the authors to check; never verified.
-    if ids == Agreement::Match
+    if named
         && located
         && title.agreement == Agreement::Match
         && authors.agreement == Agreement::Mismatch
@@ -804,13 +804,10 @@ pub fn assess(claim: &Claim, record: &SourceRecord) -> Assessment {
     let book_as_journal = work.work_type == Some(WorkType::Book)
         && work.volume.is_none()
         && claim.text.as_deref().is_some_and(publication::cites_issue);
-    if chapter_as_article || (book_as_journal && ids != Agreement::Match) {
+    if chapter_as_article || (book_as_journal && !named) {
         confidence = confidence.min(UNPLACED_CAP);
     }
-    if (journal_less || unconfirmable || book_for_article)
-        && cites_journal
-        && ids != Agreement::Match
-    {
+    if (journal_less || unconfirmable || book_for_article) && cites_journal && !named {
         confidence = confidence.min(UNPLACED_CAP);
     }
     // Another edition of a book: the same title and authors, another year
@@ -851,7 +848,7 @@ pub fn assess(claim: &Claim, record: &SourceRecord) -> Assessment {
     // the claimed identifier and title name it, whatever year is cited
     // (MIMIC-III's DOI, cited as of 2016, registered in 2023).
     if matches!(work.work_type, Some(WorkType::Dataset | WorkType::Software))
-        && ids == Agreement::Match
+        && named
         && title.agreement == Agreement::Match
         && year.agreement == Agreement::Mismatch
     {
@@ -874,7 +871,7 @@ pub fn assess(claim: &Claim, record: &SourceRecord) -> Assessment {
                 };
                 authors::names_given(raw)
             }));
-    if work.authors.is_empty() && names_people && ids != Agreement::Match {
+    if work.authors.is_empty() && names_people && !named {
         confidence = confidence.min(STRANGERS_CAP);
     }
     // So is a title with words the work's lacks, or one of its own
@@ -893,8 +890,14 @@ pub fn assess(claim: &Claim, record: &SourceRecord) -> Assessment {
         (None, Some(actual), Some(text)) => titles::misspelt_only(&text.words, actual, false),
         _ => true,
     };
-    if title.agreement == Agreement::Partial && !misspelt && ids != Agreement::Match && !located {
+    if title.agreement == Agreement::Partial && !misspelt && !named && !located {
         confidence = confidence.min(EXTENDED_TITLE_CAP);
+    }
+    // A claimed PMID or PMCID that isn't the work's, beside an identifier
+    // that is: another paper's, a few digits off (#148), or the record's
+    // own mistake. Plausible, the identifier to check; not a mismatch.
+    if ids == Agreement::Partial {
+        confidence = confidence.min(ID_CONFLICT_CAP);
     }
     // A reply, correction or commentary is not the work it responds to,
     // unless the citation says it is citing one; nor is a notice its record

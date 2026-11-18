@@ -15,10 +15,10 @@ Added:
   (`cache=hit` or `stale`), a `call` per engine call (op, items,
   patience, providers asked, ms, outcome or `cancelled`), a `tool` per
   MCP tool call, engine or host (tool, or `unknown` for a name no tool
-  has, key name, outcome, ms, cost), and
-  `retry`. Info-level events hold counts, codes and times only; what was
-  asked (queries, titles, identifiers, URLs) is only in `debug`
-  companions (`request_url`, `call_input`, `tool_input`).
+  has, key name, outcome, ms, cost), and `retry`. Info-level events
+  hold counts, codes and times only; what was asked (queries, titles,
+  identifiers, URLs) is only in `debug` companions (`request_url`,
+  `call_input`, `tool_input`).
 - FFI: `enableSystemLog(subsystem:level:)` sends them to Apple's unified
   log under the embedder's subsystem, by category (`net.<provider>`,
   `cache`, `budget`, `engine`, `mcp`), at `LogLevel.info` or `.debug`;
@@ -26,6 +26,10 @@ Added:
   installs the process's global `tracing` subscriber, so it returns
   false when called again, after another subscriber, or off Apple
   platforms.
+- `CitedField::Identifier` (FFI `CitedField.identifier`, JSON `"field":
+  "identifier"`): a claimed identifier that isn't the work's, beside
+  another that is, with the work's of its kind as `actual` and the one
+  claimed as `cited` (#148). A new enum case for exhaustive switches.
 
 Changed:
 
@@ -47,6 +51,28 @@ Fixed:
   one-line RIS record pasted together were one reference, blending two
   works; RIS records written a tag per line, one after another, were
   one too.
+
+Fixed (red team round 7, #148, from `bench/redteam/wild-3.jsonl`;
+measured offline on round 6's tape: wild-3's wrong citations verified
+fell from 25 of 122 to 8, and no correct citation of holdout-5, wild-2,
+holdout-6 or wild-3 changed its verdict):
+
+- Wrong citations `verify` verified, now plausible:
+  - A work's DOI beside a PMID or PMCID that isn't the work's (another
+    paper's, a few digits off: 17 of wild-3's 25): its identifiers partly
+    agree, and the reason names the identifier. Not a mismatch, since a
+    record's own PMID is sometimes wrong; a record without a PMID
+    contradicts none, and one any source of the work gives agrees. DOIs
+    and arXiv IDs aren't held to the work's this way (a work may have
+    several).
+  - Two claimed identifiers whose records are two works (the work's PMID
+    beside another paper's DOI), unless the two records are one work's.
+    Identifiers that all name another work are a mismatch, as before.
+- A bare PMID standing as a Markdown table's cell beside a DOI ("… |
+  10.1001/jamacardio.2016.0695 | 27438392 (verify)") is that PMID: the
+  only cell of 7 or 8 digits, alone or with a bracketed note. Bare
+  numbers in prose, in a row without a DOI or inside a cell are still
+  none.
 
 ## 0.32.0
 

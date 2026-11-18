@@ -155,6 +155,11 @@ pub enum CitedField {
     /// The work is a reply, correction or commentary on the one cited;
     /// `actual` says which ("correction", "reply", "comment", …).
     Kind,
+    /// A claimed identifier that isn't the work's, beside another that is:
+    /// a PMID or PMCID other than the work's, or one a different work's
+    /// record carries. `actual` the work's of that kind (`pmid:19623052`),
+    /// `cited` the one claimed.
+    Identifier,
 }
 
 /// A cited field the work disagrees with, and the work's value when worth
@@ -206,6 +211,7 @@ impl From<engine::CitedField> for CitedField {
             engine::CitedField::Journal => CitedField::Journal,
             engine::CitedField::Volume => CitedField::Volume,
             engine::CitedField::Kind => CitedField::Kind,
+            engine::CitedField::Identifier => CitedField::Identifier,
             _ => CitedField::FirstPage,
         }
     }

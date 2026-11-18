@@ -204,7 +204,8 @@ hits and each request's op and attempt in `crates/engine/src/observe.rs`;
   prefixed or as URLs. ~1 GB/s on prose (`just scan-bench`). A reference
   isn't prose: `Claim::from_text` takes its one bare arXiv-shaped number,
   after a colon, as a table's cell or last, for its ID (models write
-  them so), since nothing else in it could be that number.
+  them so), since nothing else in it could be that number; and a table
+  row's one cell of 7 or 8 digits beside a DOI for its PMID.
 - **Work** (`crates/core/src/work.rs`): CSL-shaped, all-optional, plus
   `updates` (retractions, corrections, newer versions), `update_to`,
   `other_years`, `open_access`. Guideline editions aren't linked in any
@@ -283,7 +284,11 @@ Crossref is asked for the title among the publisher's DOI prefixes
 **Verdicts** (`verdict.rs`): verified (≥ 0.85), plausible (≥ 0.6),
 mismatch (claimed ID missing or another work's; or same title with
 authors *or* year right and the other wrong), not_found, unverifiable
-(providers failed); a retraction is noted whatever the verdict. What each
+(providers failed); a retraction is noted whatever the verdict. Claimed
+identifiers naming two works (the work's DOI beside another paper's
+PMID: one the record's own PMID differs from, or another work's record
+carries) partly agree: plausible at most, the identifier named (#148;
+`same_work.rs`: `conflicting_id`, `merge.rs`: `contest`). What each
 kind of citation should get: the table in
 [bench/redteam/README.md](bench/redteam/README.md) ("Verdict policy").
 **`check`** (`check.rs`) adds findings (add_doi, replace_id, year_differs,

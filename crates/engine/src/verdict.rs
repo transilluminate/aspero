@@ -184,10 +184,15 @@ pub enum CitedField {
     /// What kind of work it is: the work is a reply, correction or
     /// commentary on the one cited (`actual`: "correction", "reply", …).
     Kind,
+    /// A claimed identifier that isn't the work's, beside another that is:
+    /// a PMID or PMCID other than the work's, or one a different work's
+    /// record carries (`actual`: the work's of that kind, `pmid:19623052`;
+    /// `cited`: the one claimed).
+    Identifier,
 }
 
 impl CitedField {
-    every_variant!(CitedField: Title, Authors, Year, Journal, Volume, FirstPage, Kind);
+    every_variant!(CitedField: Title, Authors, Year, Journal, Volume, FirstPage, Kind, Identifier);
 
     pub fn as_str(self) -> &'static str {
         match self {
@@ -198,6 +203,7 @@ impl CitedField {
             CitedField::Volume => "volume",
             CitedField::FirstPage => "first_page",
             CitedField::Kind => "kind",
+            CitedField::Identifier => "identifier",
         }
     }
 }
@@ -290,10 +296,36 @@ fn differences(claim: &Claim, c: &Candidate, known_only: bool) -> Vec<Difference
                 kind: Some(kind),
                 ..diff(CitedField::Kind, Some(kind.as_str().to_owned()), None)
             }),
+        (a.ids == Agreement::Partial)
+            .then(|| contested_id(claim, c))
+            .flatten(),
     ]
     .into_iter()
     .flatten()
     .collect()
+}
+
+/// The claimed identifier that isn't the work's when its identifiers
+/// partly agree: a PMID or PMCID other than the work's, judged against
+/// every identifier its records carry; else one that isn't the work's (a
+/// different work's record carries it), beside the work's of its kind.
+fn contested_id(claim: &Claim, c: &Candidate) -> Option<Difference> {
+    let (cited, actual) =
+        if let Some((cited, actual)) = matching::conflicting_id(&claim.ids, &c.ids) {
+            (cited, Some(actual))
+        } else {
+            let cited = claim
+                .ids
+                .iter()
+                .find(|id| !c.ids.iter().any(|k| matching::same_work_id(k, id)))?;
+            (cited, c.ids.iter().find(|k| k.kind() == cited.kind()))
+        };
+    Some(Difference {
+        field: CitedField::Identifier,
+        actual: actual.map(ToString::to_string),
+        cited: Some(cited.to_string()),
+        kind: None,
+    })
 }
 
 /// The differences as a clause: "its year (2017) differs", "its authors and
@@ -399,10 +431,12 @@ fn weigh(claim: &Claim, report: &ResolveReport) -> (Verdict, Reason, Option<usiz
             _ => (Verdict::NotFound, Reason::NoMatch, None),
         };
     }
+    // The most confident candidate a claimed identifier names, though
+    // another claimed (a PMID) may be another's (#148).
     let by_id = report
         .candidates
         .iter()
-        .position(|c| c.assessment.ids == Agreement::Match);
+        .position(|c| matches!(c.assessment.ids, Agreement::Match | Agreement::Partial));
     let elsewhere = |skip: Option<usize>| {
         report
             .candidates

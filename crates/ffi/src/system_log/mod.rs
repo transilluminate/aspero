@@ -98,8 +98,11 @@ impl<S: Sink> SystemLog<S> {
         SystemLog { sink, max }
     }
 
+    /// Our events at `max` and above, and `tracing::enabled!`'s hints
+    /// for them (a hint isn't an event: refused, the engine's
+    /// `request_url` was never built); never spans.
     fn wants(&self, meta: &Metadata<'_>) -> bool {
-        meta.is_event() && meta.target().starts_with("aspero") && *meta.level() <= self.max
+        !meta.is_span() && meta.target().starts_with("aspero") && *meta.level() <= self.max
     }
 }
 
@@ -312,6 +315,19 @@ mod tests {
             line,
             r#"request_url provider=crossref url="/works?query=sepsis lactate""#
         );
+    }
+
+    #[test]
+    fn a_debug_hint_is_enabled_only_at_debug() {
+        // The engine builds a request's URL for `request_url` only when
+        // `enabled!` says debug is on.
+        let hint = || {
+            let on = tracing::enabled!(target: "aspero::net", Level::DEBUG);
+            tracing::info!(target: "aspero::net", on, "hint");
+        };
+        let said = |max| logged(max, hint)[0].3.clone();
+        assert_eq!(said(LevelFilter::DEBUG), "hint on=true");
+        assert_eq!(said(LevelFilter::INFO), "hint on=false");
     }
 
     #[test]

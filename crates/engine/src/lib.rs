@@ -325,7 +325,7 @@ impl EngineBuilder {
     /// key) is under `usd` (0: never spend credit); until then,
     /// [`daily_cap`](Self::daily_cap) still applies. Without one, a
     /// used-up allowance is held to the allowance's cap, as before. See
-    /// [`cap`](crate::cap) and [`Error::BudgetCapped`].
+    /// `cap` and [`Error::BudgetCapped`].
     pub fn daily_credit_cap(mut self, provider: ProviderId, usd: f64) -> Self {
         self.credit_caps.retain(|(p, _)| *p != provider);
         self.credit_caps.push((provider, usd));

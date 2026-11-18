@@ -11,6 +11,7 @@ check:
     scripts/doc-paths.py
     cargo clippy --workspace --all-targets --all-features -- -D warnings
     cargo test --workspace --all-features
+    RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps -q
     cargo check -p aspero-engine --no-default-features
     cargo check -p aspero-engine --no-default-features --features crossref
 

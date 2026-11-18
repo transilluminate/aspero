@@ -160,7 +160,7 @@ fn from_page(
     page_claim(aspero_core::claim_from_page(html, url, title), url)
 }
 
-/// [`from_page`]'s claim from what the page was read as.
+/// `from_page`'s claim from what the page was read as.
 fn page_claim(page: PageClaim, url: &str) -> Result<(InputClaim, PageSource), Failure> {
     let Some(claim) = page.claim else {
         return Err(Failure {

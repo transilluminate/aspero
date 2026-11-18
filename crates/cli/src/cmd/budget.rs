@@ -167,7 +167,7 @@ fn line(
     text
 }
 
-/// The day's allowance and credit, as [`line`] says them.
+/// The day's allowance and credit, as [`line()`] says them.
 fn spend(
     b: &Budget,
     no_key: bool,

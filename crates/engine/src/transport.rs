@@ -76,7 +76,7 @@ fn transport_error(e: reqwest::Error) -> Error {
 ///
 /// A request of a paid call is marked sent once its slot has come, just
 /// before it's sent; one whose caller has gone by then isn't sent (see
-/// [`detach`](crate::detach)).
+/// `detach`).
 ///
 /// Logs each request (at `info`, target `aspero::http`) with the provider
 /// label, status, duration and time spent waiting for a slot.
@@ -283,7 +283,7 @@ impl HttpTape {
 ///
 /// An engine behind one ([`EngineBuilder::taped`](crate::EngineBuilder::taped))
 /// looks identifiers up one per request, so each one's answer replays
-/// however batches are made up; it asks a batch [`replaying_only`] first,
+/// however batches are made up; it asks a batch `replaying_only` first,
 /// so batches recorded whole still replay.
 pub struct TapeClient {
     label: String,

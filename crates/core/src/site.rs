@@ -97,7 +97,7 @@ pub fn site_of(address: &str) -> Option<String> {
 }
 
 /// The part of a host its owner registered: the last two labels, or three
-/// under a country's second level ([`SECOND_LEVELS`]: `example.co.uk`).
+/// under a country's second level (`SECOND_LEVELS`: `example.co.uk`).
 /// `academic.oup.com` is `oup.com`; a host of one label is itself.
 pub fn registrable_domain(host: &str) -> &str {
     let labels: Vec<&str> = host.rsplitn(4, '.').collect();

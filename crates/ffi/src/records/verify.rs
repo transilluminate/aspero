@@ -405,6 +405,11 @@ pub struct Verification {
     /// the page's publisher's"). It never changes the verdict.
     #[uniffi(default = false)]
     pub chosen_by_site: bool,
+    /// `reason` as stored data: stable, versioned JSON (the JSON
+    /// contract's `reason`, with `v`), read back with `reasonFromJson`. For
+    /// an app that keeps verifications and words their reasons when shown.
+    #[uniffi(default = "")]
+    pub reason_json: String,
 }
 
 impl Verification {
@@ -414,12 +419,14 @@ impl Verification {
         v: &engine::Verification,
         full: bool,
     ) -> Self {
+        let reason = Reason::new(&v.reason, &v.report.candidates);
         Verification {
             index: count(index),
             input: claim.input.clone(),
             claim_key: key(claim),
             verdict: v.verdict.into(),
-            reason: Reason::new(&v.reason, &v.report.candidates),
+            reason_json: reason.to_json(),
+            reason,
             reason_text: v.reason_text.clone(),
             notices: v.notices.iter().map(Notice::from).collect(),
             read: Some(Claim::read(&v.read, key(claim))),
@@ -437,14 +444,16 @@ impl Verification {
     }
 
     pub(crate) fn invalid(index: usize, claim: &InputClaim, why: &str) -> Self {
+        let reason = Reason::InvalidClaim {
+            why: why.to_owned(),
+        };
         Verification {
             index: count(index),
             input: claim.input.clone(),
             claim_key: key(claim),
             verdict: Verdict::Invalid,
-            reason: Reason::InvalidClaim {
-                why: why.to_owned(),
-            },
+            reason_json: reason.to_json(),
+            reason,
             reason_text: why.to_owned(),
             notices: Vec::new(),
             read: None,

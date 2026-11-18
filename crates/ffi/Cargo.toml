@@ -64,7 +64,8 @@ aspero-mcp = { workspace = true, features = ["http"], optional = true }
 async-trait = { workspace = true, optional = true }
 futures.workspace = true
 jiff.workspace = true
-serde_json.workspace = true
+# Exact floats, so stored reasons read back equal.
+serde_json = { workspace = true, features = ["float_roundtrip"] }
 thiserror.workspace = true
 tokio = { workspace = true, features = ["rt-multi-thread", "sync", "macros"] }
 tracing.workspace = true

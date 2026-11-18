@@ -3,6 +3,21 @@
 Releases 0.10 to 0.19 are in [docs/changelog/0.1x.md](docs/changelog/0.1x.md),
 and 0.1 to 0.9 in [docs/changelog/0.0x.md](docs/changelog/0.0x.md).
 
+## Unreleased
+
+Added:
+
+- A verification's reason as stored data (#163), for an app that keeps
+  verifications and words their reasons when it shows them.
+  `Verification.reasonJson` is stable, versioned JSON (the JSON
+  contract's `reason`, with `"v": 1`); `reasonFromJson` reads it back as
+  the typed `Reason`, and `workFromJson` reads a work's full JSON
+  (`Work.json`) back as a `Work`. A code or version a reader doesn't
+  know gives `nil`, never an error, so a stored reason always loads.
+- A difference of kind (a reply or correction cited as the work) names
+  the work's kind in the JSON's `reason.differs[].kind`
+  (`expression_of_concern`, `reply`, …).
+
 ## 0.35.0
 
 Changed (breaking):

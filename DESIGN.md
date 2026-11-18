@@ -578,6 +578,18 @@ bindings, attached to each release. Not on crates.io. Third-party notices
 ship inside it and the CLI (`crates/notices-gen`; run `just notices`
 after a version bump or dependency change).
 
+**Stored reasons are a contract** (`records/stored.rs`, #163). An app
+that keeps verifications keeps why as data and words it when it shows
+it, in its own words and language. `Verification.reasonJson` is the
+JSON contract's `reason` with a version, `{"v": 1, "code", "differs":
+[{"field", "actual", "cited", "kind"}], "cited": candidate, "why"}`;
+`reasonFromJson` reads it back typed, and `workFromJson` reads a work's
+full JSON. Codes, fields and their values never change; cases and
+fields are only added. A reader gives `nil` for a code or `v` it doesn't
+know, or for broken JSON, never an error, so a stored reason always
+loads. `id_elsewhere`'s candidate is stored in full, its confidence
+unrounded, so a round trip is exact (a test per case).
+
 Not until needed: priority lanes in the pacer, a daemon, a SQLite
 connection pool, and CLI keys anywhere but the environment (agents run
 headless, where a Keychain prompt after an upgrade would hang them). The

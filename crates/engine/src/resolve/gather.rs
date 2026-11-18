@@ -62,7 +62,8 @@ impl Engine {
             let q = query(reference.as_deref().unwrap_or_default(), true);
             async move { self.search(Some(p.as_str()), &q).await }
         }));
-        let (lookup, matched) = (std::pin::pin!(lookup), std::pin::pin!(matched));
+        // The matchers boxed, so an early stop drops them where it stops.
+        let (lookup, matched) = (std::pin::pin!(lookup), Box::pin(matched));
         let (lookup, matched) = match select(lookup, matched).await {
             Either::Left((lookup, matched)) => (lookup, Either::Left(matched)),
             Either::Right((matched, lookup)) => (lookup.await, Either::Right(matched)),
@@ -86,7 +87,10 @@ impl Engine {
         // takes seconds).
         let matched = match matched {
             Either::Right(matched) => matched,
-            Either::Left(_) if done(&acc) => Vec::new(),
+            Either::Left(pending) if done(&acc) => {
+                crate::observe::drop_for(crate::observe::Why::Done, pending);
+                Vec::new()
+            }
             Either::Left(pending) => pending.await,
         };
         let mut titles: Vec<String> = claim.title.iter().cloned().collect();
@@ -197,6 +201,7 @@ impl Engine {
                 }
             }
             if done(&acc) {
+                crate::observe::drop_for(crate::observe::Why::Done, pending);
                 break;
             }
         }

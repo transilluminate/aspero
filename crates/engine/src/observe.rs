@@ -360,6 +360,47 @@ impl Engine {
     }
 }
 
+/// Why a request still in flight was dropped: the `why` of its
+/// `status=cancelled` event. A drop the engine doesn't make is its caller's.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Why {
+    /// Its attempt's deadline passed ([`with_retries`](crate::retry::with_retries)).
+    Deadline,
+    /// The call no longer needed it: a verify found its verdict.
+    Done,
+}
+
+impl Why {
+    fn as_str(self) -> &'static str {
+        match self {
+            Why::Deadline => "deadline",
+            Why::Done => "done",
+        }
+    }
+}
+
+std::thread_local! {
+    /// Why the engine is dropping what it drops right now ([`drop_for`]).
+    static DROPPING: std::cell::Cell<Option<Why>> = const { std::cell::Cell::new(None) };
+}
+
+/// Drops `work`, whose requests still in flight say `why` they were
+/// cancelled. A drop is synchronous, so a thread-local is exact: no other
+/// task runs on this thread until it's done.
+pub(crate) fn drop_for<T>(why: Why, work: T) {
+    let before = DROPPING.with(|d| d.replace(Some(why)));
+    drop(work);
+    DROPPING.with(|d| d.set(before));
+}
+
+/// Why a request is being dropped: as [`drop_for`] says, else its caller
+/// stopped waiting (a token cancelled, a client gone, an outer timeout).
+pub(crate) fn why_dropped() -> &'static str {
+    DROPPING
+        .with(std::cell::Cell::get)
+        .map_or("caller", Why::as_str)
+}
+
 /// Every call's outcome is `ok`: reports that never fail as a whole.
 pub(crate) fn never_fails<T>(_: &T) -> Option<&'static str> {
     None

@@ -546,7 +546,16 @@ invented, fake ID, DOI swap -> verified    0/182           0/182           <= 0%
 real -> mismatch or not_found             11/503 (2.2%)   10/503 (2.0%)    <= 3%
 real -> verified                         471/503 (93.6%) 473/503 (94.0%)   >= 85%
 real -> verified or plausible            492/503 (97.8%) 493/503 (98.0%)   >= 95%
+
+wild-3 (held out, live)                      0.31.0           round 6
+wrong -> verified                         26/122 (21.3%)  25/122 (20.5%)   <= 2%
+real -> mismatch or not_found             88/1013 (8.7%)  42/1013 (4.1%)   <= 3%
+real -> verified                         783/1013 (77.3%) 836/1013 (82.5%) >= 85%
+real -> verified or plausible            922/1013 (91.0%) 971/1013 (95.9%) >= 95%
 ```
+
+wild-3 ([wild-3.md](wild-3.md)): 17 of round 6's 25 wrong verifieds are a
+right DOI beside another paper's PMID (#148).
 
 The wild-2 replay leaves 104 claims whose new requests aren't on the tape
 (unverifiable offline), so its real figures understate the change. The

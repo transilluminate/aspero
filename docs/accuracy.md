@@ -177,6 +177,24 @@ volume (7 of 8). On the corpora round 6 was tuned on, wrong → `verified`
 fell from 36/613 to 13/613 (holdout-5), and correct citations missed from
 52/910 to 6/910 (wild-2, offline replay).
 
+**Round 6, real model output, held out** — `bench/redteam/wild-3.jsonl`:
+1,135 references from 100 fresh Claude Haiku and Sonnet sessions, weighted
+towards asks for exact details (DOIs, PMIDs, pages), each checked by hand.
+Run live on 2026-11-18:
+
+| Criterion | 0.31.0 | Round 6 | Target |
+|---|---|---|---|
+| Wrong → `verified` | 26/122 (21.3%) | 25/122 (20.5%) | ≤ 2% — not yet met |
+| Correct → `verified` | 783/1013 (77.3%) | 836/1013 (82.5%) | ≥ 85% — not yet met |
+| Correct → `verified` or `plausible` | 922/1013 (91.0%) | 971/1013 (95.9%) | ≥ 95% |
+| Correct → `mismatch` or `not_found` | 88/1013 (8.7%) | 42/1013 (4.1%) | ≤ 3% — not yet met |
+
+Round 6 halved the correct citations called wrong. What still gets
+through is mostly one thing: a correct DOI beside a PMID a few digits off,
+which belongs to an unrelated paper (17 of the 25). The identifier check
+passes when any cited identifier agrees, and a bare PMID in a table cell
+isn't read (#148). Without those, about 8 of 122.
+
 **aspero 0.30.0, held out** — `bench/redteam/holdout-5.jsonl`: 1,232
 citations built independently of the code (by an agent that never read the
 matching rules or earlier corpora), shaped like what people paste: reference
@@ -214,6 +232,7 @@ measured on a corpus it had never seen:
 | 4 | holdout-4 (unseen, subtle errors) | 74/481 (15.4%) | 98.1% |
 | 5 (0.30.0) | holdout-5 (unseen) | 35/613 (5.7%) | 97.9% |
 | 6 (0.32.0 candidate) | holdout-6 (unseen, books and reprints) | 38/516 (7.4%) | 98.0% |
+| 6 (0.32.0 candidate) | wild-3 (unseen model output) | 25/122 (20.5%) | 95.9% |
 
 Each held-out corpus was built to be harder than the last, so the rates
 aren't a smooth series; what they show is that invented works and other

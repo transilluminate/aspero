@@ -551,7 +551,34 @@ fn input_schema<T: JsonSchema>() -> Map<String, Value> {
     };
     map.remove("title");
     map.remove("description");
+    // 2020-12 is MCP's default dialect, so it needn't be named.
+    map.remove("$schema");
+    let mut schema = Value::Object(map);
+    strip_storage(&mut schema);
+    let Value::Object(map) = schema else {
+        unreachable!("still an object")
+    };
     map
+}
+
+/// Removes what a schema says of Rust's storage rather than the argument:
+/// `format`s (int16, uint32) and an int16's own bounds. Tighter bounds
+/// (`limit`'s) stay.
+fn strip_storage(schema: &mut Value) {
+    match schema {
+        Value::Object(map) => {
+            map.remove("format");
+            if map.get("minimum") == Some(&json!(i16::MIN)) {
+                map.remove("minimum");
+            }
+            if map.get("maximum") == Some(&json!(i16::MAX)) {
+                map.remove("maximum");
+            }
+            map.values_mut().for_each(strip_storage);
+        }
+        Value::Array(items) => items.iter_mut().for_each(strip_storage),
+        _ => {}
+    }
 }
 
 /// Lists the sources a tool's `source` can name.

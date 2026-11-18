@@ -3,6 +3,26 @@
 Releases 0.10 to 0.19 are in [docs/changelog/0.1x.md](docs/changelog/0.1x.md),
 and 0.1 to 0.9 in [docs/changelog/0.0x.md](docs/changelog/0.0x.md).
 
+## Unreleased
+
+Changed:
+
+- MCP: the tool list is about 38% smaller (#157): from ~46,000 to
+  ~28,400 characters (about 11,500 to 7,100 tokens) at 0.34.0's seven
+  tools, which every session pays for before its first call. The same
+  tools, arguments and results; only how the schemas describe them:
+  - a work, the session's spend and a call's usage are each an object
+    whose description names its keys, rather than every key spelled
+    out as a property, in each tool that returns one; a second copy
+    (`latest`, `candidates`) points at the first;
+  - `search_supports`' `query` points at `search`'s query tree rather
+    than repeating its schema;
+  - the query tree says what `phrase` means once, not on each term;
+  - `sort` is a plain enum; input schemas drop `$schema` (2020-12 is
+    MCP's default) and Rust's integer formats and int16 bounds.
+
+  A test caps the list's size, so it doesn't grow back unnoticed.
+
 ## 0.34.0
 
 Added:

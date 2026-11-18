@@ -346,8 +346,10 @@ struct Subject {
     words: Vec<String>,
     acronyms: Vec<String>,
     /// The name's words, lower-cased, numbers aside: what an acronym of
-    /// the name is made of ([`Subject::fits`]).
-    letters: Vec<Vec<char>>,
+    /// the name is made of ([`Subject::fits`]). Each says whether it is
+    /// the name's furniture ("Proceedings", "of", "Annual"), which gives an
+    /// acronym its initial only.
+    letters: Vec<(Vec<char>, bool)>,
 }
 
 impl Subject {
@@ -356,15 +358,26 @@ impl Subject {
             .split(|c: char| !c.is_alphanumeric())
             .filter(|t| !t.is_empty())
             .collect();
-        let letters: Vec<Vec<char>> = tokens
+        let letters: Vec<(Vec<char>, bool)> = tokens
             .iter()
             .filter(|t| t.chars().next().is_some_and(char::is_alphabetic))
-            .map(|t| t.chars().flat_map(char::to_lowercase).collect())
+            .map(|t| {
+                let lower: String = t.chars().flat_map(char::to_lowercase).collect();
+                let furniture = JOURNAL_STOPWORDS.contains(&lower.as_str())
+                    || PROCEEDINGS_BOILERPLATE.contains(&lower.as_str())
+                    || ORDINALS.contains(&lower.as_str());
+                (lower.chars().collect(), furniture)
+            })
             .collect();
         // A society before its other meetings ("International AAAI
-        // Conference on Web and Social Media") names neither.
+        // Conference on Web and Social Media") names neither; a word
+        // before one is the meeting's ("The Web Conference", "Designing
+        // Interactive Systems Conference").
         let holders: Vec<String> = (0..tokens.len())
-            .filter(|&i| holds_meeting(&tokens, i))
+            .filter(|&i| {
+                holds_meeting(&tokens, i)
+                    && tokens[i].chars().filter(char::is_ascii_uppercase).count() >= 2
+            })
             .map(|i| tokens[i].to_ascii_lowercase())
             .collect();
         let alphabetic: Vec<&&str> = tokens
@@ -416,6 +429,20 @@ impl Subject {
                 }
                 words
             });
+        // A meeting named only by its special interest group ("ACM
+        // SIGCOMM Conference (SIGCOMM)") goes by that name.
+        if acronyms.is_empty() && words.is_empty() {
+            for t in &tokens {
+                let lower = t.to_ascii_lowercase();
+                if lower.starts_with("sig")
+                    && lower.len() > 3
+                    && t.chars().filter(char::is_ascii_uppercase).count() >= 3
+                    && !acronyms.contains(&lower)
+                {
+                    acronyms.push(lower);
+                }
+            }
+        }
         Subject {
             words,
             acronyms,
@@ -427,36 +454,49 @@ impl Subject {
     /// word giving its initial and, after it, any of its letters ("mwscas"
     /// of "Midwest Symposium on Circuits and Systems", "aies" of
     /// "AAAI/ACM Conference on AI, Ethics, and Society"; not "icecs" of
-    /// "International Symposium on Circuits and Systems").
+    /// "International Symposium on Circuits and Systems"). The name's
+    /// furniture gives only its initial ("podc" isn't "Proceedings of the
+    /// … Symposium on Theory of Computing"), and two letters or more come
+    /// from two words or more ("mm" isn't "… Conference on Multimedia
+    /// Retrieval").
     fn fits(&self, acronym: &str) -> bool {
         // From the acronym's `k`th letter, in word `word` after its letter
-        // `at` (none begun: `None`); states that failed are remembered.
-        type State = (usize, usize, Option<usize>);
+        // `at` (none begun: `None`), with `used` words begun (two count as
+        // many); states that failed are remembered.
+        type State = (usize, usize, Option<usize>, usize);
         fn from(
             acronym: &[char],
-            words: &[Vec<char>],
-            (k, word, at): State,
+            words: &[(Vec<char>, bool)],
+            (k, word, at, used): State,
             failed: &mut std::collections::HashSet<State>,
         ) -> bool {
             let Some(&c) = acronym.get(k) else {
-                return true;
+                return used >= acronym.len().min(2);
             };
-            if failed.contains(&(k, word, at)) {
+            if failed.contains(&(k, word, at, used)) {
                 return false;
             }
             // On in the word begun, after the letter used last.
             let within = at.is_some_and(|at| {
-                (at + 1..words[word].len()).any(|i| {
-                    words[word][i] == c && from(acronym, words, (k + 1, word, Some(i)), failed)
-                })
+                let (letters, furniture) = &words[word];
+                !furniture
+                    && (at + 1..letters.len()).any(|i| {
+                        letters[i] == c
+                            && from(acronym, words, (k + 1, word, Some(i), used), failed)
+                    })
             });
             let found = within
                 || (word + usize::from(at.is_some())..words.len()).any(|w| {
-                    words[w].first() == Some(&c)
-                        && from(acronym, words, (k + 1, w, Some(0)), failed)
+                    words[w].0.first() == Some(&c)
+                        && from(
+                            acronym,
+                            words,
+                            (k + 1, w, Some(0), (used + 1).min(2)),
+                            failed,
+                        )
                 });
             if !found {
-                failed.insert((k, word, at));
+                failed.insert((k, word, at, used));
             }
             found
         }
@@ -464,7 +504,7 @@ impl Subject {
         from(
             &acronym,
             &self.letters,
-            (0, 0, None),
+            (0, 0, None, 0),
             &mut std::collections::HashSet::new(),
         )
     }
@@ -488,6 +528,7 @@ fn same_subject_word(a: &str, b: &str) -> bool {
 /// the venue (pages, a publisher): words there only make a mismatch less
 /// likely.
 pub(crate) fn proceedings_agree(cited: &str, actual: &str) -> Option<bool> {
+    let known = conferences(actual);
     let (cited, actual) = (Subject::new(cited), Subject::new(actual));
     let same_acronym =
         |a: &String, b: &String| a == b || a.ends_with(b.as_str()) || b.ends_with(a.as_str());
@@ -498,23 +539,41 @@ pub(crate) fn proceedings_agree(cited: &str, actual: &str) -> Option<bool> {
     {
         return Some(true);
     }
+    // Named by an acronym alone that a known conference's name can't make
+    // and isn't its: another meeting of the same field and society
+    // ("(WWW '18)" for "… Conference on Information and Knowledge
+    // Management"). Other names needn't make theirs ("ASSETS" of "…
+    // Conference on Computers & Accessibility"). Two acronyms that differ
+    // are two meetings ("(CoNEXT '13)" for "ACM SIGCOMM Conference
+    // (SIGCOMM)").
+    let fits = |c: &String| actual.fits(c);
     if cited.words.is_empty() {
-        return (!cited.acronyms.is_empty() && !actual.acronyms.is_empty()).then_some(false);
+        let its_own = |c: &String| {
+            known.iter().any(|&k| {
+                CONFERENCES[k]
+                    .0
+                    .iter()
+                    .any(|a| c.trim_start_matches("sig") == *a)
+            })
+        };
+        let foreign = !cited.acronyms.is_empty()
+            && (!actual.acronyms.is_empty()
+                || (!known.is_empty() && !cited.acronyms.iter().any(|c| fits(c) || its_own(c))));
+        return foreign.then_some(false);
     }
     if actual.words.is_empty() {
-        return None;
+        return (!cited.acronyms.is_empty() && !actual.acronyms.is_empty()).then_some(false);
     }
     let shared = actual
         .words
         .iter()
         .filter(|a| cited.words.iter().any(|c| same_subject_word(c, a)))
         .count();
-    // Named by an acronym the record's name can't make: another meeting
-    // of the same field and society, its words shared ("… Conference on
-    // Electronics, Circuits and Systems (ICECS)" for the "… Midwest
-    // Symposium on Circuits and Systems", "(ICMR '25)" for "… Conference
-    // on Multimedia in Asia").
-    let foreign = !cited.acronyms.is_empty() && !cited.acronyms.iter().any(|c| actual.fits(c));
+    // So too with its words shared ("… Conference on Electronics,
+    // Circuits and Systems (ICECS)" for the "… Midwest Symposium on
+    // Circuits and Systems", "(ICMR '25)" for "… Conference on Multimedia
+    // in Asia").
+    let foreign = !cited.acronyms.is_empty() && !cited.acronyms.iter().any(fits);
     if shared * 2 >= actual.words.len() {
         Some(!foreign)
     } else if shared * 3 <= actual.words.len() {

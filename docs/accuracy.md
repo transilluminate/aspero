@@ -5,6 +5,19 @@ the bar a release has to clear, and where it stands. This applies the same
 to the CLI, the MCP server and the library: they share one engine and one
 verdict.
 
+> **The results below measure the hard tail on purpose.** The wrong
+> citations in every red-team corpus are built to be difficult. Each is a
+> real work with one field subtly off: a sister journal, one co-author
+> swapped, the year one out, an older Cochrane version, a chapter cited
+> as an article. These are mistakes a careful reader misses too. The
+> obvious errors are invented works, identifiers that don't exist, and
+> another paper's DOI or PMID. aspero has caught every one of those in
+> every round. So "wrong → `verified` 7.4%" means 7.4% of near-misses,
+> not 7.4% of what gets pasted. The real citations are messy on purpose
+> too: typos, abbreviations, missing fields, bare arXiv numbers, model
+> output. The targets are set high, and each round climbs the hardest
+> cases that are left.
+
 ## What `verify` promises
 
 **A fabricated or miscited reference should not come back `verified`.**
@@ -136,6 +149,52 @@ recorded fixture), so it stays fixed without the network.
 
 ## Results
 
+These are the hardest cases (see the note at the top), not typical
+input.
+
+**Round 6 (0.32.0 candidate), held out** — `bench/redteam/holdout-6.jsonl`:
+1,049 citations built the same way as holdout-5, weighted towards books
+and monographs (humanities included), reprints, model-style formatting,
+preprints and conference papers, with three new kinds of wrong book
+citation. Run live on 2026-11-17, beside 0.31.0 on the same requests:
+
+| Criterion | 0.31.0 | Round 6 | Target |
+|---|---|---|---|
+| Wrong → `verified` | 45/516 (8.7%) | 38/516 (7.4%) | ≤ 2% — not yet met |
+| … leaving out the new book-publisher and book-edition-year kinds | 25/480 (5.2%) | 18/480 (3.8%) | |
+| Invented works, nonexistent identifiers, another work's DOI or PMID → `verified` | 0/182 | 0/182 | 0 |
+| Real → `mismatch` or `not_found` | 11/503 (2.2%) | 10/503 (2.0%) | ≤ 3% |
+| Real → `verified` | 471/503 (93.6%) | 473/503 (94.0%) | ≥ 85% |
+| Real → `verified` or `plausible` | 492/503 (97.8%) | 493/503 (98.0%) | ≥ 95% |
+| Wrong → `plausible` naming the field that differs | 200/211 (94.8%) | 207/217 (95.4%) | ≥ 80% |
+| Retracted works flagged | 30/30 | 30/30 | 100% |
+
+What gets through: a book cited with another publisher (12 of 12; aspero
+doesn't compare publishers, which change with imprints and reissues) or a
+later edition's year as if it were the first (8 of 12), and a book chapter
+cited as an article in a "journal" named after the book with an invented
+volume (7 of 8). On the corpora round 6 was tuned on, wrong → `verified`
+fell from 36/613 to 13/613 (holdout-5), and correct citations missed from
+52/910 to 6/910 (wild-2, offline replay).
+
+**Round 6, real model output, held out** — `bench/redteam/wild-3.jsonl`:
+1,135 references from 100 fresh Claude Haiku and Sonnet sessions, weighted
+towards asks for exact details (DOIs, PMIDs, pages), each checked by hand.
+Run live on 2026-11-18:
+
+| Criterion | 0.31.0 | Round 6 | Target |
+|---|---|---|---|
+| Wrong → `verified` | 26/122 (21.3%) | 25/122 (20.5%) | ≤ 2% — not yet met |
+| Correct → `verified` | 783/1013 (77.3%) | 836/1013 (82.5%) | ≥ 85% — not yet met |
+| Correct → `verified` or `plausible` | 922/1013 (91.0%) | 971/1013 (95.9%) | ≥ 95% |
+| Correct → `mismatch` or `not_found` | 88/1013 (8.7%) | 42/1013 (4.1%) | ≤ 3% — not yet met |
+
+Round 6 halved the correct citations called wrong. What still gets
+through is mostly one thing: a correct DOI beside a PMID a few digits off,
+which belongs to an unrelated paper (17 of the 25). The identifier check
+passes when any cited identifier agrees, and a bare PMID in a table cell
+isn't read (#148). Without those, about 8 of 122.
+
 **aspero 0.30.0, held out** — `bench/redteam/holdout-5.jsonl`: 1,232
 citations built independently of the code (by an agent that never read the
 matching rules or earlier corpora), shaped like what people paste: reference
@@ -172,6 +231,8 @@ measured on a corpus it had never seen:
 | 3 | holdout-3 (unseen) | 36/426 (8.5%) | 96.5% |
 | 4 | holdout-4 (unseen, subtle errors) | 74/481 (15.4%) | 98.1% |
 | 5 (0.30.0) | holdout-5 (unseen) | 35/613 (5.7%) | 97.9% |
+| 6 (0.32.0 candidate) | holdout-6 (unseen, books and reprints) | 38/516 (7.4%) | 98.0% |
+| 6 (0.32.0 candidate) | wild-3 (unseen model output) | 25/122 (20.5%) | 95.9% |
 
 Each held-out corpus was built to be harder than the last, so the rates
 aren't a smooth series; what they show is that invented works and other

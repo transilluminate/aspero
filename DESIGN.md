@@ -194,7 +194,10 @@ Front ends:
 - **Scanning** (`id::scan`): every mention, where, and whether written as
   a web address (`from_url`); which matter is the caller's call. Shapes
   prose imitates (bare digits, `W1`, `1706.03762`) count only labelled,
-  prefixed or as URLs. ~1 GB/s on prose (`just scan-bench`).
+  prefixed or as URLs. ~1 GB/s on prose (`just scan-bench`). A reference
+  isn't prose: `Claim::from_text` takes its one bare arXiv-shaped number,
+  after a colon, as a table's cell or last, for its ID (models write
+  them so), since nothing else in it could be that number.
 - **Work** (`crates/core/src/work.rs`): CSL-shaped, all-optional, plus
   `updates` (retractions, corrections, newer versions), `update_to`,
   `other_years`, `open_access`. Guideline editions aren't linked in any
@@ -216,7 +219,10 @@ identifiers and Crossref's citation matcher (free), then at most two
 **title** searches ($0.001 each at OpenAlex). Bare titles rank far better
 than whole references, so the title is located *inside* the reference
 from the matcher hits' titles (`shared_title`), else from its shape
-(`probable_title`). `verify` stops early only on a decisive match vouched
+(`probable_title`). A hit's run is the title only where it stands where
+the reference's shape puts the title (`gather.rs`: `beside_title`): a
+hit sharing a publisher's words, or a review titled with the whole
+citation, would otherwise take the title's search. `verify` stops early only on a decisive match vouched
 for by the claimed identifiers or two providers: a digest or reprint can
 match exactly while only a later search finds the original.
 
@@ -254,7 +260,9 @@ examples are comments at the rule in `matching/assess.rs`, its numbers in
   an article cited as an edited book's chapter, a chapter cited as an
   article (`claim.rs`: `cites_edited_book`; `locator.rs`: `cites_issue`).
 - **An identified work with other authors, another edition or version**
-  (`EDITION`, `VERSION`): plausible. "RETRACTED:" markers are ignored.
+  (`EDITION`, `VERSION`): plausible, an article reprinted later as a
+  chapter too (the free sources may hold only the reprint). "RETRACTED:"
+  markers are ignored.
 
 **Sites** (#98, `crates/core/src/site.rs`). A claim's `site` is evidence
 of the publisher, never a claimed field, and only counts for a claim

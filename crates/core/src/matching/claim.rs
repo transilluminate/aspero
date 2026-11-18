@@ -88,6 +88,9 @@ impl Claim {
                 ids.push(id);
             }
         }
+        if ids.is_empty() {
+            ids.extend(bare_arxiv(&text));
+        }
         Claim {
             ids,
             text: Some(text),
@@ -427,6 +430,74 @@ fn bibtex_ids(text: &str) -> Vec<WorkId> {
         ids.extend(format!("pmid:{pmid}").parse::<WorkId>());
     }
     ids
+}
+
+/// The arXiv number a reference gives bare as its identifier, as models
+/// write them: the only number of that shape in it, after a colon
+/// ("`NegotiationToM`: 2404.13627"), as a table's cell ("… | 1706.03741 |
+/// NeurIPS 2017") or last ("… (2210.13312)"). [`crate::id::scan`] reads
+/// bare numbers in prose as none; a reference holding one there and no
+/// other identifier labels it by where it stands. Not after a colon
+/// without a space ("2016;533:1706.03762" is a locator), nor alone.
+fn bare_arxiv(text: &str) -> Option<WorkId> {
+    let bytes = text.as_bytes();
+    let digits = |from: usize| {
+        bytes[from.min(bytes.len())..]
+            .iter()
+            .take_while(|b| b.is_ascii_digit())
+            .count()
+    };
+    let mut shaped: Vec<std::ops::Range<usize>> = Vec::new();
+    let mut i = 0;
+    while i < bytes.len() {
+        let run = digits(i);
+        if run == 0 {
+            i += 1;
+            continue;
+        }
+        let edge =
+            i == 0 || !(bytes[i - 1].is_ascii_alphanumeric() || b"./".contains(&bytes[i - 1]));
+        let tail = if run == 4 && bytes.get(i + 4) == Some(&b'.') {
+            digits(i + 5)
+        } else {
+            0
+        };
+        if edge && (4..=5).contains(&tail) {
+            let mut end = i + 5 + tail;
+            if bytes.get(end) == Some(&b'v') && digits(end + 1) > 0 {
+                end += 1 + digits(end + 1);
+            }
+            // Not run on into letters, a path or more digits after a dot.
+            let run_on = bytes
+                .get(end)
+                .is_some_and(|b| b.is_ascii_alphanumeric() || *b == b'/')
+                || (bytes.get(end) == Some(&b'.')
+                    && bytes.get(end + 1).is_some_and(u8::is_ascii_digit));
+            if !run_on {
+                shaped.push(i..end);
+            }
+            i = end;
+        } else {
+            i += run;
+        }
+    }
+    let [span] = &shaped[..] else {
+        return None;
+    };
+    let before = &text[..span.start];
+    let after = &text[span.end..];
+    let spaced =
+        before.is_empty() || before.ends_with(char::is_whitespace) || before.ends_with(['(', '[']);
+    let last = after.chars().all(|c| !c.is_alphanumeric());
+    let colon = before.trim_end().ends_with(':') && before.ends_with(char::is_whitespace);
+    let cell = before.trim_end().ends_with('|')
+        && (after.trim_start().starts_with('|') || after.trim().is_empty());
+    // A number alone is no reference ("1706.03762" typed is ambiguous).
+    let referenced = before.chars().filter(|c| c.is_alphabetic()).count() >= 3;
+    if !(referenced && spaced && (last || colon || cell)) {
+        return None;
+    }
+    format!("arxiv:{}", &text[span.clone()]).parse().ok()
 }
 
 /// The distinct identifiers mentioned in free text (see [`crate::id::scan`]).

@@ -253,10 +253,14 @@ fn reprints_and_versions_cited_with_another_year_are_plausible() {
     let a = assess(&Claim::from_text(text), &reprint);
     assert_eq!(a.year.agreement, Agreement::Mismatch);
     assert!((PLAUSIBLE..VERIFIED).contains(&a.confidence), "{a:?}");
-    // Not a chapter cited as an article with the wrong year.
+    // Nor, since round 6 (#126), a chapter cited as an article of an
+    // earlier year: an article reprinted in a collection can't be told
+    // from it by the records (wild-2's Crone 1980, held only as its 2017
+    // reprint). Plausible, never verified.
     let text = "Bourdieu P. Distinction: a social critique of the judgement of taste. Soc Sci Inf. \
                 1984;13:1-20.";
-    assert!(assess(&Claim::from_text(text), &reprint).confidence < PLAUSIBLE);
+    let a = assess(&Claim::from_text(text), &reprint);
+    assert!((PLAUSIBLE..VERIFIED).contains(&a.confidence), "{a:?}");
 
     let mut mimic = record(
         &["10.13026/c2xw26"],

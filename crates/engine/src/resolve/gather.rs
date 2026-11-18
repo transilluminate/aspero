@@ -125,9 +125,9 @@ impl Engine {
             && let Some(title) = matching::probable_title(text)
         {
             let given = matching::given_title(text).is_some();
-            if titles.iter().all(|t| match beside_title(t, &title) {
+            if titles.iter().all(|t| match beside_title(t, &title, text) {
                 Beside::Part => given,
-                Beside::Apart => true,
+                Beside::Apart | Beside::Longer => true,
                 Beside::Same => false,
             }) {
                 titles.insert(0, title);
@@ -241,18 +241,44 @@ impl Engine {
 enum Beside {
     /// A part of it, shorter.
     Part,
-    /// None of it: no word of four letters or more in common.
+    /// It and more of the reference: a book review's title, the book's
+    /// whole citation ("Images, Iconoclasm, and the Carolingians.
+    /// Philadelphia: University of Pennsylvania Press, 2009").
+    Longer,
+    /// None of it: elsewhere in the reference (a publisher's words,
+    /// "Ethiopian Public Health Association"), or, where either can't be
+    /// placed in it, no word of four letters or more in common.
     Apart,
     /// It, or overlapping it otherwise: the title found.
     Same,
 }
 
-/// How `shared`, a title a matcher's hit shares with the reference,
-/// stands to `probable`, the title the reference's shape suggests.
-fn beside_title(shared: &str, probable: &str) -> Beside {
+/// How `shared`, a title a matcher's hit shares with `reference`, stands
+/// to `probable`, the title the reference's shape suggests: by where each
+/// stands in the reference, else by the words they share.
+fn beside_title(shared: &str, probable: &str, reference: &str) -> Beside {
     let (shared, probable) = (matching::normalise(shared), matching::normalise(probable));
     if shared == probable {
         return Beside::Same;
+    }
+    let reference = matching::normalise(reference);
+    let words = |s: &str| -> Vec<String> { s.split(' ').map(str::to_owned).collect() };
+    let text = words(&reference);
+    let at = |run: &[String]| {
+        text.windows(run.len())
+            .position(|w| w == run)
+            .map(|i| i..i + run.len())
+    };
+    if let (Some(s), Some(p)) = (at(&words(&shared)), at(&words(&probable))) {
+        return if p.start <= s.start && s.end <= p.end {
+            Beside::Part
+        } else if s.start <= p.start && p.end <= s.end {
+            Beside::Longer
+        } else if s.end <= p.start || p.end <= s.start {
+            Beside::Apart
+        } else {
+            Beside::Same
+        };
     }
     if probable.len() > shared.len() && format!(" {probable} ").contains(&format!(" {shared} ")) {
         return Beside::Part;
@@ -295,28 +321,72 @@ mod tests {
         // Networks" of a BibTeX title; holdout-3's books, a publisher's
         // words.
         let probable = "Semi-Supervised Classification with Graph Convolutional Networks";
+        let bibtex = "@inproceedings{kipf2017, title = {Semi-Supervised Classification with \
+                      Graph Convolutional Networks}, booktitle = {ICLR}, year = {2017}}";
         assert_eq!(
-            beside_title("graph convolutional networks", probable),
+            beside_title("graph convolutional networks", probable, bibtex),
             Beside::Part
         );
+        let brooks = "Brooks FP. The Mythical Man-Month. Addison Wesley Longman; 1995.";
         assert_eq!(
-            beside_title("addison wesley longman", "The Mythical Man-Month"),
+            beside_title("addison wesley longman", "The Mythical Man-Month", brooks),
             Beside::Apart
         );
         // The title found, or one overlapping it otherwise: the hits'.
         assert_eq!(
             beside_title(
                 "semi supervised classification with graph convolutional networks",
-                probable
+                probable,
+                bibtex
             ),
             Beside::Same
         );
         assert_eq!(
             beside_title(
                 "Graph Convolutional Networks for Text Classification",
-                probable
+                probable,
+                bibtex
             ),
             Beside::Same
+        );
+    }
+
+    #[test]
+    fn a_hits_words_elsewhere_in_the_reference_are_no_title() {
+        // holdout-5 #296, wild-2 #472: hits sharing a publisher's words,
+        // one of them the title's ("public", "british"); wild-2 #405: a
+        // book review titled with the book's whole citation.
+        let kitaw = "Kitaw, Y. (2006). The evolution of public health in Ethiopia. Ethiopian \
+                     Public Health Association.";
+        assert_eq!(
+            beside_title(
+                "ethiopian public health association",
+                "The evolution of public health in Ethiopia",
+                kitaw
+            ),
+            Beside::Apart
+        );
+        let blackburn = "Blackburn, M.A.S. (2011) Viking coinage and currency in the British \
+                         Isles. British Numismatic Society Special Publication no. 7. London: \
+                         British Numismatic Society.";
+        assert_eq!(
+            beside_title(
+                "british numismatic society",
+                "Viking coinage and currency in the British Isles",
+                blackburn
+            ),
+            Beside::Apart
+        );
+        let noble = "Noble, Thomas F. X. Images, Iconoclasm, and the Carolingians. \
+                     Philadelphia: University of Pennsylvania Press, 2009.";
+        assert_eq!(
+            beside_title(
+                "images iconoclasm and the carolingians philadelphia university of \
+                 pennsylvania press 2009",
+                "Images, Iconoclasm, and the Carolingians",
+                noble
+            ),
+            Beside::Longer
         );
     }
 }

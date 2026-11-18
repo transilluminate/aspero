@@ -39,13 +39,20 @@ fn is_url(title: &str) -> bool {
 #[allow(clippy::too_many_lines)]
 pub fn assess(claim: &Claim, record: &SourceRecord) -> Assessment {
     let work = &record.work;
-    // A BibTeX entry's accents read as letters (`Veli{\v{c}}kovi{\'c}`).
+    // A BibTeX entry's accents read as letters (`Veli{\v{c}}kovi{\'c}`);
+    // acronyms of the record's title's words read as its words ("LLMs").
     let text = claim.text.as_deref().map(|t| {
-        if t.trim_start().starts_with('@') {
-            Normalised::new(&publication::delatex(t))
+        let t = if t.trim_start().starts_with('@') {
+            publication::delatex(t)
         } else {
-            Normalised::new(t)
-        }
+            t.to_owned()
+        };
+        let t = work
+            .title
+            .as_deref()
+            .and_then(|title| titles::expand_acronyms(&t, title))
+            .unwrap_or(t);
+        Normalised::new(&t)
     });
     // A placeholder record's "title" may be a URL (a registration agency's
     // notice page): no title at all.
@@ -100,8 +107,17 @@ pub fn assess(claim: &Claim, record: &SourceRecord) -> Assessment {
         // pasted title) doesn't name others. One whose byline names
         // people, as any style writes them ("F. Eskdale-Mora", "Nadler,
         // Steven.", BibTeX's author), none of them the record's, does.
+        // Not in the work's own title ("ARAGOG: Advanced RAG Output
+        // Grading" names no one).
+        let outside_title = || match &title_span {
+            Some(span) if !span.is_empty() => {
+                let (from, to) = (text.spans[span.start].start, text.spans[span.end - 1].end);
+                format!("{} {}", &text.raw[..from], &text.raw[to..])
+            }
+            _ => text.raw.clone(),
+        };
         let others = || {
-            authors::names_given(&text.raw)
+            authors::names_given(&outside_title())
                 || byline(text, work_title.as_deref(), title_span.as_ref()).is_some_and(|b| {
                     byline_strangers(&b, &work.authors, work.container_title.as_deref())
                 })
@@ -171,11 +187,22 @@ pub fn assess(claim: &Claim, record: &SourceRecord) -> Assessment {
     // Determinants Associated With …" for "Risk Factors Associated With
     // …", "A Controlled Study" for "A Randomized Trial" (synonyms, as an
     // invented reference's or a paraphrase's are).
+    // Where only its main title was found ("\"High and Noble Adventures\":
+    // Reading the Novel in \"The Male Quixote\"" for "… The Female
+    // Quixote"), a word put in place in the rest.
+    let main_only = title_span.as_ref().is_some_and(|span| {
+        work_title
+            .as_deref()
+            .is_some_and(|t| span.len() < words(unmarked(t)).len())
+    });
     let reworded = match (&work_title, &text) {
         (Some(actual), Some(text)) if found && title_span.is_none() && claim.title.is_none() => {
             text.substitutes_in(actual)
                 .or_else(|| text.inserts_in(actual).then_some(false))
                 .or_else(|| text.replaces_in(actual).then_some(false))
+        }
+        (Some(actual), Some(text)) if found && main_only && claim.title.is_none() => {
+            text.substitutes_in(actual)
         }
         (Some(actual), _) if found => claim
             .title
@@ -249,12 +276,16 @@ pub fn assess(claim: &Claim, record: &SourceRecord) -> Assessment {
     let bibtex = text
         .as_ref()
         .is_some_and(|t| t.raw.trim_start().starts_with('@'));
+    // One given a volume and page is a journal ("Physiotherapy, 40(8),
+    // pp. 1753-1766"); a series' volume alone isn't.
+    let volume_given = claim.place().is_some();
     let journals: Vec<String> = claim
         .cited_containers()
         .into_iter()
         .filter(|cited| {
             claim.container.is_some()
                 || bibtex
+                || volume_given
                 || !publication::significant(cited)
                     .iter()
                     .all(|w| title_words.contains(w))
@@ -370,12 +401,20 @@ pub fn assess(claim: &Claim, record: &SourceRecord) -> Assessment {
     // in that shape: plausible; another journal is another venue too.
     // (A book series' volume, "Lecture Notes in Computer Science, vol.
     // 9351", has no issue; a chapter cited as one, "In: …", is none.)
-    let chapter_as_article = work.work_type == Some(WorkType::Chapter)
-        && work.volume.is_none()
+    // So is a conference paper in a series ("Lecture Notes in Computer
+    // Science"), no more a journal's.
+    let issue_cited = claim.text.as_deref().is_some_and(publication::cites_issue);
+    let chapter_as_article = work.volume.is_none()
         && cited_place.volume.is_some()
         && !claim.text.as_deref().is_some_and(cites_chapter)
-        && (claim.text.as_deref().is_some_and(publication::cites_issue)
-            || (claim.container.is_some() && container.agreement != Agreement::Match));
+        && match work.work_type {
+            Some(WorkType::Chapter) => {
+                issue_cited
+                    || (claim.container.is_some() && container.agreement != Agreement::Match)
+            }
+            Some(WorkType::ConferencePaper) => issue_cited,
+            _ => false,
+        };
     let container =
         if chapter_as_article && cites_journal && container.agreement != Agreement::Match {
             FieldCheck::exact(false)
@@ -392,8 +431,18 @@ pub fn assess(claim: &Claim, record: &SourceRecord) -> Assessment {
     // Corvaro IR, Mirkrand P, editors. Handbook of Nurse-Midwifery"): the
     // reverse, another container (a meeting's proceedings aside, and a
     // series named as its journal: "In: …, editor. Methods in Enzymology").
+    // So too when the book named is its journal, but in no volume ("In:
+    // …, editor. Journal of Applied Probability. Wiley-Blackwell; 1994.
+    // p. 185-197."): a series' volume is cited with its number ("Methods
+    // in Enzymology. Vol 182").
+    let volume_cited = work.volume.as_deref().is_some_and(|v| {
+        cited_place.volume.as_deref() == Some(v)
+            || text
+                .as_ref()
+                .is_some_and(|t| t.words.iter().any(|w| w == v))
+    });
     let article_as_chapter = article
-        && container.agreement != Agreement::Match
+        && (container.agreement != Agreement::Match || !volume_cited)
         && claim.text.as_deref().is_some_and(cites_edited_book)
         && !venue.as_deref().is_some_and(publication::proceedings);
     let container = if article_as_chapter {
@@ -462,11 +511,14 @@ pub fn assess(claim: &Claim, record: &SourceRecord) -> Assessment {
             || v.starts_with("In:")
     });
     // A journal's article cited in a meeting's proceedings ("In
-    // Proceedings of the 8th International Symposium on …") is another
-    // version, if any, of the paper cited.
+    // Proceedings of the 8th International Symposium on …", BibTeX's
+    // `booktitle`) is another version, if any, of the paper cited.
+    let booktitle = text
+        .as_ref()
+        .is_some_and(|t| publication::bibtex_field(&t.raw, "booktitle").is_some());
     let in_proceedings = |v: &str| {
         let v = v.trim_start_matches(|c: char| !c.is_alphanumeric());
-        (v.starts_with("In ") || v.starts_with("In:")) && publication::proceedings(v)
+        (booktitle || v.starts_with("In ") || v.starts_with("In:")) && publication::proceedings(v)
     };
     let other_meeting = !other_conference
         && !confirmed
@@ -483,8 +535,16 @@ pub fn assess(claim: &Claim, record: &SourceRecord) -> Assessment {
             {
                 claim.container.is_none() && in_proceedings(cited)
             }
+            // A conference paper's container is its meeting's, whatever
+            // its name ("Interaction Design and Children"), when a
+            // meeting's proceedings are cited.
             (Some(cited), Some(actual)) => {
-                publication::meeting_name(actual, work.work_type != Some(WorkType::JournalArticle))
+                ((work.work_type == Some(WorkType::ConferencePaper)
+                    && publication::proceedings(cited))
+                    || publication::meeting_name(
+                        actual,
+                        work.work_type != Some(WorkType::JournalArticle),
+                    ))
                     && publication::proceedings_agree(cited, actual) == Some(false)
             }
             _ => false,
@@ -768,8 +828,18 @@ pub fn assess(claim: &Claim, record: &SourceRecord) -> Assessment {
             )
         })
     });
+    // So is a journal's article reprinted whole, later, as a chapter of a
+    // collection ("Islam, Judeo-Christianity and Byzantine Iconoclasm",
+    // Jerusalem Studies in Arabic and Islam 1980, found only in a 2017
+    // Variorum volume): an original and its reprint are versions.
+    let reprint = work.work_type == Some(WorkType::Chapter)
+        && (cites_journal || cited_place.volume.is_some())
+        && !claimed_years.is_empty()
+        && actual_years
+            .iter()
+            .all(|a| claimed_years.iter().all(|c| c < a));
     if (work.work_type == Some(WorkType::Book)
-        || (work.work_type == Some(WorkType::Chapter) && cites_book))
+        || (work.work_type == Some(WorkType::Chapter) && (cites_book || reprint)))
         && (title.agreement == Agreement::Match || extended)
         && authors.score.is_some_and(|s| s >= CORROBORATING_AUTHORS)
         && year.agreement == Agreement::Mismatch
@@ -792,9 +862,38 @@ pub fn assess(claim: &Claim, record: &SourceRecord) -> Assessment {
     if strangers {
         confidence = confidence.min(STRANGERS_CAP);
     }
+    // Nor can a record without a byline confirm the people a citation
+    // names (holdout-5: invented authors of a JAMA piece whose record
+    // lists none; a correction notice's record for its original's).
+    let names_people = claim.authors.iter().any(|a| !authors::is_body(a))
+        || (claim.authors.is_empty()
+            && text.as_ref().is_some_and(|t| {
+                let raw = match &title_span {
+                    Some(span) if !span.is_empty() => &t.raw[..t.spans[span.start].start],
+                    _ => t.raw.as_str(),
+                };
+                authors::names_given(raw)
+            }));
+    if work.authors.is_empty() && names_people && ids != Agreement::Match {
+        confidence = confidence.min(STRANGERS_CAP);
+    }
     // So is a title with words the work's lacks, or one of its own
     // replaced, whatever else agrees.
     if extended || substituted {
+        confidence = confidence.min(EXTENDED_TITLE_CAP);
+    }
+    // And a title only partly the work's, words of the work's missing (not
+    // misspelt: "Ailgnment"): reworded, as another version's title is
+    // ("Preliminary adaptation of cognitive behavioral therapy …" for a
+    // preprint's "Preliminary adaptation process of …"), or another
+    // work's. Plausible, unless the claimed identifier or the place says
+    // which work is cited.
+    let misspelt = match (&claimed_title, &work_title, &text) {
+        (Some(claimed), Some(actual), _) => titles::misspelt_only(&words(claimed), actual, true),
+        (None, Some(actual), Some(text)) => titles::misspelt_only(&text.words, actual, false),
+        _ => true,
+    };
+    if title.agreement == Agreement::Partial && !misspelt && ids != Agreement::Match && !located {
         confidence = confidence.min(EXTENDED_TITLE_CAP);
     }
     // A reply, correction or commentary is not the work it responds to,

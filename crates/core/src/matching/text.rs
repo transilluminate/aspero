@@ -27,7 +27,8 @@ pub fn normalise(s: &str) -> String {
 }
 
 /// [`normalise`]'s words, each with where it stands in `s` (a byte
-/// range), so what surrounds a word can be read as written.
+/// range, in order and not overlapping), so what surrounds a word can be
+/// read as written.
 pub(super) fn spanned_words(s: &str) -> Vec<(String, Range<usize>)> {
     let mut found: Vec<(String, Range<usize>)> = Vec::new();
     let mut open = false;
@@ -45,8 +46,12 @@ pub(super) fn spanned_words(s: &str) -> Vec<(String, Range<usize>)> {
                     word.push(f);
                     span.end = end;
                 }
-                _ => {
-                    found.push((f.to_string(), at..end));
+                // A word begun inside the character that ended the last one
+                // ("½" folds to "1⁄2") starts where that word ends, so
+                // spans stay in order.
+                last => {
+                    let start = last.map_or(at, |(_, span)| span.end.max(at));
+                    found.push((f.to_string(), start..end));
                     open = true;
                 }
             }
@@ -295,7 +300,9 @@ impl Normalised {
     /// its own among them ("… for Sepsis and Septic Shock in Adults and
     /// Children (Sepsis-3)" for "… Septic Shock (Sepsis-3)"): another
     /// title. Joining words inserted don't count, nor words dropped (a
-    /// title shortened is the same title).
+    /// title shortened is the same title), and the title's own joining
+    /// words may be left out ("Multiple HPV 16 infection with two strains:
+    /// a possible marker" for "Multiple HPV infection as possible marker").
     pub(super) fn inserts_in(&self, title: &str) -> bool {
         /// Words inserted, at most, before the title is taken as not there.
         const GAP: usize = 8;
@@ -313,6 +320,11 @@ impl Normalised {
                     }
                     if *word == title[j] {
                         j += 1;
+                        end = k;
+                    } else if STOPWORDS.contains(&title[j].as_str())
+                        && title.get(j + 1) == Some(word)
+                    {
+                        j += 2;
                         end = k;
                     } else if !STOPWORDS.contains(&word.as_str()) {
                         inserted += 1;
@@ -532,8 +544,10 @@ impl Normalised {
         let journal = journal.map(crate::publication::significant);
         self.words
             .iter()
-            .map(|w| {
-                !(w.chars().count() <= 2
+            .zip(&self.linked)
+            .map(|(w, &linked)| {
+                !(linked
+                    || w.chars().count() <= 2
                     || w.bytes().any(|b| b.is_ascii_digit())
                     || STOPWORDS.contains(&w.as_str())
                     || LINK_WORDS.contains(&w.as_str())
@@ -557,12 +571,19 @@ impl Normalised {
     pub(super) fn years_beside(&self, title: Option<&str>) -> Vec<i16> {
         let span = title.and_then(|t| self.title_span(t)).unwrap_or(0..0);
         // A volume numbered like a year, with its part and issue
-        // ("2007.0(52)", a working-paper series'), is no year.
+        // ("2007.0(52)", a working-paper series'), is no year; nor an arXiv
+        // number's year and month ("1811.07871").
         let decimal = |i: usize| {
-            self.raw[self.spans[i].end..]
-                .strip_prefix('.')
-                .map(|s| s.trim_start_matches(|c: char| c.is_ascii_digit()))
-                .is_some_and(|rest| rest.starts_with('('))
+            let Some(after) = self.raw[self.spans[i].end..].strip_prefix('.') else {
+                return false;
+            };
+            let digits = after.len() - after.trim_start_matches(|c: char| c.is_ascii_digit()).len();
+            let rest = &after[digits..];
+            let month = self.words[i].get(2..).and_then(|m| m.parse::<u8>().ok());
+            rest.starts_with('(')
+                || ((4..=5).contains(&digits)
+                    && month.is_some_and(|m| (1..=12).contains(&m))
+                    && !rest.starts_with(|c: char| c.is_alphanumeric() && c != 'v'))
         };
         let years = |skip: &Range<usize>| -> Vec<i16> {
             self.words

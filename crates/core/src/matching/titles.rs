@@ -4,12 +4,17 @@
 use super::text::{STOPWORDS, content_words, dedup, words};
 
 /// A title without a leading status marker publishers add to retracted or
-/// withdrawn works ("RETRACTED: Ileal-lymphoid…", "RETRACTED ARTICLE: …"),
-/// so a citation of the original title still matches. Notices themselves
-/// ("Retraction: …") are left alone.
+/// withdrawn works ("RETRACTED: Ileal-lymphoid…", "RETRACTED ARTICLE: …",
+/// IEEE's "Notice of Retraction: …"), so a citation of the original title
+/// still matches. Notices themselves ("Retraction: …") are left alone.
 pub fn unmarked(title: &str) -> &str {
     let trimmed = title.trim_start();
-    for marker in ["retracted article", "retracted", "withdrawn"] {
+    for marker in [
+        "retracted article",
+        "retracted",
+        "withdrawn",
+        "notice of retraction",
+    ] {
         if let Some(head) = trimmed.get(..marker.len())
             && head.eq_ignore_ascii_case(marker)
         {
@@ -64,6 +69,102 @@ pub(super) fn dice(a: &[String], b: &[String]) -> f64 {
     }
     let shared = a.iter().filter(|w| b.contains(w)).count();
     2.0 * shared as f64 / (a.len() + b.len()) as f64
+}
+
+/// A reference with the acronyms it writes for a run of `title`'s words
+/// written out as those words ("Theory of Mind in LLMs" for "… in Large
+/// Language Models", "RLHF" for "Reinforcement Learning from Human
+/// Feedback", "ToM"): models abbreviate titles so. An acronym is two
+/// capitals or more, a plural's "s" aside, spelling the initials of
+/// consecutive words of the title, its joining words' optional; one the
+/// title holds as a word stays. `None` when there is none.
+pub fn expand_acronyms(text: &str, title: &str) -> Option<String> {
+    // The run of title words from `at` whose initials spell `letters`.
+    fn spelt(letters: &[char], words: &[String], at: usize) -> Option<usize> {
+        let Some(&c) = letters.first() else {
+            return Some(at);
+        };
+        let word = words.get(at)?;
+        let joining = STOPWORDS.contains(&word.as_str());
+        if word.starts_with(c)
+            && let Some(end) = spelt(&letters[1..], words, at + 1)
+        {
+            return Some(end);
+        }
+        // A joining word inside the run may give no letter ("Learning
+        // from Human" in "RLHF").
+        if joining && at > 0 {
+            return spelt(letters, words, at + 1);
+        }
+        None
+    }
+    let title_words: Vec<&str> = title
+        .split(|c: char| !c.is_alphanumeric())
+        .filter(|w| !w.is_empty())
+        .collect();
+    let lower: Vec<String> = title_words.iter().map(|w| w.to_lowercase()).collect();
+    let mut out = String::with_capacity(text.len());
+    let mut changed = false;
+    let mut rest = text;
+    let mut previous = "";
+    while !rest.is_empty() {
+        let start = rest.find(char::is_alphanumeric).unwrap_or(rest.len());
+        out.push_str(&rest[..start]);
+        rest = &rest[start..];
+        let end = rest
+            .find(|c: char| !c.is_alphanumeric())
+            .unwrap_or(rest.len());
+        let token = &rest[..end];
+        rest = &rest[end..];
+        let capitals = token.chars().filter(char::is_ascii_uppercase).count();
+        let stem = token
+            .strip_suffix('s')
+            .filter(|_| token.len() > 2)
+            .unwrap_or(token);
+        let letters: Vec<char> = stem.to_lowercase().chars().collect();
+        // A name's initials ("Kishore CP,") are no acronym.
+        let initials = token.chars().all(|c| c.is_ascii_uppercase())
+            && previous.starts_with(char::is_uppercase)
+            && previous.chars().any(char::is_lowercase)
+            && (rest.is_empty() || rest.starts_with([',', '.', ';']));
+        let expansion = (capitals >= 2
+            && !initials
+            && (2..=8).contains(&letters.len())
+            && token.chars().all(|c| c.is_ascii_alphabetic())
+            && !lower
+                .iter()
+                .any(|w| w.eq_ignore_ascii_case(token) || *w == stem.to_lowercase()))
+        .then(|| {
+            (0..lower.len())
+                .filter(|&i| !STOPWORDS.contains(&lower[i].as_str()))
+                .find_map(|i| {
+                    let end = spelt(&letters, &lower, i)?;
+                    // A run ends on a word of its own, not a joining word.
+                    (end - i >= 2 && !STOPWORDS.contains(&lower[end - 1].as_str()))
+                        .then(|| title_words[i..end].join(" "))
+                })
+        })
+        .flatten();
+        match expansion {
+            Some(words) => {
+                out.push_str(&words);
+                changed = true;
+            }
+            None => out.push_str(token),
+        }
+        previous = token;
+    }
+    changed.then_some(out)
+}
+
+/// Whether `cited` (a reference's words, or a title cited apart) has
+/// every content word of `title`, but for misspellings ("Ailgnment",
+/// "colour"); with `both`, and no content words of its own either.
+pub(super) fn misspelt_only(cited: &[String], title: &str, both: bool) -> bool {
+    let near = |w: &String, among: &[String]| among.iter().any(|o| super::authors::near(w, o));
+    let title = content_words(unmarked(title));
+    let cited_content = content_words(&cited.join(" "));
+    title.iter().all(|w| near(w, cited)) && (!both || cited_content.iter().all(|w| near(w, &title)))
 }
 
 /// The title before a subtitle separator (":" or a dash), if there is one.
@@ -322,19 +423,143 @@ pub fn probable_title(text: &str) -> Option<String> {
     if let Some(given) = given_title(text) {
         return Some(given);
     }
+    if let Some(title) = after_comma_byline(text) {
+        return Some(title);
+    }
     // Of its sentences, not a byline, a publisher or locator (";"), the
-    // one most in sentence case, then the longest.
+    // one most in sentence case, then the longest; a year opening one
+    // (Harvard's "(2011) Viking coinage …", after initials) is the year's.
+    // Nor editors' names ("Ragep, eds").
+    let editors = |s: &str| {
+        s.split_whitespace().last().is_some_and(|w| {
+            matches!(
+                w.trim_matches(|c: char| !c.is_alphabetic())
+                    .to_lowercase()
+                    .as_str(),
+                "ed" | "eds" | "editor" | "editors" | "dir" | "hrsg"
+            )
+        })
+    };
     text.split(". ")
-        .filter(|s| !s.contains(';') && !super::authors::names_given(s))
+        .filter(|s| !s.contains(';') && !super::authors::names_given(s) && !editors(s))
+        .map(without_leading_year)
         .filter_map(title_like)
-        .max_by_key(|s| {
+        .enumerate()
+        // Of sentences alike, the first: a title precedes its place.
+        .max_by_key(|(i, s)| {
             let words: Vec<&str> = s.split_whitespace().collect();
             let lower = words
                 .iter()
                 .filter(|w| w.chars().count() >= 3 && w.starts_with(char::is_lowercase))
                 .count();
-            (lower, words.len())
+            (lower, words.len(), std::cmp::Reverse(*i))
         })
+        .map(|(_, s)| s)
+}
+
+/// A sentence without the year in brackets opening it: "(2011) Viking
+/// coinage …".
+fn without_leading_year(s: &str) -> &str {
+    let t = s.trim_start();
+    let Some(inner) = t.strip_prefix('(') else {
+        return s;
+    };
+    let digits = inner.chars().take_while(char::is_ascii_digit).count();
+    let rest = &inner[digits..];
+    let rest = rest
+        .strip_prefix(|c: char| c.is_ascii_lowercase())
+        .unwrap_or(rest);
+    match rest.strip_prefix(')') {
+        Some(after) if digits == 4 => after.trim_start_matches(['.', ',']).trim_start(),
+        _ => s,
+    }
+}
+
+/// The title after a byline written "Family, Given," (French and some
+/// Chicago references: "Vidal-Naquet, Pierre, La torture dans la
+/// République, Paris, Minuit, 1972"), up to a sentence's end, a place (a
+/// lone capitalised word before a comma or colon), a number or a bracket.
+/// Given names are written out ("Charles-Robert", "Thomas S."), unlike
+/// APA's initials; a second author ("…, and Jane Doe") is no title.
+fn after_comma_byline(text: &str) -> Option<String> {
+    let name = |w: &str| {
+        w.starts_with(char::is_uppercase)
+            && w.chars()
+                .all(|c| c.is_alphabetic() || matches!(c, '-' | '\'' | '’'))
+    };
+    // Initials in capitals ("Radford A, Kim JW,") are Vancouver's.
+    let capitals = |w: &str| {
+        let w = w.trim_end_matches('.');
+        w.chars().count() >= 2 && w.chars().all(|c| c.is_uppercase() || c == '.')
+    };
+    let (family, rest) = text.split_once(", ")?;
+    if !family.split_whitespace().all(name)
+        || family.split_whitespace().count() > 3
+        || family
+            .split_whitespace()
+            .any(|w| w.chars().count() <= 3 && w.chars().all(char::is_uppercase))
+    {
+        return None;
+    }
+    let (given, rest) = rest.split_once(", ")?;
+    let given = given
+        .trim_end_matches(' ')
+        .trim_end_matches(['.'])
+        .split(" (")
+        .next()
+        .unwrap_or_default();
+    let parts: Vec<&str> = given.split_whitespace().collect();
+    let initial = |w: &str| {
+        let w = w.trim_end_matches('.');
+        w.chars().count() == 1 && w.chars().all(char::is_uppercase)
+    };
+    let written_out = parts.iter().any(|w| {
+        name(w)
+            && w.chars().filter(|c| c.is_alphabetic()).count() >= 2
+            && w.chars().any(char::is_lowercase)
+    });
+    if parts.is_empty()
+        || parts.len() > 3
+        || !written_out
+        || !parts
+            .iter()
+            .all(|w| name(w.trim_end_matches('.')) || initial(w))
+        || parts.iter().any(|w| capitals(w))
+    {
+        return None;
+    }
+    let first = rest.split_whitespace().next()?;
+    if matches!(
+        first.to_lowercase().as_str(),
+        "and" | "&" | "et" | "y" | "und" | "e" | "ed" | "eds" | "dir"
+    ) || first.starts_with(|c: char| c.is_ascii_digit())
+    {
+        return None;
+    }
+    // The title ends at a sentence's end, a bracket or semicolon, or a
+    // comma before a place, a publisher's or a number.
+    let mut end = rest.len();
+    for stop in [". ", " (", ";"] {
+        if let Some(at) = rest.find(stop) {
+            end = end.min(at);
+        }
+    }
+    let mut from = 0;
+    while let Some(at) = rest[from..end].find(", ") {
+        let after = &rest[from + at + 2..];
+        let next = after.split_whitespace().next().unwrap_or_default();
+        let bare = next.trim_end_matches([',', ':', '.']);
+        let place = name(bare) && next.ends_with([',', ':']);
+        if place || next.starts_with(|c: char| c.is_ascii_digit()) {
+            end = from + at;
+            break;
+        }
+        from += at + 2;
+    }
+    let title = rest[..end].trim().trim_end_matches(['.', ',']);
+    (title.split_whitespace().count() >= 2)
+        .then(|| title.to_owned())
+        .and_then(|t| title_like(&t))
 }
 
 /// A span of a reference that may be a title: words, one of three letters

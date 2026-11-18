@@ -8,7 +8,7 @@ use rmcp::model::{Tool, ToolAnnotations};
 use serde_json::{Map, Value};
 
 use super::StartError;
-use crate::{Caller, Scope, ToolErrorKind};
+use crate::{Caller, ToolErrorKind, scope};
 
 /// A tool the app serves, as it declares it.
 #[derive(Debug, Clone, PartialEq)]
@@ -21,8 +21,21 @@ pub struct HostTool {
     pub input_schema: String,
     /// JSON Schema of the result's `structured`: an object.
     pub output_schema: Option<String>,
-    /// What a key needs to see and call it.
-    pub scope: Scope,
+    /// What a key needs to see and call it, named by the host
+    /// ("history.read", "notes.write"): [`scope::check_host`] says which
+    /// names it may take (not `sources`, aspero's own). A key needs exactly
+    /// this scope; no scope implies another.
+    pub scope: String,
+    /// Whether it only reads: changes nothing in the host's data. Listed as
+    /// `readOnlyHint`; a read-only tool is never listed as destructive.
+    pub read_only: bool,
+    /// Whether, unless read-only, it may take something away (remove,
+    /// untag, delete, overwrite) rather than only add. Listed as
+    /// `destructiveHint`.
+    pub destructive: bool,
+    /// Whether calling it again with the same arguments does nothing more.
+    /// Listed as `idempotentHint`.
+    pub idempotent: bool,
 }
 
 /// A host tool's answer.
@@ -131,14 +144,15 @@ pub trait Host: Send + Sync {
 /// A host tool, checked and ready to list.
 #[derive(Debug, Clone)]
 pub(crate) struct Listed {
-    pub scope: Scope,
+    pub scope: String,
     pub tool: Tool,
     /// Its input schema's required fields.
     pub required: Vec<String>,
 }
 
 /// The host's tools, checked: names unique and unlike the engine's,
-/// schemas JSON objects.
+/// scopes valid ([`scope::check_host`]), schemas JSON objects. Annotated
+/// with the hints the host declared.
 pub(crate) fn catalog(host: &dyn Host, engine: &[&str]) -> Result<Vec<Listed>, StartError> {
     let mut listed: Vec<Listed> = Vec::new();
     for spec in host.tools() {
@@ -148,6 +162,12 @@ pub(crate) fn catalog(host: &dyn Host, engine: &[&str]) -> Result<Vec<Listed>, S
         }
         if engine.contains(&name) || listed.iter().any(|l| l.tool.name == name) {
             return Err(StartError::ToolNameClash { name: name.into() });
+        }
+        if let Err(problem) = scope::check_host(&spec.scope) {
+            return Err(StartError::Setup(format!(
+                "host tool {name:?}: its scope {:?} {problem}",
+                spec.scope
+            )));
         }
         let schema = |what: &str, json: &str| -> Result<Map<String, Value>, StartError> {
             match serde_json::from_str(json) {
@@ -165,14 +185,12 @@ pub(crate) fn catalog(host: &dyn Host, engine: &[&str]) -> Result<Vec<Listed>, S
                 .collect(),
             _ => Vec::new(),
         };
-        let writes = matches!(spec.scope, Scope::WriteHistory | Scope::RemoveHistory);
-        let removes = spec.scope == Scope::RemoveHistory;
         let mut tool = Tool::new(name.to_owned(), spec.description.clone(), input)
             .with_annotations(
                 ToolAnnotations::with_title(spec.title.clone())
-                    .read_only(!writes)
-                    .destructive(removes)
-                    .idempotent(!writes)
+                    .read_only(spec.read_only)
+                    .destructive(!spec.read_only && spec.destructive)
+                    .idempotent(spec.idempotent)
                     .open_world(false),
             );
         if !spec.title.is_empty() {
@@ -182,7 +200,7 @@ pub(crate) fn catalog(host: &dyn Host, engine: &[&str]) -> Result<Vec<Listed>, S
             tool = tool.with_raw_output_schema(Arc::new(schema("output", output)?));
         }
         listed.push(Listed {
-            scope: spec.scope,
+            scope: spec.scope.clone(),
             tool,
             required,
         });

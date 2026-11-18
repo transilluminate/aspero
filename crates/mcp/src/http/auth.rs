@@ -9,6 +9,7 @@ use sha2::{Digest, Sha256};
 use subtle::ConstantTimeEq;
 
 use super::Key;
+use crate::scope;
 
 /// A key and its token's hash, decoded.
 #[derive(Debug, Clone)]
@@ -18,8 +19,9 @@ pub(crate) struct Credential {
 }
 
 impl Credential {
-    /// The key, if its hash is 64 hex digits and its budget a number of
-    /// dollars; otherwise what's wrong.
+    /// The key, if its hash is 64 hex digits, its budget a number of
+    /// dollars and its scopes ones a key may hold
+    /// ([`scope::check_key`]); otherwise what's wrong.
     pub fn new(key: Key) -> Result<Self, String> {
         let digest = decode_hex(key.sha256.trim()).ok_or_else(|| {
             format!(
@@ -32,6 +34,10 @@ impl Credential {
                 "key {:?}: its daily budget must be zero or more US dollars, not {}",
                 key.id, key.daily_budget_usd
             ));
+        }
+        for s in &key.scopes {
+            scope::check_key(s)
+                .map_err(|problem| format!("key {:?}: its scope {s:?} {problem}", key.id))?;
         }
         Ok(Credential { key, digest })
     }
@@ -160,6 +166,28 @@ mod tests {
         let mut k = key("a", "t").key;
         k.daily_budget_usd = f64::NAN;
         assert!(Credential::new(k).is_err());
+    }
+
+    #[test]
+    fn a_key_holds_sources_and_well_formed_host_scopes_only() {
+        let with = |scopes: &[&str]| {
+            let mut k = key("a", "t").key;
+            k.scopes = scopes.iter().map(|s| (*s).to_owned()).collect();
+            Credential::new(k)
+        };
+        assert!(with(&["sources", "history.read", "notes.write"]).is_ok());
+        // Not declared by any tool: holds it, and it grants nothing.
+        assert!(with(&["nothing.yet"]).is_ok());
+        assert_eq!(
+            with(&["history.read", "history read"]).err().as_deref(),
+            Some(
+                "key \"a\": its scope \"history read\" may hold only letters, digits, \
+                 `.`, `_` and `-`"
+            )
+        );
+        for bad in ["", "Sources", "read/history", "📚"] {
+            assert!(with(&[bad]).is_err(), "{bad:?}");
+        }
     }
 
     #[test]

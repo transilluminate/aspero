@@ -10,7 +10,6 @@
 use std::sync::Arc;
 
 use aspero_engine::{SecretString, SqliteCache, StandardConfig, standard};
-use aspero_mcp::Scope;
 use aspero_mcp::Tools;
 use aspero_mcp::http::{HttpConfig, HttpServer, Key, sha256_hex};
 
@@ -36,7 +35,7 @@ async fn main() {
     http.keys = vec![Key {
         id: "example".into(),
         name: "example agent".into(),
-        scopes: vec![Scope::Sources],
+        scopes: vec![aspero_mcp::scope::SOURCES.into()],
         sha256: sha256_hex(&token),
         daily_budget_usd: 0.05,
     }];

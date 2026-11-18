@@ -11,34 +11,6 @@ use crate::{ToolError, ToolErrorKind};
 /// search costs $0.001, so this is about 250 searches; lookups are free.
 pub const DEFAULT_BUDGET_USD: f64 = 0.25;
 
-/// What a key may do over HTTP. Over stdio there are no keys: the agent
-/// that launched the server may call every tool.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum Scope {
-    /// The engine tools: searching, looking up and verifying works in
-    /// open sources (and spending on them).
-    Sources,
-    /// An app's tools that read its history.
-    ReadHistory,
-    /// An app's tools that add to its history.
-    WriteHistory,
-    /// An app's tools that take something away from its history: remove,
-    /// untag, delete. Apart from [`Scope::WriteHistory`], which doesn't
-    /// imply it, so a key may add without being able to remove.
-    RemoveHistory,
-}
-
-impl Scope {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Scope::Sources => "sources",
-            Scope::ReadHistory => "read_history",
-            Scope::WriteHistory => "write_history",
-            Scope::RemoveHistory => "remove_history",
-        }
-    }
-}
-
 /// Who is calling. Over stdio, the agent that launched the server, which
 /// is all there is to know; over HTTP, also the key it presented.
 #[derive(Debug, Clone, Default)]
@@ -49,8 +21,9 @@ pub struct Caller {
     /// The key's id and name, as the host gave them (HTTP only).
     pub key_id: Option<String>,
     pub key_name: Option<String>,
-    /// What the key may do (HTTP only).
-    pub scopes: Vec<Scope>,
+    /// What the key may do (HTTP only): [`scope::SOURCES`](crate::scope::SOURCES)
+    /// and the host's scopes it holds, as the host gave them.
+    pub scopes: Vec<String>,
 }
 
 /// One connection: its caller, and its spend against a cap.

@@ -28,7 +28,7 @@
 //!    name (see `title`).
 //! 6. For a title only, and only when nothing above gives one: the `title`
 //!    given, if it is one.
-//! 7. The address, scanned as [`scan`](crate::id::scan) reads it (a DOI in
+//! 7. The address, scanned as [`scan`] reads it (a DOI in
 //!    the path, Nature's articles, PIIs, PubMed, arXiv).
 //!
 //! Every identifier found, in that order and each once, is in

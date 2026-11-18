@@ -15,7 +15,7 @@ use crate::{Result, SqliteCache};
 /// COLUMN`, so adding it rebuilt nothing, and older versions sharing the
 /// file still read and write it). Rows written without it count as used
 /// when stored. Writes set it; reads bump it only while a limit is set,
-/// and at most once per [`TOUCH_EVERY`], so an unlimited cache's reads
+/// and at most once per `TOUCH_EVERY`, so an unlimited cache's reads
 /// stay reads. A record's identifiers (`record_id`) go with it.
 pub const ACCESS: &[&str] = &["record", "miss", "search", "edges"];
 

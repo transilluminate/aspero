@@ -12,6 +12,16 @@ Added:
   another that is, with the work's of its kind as `actual` and the one
   claimed as `cited` (#148). A new enum case for exhaustive switches.
 
+Fixed:
+
+- `--split` reads a tagged record as a reference of its own: a line
+  starting a `{{cite …}}` template, an RIS record (`TY  -`) or an
+  EndNote one (`%0`) starts a reference, and a template with its braces
+  closed or an RIS record at `ER  -` ends one (#141). A template and a
+  one-line RIS record pasted together were one reference, blending two
+  works; RIS records written a tag per line, one after another, were
+  one too.
+
 Fixed (red team round 7, #148, from `bench/redteam/wild-3.jsonl`;
 measured offline on round 6's tape: wild-3's wrong citations verified
 fell from 25 of 122 to 8, and no correct citation of holdout-5, wild-2,

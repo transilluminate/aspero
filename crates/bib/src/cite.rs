@@ -174,12 +174,12 @@ pub enum Markup {
 pub struct Cited {
     /// The work's position in the input.
     pub index: usize,
-    /// The style's number or label for it ("1.", "[1]"), when the style
+    /// The style's number or label for it ("1.", "\[1\]"), when the style
     /// sets it apart from the reference.
     pub label: Option<String>,
     pub text: String,
     /// How the style cites it in running text: "(LeCun et al., 2015)",
-    /// "[1]".
+    /// "\[1\]".
     pub in_text: String,
 }
 

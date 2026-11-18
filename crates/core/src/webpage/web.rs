@@ -352,7 +352,7 @@ const TRACKING: &[&str] = &[
 
 /// A web address normalised as a page's key: scheme and host lower case,
 /// the default port and the fragment dropped, tracking parameters
-/// ([`TRACKING`], `utm_*`) taken out of the query (the rest kept, in
+/// (`TRACKING`, `utm_*`) taken out of the query (the rest kept, in
 /// order), an empty path `/`. `None` unless it's `http` or `https` with a
 /// host.
 pub fn normalise_url(url: &str) -> Option<String> {

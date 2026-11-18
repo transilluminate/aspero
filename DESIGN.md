@@ -525,6 +525,24 @@ held as SHA-256 hashes and compared in constant time, with scopes and a
 daily budget kept in `mcp_spend`. Host tools cost $0 and get 30 s; a
 timeout says the outcome is unknown (a retry could write twice).
 
+**Scopes** are strings (`crates/mcp/src/scope.rs`). `sources` is
+aspero's own, for the engine tools. Every other is declared by the host
+for its tools (`history.read`, `history.remove`, `notes.write`): aspero
+gives it no meaning, so no fixed set of verbs or nouns ties aspero to one
+embedder's store. A key holds a set of them and may list and call a tool
+only if it holds exactly that tool's scope; none implies another, so a
+key may add without being able to remove. Scopes are short ASCII names
+(letters, digits, `.`, `_`, `-`, at most 64); a host tool can't claim
+`sources`. A malformed scope fails the server's start, leaves its key out
+of a key change, or fails a change of the host's tools (which keeps the
+tools it had); one no tool declares grants nothing. Since a scope says
+nothing about what a tool does, the host declares each tool's hints
+(read-only, destructive, idempotent), listed as its MCP annotations; unset
+over FFI, they are MCP's defaults (not read-only, destructive, not
+idempotent), and a read-only tool is never listed as destructive. A key
+whose scopes change hears `tools/list_changed`, as after a change of the
+host's tools.
+
 **Threat model.** For agents on the same machine, acting for the user.
 Loopback only: nothing off the machine connects. Every request needs a key
 the app minted and can revoke; aspero holds only hashes (the app keeps
@@ -533,9 +551,11 @@ can send requests to loopback, but sends an `Origin` (refused) and, with
 DNS rebinding, its own host in `Host` (refused); it can't read a token.
 Other local processes running as the user could read the app's data
 anyway, so a key bounds what an agent may do (scopes, budgets), not who
-the user is. No tool deletes anything; writes go only through the app's
-`writeHistory` tools, which it can refuse. Next (P3): progress
-notifications and resources.
+the user is. The engine tools only read (and spend); writes and removals
+go only through the app's tools, under scopes the app declares and a key
+must hold exactly, and the app can refuse them. A tool the app marks
+destructive is listed so. Next (P3): progress notifications and
+resources.
 
 ## Apps (FFI)
 

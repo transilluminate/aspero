@@ -10,12 +10,11 @@ use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
 
 use aspero_core::testing::Events;
-use aspero_mcp::Scope::{ReadHistory, Sources, WriteHistory};
 use aspero_mcp::http::{
     ACTIVITY_QUEUE, Activity, Host, HostError, HostOutput, HostTool, HttpConfig, HttpServer, Key,
     Ledger, MemoryLedger, StartError, sha256_hex,
 };
-use aspero_mcp::{Caller, Scope, ToolErrorKind, Tools};
+use aspero_mcp::{Caller, ToolErrorKind, Tools};
 use async_trait::async_trait;
 use common::{SEARCH_COST, source, tools};
 use serde_json::{Value, json};
@@ -24,17 +23,23 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 const FULL: &str = "token-full";
 const READER: &str = "token-reader";
 
+// Scopes: aspero's own, and the ones this host declares.
+const SOURCES: &str = "sources";
+const READ: &str = "history.read";
+const WRITE: &str = "history.write";
+const REMOVE: &str = "history.remove";
+
 /// A free port: bound, read and let go, as an app's settings would pick.
 fn free_port() -> u16 {
     let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     listener.local_addr().unwrap().port()
 }
 
-fn key(id: &str, token: &str, scopes: &[Scope], daily_budget_usd: f64) -> Key {
+fn key(id: &str, token: &str, scopes: &[&str], daily_budget_usd: f64) -> Key {
     Key {
         id: id.into(),
         name: format!("{id} agent"),
-        scopes: scopes.to_vec(),
+        scopes: scopes.iter().map(|s| (*s).to_owned()).collect(),
         sha256: sha256_hex(token),
         daily_budget_usd,
     }
@@ -42,12 +47,19 @@ fn key(id: &str, token: &str, scopes: &[Scope], daily_budget_usd: f64) -> Key {
 
 fn keys() -> Vec<Key> {
     vec![
-        key("full", FULL, &[Sources, ReadHistory, WriteHistory], 100.0),
-        key("reader", READER, &[ReadHistory], 100.0),
+        key("full", FULL, &[SOURCES, READ, WRITE], 100.0),
+        key("reader", READER, &[READ], 100.0),
     ]
 }
 
-fn tool(name: &str, scope: Scope, required: &[&str]) -> HostTool {
+/// A host tool under `scope`, with the hints a store's tools would
+/// declare: reading changes nothing, removing destroys, writing adds.
+fn tool(name: &str, scope: &str, required: &[&str]) -> HostTool {
+    let (read_only, destructive, idempotent) = match scope {
+        READ => (true, false, true),
+        REMOVE => (false, true, false),
+        _ => (false, false, false),
+    };
     HostTool {
         name: name.into(),
         title: format!("The {name} tool"),
@@ -59,7 +71,10 @@ fn tool(name: &str, scope: Scope, required: &[&str]) -> HostTool {
         })
         .to_string(),
         output_schema: Some(json!({"type": "object"}).to_string()),
-        scope,
+        scope: scope.into(),
+        read_only,
+        destructive,
+        idempotent,
     }
 }
 
@@ -75,11 +90,11 @@ impl FakeHost {
     fn new() -> Arc<Self> {
         let host = FakeHost::default();
         *host.tools.lock().unwrap() = vec![
-            tool("history_search", ReadHistory, &["q"]),
-            tool("history_add", WriteHistory, &["doi"]),
-            tool("history_fail", ReadHistory, &[]),
-            tool("history_slow", ReadHistory, &[]),
-            tool("history_bad", ReadHistory, &[]),
+            tool("history_search", READ, &["q"]),
+            tool("history_add", WRITE, &["doi"]),
+            tool("history_fail", READ, &[]),
+            tool("history_slow", READ, &[]),
+            tool("history_bad", READ, &[]),
         ];
         Arc::new(host)
     }
@@ -421,7 +436,7 @@ async fn engine_and_host_tools_answer_and_the_host_hears_of_each() {
     assert_eq!(args, &json!({"q": "sepsis"}));
     assert_eq!(caller.key_id.as_deref(), Some("full"));
     assert_eq!(caller.key_name.as_deref(), Some("full agent"));
-    assert_eq!(caller.scopes, [Sources, ReadHistory, WriteHistory]);
+    assert_eq!(caller.scopes, [SOURCES, READ, WRITE]);
     assert_eq!(caller.client.as_deref(), Some("test-agent"));
 
     let result = agent.call("history_fail", json!({})).await;
@@ -469,7 +484,7 @@ async fn a_key_without_the_scope_is_refused_before_the_host_is_asked() {
     assert!(is_error(&result));
     assert_eq!(
         text(&result),
-        "Error (forbidden): this key can't use history_add: it lacks the write_history scope"
+        "Error (forbidden): this key can't use history_add: it lacks the history.write scope"
     );
     let result = reader
         .call("search", json!({"text": "Deep learning"}))
@@ -621,10 +636,7 @@ async fn required_fields_are_checked_and_a_slow_host_times_out() {
 #[tokio::test(flavor = "multi_thread")]
 async fn host_tools_may_not_share_a_name() {
     let host = FakeHost::new();
-    host.tools
-        .lock()
-        .unwrap()
-        .push(tool("lookup", ReadHistory, &[]));
+    host.tools.lock().unwrap().push(tool("lookup", READ, &[]));
     let clash = start_with(
         config(free_port()),
         Some(host.clone()),
@@ -644,7 +656,7 @@ async fn host_tools_may_not_share_a_name() {
     host.tools
         .lock()
         .unwrap()
-        .push(tool("history_add", ReadHistory, &[]));
+        .push(tool("history_add", READ, &[]));
     assert_eq!(
         server.host_tools_changed(),
         Err(StartError::ToolNameClash {
@@ -658,7 +670,7 @@ async fn host_tools_may_not_share_a_name() {
     {
         let mut tools = host.tools.lock().unwrap();
         tools.pop();
-        tools.push(tool("history_count", ReadHistory, &[]));
+        tools.push(tool("history_count", READ, &[]));
     }
     server.host_tools_changed().unwrap();
     assert!(agent.tools().await.contains(&"history_count".to_owned()));
@@ -719,14 +731,14 @@ async fn requests_need_a_key_and_a_revoked_key_is_refused_at_once() {
     assert_eq!(other.request("tools/list", json!({})).await.0, 404);
 
     // Revoked: the next request is refused, and the session ends.
-    server.set_keys(vec![key("reader", READER, &[ReadHistory], 1.0)]);
+    server.set_keys(vec![key("reader", READER, &[READ], 1.0)]);
     let (status, _) = agent.request("tools/list", json!({})).await;
     assert_eq!(status, 401);
     tokio::time::sleep(Duration::from_millis(100)).await;
     assert_eq!(server.status().sessions, 0);
 
     // Rotated: the old token no longer works, the new one does.
-    server.set_keys(vec![key("full", "token-new", &[Sources], 1.0)]);
+    server.set_keys(vec![key("full", "token-new", &[SOURCES], 1.0)]);
     let mut old = Agent::new(port, FULL);
     assert_eq!(old.request("initialize", json!({})).await.0, 401);
     let mut new = Agent::new(port, "token-new");
@@ -872,7 +884,7 @@ struct StuckHost {
 #[async_trait]
 impl Host for StuckHost {
     fn tools(&self) -> Vec<HostTool> {
-        vec![tool("history_search", ReadHistory, &[])]
+        vec![tool("history_search", READ, &[])]
     }
 
     async fn call(&self, _: String, _: String, _: Caller) -> Result<HostOutput, HostError> {
@@ -1011,7 +1023,7 @@ async fn a_keys_daily_budget_outlasts_a_restart() {
     let ledger =
         || -> Arc<dyn Ledger> { Arc::new(aspero_engine::SqliteCache::open(&path).unwrap()) };
     let mut config = config(free_port());
-    config.keys = vec![key("full", FULL, &[Sources], 2.0 * SEARCH_COST)];
+    config.keys = vec![key("full", FULL, &[SOURCES], 2.0 * SEARCH_COST)];
     let search = json!({"text": "Deep learning"});
 
     let server = start_with(config.clone(), None, ledger()).await.unwrap();
@@ -1049,9 +1061,9 @@ async fn the_status_says_what_each_key_spent_today() {
     ledger.add("other", "2000-01-01", 3.0).unwrap();
     let mut config = config(free_port());
     config.keys = vec![
-        key("full", FULL, &[Sources], 100.0),
-        key("other", READER, &[Sources], 100.0),
-        key("idle", "token-idle", &[Sources], 100.0),
+        key("full", FULL, &[SOURCES], 100.0),
+        key("other", READER, &[SOURCES], 100.0),
+        key("idle", "token-idle", &[SOURCES], 100.0),
     ];
     let server = start_with(config, None, ledger.clone()).await.unwrap();
     let search = json!({"text": "Deep learning"});
@@ -1106,7 +1118,7 @@ async fn searches_at_once(n: usize, daily_usd: f64) -> (usize, f64) {
     let tools = Arc::new(tools(vec![Arc::new(slow)]));
     let ledger = Arc::new(MemoryLedger::default());
     let mut config = config(free_port());
-    config.keys = vec![key("full", FULL, &[Sources], daily_usd)];
+    config.keys = vec![key("full", FULL, &[SOURCES], daily_usd)];
     let server = HttpServer::start(tools, config, None, ledger.clone())
         .await
         .unwrap();
@@ -1170,7 +1182,7 @@ async fn spend_the_ledger_cant_record_still_counts_and_is_written_later() {
         .failing
         .store(true, std::sync::atomic::Ordering::Relaxed);
     let mut config = config(free_port());
-    config.keys = vec![key("full", FULL, &[Sources], SEARCH_COST)];
+    config.keys = vec![key("full", FULL, &[SOURCES], SEARCH_COST)];
     let server = start_with(config, None, ledger.clone()).await.unwrap();
     let mut agent = Agent::new(server.port(), FULL);
     agent.initialize().await;
@@ -1199,7 +1211,7 @@ async fn spend_the_ledger_cant_record_still_counts_and_is_written_later() {
 async fn a_failed_call_spends_from_the_keys_budget_too() {
     let ledger = Arc::new(MemoryLedger::default());
     let mut config = config(free_port());
-    config.keys = vec![key("full", FULL, &[Sources], 100.0)];
+    config.keys = vec![key("full", FULL, &[SOURCES], 100.0)];
     let server = start_with(config, None, ledger.clone()).await.unwrap();
     let mut agent = Agent::new(server.port(), FULL);
     agent.initialize().await;
@@ -1252,13 +1264,13 @@ async fn a_scope_change_tells_the_keys_sessions_and_relists() {
     assert!(heard.quiet().await);
 
     // Writing allowed: the reader's session hears, and lists the write tool.
-    let with_reader = |scopes: &[Scope]| {
+    let with_reader = |scopes: &[&str]| {
         vec![
-            key("full", FULL, &[Sources, ReadHistory, WriteHistory], 100.0),
+            key("full", FULL, &[SOURCES, READ, WRITE], 100.0),
             key("reader", READER, scopes, 100.0),
         ]
     };
-    server.set_keys(with_reader(&[ReadHistory, WriteHistory]));
+    server.set_keys(with_reader(&[READ, WRITE]));
     assert!(heard.told().await);
     assert!(heard.quiet().await, "told once");
     assert!(
@@ -1271,23 +1283,25 @@ async fn a_scope_change_tells_the_keys_sessions_and_relists() {
     assert!(!is_error(&result), "{result}");
 
     // The same scopes in another order: no change.
-    server.set_keys(with_reader(&[WriteHistory, ReadHistory]));
+    server.set_keys(with_reader(&[WRITE, READ]));
     assert!(heard.quiet().await);
 
     // And taken away again.
-    server.set_keys(with_reader(&[ReadHistory]));
+    server.set_keys(with_reader(&[READ]));
     assert!(heard.told().await);
     assert_eq!(reader.tools().await, READ_TOOLS);
     let result = reader.call("history_add", json!({"doi": "10.1/x"})).await;
     assert!(is_error(&result), "{result}");
 
+    // One scope swapped for another, as many as before: told.
+    server.set_keys(with_reader(&["notes.read"]));
+    assert!(heard.told().await);
+    assert!(reader.tools().await.is_empty());
+    server.set_keys(with_reader(&[READ]));
+    assert!(heard.told().await);
+
     // A key removed still ends its sessions.
-    server.set_keys(vec![key(
-        "full",
-        FULL,
-        &[Sources, ReadHistory, WriteHistory],
-        100.0,
-    )]);
+    server.set_keys(vec![key("full", FULL, &[SOURCES, READ, WRITE], 100.0)]);
     assert_eq!(reader.request("tools/list", json!({})).await.0, 401);
     assert_eq!(full.tools().await.len(), ENGINE.len() + 5);
     server.stop().await;
@@ -1300,12 +1314,7 @@ async fn a_change_waits_for_the_client_to_listen() {
     let mut reader = Agent::new(server.port(), READER);
     reader.initialize().await;
 
-    server.set_keys(vec![key(
-        "reader",
-        READER,
-        &[ReadHistory, WriteHistory],
-        1.0,
-    )]);
+    server.set_keys(vec![key("reader", READER, &[READ, WRITE], 1.0)]);
     // No stream open yet: kept, and said once there is one.
     tokio::time::sleep(Duration::from_millis(100)).await;
     let mut heard = reader.listen().await;
@@ -1328,7 +1337,7 @@ async fn new_host_tools_are_told_to_every_session() {
     host.tools
         .lock()
         .unwrap()
-        .push(tool("history_count", ReadHistory, &[]));
+        .push(tool("history_count", READ, &[]));
     server.host_tools_changed().unwrap();
     assert!(reader_heard.told().await);
     assert!(full_heard.told().await);
@@ -1336,10 +1345,7 @@ async fn new_host_tools_are_told_to_every_session() {
     assert!(full.tools().await.contains(&"history_count".to_owned()));
 
     // A clash keeps the tools, and tells no one.
-    host.tools
-        .lock()
-        .unwrap()
-        .push(tool("lookup", ReadHistory, &[]));
+    host.tools.lock().unwrap().push(tool("lookup", READ, &[]));
     assert!(server.host_tools_changed().is_err());
     assert!(reader_heard.quiet().await);
     server.stop().await;
@@ -1358,11 +1364,7 @@ async fn clients_that_never_listen_hold_up_no_one() {
     // Many changes, no streams open: neither call waits on a client.
     let started = std::time::Instant::now();
     for i in 0..200 {
-        let scopes: &[Scope] = if i % 2 == 0 {
-            &[ReadHistory, WriteHistory]
-        } else {
-            &[ReadHistory]
-        };
+        let scopes: &[&str] = if i % 2 == 0 { &[READ, WRITE] } else { &[READ] };
         server.set_keys(vec![key("reader", READER, scopes, 1.0)]);
         server.host_tools_changed().unwrap();
     }
@@ -1378,21 +1380,20 @@ async fn clients_that_never_listen_hold_up_no_one() {
 /// writing); a key gaining it is told, and its tools say they destroy.
 #[tokio::test(flavor = "multi_thread")]
 async fn removing_needs_its_own_scope() {
-    use aspero_mcp::Scope::RemoveHistory;
     let host = FakeHost::new();
     host.tools
         .lock()
         .unwrap()
-        .push(tool("history_remove", RemoveHistory, &["doi"]));
+        .push(tool("history_remove", REMOVE, &["doi"]));
     let server = start(&host).await;
     let port = server.port();
-    let with_writer = |scopes: &[Scope]| {
+    let with_writer = |scopes: &[&str]| {
         vec![
-            key("full", FULL, &[Sources, ReadHistory, WriteHistory], 100.0),
+            key("full", FULL, &[SOURCES, READ, WRITE], 100.0),
             key("reader", READER, scopes, 100.0),
         ]
     };
-    server.set_keys(with_writer(&[ReadHistory, WriteHistory]));
+    server.set_keys(with_writer(&[READ, WRITE]));
 
     // Adding allowed, removing not: unlisted, and refused if called.
     let mut writer = Agent::new(port, READER);
@@ -1406,16 +1407,16 @@ async fn removing_needs_its_own_scope() {
     assert!(is_error(&result));
     assert_eq!(
         text(&result),
-        "Error (forbidden): this key can't use history_remove: it lacks the remove_history scope"
+        "Error (forbidden): this key can't use history_remove: it lacks the history.remove scope"
     );
-    // The full key has write_history but not remove_history either.
+    // The full key has history.write but not history.remove either.
     let mut full = Agent::new(port, FULL);
     full.initialize().await;
     assert!(!full.tools().await.contains(&"history_remove".to_owned()));
 
     // Granted: told, listed as destructive, and called.
     let mut heard = writer.listen().await;
-    server.set_keys(with_writer(&[ReadHistory, WriteHistory, RemoveHistory]));
+    server.set_keys(with_writer(&[READ, WRITE, REMOVE]));
     assert!(heard.told().await);
     let answer = writer.rpc("tools/list", json!({})).await;
     let remove = answer["result"]["tools"]
@@ -1433,7 +1434,7 @@ async fn removing_needs_its_own_scope() {
     assert!(!is_error(&result), "{result}");
 
     // Removing alone doesn't allow adding.
-    server.set_keys(with_writer(&[RemoveHistory]));
+    server.set_keys(with_writer(&[REMOVE]));
     assert!(heard.told().await);
     let result = writer.call("history_add", json!({"doi": "10.1/x"})).await;
     assert!(is_error(&result), "{result}");
@@ -1441,6 +1442,183 @@ async fn removing_needs_its_own_scope() {
         .call("history_remove", json!({"doi": "10.1/x"}))
         .await;
     assert!(!is_error(&result), "{result}");
+    server.stop().await;
+}
+
+/// #153: a host tool's scope is the host's own name, and a key needs
+/// exactly it: not a prefix, another case, a neighbour or `sources`. Nor
+/// does it imply another, `sources` included.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_key_needs_exactly_the_tools_scope() {
+    let host = FakeHost::new();
+    host.tools
+        .lock()
+        .unwrap()
+        .push(tool("notes_add", "notes.write", &[]));
+    let server = start(&host).await;
+    let port = server.port();
+    let as_reader = |scopes: &[&str]| {
+        server.set_keys(vec![key("reader", READER, scopes, 100.0)]);
+    };
+    let mut agent = Agent::new(port, READER);
+    for near in [
+        &[SOURCES][..],
+        &["notes"],
+        &["notes.write.all"],
+        &["NOTES.WRITE"],
+        &["notes.read", READ, WRITE, REMOVE],
+    ] {
+        as_reader(near);
+        agent.initialize().await;
+        assert!(
+            !agent.tools().await.contains(&"notes_add".to_owned()),
+            "{near:?}"
+        );
+        let result = agent.call("notes_add", json!({})).await;
+        assert_eq!(
+            text(&result),
+            "Error (forbidden): this key can't use notes_add: it lacks the notes.write scope",
+            "{near:?}"
+        );
+    }
+    // Exactly it: listed and called, and nothing else comes with it.
+    as_reader(&["notes.write"]);
+    agent.initialize().await;
+    assert_eq!(agent.tools().await, ["notes_add"]);
+    let result = agent.call("notes_add", json!({})).await;
+    assert!(!is_error(&result), "{result}");
+    let result = agent.call("search", json!({"text": "x"})).await;
+    assert!(
+        text(&result).contains("it lacks the sources scope"),
+        "{result}"
+    );
+    // The host hears the key's scopes as the app gave them.
+    let calls = host.calls();
+    assert_eq!(calls.len(), 1);
+    assert_eq!(calls[0].2.scopes, ["notes.write"]);
+    // The activity names the scope, as the agent read it.
+    let activity = host.activity(7).await;
+    assert_eq!(
+        activity[0].error_message.as_deref(),
+        Some("this key can't use notes_add: it lacks the notes.write scope")
+    );
+    server.stop().await;
+}
+
+/// A scope no key may hold, or no tool declare, is refused where it's
+/// given: a key's at start (and left out of `set_keys`), a tool's at start
+/// or when the host's tools change. One no tool declares yet grants
+/// nothing.
+#[tokio::test(flavor = "multi_thread")]
+async fn unknown_and_malformed_scopes_are_refused() {
+    let ledger = || Arc::new(MemoryLedger::default());
+    for bad in ["", "history read", "Sources", "history/read", "notes:write"] {
+        let mut config = config(free_port());
+        config.keys.push(key("bad", "token-bad", &[READ, bad], 1.0));
+        let refused = start_with(config, Some(FakeHost::new()), ledger()).await;
+        match refused.err() {
+            Some(StartError::Setup(e)) => {
+                assert!(
+                    e.starts_with(&format!("key \"bad\": its scope {bad:?} ")),
+                    "{e}"
+                );
+            }
+            other => panic!("{bad:?}: {other:?}"),
+        }
+    }
+    for bad in ["sources", "SOURCES", "", "a b", "notes/write", "é"] {
+        let host = FakeHost::new();
+        host.tools.lock().unwrap().push(tool("notes_add", bad, &[]));
+        let refused = start_with(config(free_port()), Some(host), ledger()).await;
+        match refused.err() {
+            Some(StartError::Setup(e)) => {
+                assert!(
+                    e.starts_with(&format!("host tool \"notes_add\": its scope {bad:?} ")),
+                    "{e}"
+                );
+            }
+            other => panic!("{bad:?}: {other:?}"),
+        }
+    }
+
+    let host = FakeHost::new();
+    let server = start(&host).await;
+    // A malformed key is left out: its token opens nothing.
+    server.set_keys(vec![key("reader", READER, &[READ, "history read"], 1.0)]);
+    let mut agent = Agent::new(server.port(), READER);
+    assert_eq!(agent.request("initialize", json!({})).await.0, 401);
+    // A key with a scope no tool declares: nothing listed for it.
+    server.set_keys(vec![key("reader", READER, &["notes.write"], 1.0)]);
+    agent.initialize().await;
+    assert!(agent.tools().await.is_empty());
+    // A tool claiming aspero's own scope: refused, the tools kept.
+    host.tools
+        .lock()
+        .unwrap()
+        .push(tool("history_sources", SOURCES, &[]));
+    match server.host_tools_changed() {
+        Err(StartError::Setup(e)) => assert!(e.contains("aspero's own"), "{e}"),
+        other => panic!("{other:?}"),
+    }
+    let mut full = Agent::new(server.port(), FULL);
+    server.set_keys(keys());
+    full.initialize().await;
+    assert_eq!(full.tools().await.len(), ENGINE.len() + 5);
+    server.stop().await;
+}
+
+/// A host tool's annotations are the hints its host declared, whatever
+/// its scope; a read-only tool is never destructive.
+#[tokio::test(flavor = "multi_thread")]
+async fn annotations_follow_the_declared_hints() {
+    let host = FakeHost::new();
+    let hinted = |name: &str, read_only, destructive, idempotent| HostTool {
+        read_only,
+        destructive,
+        idempotent,
+        ..tool(name, "notes.any", &[])
+    };
+    host.tools.lock().unwrap().extend([
+        hinted("notes_mcp_defaults", false, true, false),
+        hinted("notes_add", false, false, false),
+        hinted("notes_tag", false, false, true),
+        hinted("notes_read", true, false, true),
+        hinted("notes_read_says_destructive", true, true, false),
+    ]);
+    let server = start(&host).await;
+    server.set_keys(vec![key(
+        "reader",
+        READER,
+        &["notes.any", READ, WRITE],
+        1.0,
+    )]);
+    let mut agent = Agent::new(server.port(), READER);
+    agent.initialize().await;
+    let answer = agent.rpc("tools/list", json!({})).await;
+    let hints = |name: &str| {
+        let tool = answer["result"]["tools"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|t| t["name"] == name)
+            .unwrap_or_else(|| panic!("{name} listed"));
+        let a = &tool["annotations"];
+        assert_eq!(a["openWorldHint"], false, "{tool}");
+        assert_eq!(a["title"], format!("The {name} tool"), "{tool}");
+        (
+            a["readOnlyHint"].as_bool().unwrap(),
+            a["destructiveHint"].as_bool().unwrap(),
+            a["idempotentHint"].as_bool().unwrap(),
+        )
+    };
+    assert_eq!(hints("notes_mcp_defaults"), (false, true, false));
+    assert_eq!(hints("notes_add"), (false, false, false));
+    assert_eq!(hints("notes_tag"), (false, false, true));
+    assert_eq!(hints("notes_read"), (true, false, true));
+    assert_eq!(hints("notes_read_says_destructive"), (true, false, false));
+    // As the old fixed scopes' tools were: reading, adding.
+    assert_eq!(hints("history_search"), (true, false, true));
+    assert_eq!(hints("history_add"), (false, false, false));
     server.stop().await;
 }
 
@@ -1466,12 +1644,7 @@ async fn each_tool_call_is_logged_with_the_keys_name_and_no_query() {
     let events = global_events();
     let host = FakeHost::new();
     let mut config = config(free_port());
-    config.keys = vec![key(
-        "events",
-        "token-events",
-        &[Sources, ReadHistory],
-        100.0,
-    )];
+    config.keys = vec![key("events", "token-events", &[SOURCES, READ], 100.0)];
     let server = start_with(config, Some(host), Arc::new(MemoryLedger::default()))
         .await
         .unwrap();

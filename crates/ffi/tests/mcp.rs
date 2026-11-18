@@ -7,7 +7,7 @@ use std::time::Duration;
 
 use aspero_ffi::mcp::{
     HostTool, HostToolError, HostToolResult, McpActivity, McpCaller, McpError, McpErrorKind,
-    McpHost, McpKey, McpScope, McpServer, McpServerConfig,
+    McpHost, McpKey, McpServer, McpServerConfig,
 };
 use aspero_ffi::{Aspero, Config};
 use serde_json::{Value, json};
@@ -20,19 +20,41 @@ const TOKEN_SHA256: &str = "930eb69d84548d91c02c9c71df25e004feb1a0e0bc49831ea47e
 struct App {
     callers: Mutex<Vec<McpCaller>>,
     activity: Mutex<Vec<McpActivity>>,
+    /// Tools beyond `history_recent`, for `hostToolsChanged()`.
+    more: Mutex<Vec<HostTool>>,
+}
+
+/// A tool as an app declares it, its hints left to their defaults.
+fn history_remove(scope: &str) -> HostTool {
+    HostTool {
+        name: "history_remove".into(),
+        title: "Remove a work".into(),
+        description: "Takes a work out of the user's history.".into(),
+        input_schema: json!({"type": "object"}).to_string(),
+        output_schema: None,
+        scope: scope.into(),
+        read_only: false,
+        destructive: true,
+        idempotent: false,
+    }
 }
 
 #[async_trait::async_trait]
 impl McpHost for App {
     fn tools(&self) -> Vec<HostTool> {
-        vec![HostTool {
+        let mut tools = vec![HostTool {
             name: "history_recent".into(),
             title: "Recent works".into(),
             description: "Works the user looked at lately.".into(),
             input_schema: json!({"type": "object", "properties": {"limit": {"type": "integer"}}, "required": ["limit"]}).to_string(),
             output_schema: None,
-            scope: McpScope::ReadHistory,
-        }]
+            scope: "history.read".into(),
+            read_only: true,
+            destructive: false,
+            idempotent: true,
+        }];
+        tools.extend(self.more.lock().unwrap().iter().cloned());
+        tools
     }
 
     async fn call(
@@ -104,16 +126,20 @@ async fn rpc(
     (status, answer)
 }
 
-fn config(port: u16, scopes: Vec<McpScope>) -> McpServerConfig {
+fn key(scopes: &[&str]) -> McpKey {
+    McpKey {
+        id: "k1".into(),
+        name: "Test agent".into(),
+        scopes: scopes.iter().map(|s| (*s).to_owned()).collect(),
+        sha256: TOKEN_SHA256.into(),
+        daily_budget_usd: 1.0,
+    }
+}
+
+fn config(port: u16, scopes: &[&str]) -> McpServerConfig {
     McpServerConfig {
         port,
-        keys: vec![McpKey {
-            id: "k1".into(),
-            name: "Test agent".into(),
-            scopes,
-            sha256: TOKEN_SHA256.into(),
-            daily_budget_usd: 1.0,
-        }],
+        keys: vec![key(scopes)],
         session_budget_usd: 0.25,
         engine_tools: true,
     }
@@ -133,14 +159,14 @@ fn an_app_serves_its_tools_to_an_agent() {
     let server = rt
         .block_on(McpServer::start(
             aspero.clone(),
-            config(port, vec![McpScope::Sources, McpScope::ReadHistory]),
+            config(port, &["sources", "history.read"]),
             Some(app.clone() as Arc<dyn McpHost>),
         ))
         .unwrap();
     assert_eq!(server.port(), port);
 
     // A second server can't take the port.
-    let taken = rt.block_on(McpServer::start(aspero.clone(), config(port, vec![]), None));
+    let taken = rt.block_on(McpServer::start(aspero.clone(), config(port, &[]), None));
     assert_eq!(taken.err(), Some(McpError::PortInUse { port }));
 
     let http = reqwest::Client::builder().no_proxy().build().unwrap();
@@ -155,14 +181,16 @@ fn an_app_serves_its_tools_to_an_agent() {
         assert_eq!(status, 200);
         let list = json!({"jsonrpc": "2.0", "id": 2, "method": "tools/list"});
         let (_, answer) = rpc(&http, port, TOKEN, &mut session, list).await;
-        let names: Vec<String> = answer.unwrap()["result"]["tools"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .map(|t| t["name"].as_str().unwrap().to_owned())
-            .collect();
+        let answer = answer.unwrap();
+        let tools = answer["result"]["tools"].as_array().unwrap();
+        let names: Vec<&str> = tools.iter().map(|t| t["name"].as_str().unwrap()).collect();
         assert_eq!(names.len(), 8);
-        assert_eq!(names.last().unwrap(), "history_recent");
+        assert_eq!(names.last().unwrap(), &"history_recent");
+        // Annotated as the app declared it.
+        let hints = &tools.last().unwrap()["annotations"];
+        assert_eq!(hints["readOnlyHint"], true, "{hints}");
+        assert_eq!(hints["destructiveHint"], false, "{hints}");
+        assert_eq!(hints["idempotentHint"], true, "{hints}");
 
         let call = json!({"jsonrpc": "2.0", "id": 3, "method": "tools/call",
             "params": {"name": "history_recent", "arguments": {"limit": 5}}});
@@ -196,7 +224,7 @@ fn an_app_serves_its_tools_to_an_agent() {
         McpCaller {
             key_id: "k1".into(),
             key_name: "Test agent".into(),
-            scopes: vec![McpScope::Sources, McpScope::ReadHistory],
+            scopes: vec!["sources".into(), "history.read".into()],
         }
     );
     let status = server.status();
@@ -205,11 +233,53 @@ fn an_app_serves_its_tools_to_an_agent() {
     assert_eq!(status.last_key_name.as_deref(), Some("Test agent"));
     assert!(status.keys[0].last_used_at.is_some());
 
+    // A tool of the app's own scope, destructive: a malformed scope is
+    // refused and the tools kept; a sound one is listed only to a key
+    // holding exactly it.
+    app.more
+        .lock()
+        .unwrap()
+        .push(history_remove("history remove"));
+    assert!(matches!(
+        server.host_tools_changed(),
+        Err(McpError::Setup { message }) if message.contains("its scope \"history remove\"")
+    ));
+    *app.more.lock().unwrap() = vec![history_remove("history.remove")];
+    server.host_tools_changed().unwrap();
+    let listed = |session: &mut Option<String>| {
+        let list = json!({"jsonrpc": "2.0", "id": 7, "method": "tools/list"});
+        let answer = rt
+            .block_on(rpc(&http, port, TOKEN, session, list))
+            .1
+            .unwrap();
+        answer["result"]["tools"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|t| t["name"] == "history_remove")
+            .map(|t| t["annotations"].clone())
+    };
+    assert_eq!(listed(&mut session), None);
+    server.set_keys(vec![key(&["history.read", "history.write"])]);
+    assert_eq!(listed(&mut session), None);
+    server.set_keys(vec![key(&["history.remove"])]);
+    let hints = listed(&mut session).expect("listed with its scope");
+    assert_eq!(hints["destructiveHint"], true, "{hints}");
+    assert_eq!(hints["readOnlyHint"], false, "{hints}");
     // Revoked from the app's thread: refused at once.
     server.set_keys(vec![]);
     rt.block_on(async {
         let list = json!({"jsonrpc": "2.0", "id": 6, "method": "tools/list"});
         let (status, _) = rpc(&http, port, TOKEN, &mut session, list).await;
+        assert_eq!(status, 401);
+    });
+    // A key holding a malformed scope is left out: its token opens nothing.
+    server.set_keys(vec![key(&["history.remove", "history/read"])]);
+    rt.block_on(async {
+        let init = json!({"jsonrpc": "2.0", "id": 8, "method": "initialize", "params": {
+            "protocolVersion": "2025-06-18", "capabilities": {},
+            "clientInfo": {"name": "test", "version": "1"}}});
+        let (status, _) = rpc(&http, port, TOKEN, &mut None, init).await;
         assert_eq!(status, 401);
     });
 

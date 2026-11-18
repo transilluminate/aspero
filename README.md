@@ -181,9 +181,10 @@ claude mcp add --transport http aspero http://127.0.0.1:23130/mcp \
 ```
 
 Only loopback, only with a key (aspero keeps its SHA-256, never the
-token), and never from a browser. Each key has scopes (the sources;
-reading or adding to the app's history) and a daily budget; each session
-its own budget. The app hears of every tool call as it happens.
+token), and never from a browser. Each key has scopes (`sources` for
+aspero's own tools; for the app's, the scopes the app declares, such as
+reading or adding to its history) and a daily budget; each session its
+own budget. The app hears of every tool call as it happens.
 
 ## How it behaves
 

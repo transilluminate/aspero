@@ -8,46 +8,9 @@ use std::sync::Arc;
 use std::time::SystemTime;
 
 use aspero_mcp::http::{self, HttpConfig, HttpServer, Ledger, MemoryLedger, StartError};
-use aspero_mcp::{Caller, Scope, ToolErrorKind, Tools};
+use aspero_mcp::{Caller, ToolErrorKind, Tools};
 
 use crate::Aspero;
-
-/// What a key may do.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Enum)]
-pub enum McpScope {
-    /// The engine tools: search, look up and verify works in open sources,
-    /// spending from the key's daily budget.
-    Sources,
-    /// The app's tools that read its history.
-    ReadHistory,
-    /// The app's tools that add to its history.
-    WriteHistory,
-    /// The app's tools that remove, untag or delete from its history. Not
-    /// implied by `WriteHistory`: a key has it only when listed.
-    RemoveHistory,
-}
-
-impl From<McpScope> for Scope {
-    fn from(s: McpScope) -> Self {
-        match s {
-            McpScope::Sources => Scope::Sources,
-            McpScope::ReadHistory => Scope::ReadHistory,
-            McpScope::WriteHistory => Scope::WriteHistory,
-            McpScope::RemoveHistory => Scope::RemoveHistory,
-        }
-    }
-}
-
-impl From<Scope> for McpScope {
-    fn from(s: Scope) -> Self {
-        match s {
-            Scope::Sources => McpScope::Sources,
-            Scope::ReadHistory => McpScope::ReadHistory,
-            Scope::WriteHistory => McpScope::WriteHistory,
-            Scope::RemoveHistory => McpScope::RemoveHistory,
-        }
-    }
-}
 
 /// A tool the app serves.
 #[derive(Debug, Clone, uniffi::Record)]
@@ -63,8 +26,27 @@ pub struct HostTool {
     /// JSON Schema of the result's `structured`: an object.
     #[uniffi(default = None)]
     pub output_schema: Option<String>,
-    /// What a key needs to see and call it.
-    pub scope: McpScope,
+    /// What a key needs to see and call it: a name the app chooses
+    /// ("history.read", "notes.write"): at most 64 ASCII letters, digits,
+    /// `.`, `_` and `-`, and not `sources` (aspero's own). A key needs
+    /// exactly this scope in its `scopes`: no scope implies another. A tool
+    /// whose scope breaks these rules fails `start` or `hostToolsChanged()`
+    /// (`setup`).
+    pub scope: String,
+    /// It only reads: changes nothing in the app's data. Off unless set,
+    /// as MCP assumes.
+    #[uniffi(default = false)]
+    pub read_only: bool,
+    /// Unless read-only, it may take something away (remove, untag,
+    /// delete, overwrite) rather than only add. On unless cleared, as MCP
+    /// assumes: clear it for a tool that only adds. A read-only tool is
+    /// never listed as destructive.
+    #[uniffi(default = true)]
+    pub destructive: bool,
+    /// Calling it again with the same arguments does nothing more. Off
+    /// unless set, as MCP assumes.
+    #[uniffi(default = false)]
+    pub idempotent: bool,
 }
 
 /// A tool's answer.
@@ -101,7 +83,8 @@ impl From<uniffi::UnexpectedUniFFICallbackError> for HostToolError {
 pub struct McpCaller {
     pub key_id: String,
     pub key_name: String,
-    pub scopes: Vec<McpScope>,
+    /// The key's scopes, as the app gave them.
+    pub scopes: Vec<String>,
 }
 
 /// Why a tool call failed: the agent's own doing (`invalidArguments`,
@@ -226,7 +209,14 @@ pub struct McpKey {
     pub id: String,
     /// Shown in activity: "Claude Code".
     pub name: String,
-    pub scopes: Vec<McpScope>,
+    /// What it may do, exactly as listed: `"sources"` for aspero's engine
+    /// tools (searching, looking up and verifying works, spending from the
+    /// daily budget), and the `scope` of each of the app's tools it may
+    /// use ("history.read"). No scope implies another. A scope no tool
+    /// declares grants nothing; one no tool could declare (see
+    /// `HostTool.scope`) fails `start` (`setup`), and leaves the key out
+    /// of `setKeys`.
+    pub scopes: Vec<String>,
     /// The SHA-256 of the token, as 64 hex digits (lowercase).
     pub sha256: String,
     /// Engine spend allowed per UTC day, in US dollars, kept in the cache
@@ -240,7 +230,7 @@ impl From<McpKey> for http::Key {
         http::Key {
             id: k.id,
             name: k.name,
-            scopes: k.scopes.into_iter().map(Into::into).collect(),
+            scopes: k.scopes,
             sha256: k.sha256,
             daily_budget_usd: k.daily_budget_usd,
         }
@@ -302,7 +292,8 @@ pub enum McpError {
     /// An app tool is named like an engine tool, or like another app tool.
     #[error("two tools are named {name:?}")]
     ToolNameClash { name: String },
-    /// A key's hash or a budget is malformed, or the server couldn't start.
+    /// A key's hash, a budget, a key's or tool's scope is malformed, or
+    /// the server couldn't start.
     #[error("could not set up the MCP server: {message}")]
     Setup { message: String },
 }
@@ -335,7 +326,10 @@ impl http::Host for ForeignHost {
                 description: t.description,
                 input_schema: t.input_schema,
                 output_schema: t.output_schema,
-                scope: t.scope.into(),
+                scope: t.scope,
+                read_only: t.read_only,
+                destructive: t.destructive,
+                idempotent: t.idempotent,
             })
             .collect()
     }
@@ -349,7 +343,7 @@ impl http::Host for ForeignHost {
         let caller = McpCaller {
             key_id: caller.key_id.unwrap_or_default(),
             key_name: caller.key_name.unwrap_or_default(),
-            scopes: caller.scopes.into_iter().map(Into::into).collect(),
+            scopes: caller.scopes,
         };
         match self.0.call(name, arguments, caller).await {
             Ok(r) => Ok(http::HostOutput {
@@ -433,7 +427,8 @@ impl McpServer {
     /// hash changed, end: their next request is refused (401). Sessions of
     /// a key whose scopes changed (same id, same hash) are told their tools
     /// changed (`notifications/tools/list_changed`). A key whose hash isn't
-    /// 64 hex digits is left out. Returns without waiting on any agent.
+    /// 64 hex digits, or that holds a malformed scope, is left out. Returns
+    /// without waiting on any agent.
     pub fn set_keys(&self, keys: Vec<McpKey>) {
         self.inner
             .set_keys(keys.into_iter().map(Into::into).collect());
@@ -441,8 +436,8 @@ impl McpServer {
 
     /// Asks the host for its tools again, and tells every open session its
     /// tools changed (`notifications/tools/list_changed`), without waiting
-    /// on any agent. On a clash (or a schema that isn't a JSON object)
-    /// throws, keeping the tools it had.
+    /// on any agent. On a clash (or a malformed scope, or a schema that
+    /// isn't a JSON object) throws, keeping the tools it had.
     pub fn host_tools_changed(&self) -> Result<(), McpError> {
         Ok(self.inner.host_tools_changed()?)
     }
@@ -508,6 +503,23 @@ mod tests {
             (http::DEFAULT_PORT.to_string(), "port: u16"),
         ] {
             let attribute = format!("#[uniffi(default = {default})]\n    pub {field},");
+            assert!(source.contains(&attribute), "{attribute}");
+        }
+        let limit = format!("at most {} ASCII letters", aspero_mcp::scope::MAX_LEN);
+        assert!(source.contains(&limit), "{limit}");
+    }
+
+    /// Hints left unset are MCP's own defaults: a tool that says nothing
+    /// may change and destroy, and isn't safe to repeat.
+    #[test]
+    fn unset_hints_are_mcps_defaults() {
+        let source = include_str!("mcp.rs");
+        for (default, field) in [
+            ("false", "read_only"),
+            ("true", "destructive"),
+            ("false", "idempotent"),
+        ] {
+            let attribute = format!("#[uniffi(default = {default})]\n    pub {field}: bool,");
             assert!(source.contains(&attribute), "{attribute}");
         }
     }

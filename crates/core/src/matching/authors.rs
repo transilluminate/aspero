@@ -63,11 +63,46 @@ const PEOPLE_BESIDE_BODIES: usize = 3;
 pub(super) fn complete_byline(authors: &[Person]) -> bool {
     let people = authors
         .iter()
-        .filter(|p| p.parts().is_some() || p.literal.as_deref().is_some_and(uncased_name))
+        .filter(|p| {
+            p.parts().is_some()
+                || p.literal
+                    .as_deref()
+                    .is_some_and(|n| uncased_name(n) || shouted_name(n) || family_alone(n))
+        })
         .count();
     !authors.is_empty()
         && authors.len() < FULL_BYLINE
         && (people == authors.len() || people >= PEOPLE_BESIDE_BODIES)
+}
+
+/// A person's name in capitals, as old records print them: two to four
+/// words, one an initial ("JOHN R. JAENIKE"); an organisation's has none
+/// ("WORLD HEALTH ORGANIZATION").
+fn shouted_name(name: &str) -> bool {
+    let parts: Vec<&str> = name.split_whitespace().collect();
+    let letters = |w: &str| w.chars().filter(|c| c.is_alphabetic()).count();
+    (2..=4).contains(&parts.len())
+        && parts.iter().all(|w| {
+            w.chars()
+                .all(|c| c.is_uppercase() || matches!(c, '.' | '-' | '\'' | '’'))
+        })
+        && parts.iter().any(|w| letters(w) == 1)
+        && parts.iter().any(|w| letters(w) >= 2)
+}
+
+/// A family name alone, as some records give a byline ("Silverman"): one
+/// capitalised word, in lower case after its first letter but for a
+/// prefix's capital (a Scottish or Dutch prefix's).
+fn family_alone(name: &str) -> bool {
+    let name = name.trim();
+    !name.contains(char::is_whitespace)
+        && name.chars().count() >= 3
+        && name.starts_with(char::is_uppercase)
+        && name.chars().filter(|c| c.is_lowercase()).count() >= 2
+        && name.chars().filter(|c| c.is_uppercase()).count() <= 2
+        && name
+            .chars()
+            .all(|c| c.is_alphabetic() || matches!(c, '-' | '\'' | '’'))
 }
 
 /// A name of two to five words in a script without capitals (Arabic,

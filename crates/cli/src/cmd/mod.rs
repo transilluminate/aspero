@@ -22,6 +22,7 @@ mod testing;
 pub mod verify;
 
 use std::io::Read;
+use std::time::Duration;
 
 use aspero_engine::EngineError;
 pub use aspero_json::merged;
@@ -29,6 +30,12 @@ use serde_json::Value;
 
 use crate::args::Format;
 use crate::exit::Exit;
+
+/// How long a command waits, before it exits, for paid requests still
+/// finishing after their callers stopped waiting ([`Engine::settle`]).
+///
+/// [`Engine::settle`]: aspero_engine::Engine::settle
+pub const SETTLE: Duration = Duration::from_secs(10);
 
 /// A command that couldn't run at all (as opposed to per-item outcomes).
 #[derive(Debug)]

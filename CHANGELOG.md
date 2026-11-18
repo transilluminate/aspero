@@ -13,6 +13,71 @@ Added:
   a key may add without being able to remove; its tools are listed as
   destructive, and a key gaining or losing it hears `tools/list_changed`.
 
+Fixed:
+
+- A paid OpenAlex request already sent is finished and counted when its
+  caller stops waiting (#139). A claim verified while its other searches
+  were still out cancelled them mid-flight: OpenAlex charged for them,
+  but their cost was missing from the usage, the credit spent here and
+  the caps, and their answers from the cache and the tape (29% of a live
+  run's OpenAlex requests; the balance fell 1.37× the costs counted).
+  They now finish in the background, counted and cached as an awaited
+  request is. Requests still waiting for a pacing slot are cancelled, as
+  before, so the early stop still saves them. New `Engine::settle`
+  waits, with a bound, for those finishing; the CLI waits up to 10 s
+  before it exits, and `verify` and `check` add their usage to what they
+  report.
+- `verify` no longer panics on a reference holding a character that folds
+  to two words, such as "½" ("1⁄2"): their spans overlapped, and reading
+  the text between them sliced backwards.
+
+Fixed (red team round 6, #126, from `bench/redteam/holdout-5.jsonl` and
+`wild-2.jsonl`; measured offline on 0.31.0's tape: holdout-5's wrong
+citations verified fell from 36 of 613 to 13; wild-2's correct citations
+missed from 52 of 910 to 6, the rest of the change waiting on requests
+the tape lacks):
+
+- Correct citations `verify` missed:
+  - A model-written reference whose only identifier is a bare arXiv
+    number after a colon, as a table's cell or last ("Chan et al.,
+    NegotiationToM: 2404.13627", "… | 1706.03741 | NeurIPS 2017") cites
+    that arXiv ID. `scan` still reads bare numbers in prose as none.
+  - An arXiv number's year and month ("1811.07871") is no cited year.
+  - Titles' acronyms of their own words ("LLMs", "RLHF", "ToM") read as
+    the words; a title's acronym ("Advanced RAG") is no byline.
+  - Books: the title a reference cites is searched, not a matcher hit's
+    run of a publisher's words sharing one of its words ("Ethiopian
+    Public Health Association"), nor only a book review's title holding
+    the whole citation; titles are read after bylines written "Family,
+    Given," ("Vidal-Naquet, Pierre, La torture dans la République,
+    Paris, Minuit, 1972") and after Harvard's "(2011)" without a stop.
+  - An article found only reprinted later as a chapter of a collection,
+    cited with its original year, is another version: plausible, not a
+    mismatch.
+  - A reference giving authors, year, journal and a bare DOI but no title
+    is untitled: its DOI's words are no title.
+  - A journal named with a volume and page counts though the title holds
+    its word ("Physiotherapy, 40(8)").
+- Wrong citations `verify` verified, now plausible:
+  - Another meeting of the same society: an acronym fits a meeting's name
+    only through two words or more and its furniture's initials ("MM" is
+    not the Conference on Multimedia Retrieval), an acronym alone that a
+    known conference can't make is another ("WWW '18" for CIKM), two
+    acronyms that differ are two meetings, and a conference paper's
+    container is its meeting's whatever its name. BibTeX's `booktitle`
+    cites proceedings.
+  - A title only partly the record's, words missing that aren't
+    misspellings, unless the claimed identifier or the place agrees (a
+    journal version's title cited for its preprint); a word replaced after
+    the record's main title ("The Male Quixote").
+  - Invented co-authors beside bylines in capitals ("JOHN R. JAENIKE") or
+    of family names alone; names given for a record without a byline.
+  - A journal's article cited as a chapter of an edited book named as its
+    journal, its volume not cited; a conference paper cited at a volume
+    and issue.
+  - A supplement's roman page ("2009;18:ii5-ii8") is read with its volume.
+  - IEEE's "Notice of Retraction:" is a marker, as "RETRACTED:" is.
+
 ## 0.31.0
 
 Added:

@@ -277,19 +277,12 @@ impl Engine {
         while let Some(chunk) = chunks.next() {
             leads.publish(&answers);
             let batch: Vec<WorkId> = chunk.iter().map(|&i| ids[i].clone()).collect();
-            let ask = || entry.provider.lookup(&batch, fields);
-            let answer = if batch.len() > free {
-                self.call_paid(entry, ask).await
-            } else {
-                self.call(entry, ask).await
-            };
-
-            let error = match answer {
-                Ok(resp) => {
-                    if let Some(u) = resp.usage {
+            let error = match self.ask_batch(entry, batch, fields).await {
+                Ok((spent, answered)) => {
+                    if let Some(u) = spent {
                         add_usage(usage, &provider, u);
                     }
-                    if let Some(answered) = self.answered(&provider, &batch, resp.value) {
+                    if let Some(answered) = answered {
                         for (&i, answer) in chunk.iter().zip(answered) {
                             answers[i] = Some(answer);
                         }
@@ -349,6 +342,35 @@ impl Engine {
             .into_iter()
             .map(|a| a.expect("every ID answered from cache, provider or failure"))
             .collect()
+    }
+
+    /// Asks `entry` about `batch` (paid past its free batch size), and
+    /// remembers the answers: the call's usage, and its answers (`None`
+    /// when they break the contract). Finished and cached, once sent, even
+    /// if the caller stops waiting ([`finish_paid`](Self::finish_paid)).
+    async fn ask_batch(
+        &self,
+        entry: &Entry,
+        batch: Vec<WorkId>,
+        fields: FieldSet,
+    ) -> Result<(Option<Usage>, Option<Vec<Answer>>), Error> {
+        let free = entry.provider.capabilities().max_free_batch;
+        let (engine, owned) = (self.clone(), entry.clone());
+        let ask = async move {
+            let entry = &owned;
+            let ask = || entry.provider.lookup(&batch, fields);
+            let answer = if batch.len() > free {
+                engine.call_paid(entry, ask).await
+            } else {
+                engine.call(entry, ask).await
+            };
+            answer.map(|resp| {
+                let answered = engine.answered(&entry.provider.id(), &batch, resp.value);
+                (resp.usage, answered)
+            })
+        };
+        self.finish_paid(entry, ask, |answer| answer.as_ref().ok()?.0)
+            .await
     }
 
     /// A provider's answers to `batch`, live, remembered in the cache; `None`

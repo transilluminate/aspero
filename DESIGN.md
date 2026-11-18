@@ -107,7 +107,8 @@ Engine, `crates/engine/src/`:
 - `graph.rs` and `graph/` (citation links): `seeds.rs`, `spend.rs`,
   `missing.rs`, `retracted.rs`, `references.rs`, `related.rs`,
   `related/plan.rs`, `related/score.rs`, `types.rs`.
-- `retry.rs`, `health.rs` (breaker, spent quotas); `cap.rs` (`reached`,
+- `detach.rs` (`finish_paid`, `settle`: paid calls finished once sent);
+  `retry.rs`, `health.rs` (breaker, spent quotas); `cap.rs` (`reached`,
   `spendable_today`); `budget.rs` (`Budget`, `PrepaidDay`,
   `credit_part`); `transport.rs`
   (HTTP client, pacing, `TapeClient`).
@@ -194,7 +195,10 @@ Front ends:
 - **Scanning** (`id::scan`): every mention, where, and whether written as
   a web address (`from_url`); which matter is the caller's call. Shapes
   prose imitates (bare digits, `W1`, `1706.03762`) count only labelled,
-  prefixed or as URLs. ~1 GB/s on prose (`just scan-bench`).
+  prefixed or as URLs. ~1 GB/s on prose (`just scan-bench`). A reference
+  isn't prose: `Claim::from_text` takes its one bare arXiv-shaped number,
+  after a colon, as a table's cell or last, for its ID (models write
+  them so), since nothing else in it could be that number.
 - **Work** (`crates/core/src/work.rs`): CSL-shaped, all-optional, plus
   `updates` (retractions, corrections, newer versions), `update_to`,
   `other_years`, `open_access`. Guideline editions aren't linked in any
@@ -216,7 +220,10 @@ identifiers and Crossref's citation matcher (free), then at most two
 **title** searches ($0.001 each at OpenAlex). Bare titles rank far better
 than whole references, so the title is located *inside* the reference
 from the matcher hits' titles (`shared_title`), else from its shape
-(`probable_title`). `verify` stops early only on a decisive match vouched
+(`probable_title`). A hit's run is the title only where it stands where
+the reference's shape puts the title (`gather.rs`: `beside_title`): a
+hit sharing a publisher's words, or a review titled with the whole
+citation, would otherwise take the title's search. `verify` stops early only on a decisive match vouched
 for by the claimed identifiers or two providers: a digest or reprint can
 match exactly while only a later search finds the original.
 
@@ -254,7 +261,9 @@ examples are comments at the rule in `matching/assess.rs`, its numbers in
   an article cited as an edited book's chapter, a chapter cited as an
   article (`claim.rs`: `cites_edited_book`; `locator.rs`: `cites_issue`).
 - **An identified work with other authors, another edition or version**
-  (`EDITION`, `VERSION`): plausible. "RETRACTED:" markers are ignored.
+  (`EDITION`, `VERSION`): plausible, an article reprinted later as a
+  chapter too (the free sources may hold only the reprint). "RETRACTED:"
+  markers are ignored.
 
 **Sites** (#98, `crates/core/src/site.rs`). A claim's `site` is evidence
 of the publisher, never a claimed field, and only counts for a claim
@@ -393,6 +402,19 @@ into credit itself; only other tools can. A stop is `BudgetCapped` (exit
 time. With the day's use unknown and a key, one free `/rate-limit`
 decides the first paid call. Overshoots: a call's cost is known only
 after it, and others' spending shows only in the next response.
+
+**A paid request once sent is finished** (#139): OpenAlex charges for
+what it has started, so a caller that stops waiting (a claim verified
+while its other searches are out) mustn't cancel it. A charging
+provider's call runs as a task of its own (`detach.rs`), the call and
+what's done with its answer: a caller dropped leaves it running only if
+`Paced` has marked one of its requests sent (its slot come, just before
+sending); otherwise it's cancelled, so the early stop still saves what
+it stops, and one left running sends no retry. The task is whole above
+the provider, not in the transport, because that's where costs are
+counted (`Engine::call`), answers cached, and, below, taped: it needs no
+second path for any of them. Its usage, which no report carries, waits
+for `Engine::settle`, which the CLI calls (up to 10 s) before exiting.
 
 **Credit spent here** is each paid response's cost (`x-ratelimit-cost-usd`)
 once the allowance is gone, added up per budget day in the cache file's

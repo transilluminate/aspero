@@ -74,6 +74,10 @@ fn transport_error(e: reqwest::Error) -> Error {
 /// keep to one rate between them; if the store fails, pacing falls back to
 /// this process alone.
 ///
+/// A request of a paid call is marked sent once its slot has come, just
+/// before it's sent; one whose caller has gone by then isn't sent (see
+/// [`detach`](crate::detach)).
+///
 /// Logs each request (at `info`, target `aspero::http`) with the provider
 /// label, status, duration and time spent waiting for a slot.
 pub struct Paced {
@@ -160,6 +164,11 @@ impl HttpClient for Paced {
         };
         let slot = self.claim().await;
         tokio::time::sleep_until(slot).await;
+        if !crate::detach::may_send() {
+            // A paid call whose caller has gone: it's being cancelled, and
+            // this is never sent.
+            std::future::pending::<()>().await;
+        }
         let started = Instant::now();
         let url = loggable_url(&request.url);
         let result = self.inner.send(request).await;
@@ -314,7 +323,7 @@ impl TapeClient {
 impl HttpClient for TapeClient {
     async fn send(&self, request: HttpRequest) -> Result<HttpResponse, Error> {
         // Asked whether a whole batch is on the tape: nothing is sent.
-        let peeking = REPLAYING_ONLY.try_with(|()| ()).is_ok();
+        let peeking = peeking();
         let Some(key) = TapeKey::new(&request).filter(|_| !is_live(&request.url)) else {
             if peeking {
                 return Err(Error::Offline);
@@ -376,6 +385,12 @@ tokio::task_local! {
 /// that don't go through a tape are sent as usual.
 pub(crate) async fn replaying_only<F: Future>(f: F) -> F::Output {
     REPLAYING_ONLY.scope((), f).await
+}
+
+/// Whether this task is asking only what's on the tape
+/// ([`replaying_only`]), so sends nothing.
+pub(crate) fn peeking() -> bool {
+    REPLAYING_ONLY.try_with(|()| ()).is_ok()
 }
 
 /// Whether `url` asks for live state rather than data: OpenAlex's

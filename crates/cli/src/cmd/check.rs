@@ -4,10 +4,10 @@ use std::fmt::Write as _;
 use std::io::IsTerminal;
 
 use aspero_bib::BibEntry;
-use aspero_engine::{BibliographyReport, CheckSummary, CheckedEntry, Engine, Severity};
+use aspero_engine::{BibliographyReport, CheckSummary, CheckedEntry, Engine, Severity, add_usage};
 use aspero_json::check::keys;
 
-use super::{Failure, Out, print, print_line, read_stdin};
+use super::{Failure, Out, SETTLE, print, print_line, read_stdin};
 use crate::args::{FailOn, Format};
 use crate::exit::Exit;
 use crate::grid::{self, Col, Grid, Text};
@@ -40,13 +40,17 @@ pub async fn run(
     let mut progress = Progress::new("entries", if out.format.is_human() { total } else { 0 });
     progress.show(0);
     let mut done = 0;
-    let report = engine
+    let mut report = engine
         .check_entries(&entries, limit, |_| {
             done += 1;
             progress.show(done);
         })
         .await;
     progress.clear();
+    // Searches a verified entry stopped waiting for, finished since.
+    for (p, u) in engine.settle(SETTLE).await {
+        add_usage(&mut report.usage, &p, u);
+    }
 
     let failed = report.entries.iter().any(|e| fails(e.severity(), fail_on));
     let keys = keys(&entries);

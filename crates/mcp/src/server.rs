@@ -88,21 +88,31 @@ pub(crate) fn engine_result(
 /// events") as it completes: the tool (`None`, logged `unknown`, for a
 /// name no tool has: the client's text, kept to [`tool_input`]), the key's
 /// name (HTTP; none over stdio), `ok` or the error's kind, its time since
-/// `started` and what it cost.
+/// `started`, what it cost, and the id of the engine call it made, if it
+/// made one ([`with_call_id`]).
 pub(crate) fn tool_event(
     tool: Option<&str>,
     key: Option<&str>,
     outcome: &str,
     started: tokio::time::Instant,
     cost_usd: f64,
+    call: Option<u64>,
 ) {
     tracing::info!(
         target: "aspero::mcp",
         tool = %tool.unwrap_or("unknown"), key = key.map(tracing::field::display),
         outcome = %outcome,
         ms = u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX),
-        cost_usd = %format_args!("{cost_usd:.6}"), "tool"
+        cost_usd = %format_args!("{cost_usd:.6}"), call, "tool"
     );
+}
+
+/// Runs `work`, an engine tool's call, giving the engine call it makes an
+/// id: that id, if it made one, for the `tool` event's `call`.
+pub(crate) async fn with_call_id<T>(work: impl Future<Output = T>) -> (T, Option<u64>) {
+    let id = aspero_engine::CallId::new();
+    let answer = id.scope(work).await;
+    (answer, id.taken().then(|| id.get()))
 }
 
 /// The `debug` companion of a tool call: what it was asked.
@@ -164,10 +174,12 @@ impl ServerHandler for Handler {
         let started = tokio::time::Instant::now();
         let arguments = request.arguments.unwrap_or_default();
         tool_input(&request.name, &arguments);
-        let result = self
-            .tools
-            .call(&self.session, &request.name, Value::Object(arguments))
-            .await;
+        let (result, call) = with_call_id(self.tools.call(
+            &self.session,
+            &request.name,
+            Value::Object(arguments),
+        ))
+        .await;
         let (outcome, cost) = match &result {
             Ok(output) => ("ok", output.cost_usd),
             Err(e) => (e.kind.as_str(), e.cost_usd),
@@ -179,6 +191,7 @@ impl ServerHandler for Handler {
             outcome,
             started,
             cost,
+            call,
         );
         Ok(engine_result(&self.session, result)?.into())
     }

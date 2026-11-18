@@ -202,7 +202,7 @@ impl schemars::JsonSchema for QueryTree {
                 "description": description,
                 "properties": {
                     key: {"type": "string"},
-                    "phrase": {"type": "boolean", "description": "the words together, in order"},
+                    "phrase": {"type": "boolean"},
                 },
                 "required": [key],
                 "additionalProperties": false,
@@ -277,7 +277,7 @@ impl schemars::JsonSchema for QueryTree {
             ),
         ];
         schemars::Schema::try_from(json!({
-            "description": "A query tree: each node an object with one key.",
+            "description": "A query tree: each node an object with one key; a term may add \"phrase\": true, for its words together and in order.",
             "anyOf": alternatives,
         }))
         .expect("an object is a schema")

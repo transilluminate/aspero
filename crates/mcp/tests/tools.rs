@@ -70,12 +70,40 @@ fn every_tool_is_listed_with_its_schemas() {
         json!(["openalex", null])
     );
     assert_eq!(search["properties"]["limit"]["default"], 5);
-    // The query tree's schema, shared with `search_supports`.
+    // The query tree's schema, given once: `search_supports` points at it.
     assert!(search["$defs"]["QueryNode"]["anyOf"].is_array());
+    let supports = &tools.spec("search_supports").unwrap().input_schema;
+    assert!(supports.get("$defs").is_none());
     let verify = &tools.spec("verify").unwrap().input_schema;
     assert!(verify["$defs"]["ClaimInput"]["properties"]["journal"].is_null());
     assert!(verify["$defs"]["ClaimInput"]["properties"]["container"].is_object());
 }
+
+#[test]
+fn the_tool_list_stays_small() {
+    // Every session pays for the tool list before it does anything (#157):
+    // a new field or tool that grows it past this should earn its place.
+    let tools = tools(vec![source()]);
+    let size: usize = tools
+        .specs()
+        .iter()
+        .map(|s| {
+            let schemas = json!([
+                s.name,
+                s.title,
+                s.description,
+                s.input_schema,
+                s.output_schema
+            ]);
+            serde_json::to_string(&schemas).unwrap().len()
+        })
+        .sum();
+    assert!(size < SIZE_CAP, "the tool list is {size} characters");
+}
+
+/// The tool list's cap, in characters of compact JSON (about four to a
+/// token): 0.34.0's list was ~46,000.
+const SIZE_CAP: usize = 28_000;
 
 #[tokio::test]
 async fn search_takes_a_query_tree_as_the_cli_does() {

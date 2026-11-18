@@ -4,7 +4,9 @@
 //! Written by hand, since the shapes are built as JSON rather than typed.
 //! They name the keys agents rely on and leave the rest open
 //! (`additionalProperties`): `full` adds every known field. Self-contained
-//! (no `$ref`), so any client's validator reads them.
+//! (no `$ref`), so any client's validator reads them. Every tool's list
+//! costs an agent's context, so a shape that recurs (a work, the session)
+//! names its keys in a description, and a second copy points at the first.
 
 use serde_json::{Map, Value, json};
 
@@ -20,37 +22,20 @@ fn nullable(kind: &str) -> Value {
     json!({"type": [kind, "null"]})
 }
 
-/// A work: lean by default, every known field with `full`.
+/// A work: lean by default, every known field with `full`. Its keys are
+/// named in the description rather than spelled out as properties: the
+/// same shape recurs in nearly every tool, and agents read the keys off the
+/// result.
 fn work() -> Value {
-    object(
-        &json!({
-            "source": {"type": "string", "description": "the provider whose record this is"},
-            "ids": {"type": "array", "items": {"type": "string"}, "description": "every identifier, prefixed: doi:…, arxiv:…, pmid:…"},
-            "canonical_id": {
-                "type": ["string", "null"],
-                "description": "the work's key, the same whichever identifier found it: dedupe on it",
-            },
-            "title": {"type": "string"},
-            "authors": {
-                "type": "array",
-                "items": object(&json!({"name": {"type": "string"}, "orcid": {"type": "string"}}), &["name"]),
-            },
-            "authors_more": {"type": "integer", "description": "authors left out of a lean record's list (`full` lists them all)"},
-            "issued": {"type": "string", "description": "the publication date: 2015, 2015-05 or 2015-05-27"},
-            "type": {"type": "string", "description": "a CSL type"},
-            "container": {"type": "string", "description": "the journal, or the book for a chapter"},
-            "cited_by_count": {"type": "integer"},
-            "url": {"type": "string"},
-            "updates": {
-                "type": "array",
-                "description": "notices about the work: retraction, withdrawal, expression_of_concern, correction, new_version (superseded)",
-                "items": {"type": "object"},
-            },
-            "update_to": {"type": "array", "description": "for a notice, the works it updates", "items": {"type": "object"}},
-            "open_access": {"type": "object", "description": "whether a free, legal copy exists, and where"},
-        }),
-        &["source", "ids"],
-    )
+    json!({
+        "type": "object",
+        "description": "a work: source (the provider), ids (doi:…, pmid:…, …), canonical_id \
+            (dedupe on it), title, authors [{name, orcid}], authors_more (left out of a lean \
+            list), issued, type (CSL), container (the journal, or the book for a chapter), \
+            cited_by_count, url, updates (notices: retraction, correction, …), update_to (for \
+            a notice, the works it updates), open_access",
+        "required": ["source", "ids"],
+    })
 }
 
 /// A scored candidate for a citation.
@@ -83,40 +68,31 @@ fn verification() -> Value {
             "best_match": candidate(),
             "errors": {"type": "array", "items": {"type": "string"}, "description": "providers that failed"},
             "error_kinds": {"type": "array", "items": {"type": "string"}},
-            "candidates": {"type": "array", "items": candidate(), "description": "with full: every candidate"},
+            "candidates": {
+                "type": "array",
+                "items": {"type": "object"},
+                "description": "with full: every candidate, shaped as best_match",
+            },
         }),
         &["input", "verdict", "reason_text"],
     )
 }
 
 /// What each provider's calls cost: `{provider: {cost_usd, remaining_usd,
-/// resets_at}}`.
+/// resets_at}}`, named in the description rather than spelled out.
 fn usage() -> Value {
     json!({
         "type": "object",
-        "description": "this call's usage per provider: cost and what's left of its budget, in USD",
-        "additionalProperties": object(
-            &json!({
-                "cost_usd": {"type": "number"},
-                "remaining_usd": {"type": "number"},
-                "resets_at": {"type": "string"},
-            }),
-            &[],
-        ),
+        "description": "per provider, in USD: {provider: {cost_usd, remaining_usd, resets_at}}",
     })
 }
 
 fn session() -> Value {
-    let mut session = object(
-        &json!({
-            "spent_usd": {"type": "number"},
-            "budget_usd": {"type": "number"},
-            "left_usd": {"type": "number"},
-        }),
-        &["spent_usd", "budget_usd", "left_usd"],
-    );
-    session["description"] = json!("this session's spend, this call included, against its cap");
-    session
+    json!({
+        "type": "object",
+        "description": "the session's spend, this call included: spent_usd, budget_usd, left_usd",
+        "required": ["spent_usd", "budget_usd", "left_usd"],
+    })
 }
 
 /// `properties` plus `usage` and `session`, as an output schema.
@@ -185,7 +161,7 @@ pub fn lookup() -> Map<String, Value> {
                 "type": "boolean",
                 "description": "the DOI missed with its trailing punctuation stripped, and was found with it kept",
             },
-            "latest": work(),
+            "latest": {"type": "object", "description": "a superseded work's latest version, shaped as work"},
             "disagreements": {"type": "array", "items": {"type": "object"}},
         }),
         &["input", "status"],

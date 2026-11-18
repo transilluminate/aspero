@@ -13,16 +13,15 @@ fn default_limit() -> u32 {
     DEFAULT_LIMIT
 }
 
-/// Order of the hits.
+/// Order of the hits: `relevance` (best match first), `newest` or `most_cited`.
+// No doc comments on the variants: with them, the schema is a `oneOf` of
+// described constants rather than a short `enum`.
 #[derive(Debug, Clone, Copy, Default, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum SortBy {
-    /// Best match first.
     #[default]
     Relevance,
-    /// Most recently published first.
     Newest,
-    /// Most cited first.
     MostCited,
 }
 
@@ -66,7 +65,9 @@ pub struct SearchArgs {
 pub struct SupportsArgs {
     /// The source to ask about; by default the one `search` would pick.
     pub source: Option<String>,
-    /// The query tree, as `search` takes it.
+    /// The query tree, as `search` takes it. Its schema is `search`'s,
+    /// not repeated here.
+    #[schemars(with = "Map<String, Value>")]
     pub query: QueryTree,
 }
 

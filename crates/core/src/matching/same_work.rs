@@ -17,7 +17,7 @@ const ONE_PER_WORK: &[IdKind] = &[IdKind::Pmid, IdKind::Pmcid];
 
 /// Whether claimed identifiers are among a work's identifiers (see
 /// [`super::Assessment::ids`]): `Partial` when one is, but another is of a
-/// kind the work has [one of](ONE_PER_WORK) and isn't the work's (a
+/// kind the work has one of (`ONE_PER_WORK`) and isn't the work's (a
 /// paper's DOI beside another paper's PMID, #148).
 pub fn id_agreement(claimed: &[WorkId], actual: &[WorkId]) -> Agreement {
     if claimed.is_empty() {
@@ -43,7 +43,7 @@ pub fn id_agreement(claimed: &[WorkId], actual: &[WorkId]) -> Agreement {
     }
 }
 
-/// The first claimed identifier of a kind a work has [one of](ONE_PER_WORK)
+/// The first claimed identifier of a kind a work has one of (`ONE_PER_WORK`)
 /// that isn't the work's, with the work's of that kind: `pmid:19623055`
 /// cited, `pmid:19623052` the work's. None when the work has none of the
 /// kind (a Crossref record has no PMID): nothing contradicts it.

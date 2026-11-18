@@ -108,6 +108,19 @@ impl Engine {
         budget: Option<f64>,
         estimate_only: bool,
     ) -> Result<Analysis, EngineError> {
+        let work = Box::pin(self.analyse_seeds(seeds, kinds, budget, estimate_only));
+        let input = || seeds.join(" ");
+        self.observed("analyse", seeds.len(), input, work, crate::observe::kind_of)
+            .await
+    }
+
+    async fn analyse_seeds(
+        &self,
+        seeds: &[String],
+        kinds: &[AnalysisKind],
+        budget: Option<f64>,
+        estimate_only: bool,
+    ) -> Result<Analysis, EngineError> {
         let entry = self.openalex_entry()?;
         let mut spend = Spend {
             budget,

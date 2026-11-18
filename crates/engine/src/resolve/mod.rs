@@ -144,12 +144,22 @@ impl Engine {
     /// Gathers and scores every candidate for `claim`. `limit` caps results
     /// per provider search.
     pub async fn resolve(&self, claim: &Claim, limit: u32) -> ResolveReport {
-        self.gather(claim, limit, false).await
+        let work = Box::pin(self.gather(claim, limit, false));
+        let input = || format!("{claim:?}");
+        self.observed("resolve", 1, input, work, crate::observe::never_fails)
+            .await
     }
 
     /// Decides whether `claim` refers to a real work, stopping early once it
     /// does.
     pub async fn verify(&self, claim: &Claim, limit: u32) -> Verification {
+        let work = Box::pin(self.verify_claim(claim, limit));
+        let input = || format!("{claim:?}");
+        self.observed("verify", 1, input, work, crate::observe::never_fails)
+            .await
+    }
+
+    async fn verify_claim(&self, claim: &Claim, limit: u32) -> Verification {
         // Alternative readings of claimed identifiers are looked up with
         // them, alongside the citation matchers; which was meant is settled
         // after, so a broken DOI costs no extra round of lookups.

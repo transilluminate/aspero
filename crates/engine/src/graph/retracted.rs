@@ -54,12 +54,13 @@ impl Engine {
                     done += chunk.len();
                 }
                 Err(e) if e.kind() == ErrorKind::BudgetCapped => {
-                    tracing::info!(target: "aspero::graph", error = %e, "retraction check stopped at the daily cap");
+                    tracing::info!(target: "aspero::engine", status = %e.kind().as_str(), "retraction check stopped at the daily cap");
                     budget = true;
                     break;
                 }
                 Err(e) => {
-                    tracing::warn!(target: "aspero::graph", error = %e, "retraction check failed");
+                    tracing::warn!(target: "aspero::engine", status = %e.kind().as_str(), "retraction check failed");
+                    tracing::debug!(target: "aspero::engine", error = %e, "retraction_detail");
                     failed = true;
                 }
             }

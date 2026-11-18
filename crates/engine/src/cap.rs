@@ -146,6 +146,7 @@ impl Engine {
     pub(crate) async fn call_paid<T, F, Fut>(
         &self,
         entry: &Entry,
+        what: &'static str,
         op: F,
     ) -> Result<Response<T>, Error>
     where
@@ -153,7 +154,7 @@ impl Engine {
         Fut: std::future::Future<Output = Result<Response<T>, Error>>,
     {
         self.check_cap(entry).await?;
-        self.call(entry, op).await
+        self.call(entry, what, op).await
     }
 
     /// `Err(BudgetCapped)` when `entry`'s provider has caps and its day has

@@ -12,8 +12,9 @@ authors.workspace = true
 workspace = true
 
 [features]
-# Fixture replay helpers for provider crates' tests.
-testing = []
+# Fixture replay helpers for provider crates' tests, and a log event
+# capture for tests of the diagnostics events.
+testing = ["dep:tracing"]
 
 [dependencies]
 async-trait.workspace = true
@@ -22,6 +23,7 @@ percent-encoding.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
+tracing = { workspace = true, optional = true }
 unicode-normalization.workspace = true
 
 [dev-dependencies]

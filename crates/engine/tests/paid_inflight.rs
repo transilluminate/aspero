@@ -5,7 +5,7 @@
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use aspero_core::testing::{FIXTURE_TIME, fixture, response};
+use aspero_core::testing::{Events, FIXTURE_TIME, fixture, response};
 use aspero_core::{
     Error, ErrorKind, HttpClient, HttpRequest, HttpResponse, ProviderId, ResiliencePolicy,
     SearchQuery,
@@ -17,6 +17,7 @@ use aspero_engine::{
 use aspero_openalex::OpenAlex;
 use async_trait::async_trait;
 use tokio::time::Instant;
+use tracing::subscriber::DefaultGuard;
 
 const FIXTURES: &str = concat!(
     env!("CARGO_MANIFEST_DIR"),
@@ -93,12 +94,17 @@ struct Setup {
     http: Arc<Slow>,
     store: Arc<SqliteCache>,
     tape: HttpTape,
+    /// The test's events. Every test captures its own: a thread with no
+    /// subscriber can leave a callsite cached as unwanted by another's.
+    events: Events,
+    _events: DefaultGuard,
 }
 
 /// A keyed OpenAlex over `http`, paced `interval` apart, behind a tape,
 /// with an answer cache and the credit spent here kept in one store; a
 /// credit cap of `credit_cap`, if any, and `retries`.
 fn setup(http: Arc<Slow>, interval: Duration, credit_cap: Option<f64>, retries: u32) -> Setup {
+    let (events, guard) = Events::install();
     let tape = HttpTape::new(
         Arc::new(SqliteTape::open_in_memory().unwrap()),
         TapeMode::Record,
@@ -123,6 +129,8 @@ fn setup(http: Arc<Slow>, interval: Duration, credit_cap: Option<f64>, retries: 
         http,
         store,
         tape,
+        events,
+        _events: guard,
     }
 }
 
@@ -258,4 +266,40 @@ async fn an_awaited_search_is_answered_as_before() {
     // Its usage is the report's, not left for settling.
     assert!(s.engine.settle(Duration::from_secs(1)).await.is_empty());
     assert_eq!(s.store.credit_here("openalex", DAY).unwrap(), 0.001);
+}
+
+/// DESIGN "Diagnostics events": a paid request finished after its caller
+/// left says `detached=true`, and its caller's call was cancelled; one
+/// awaited says nothing of it.
+#[tokio::test(start_paused = true)]
+async fn a_request_finished_after_its_caller_left_says_detached() {
+    let s = setup(
+        Slow::new(Duration::from_secs(1), 200),
+        Duration::ZERO,
+        None,
+        0,
+    );
+    let left = tokio::time::timeout(
+        Duration::from_millis(50),
+        s.engine.search(Some("openalex"), &query("deep learning")),
+    )
+    .await;
+    assert!(left.is_err());
+    s.engine.settle(Duration::from_secs(10)).await;
+    s.engine
+        .search(Some("openalex"), &query("graph neural networks"))
+        .await
+        .unwrap();
+
+    let searches: Vec<_> = s
+        .events
+        .named("aspero::net", "request")
+        .into_iter()
+        .filter(|e| e.field("op") == Some("search"))
+        .collect();
+    let detached: Vec<_> = searches.iter().map(|e| e.field("detached")).collect();
+    assert_eq!(detached, [Some("true"), None]);
+    let calls = s.events.named("aspero::engine", "call");
+    let outcomes: Vec<_> = calls.iter().map(|e| e.field("outcome")).collect();
+    assert_eq!(outcomes, [Some("cancelled"), Some("ok")]);
 }

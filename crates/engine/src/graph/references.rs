@@ -5,6 +5,7 @@ use aspero_core::{Cursor, FieldSet, IdKind, WorkId};
 use aspero_store::{Direction, Edges};
 
 use super::{Coverage, ReferencesPage};
+use crate::observe::op;
 use crate::{Engine, EngineError, LookupResult, Outcome, Served};
 
 impl Engine {
@@ -13,6 +14,18 @@ impl Engine {
     /// 100. `id` is any identifier aspero looks up; it's resolved to an
     /// OpenAlex work as a search's relations are.
     pub async fn references(
+        &self,
+        id: &str,
+        cursor: Option<&Cursor>,
+        limit: u32,
+    ) -> Result<ReferencesPage, EngineError> {
+        let work = Box::pin(self.references_page(id, cursor, limit));
+        let input = || id.to_owned();
+        self.observed(op::REFERENCES, 1, input, work, crate::observe::kind_of)
+            .await
+    }
+
+    async fn references_page(
         &self,
         id: &str,
         cursor: Option<&Cursor>,
@@ -132,8 +145,12 @@ impl Engine {
             .get_edges(Direction::References, std::slice::from_ref(work))
             .ok()?
             .pop()??;
-        self.current(&entry, self.cache_policy.references)
-            .then_some(entry.value.ids)
+        let current = self.current(&entry, self.cache_policy.references);
+        if current {
+            let provider = aspero_core::ProviderId::from_static(super::OPENALEX);
+            crate::observe::served(&provider, op::REFERENCES, "hit", "none", 1);
+        }
+        current.then_some(entry.value.ids)
     }
 
     pub(super) fn remember_references(&self, links: &[(&WorkId, &[WorkId])]) {

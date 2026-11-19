@@ -327,6 +327,33 @@ impl Accumulator<'_> {
     }
 }
 
+/// Scores works a caller already has against a claim, on `verify`'s terms
+/// for its own candidates, offline: each field's agreement and the
+/// confidence, the identifiers judged against all the work's own, and a
+/// work whose claimed identifier another given work carries capped as
+/// `verify` caps it (#148). In the order given, unmerged and unranked;
+/// `sightings` empty.
+pub fn compare(claim: &Claim, records: Vec<SourceRecord>) -> Vec<Candidate> {
+    let mut candidates: Vec<Candidate> = records
+        .into_iter()
+        .map(|record| {
+            let mut notices = Vec::new();
+            merge_notices(&mut notices, &record.work.notices);
+            let mut assessment = matching::assess(claim, &record);
+            assessment.ids = id_agreement(&claim.ids, &record.ids);
+            Candidate {
+                ids: record.ids.clone(),
+                notices,
+                sightings: Vec::new(),
+                assessment,
+                record,
+            }
+        })
+        .collect();
+    contest(&mut candidates, claim);
+    candidates
+}
+
 /// A candidate one claimed identifier names while another is carried by a
 /// different work's record (wild-3: a paper's PMID beside another paper's
 /// DOI, which its lookup found): the identifiers name two works, so they
@@ -446,6 +473,33 @@ mod tests {
 
     use super::*;
     use crate::resolve::tests::titled;
+
+    #[test]
+    fn given_works_compare_on_verifys_terms() {
+        // A paper's DOI beside another paper's PMID (#148): the work the
+        // DOI names doesn't carry the PMID, which another given work does.
+        let deep = titled(
+            "doi:10.1038/nature14539",
+            "Deep learning",
+            &["Yann LeCun"],
+            2015,
+        );
+        let mut other = titled("doi:10.1000/other", "Something else", &["A. Author"], 2015);
+        other.ids.push("pmid:12345678".parse().unwrap());
+        let mut claim = Claim::from_text("LeCun Y. Deep learning. 2015");
+        claim.ids = vec![
+            "doi:10.1038/nature14539".parse().unwrap(),
+            "pmid:12345678".parse().unwrap(),
+        ];
+        let alone = compare(&claim, vec![deep.clone()]);
+        assert_eq!(alone[0].assessment.ids, Agreement::Match);
+        let both = compare(&claim, vec![other, deep]);
+        // In the order given.
+        assert_eq!(both[1].ids[0].to_string(), "doi:10.1038/nature14539");
+        assert_eq!(both[1].assessment.ids, Agreement::Partial);
+        assert!(both[1].assessment.confidence <= matching::ID_CONFLICT_CAP);
+        assert!(both.iter().all(|c| c.sightings.is_empty()));
+    }
 
     /// Plasticenta as a source has it (#81).
     fn plasticenta(

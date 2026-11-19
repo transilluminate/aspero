@@ -43,6 +43,7 @@ mod merge;
 mod rank;
 
 use merge::assess;
+pub use merge::compare;
 pub(crate) use merge::merge_notices;
 use rank::rank;
 

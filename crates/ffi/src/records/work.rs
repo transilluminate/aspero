@@ -211,6 +211,25 @@ impl From<&aspero_core::OpenAccess> for OpenAccess {
 }
 
 impl Work {
+    /// The record the work came from, for comparing with a claim: read
+    /// from its full `json` (every field), else from its fields here.
+    pub(crate) fn to_record(&self) -> SourceRecord {
+        let full = serde_json::from_str(&self.json).ok();
+        if let Some(record) = full.as_ref().and_then(super::record_from) {
+            return record;
+        }
+        let (work, ids) = self.to_core();
+        let source = aspero_core::ProviderId::parse(&self.source)
+            .unwrap_or(aspero_core::ProviderId::from_static("app"));
+        let raw = aspero_core::Raw {
+            media_type: String::new(),
+            body: String::new(),
+        };
+        let fetched =
+            jiff::Timestamp::try_from(self.fetched_at).unwrap_or(jiff::Timestamp::UNIX_EPOCH);
+        SourceRecord::new(source, ids, work, aspero_core::FieldSet::ALL, raw, fetched)
+    }
+
     /// The work and its identifiers as found, for writing out.
     pub(crate) fn to_core(&self) -> (aspero_core::Work, Vec<aspero_core::WorkId>) {
         let mut w = aspero_core::Work::default();

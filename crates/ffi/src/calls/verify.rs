@@ -6,11 +6,33 @@ use aspero_engine::Engine;
 use aspero_json::InputClaim;
 use futures::StreamExt;
 
-use crate::records::{self, Claim as ClaimRecord, ProviderUsage, Verification, Verifications};
+use crate::records::{
+    self, Candidate, Claim as ClaimRecord, ProviderUsage, Verification, Verifications, Work,
+};
 use crate::{Aspero, AsperoError, CallToken, Patience, VerifyListener};
 
 #[uniffi::export]
 impl Aspero {
+    /// Scores works the app already has against a claim, offline, on
+    /// `verify`'s terms for its own candidates: each work's `checks` and
+    /// `confidence`, in the order given, the work as given (`foundBy`
+    /// empty). For showing a search's results beside a citation, field by
+    /// field. A claim that can't be read compares as empty, every check
+    /// unknown.
+    #[allow(clippy::needless_pass_by_value, clippy::unused_self)]
+    pub fn compare(&self, claim: ClaimRecord, works: Vec<Work>) -> Vec<Candidate> {
+        let claim = claim.into_input().claim.unwrap_or_default();
+        let records = works.iter().map(Work::to_record).collect();
+        aspero_engine::compare(&claim, records)
+            .iter()
+            .zip(works)
+            .map(|(c, work)| Candidate {
+                work,
+                ..Candidate::from(c)
+            })
+            .collect()
+    }
+
     /// Verifies citations, answering in claim order. With `full`, every
     /// candidate considered.
     #[uniffi::method(default(cancel = None))]

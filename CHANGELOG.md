@@ -3,6 +3,18 @@
 Releases 0.10 to 0.19 are in [docs/changelog/0.1x.md](docs/changelog/0.1x.md),
 and 0.1 to 0.9 in [docs/changelog/0.0x.md](docs/changelog/0.0x.md).
 
+## Unreleased
+
+Added:
+
+- `compare(claim:works:)` on the handle (#166): scores works the app
+  already has against a claim, offline, on `verify`'s terms for its own
+  candidates. Each work gets its per-field `checks` and `confidence`, in
+  the order given, so a search's results can be shown beside a citation
+  field by field. The engine's `compare` does the same for Rust callers.
+  A work is read from its full `json`, or from its fields when that can't
+  be read.
+
 ## 0.36.0
 
 Added:

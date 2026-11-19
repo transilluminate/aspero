@@ -5,10 +5,10 @@ use std::collections::HashMap;
 
 use aspero_ffi::records::ReadError;
 use aspero_ffi::records::{
-    AnalysisKind, Author, BibFormat, BibProblem, CitationManager, CiteFormat, Claim, Coverage,
-    ErrorKind, ExportFormat, KeyStatus, LookupStatus, PageKind, PageSource, Reason, SearchBoolean,
-    SearchField, SearchFilter, SearchFilterValue, SearchNode, SearchRelation, SearchRequest,
-    SearchSort, SeedProblem, StyleError, StyleSource, Verdict, WebPage, Work,
+    Agreement, AnalysisKind, Author, BibFormat, BibProblem, CitationManager, CiteFormat, Claim,
+    Coverage, ErrorKind, ExportFormat, KeyStatus, LookupStatus, PageKind, PageSource, Reason,
+    SearchBoolean, SearchField, SearchFilter, SearchFilterValue, SearchNode, SearchRelation,
+    SearchRequest, SearchSort, SeedProblem, StyleError, StyleSource, Verdict, WebPage, Work,
 };
 use aspero_ffi::{Aspero, AsperoError, CallToken, Config, Patience};
 
@@ -1364,4 +1364,77 @@ fn alternative_timing() {
             );
         }
     }
+}
+
+/// A JAMA 2016 paper, by family and given names.
+fn jama(title: &str, authors: &[(&str, &str)], page: &str, doi: &str) -> Work {
+    let mut w = work(title, "", 2016);
+    w.authors = authors
+        .iter()
+        .map(|(family, given)| Author {
+            name: format!("{given} {family}"),
+            orcid: None,
+            family: Some((*family).into()),
+            given: Some((*given).into()),
+            short: (*family).into(),
+        })
+        .collect();
+    w.container = Some("JAMA".into());
+    w.volume = Some("315".into());
+    w.page = Some(page.into());
+    w.ids = vec![doi.into()];
+    w
+}
+
+#[test]
+fn works_given_compare_with_a_claim_as_verify_scores_its_own() {
+    // Seymour's citation carrying Singer's DOI (aspero#165, #166).
+    let claim = text(
+        "Seymour CW, Liu VX, Iwashyna TJ, et al. Assessment of clinical criteria for \
+         sepsis. JAMA. 2016;315(8):762-774. doi:10.1001/jama.2016.0287",
+    );
+    let seymour = jama(
+        "Assessment of Clinical Criteria for Sepsis",
+        &[
+            ("Seymour", "Christopher W."),
+            ("Liu", "Vincent X."),
+            ("Iwashyna", "Theodore J."),
+        ],
+        "762",
+        "doi:10.1001/jama.2016.0288",
+    );
+    let singer = jama(
+        "The Third International Consensus Definitions for Sepsis and Septic Shock (Sepsis-3)",
+        &[
+            ("Singer", "Mervyn"),
+            ("Deutschman", "Clifford S."),
+            ("Seymour", "Christopher Warren"),
+        ],
+        "801",
+        "doi:10.1001/jama.2016.0287",
+    );
+    let aspero = aspero(None);
+    let scored = aspero.compare(claim.clone(), vec![singer.clone(), seymour.clone()]);
+    // In the order given, the works as given.
+    assert_eq!(scored.len(), 2);
+    assert_eq!(scored[0].work.ids, singer.ids);
+    assert_eq!(scored[1].work.ids, seymour.ids);
+    assert!(scored.iter().all(|c| c.found_by.is_empty()));
+    let (singer_c, seymour_c) = (&scored[0], &scored[1]);
+    // Every field but the identifier agrees with Seymour's...
+    assert_eq!(seymour_c.checks.title, Agreement::Match);
+    assert_eq!(seymour_c.checks.year, Agreement::Match);
+    assert_eq!(seymour_c.checks.ids, Agreement::Mismatch);
+    // ...and only the identifier with Singer's.
+    assert_eq!(singer_c.checks.ids, Agreement::Match);
+    assert_eq!(singer_c.checks.title, Agreement::Mismatch);
+    assert!(
+        seymour_c.confidence > singer_c.confidence + 0.5,
+        "{} vs {}",
+        seymour_c.confidence,
+        singer_c.confidence
+    );
+    // A claim that can't be read compares as empty.
+    let empty = aspero.compare(Claim::default(), vec![seymour]);
+    assert_eq!(empty[0].checks.title, Agreement::Unknown);
 }

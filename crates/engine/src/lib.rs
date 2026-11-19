@@ -94,7 +94,7 @@ pub use identify::{Decision, Identified, IdentifyReport, MAX_IDENTIFIERS};
 pub use keys::check_openalex_key;
 pub use keys::{KeyCheck, KeyStatus};
 pub use registry::{Disagreement, disagreements};
-pub use resolve::{Candidate, ResolveReport, Sighting, Via};
+pub use resolve::{Candidate, ResolveReport, Sighting, Via, compare};
 /// Re-exported for credentials in provider configs.
 pub use secrecy::SecretString;
 #[cfg(feature = "crossref")]

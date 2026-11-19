@@ -248,6 +248,12 @@ fn candidate_from(c: &Value) -> Option<Candidate> {
 /// differently: `notices` and `notice_for` (stored as `updates` and
 /// `update_to`), and the record's `source`, `ids` and `fetched_at`.
 fn work_from(w: &Value) -> Option<Work> {
+    Some(Work::from_record(&record_from(w)?))
+}
+
+/// The record a work's full JSON was written from, as far as a work says:
+/// its source, identifiers, fields and when it was fetched.
+pub(crate) fn record_from(w: &Value) -> Option<SourceRecord> {
     let mut fields = w.as_object()?.clone();
     for (said, stored) in [("notices", "updates"), ("notice_for", "update_to")] {
         if let Some(v) = fields.remove(said) {
@@ -265,8 +271,14 @@ fn work_from(w: &Value) -> Option<Work> {
         media_type: String::new(),
         body: String::new(),
     };
-    let record = SourceRecord::new(source, ids, work, FieldSet::ALL, raw, fetched_at);
-    Some(Work::from_record(&record))
+    Some(SourceRecord::new(
+        source,
+        ids,
+        work,
+        FieldSet::ALL,
+        raw,
+        fetched_at,
+    ))
 }
 
 #[cfg(test)]

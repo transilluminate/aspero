@@ -578,6 +578,14 @@ bindings, attached to each release. Not on crates.io. Third-party notices
 ship inside it and the CLI (`crates/notices-gen`; run `just notices`
 after a version bump or dependency change).
 
+**Comparing given works** (`compare`, #166) scores works the caller
+already has (a search's results) against a claim with no requests, on
+the terms `verify` gives its own candidates: `matching::assess`, the
+identifiers judged against all the work's own, and the cap on a work
+whose claimed identifier another given work carries (#148). It doesn't
+merge, rank or settle a cut-short identifier's readings, which need
+lookups; the works come back in the order given.
+
 **Stored reasons are a contract** (`records/stored.rs`, #163). An app
 that keeps verifications keeps why as data and words it when it shows
 it, in its own words and language. `Verification.reasonJson` is the

@@ -3,6 +3,17 @@
 Releases 0.10 to 0.19 are in [docs/changelog/0.1x.md](docs/changelog/0.1x.md),
 and 0.1 to 0.9 in [docs/changelog/0.0x.md](docs/changelog/0.0x.md).
 
+## Unreleased
+
+Fixed:
+
+- A short free-text title beside other authors, at the place of another
+  work in the same journal and volume ("LeCun Y, Bengio Y, Hinton G. Deep
+  learning. Nature. 2015;521…" against Littman's paper in Nature 521),
+  graded that work's title `unknown`, as if the reference gave none; it
+  is `mismatch` (#172). Beside the work's own authors a short label
+  ("RESP score") is still no other title.
+
 ## 0.38.0
 
 Added:

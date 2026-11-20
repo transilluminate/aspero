@@ -18,6 +18,7 @@ use super::preprint::{names_preprint, preprint_server, preprint_version_claimed}
 use super::same_work::{id_agreement, same_work_id};
 use super::text::{Normalised, content_words, words};
 use super::titles::{self, title_similarity, unmarked};
+use super::written;
 use super::{Agreement, Assessment, Claim, FieldCheck};
 use crate::id::{IdKind, is_digits, starts_with_ci};
 use crate::publication::{self, first_page, journal_in, other_journal, same_journal};
@@ -632,10 +633,22 @@ pub fn assess(claim: &Claim, record: &SourceRecord) -> Assessment {
     // by nanocarriers. J Microbiol Methods. 2005;61:251" isn't titleless).
     let placed = container.agreement == Agreement::Match && volume.agreement == Agreement::Match;
     // A title quoted, or BibTeX's, is given however short ("“The essence
-    // of entanglement,” Phys. Rev. A, vol. 63").
+    // of entanglement,” Phys. Rev. A, vol. 63"). So is one the layout
+    // reads beside other authors ("LeCun Y, Bengio Y, Hinton G. Deep
+    // learning. Nature. 2015;521" cites no title of Littman's at Nature
+    // 521, #172), unless all its words are the work's authors, journal or
+    // furniture ("N Engl J Med"). Beside the work's own authors, a short
+    // one is a label for it ("Schmidt M, et al. RESP score. Am J Respir
+    // Crit Care Med 2014;189:1374").
+    let others = authors.score.is_none_or(|s| s < CORROBORATING_AUTHORS);
     let titled = text.as_ref().is_some_and(|t| {
-        t.title_run(&families, work.container_title.as_deref()) >= SHORT_TITLE_WORDS
+        let journal = work.container_title.as_deref();
+        t.title_run(&families, journal) >= SHORT_TITLE_WORDS
             || titles::given_title(&t.raw).is_some()
+            || (others
+                && written::laid_out(&t.raw)
+                    .title
+                    .is_some_and(|read| Normalised::new(&read).title_run(&families, journal) > 0))
     });
     let title =
         if placed && claim.title.is_none() && title.agreement == Agreement::Mismatch && !titled {

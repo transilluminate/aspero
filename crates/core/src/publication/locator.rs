@@ -18,11 +18,19 @@ pub fn first_page(pages: &str) -> &str {
     &pages[..end]
 }
 
-/// Volume and first page as a reference gives them.
+/// Volume and first page as a reference gives them, and its pages as
+/// written ("762-774", "e1117").
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub(crate) struct Locator {
     pub volume: Option<String>,
     pub page: Option<String>,
+    pub pages: Option<String>,
+}
+
+/// Pages as a reference writes them, without the stop after them.
+fn written(pages: &str) -> Option<String> {
+    let pages = pages.trim().trim_end_matches(['.', ',', ';']);
+    (!pages.is_empty()).then(|| pages.to_owned())
 }
 
 /// The volume and first page in a free-text reference, from the common
@@ -33,9 +41,15 @@ pub(crate) struct Locator {
 pub(crate) fn locator(text: &str) -> Locator {
     if text.trim_start().starts_with('@') {
         // BibTeX: its fields.
+        let pages = bibtex_field(text, "pages");
+        let page = pages.as_deref().and_then(page_number);
         return Locator {
             volume: bibtex_field(text, "volume").and_then(|v| volume_number(&v)),
-            page: bibtex_field(text, "pages").and_then(|p| page_number(&p)),
+            pages: page
+                .is_some()
+                .then(|| pages.as_deref().and_then(written))
+                .flatten(),
+            page,
         };
     }
     let compact = compact(text);
@@ -111,9 +125,10 @@ pub(super) fn compact(text: &str) -> String {
 /// The first styled locator among a compacted reference's tokens, with the
 /// index of the token it starts at: what comes before it is the journal.
 pub(super) fn styled(tokens: &[&str]) -> Option<(usize, Locator)> {
-    let at = |volume: String, page: String| Locator {
+    let at = |volume: String, page: String, pages: &str| Locator {
         volume: Some(volume),
         page: Some(page),
+        pages: written(pages),
     };
     for (i, token) in tokens.iter().enumerate() {
         let token = token.trim_end_matches(['.', ',']);
@@ -129,7 +144,7 @@ pub(super) fn styled(tokens: &[&str]) -> Option<(usize, Locator)> {
                     page_number(pages),
                 )
             {
-                return Some((i, at(volume, page)));
+                return Some((i, at(volume, page, pages)));
             }
         }
         // Harvard labels the pages: "Cell, 144(5), pp. 646-674".
@@ -144,7 +159,7 @@ pub(super) fn styled(tokens: &[&str]) -> Option<(usize, Locator)> {
             && head.split_once('(').is_some_and(|(_, y)| bracketed_year(y))
             && let Some(page) = page_number(pages)
         {
-            return Some((i, at(volume, page)));
+            return Some((i, at(volume, page, pages)));
         }
         // APA: volume(issue), page[–end]
         if tokens[i].ends_with(',')
@@ -152,7 +167,7 @@ pub(super) fn styled(tokens: &[&str]) -> Option<(usize, Locator)> {
             && let Some(volume) = volume_number(token)
             && let Some(page) = tokens.get(page_at).and_then(|p| page_number(p))
         {
-            return Some((i, at(volume, page)));
+            return Some((i, at(volume, page, tokens[page_at])));
         }
         // Running headers, Elsevier's "47 (2016) 797–804" and Nature's
         // "521, 436–444 (2015)": a year in brackets tells them apart.
@@ -164,7 +179,7 @@ pub(super) fn styled(tokens: &[&str]) -> Option<(usize, Locator)> {
                 next_page.filter(|p| ranged(p)).and_then(page_number),
             )
         {
-            return Some((i, at(volume, page)));
+            return Some((i, at(volume, page, next_page.unwrap_or_default())));
         }
         // Nature's single page, "Nature 530, 484 (2016)", only right after
         // the journal's word, abbreviated or not ("J. Org. Chem. 101, 6301
@@ -177,7 +192,7 @@ pub(super) fn styled(tokens: &[&str]) -> Option<(usize, Locator)> {
                 || (i > 0 && name_word(tokens[i - 1].strip_suffix('.').unwrap_or(tokens[i - 1]))))
             && let Some(page) = page_number(pages)
         {
-            return Some((i, at(volume, page)));
+            return Some((i, at(volume, page, pages)));
         }
         // APA without an issue: "Journal Name, 146, 106274." Bare numbers
         // after commas are common, so only right after a word and its
@@ -196,7 +211,7 @@ pub(super) fn styled(tokens: &[&str]) -> Option<(usize, Locator)> {
                     .get(page_at + 1)
                     .is_none_or(|t| starts_with_ci(t, "doi") || starts_with_ci(t, "http")))
         {
-            return Some((i, at(volume, page)));
+            return Some((i, at(volume, page, tokens[page_at])));
         }
     }
     None
@@ -214,10 +229,13 @@ fn labelled(tokens: &[&str]) -> Locator {
             }
             "pp" | "p" | "pages" | "page" if found.page.is_none() => {
                 found.page = next().and_then(page_number);
+                found.pages = found.page.as_ref().and(next()).and_then(written);
             }
             // IEEE's article number, where the page would be: "Art. no. 615".
             "art" if found.page.is_none() && next().is_some_and(|n| is_label(n, &["no"])) => {
-                found.page = tokens.get(i + 2).and_then(|p| page_number(p));
+                let raw = tokens.get(i + 2).copied();
+                found.page = raw.and_then(page_number);
+                found.pages = found.page.as_ref().and(raw).and_then(written);
             }
             _ => {}
         }
@@ -346,71 +364,110 @@ pub(super) fn page_number(s: &str) -> Option<String> {
 mod tests {
     use super::*;
 
+    /// The volume and first page found, the pages as written aside.
+    fn placed(text: &str) -> Locator {
+        Locator {
+            pages: None,
+            ..locator(text)
+        }
+    }
+
+    #[test]
+    fn the_pages_are_read_as_written() {
+        // #169: the range beside the first page, for a cited-vs-found table.
+        for (text, pages) in [
+            ("Seymour CW, et al. JAMA. 2016;315(8):762-774.", "762-774"),
+            (
+                "Meyer, G. (2014). Fibrinolysis. NEJM, 370(15), 1402–1411.",
+                "1402–1411",
+            ),
+            (
+                "Hanahan, D. (2011) 'Hallmarks of cancer', Cell, 144(5), pp. 646-674.",
+                "646-674",
+            ),
+            ("Nature, vol. 521, pp. 436-444, 2015", "436-444"),
+            ("Injury, Int. J. Care Injured 47 (2016) 797–804", "797–804"),
+            (
+                "Silver, D. et al. Mastering the game of Go. Nature 530, 484 (2016).",
+                "484",
+            ),
+            ("JAMA. 2014;311(11):e1117.", "e1117"),
+            (
+                "@article{x, volume = {521}, pages = {436--444}}",
+                "436--444",
+            ),
+        ] {
+            assert_eq!(locator(text).pages.as_deref(), Some(pages), "{text}");
+        }
+        assert_eq!(locator("Smith J. Title. Publisher, 2010.").pages, None);
+    }
+
     #[test]
     fn locators_from_common_styles() {
         let loc = |v: &str, p: &str| Locator {
             volume: Some(v.into()),
             page: Some(p.into()),
+            pages: None,
         };
         assert_eq!(
-            locator("Daum RS et al. N Engl J Med 2017;376:2545"),
+            placed("Daum RS et al. N Engl J Med 2017;376:2545"),
             loc("376", "2545")
         );
         assert_eq!(
-            locator("N Engl J Med. 2014;370(15):1402-11."),
+            placed("N Engl J Med. 2014;370(15):1402-11."),
             loc("370", "1402")
         );
-        assert_eq!(locator("Lancet. 2010; 376 (9734): 23-32"), loc("376", "23"));
+        assert_eq!(placed("Lancet. 2010; 376 (9734): 23-32"), loc("376", "23"));
         assert_eq!(
-            locator("Meyer, G. (2014). Fibrinolysis. NEJM, 370(15), 1402–1411."),
+            placed("Meyer, G. (2014). Fibrinolysis. NEJM, 370(15), 1402–1411."),
             loc("370", "1402")
         );
         assert_eq!(
-            locator("Nature, vol. 521, pp. 436-444, 2015"),
+            placed("Nature, vol. 521, pp. 436-444, 2015"),
             loc("521", "436")
         );
-        assert_eq!(locator("JAMA. 2014;311(11):e1117."), loc("311", "e1117"));
-        assert_eq!(locator("Nature 521:436–444 (2015)"), loc("521", "436"));
+        assert_eq!(placed("JAMA. 2014;311(11):e1117."), loc("311", "e1117"));
+        assert_eq!(placed("Nature 521:436–444 (2015)"), loc("521", "436"));
         assert_eq!(
-            locator("Injury, Int. J. Care Injured 47 (2016) 797–804"),
+            placed("Injury, Int. J. Care Injured 47 (2016) 797–804"),
             loc("47", "797")
         );
-        assert_eq!(locator("Nature 521, 436–444 (2015)"), loc("521", "436"));
+        assert_eq!(placed("Nature 521, 436–444 (2015)"), loc("521", "436"));
         // Red team (#102): Nature's single page, Harvard's "pp.", BibTeX.
         assert_eq!(
-            locator("Silver, D. et al. Mastering the game of Go. Nature 530, 484 (2016)."),
+            placed("Silver, D. et al. Mastering the game of Go. Nature 530, 484 (2016)."),
             loc("530", "484")
         );
         assert_eq!(
-            locator("Hanahan, D. (2011) 'Hallmarks of cancer', Cell, 144(5), pp. 646-674."),
+            placed("Hanahan, D. (2011) 'Hallmarks of cancer', Cell, 144(5), pp. 646-674."),
             loc("144", "646")
         );
         assert_eq!(
-            locator("LeCun, Y. (2015) 'Deep learning', Nature, 521, pp. 436-444."),
+            placed("LeCun, Y. (2015) 'Deep learning', Nature, 521, pp. 436-444."),
             loc("521", "436")
         );
         assert_eq!(
-            locator(
+            placed(
                 "@article{j, author = {Jumper, John}, title = {Highly accurate {AlphaFold}}, \
                  journal = {Nature}, year = {2021}, volume = {597}, pages = {583--589}}"
             ),
             loc("597", "583")
         );
         // A bracketed year without a page range: no place.
-        assert_eq!(locator("Smith 47 (2016) 797 patients"), Locator::default());
+        assert_eq!(placed("Smith 47 (2016) 797 patients"), Locator::default());
         assert_eq!(
-            locator("Vaswani 2017. doi:10.48550/arXiv.1706.03762 at 10:30"),
+            placed("Vaswani 2017. doi:10.48550/arXiv.1706.03762 at 10:30"),
             Locator::default()
         );
         // APA without an issue (#80): a journal, its comma, then numbers.
         assert_eq!(
-            locator(
+            placed(
                 "Ragusa, A. (2021). Plasticenta. Environmental Science & Technology, 146, 106274."
             ),
             loc("146", "106274")
         );
         assert_eq!(
-            locator("Smith, J. (2020). Title. Nature, 521, 436-444. https://doi.org/10.1/x"),
+            placed("Smith, J. (2020). Title. Nature, 521, 436-444. https://doi.org/10.1/x"),
             loc("521", "436")
         );
         // Bare numbers elsewhere are not a place.
@@ -419,7 +476,7 @@ mod tests {
             "We saw 12, 34 and 56, 78, 90 patients.",
             "Smith, J. (2020). Title. Journal, 146, 106274 and more",
         ] {
-            assert_eq!(locator(text), Locator::default(), "{text}");
+            assert_eq!(placed(text), Locator::default(), "{text}");
         }
     }
 }

@@ -45,6 +45,11 @@ pub struct Claim {
     /// as the journal; `Verification.chosenBySite` says when it decided.
     #[uniffi(default = None)]
     pub site: Option<String>,
+    /// The pages as written: a range ("762-774") or a page, `page` being
+    /// the first. In `Verification.read`, read from free text; given
+    /// without `page`, its first page counts as the page.
+    #[uniffi(default = None)]
+    pub pages: Option<String>,
 }
 
 /// Another reading of a claimed identifier: a DOI broken across lines at
@@ -79,6 +84,7 @@ impl Claim {
             key,
             alternative_ids: c.alternatives.iter().map(Into::into).collect(),
             site: c.site.clone(),
+            pages: c.pages.clone(),
         }
     }
 
@@ -90,7 +96,7 @@ impl Claim {
             year: self.year,
             container: self.container,
             volume: self.volume,
-            page: self.page,
+            page: self.page.or(self.pages),
             ids: self.ids,
             site: self.site,
             ..Default::default()

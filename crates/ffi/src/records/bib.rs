@@ -59,6 +59,7 @@ impl From<aspero_bib::BibEntry> for BibEntry {
                 key: Some(e.key),
                 alternative_ids: Vec::new(),
                 site: None,
+                pages: c.pages,
             },
             entry_type: e.entry_type,
             problems: e.problems.iter().map(Into::into).collect(),

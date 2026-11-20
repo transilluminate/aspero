@@ -37,6 +37,11 @@ pub struct Claim {
     /// The first page (or a range, of which the first page counts).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub page: Option<String>,
+    /// The pages as written: a range ("762-774") or a page. Given without
+    /// `page`, its first page counts as the page; the claim as read takes
+    /// it from free text.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pages: Option<String>,
     /// Other readings of claimed identifiers (a DOI without the hyphen at
     /// a line break), to try only if the claimed one doesn't exist.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -127,16 +132,24 @@ impl Claim {
     /// The volume and first page the claim cites: its fields, each one not
     /// given read from its text ("Injury 47 (2016) 797–804").
     pub(crate) fn locator(&self) -> publication::Locator {
+        let page = self.page.as_ref().or(self.pages.as_ref());
         let given = publication::Locator {
             volume: self.volume.clone(),
-            page: self.page.as_deref().map(|p| first_page(p).to_owned()),
+            page: page.map(|p| first_page(p).to_owned()),
+            pages: self.pages.clone().or_else(|| self.page.clone()),
         };
         match &self.text {
             Some(text) if given.volume.is_none() || given.page.is_none() => {
                 let found = publication::locator(text);
+                let pages = if given.page.is_some() {
+                    given.pages
+                } else {
+                    found.pages
+                };
                 publication::Locator {
                     volume: given.volume.or(found.volume),
                     page: given.page.or(found.page),
+                    pages,
                 }
             }
             _ => given,
@@ -205,6 +218,7 @@ impl Claim {
         let located = self.locator();
         read.volume = read.volume.or(located.volume);
         read.page = read.page.or(located.page);
+        read.pages = located.pages;
         read
     }
 

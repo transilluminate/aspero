@@ -580,6 +580,7 @@ mod tests {
         let loc = |v: &str, p: &str| Locator {
             volume: Some(v.into()),
             page: Some(p.into()),
+            pages: None,
         };
         for (text, journal, place) in [
             (
@@ -646,7 +647,7 @@ mod tests {
                 "Psychological Science",
                 Some(Locator {
                     volume: Some("5".into()),
-                    page: None,
+                    ..Locator::default()
                 }),
             ),
             (
@@ -655,7 +656,7 @@ mod tests {
                 "American Sociological Review",
                 Some(Locator {
                     volume: Some("68".into()),
-                    page: None,
+                    ..Locator::default()
                 }),
             ),
             (
@@ -681,7 +682,11 @@ mod tests {
         ] {
             assert_eq!(cited_journal(text).as_deref(), Some(journal), "{text}");
             if let Some(place) = place {
-                assert_eq!(locator(text), place, "{text}");
+                let found = Locator {
+                    pages: None,
+                    ..locator(text)
+                };
+                assert_eq!(found, place, "{text}");
             }
         }
         // Bare numbers and years elsewhere are still no place.

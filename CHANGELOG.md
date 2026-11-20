@@ -3,6 +3,26 @@
 Releases 0.10 to 0.19 are in [docs/changelog/0.1x.md](docs/changelog/0.1x.md),
 and 0.1 to 0.9 in [docs/changelog/0.0x.md](docs/changelog/0.0x.md).
 
+## Unreleased
+
+Added:
+
+- The pages as written (#169, an embedder's ask): `Claim.pages` (the
+  range, "762-774", or a page), beside `page`, the first page. The
+  claim as read takes it from free text and BibTeX, in every style the
+  first page is read from; the JSON's `read.pages`. Given without
+  `page`, its first page counts as the page. In Swift, `Claim` gains
+  `pages: String?`, last, defaulting to `nil`, so existing calls still
+  compile.
+
+Fixed:
+
+- A free-text title that is another work's title as its subtitle, after
+  a main title of its own ("Assessment of Clinical Criteria for Sepsis:
+  For the Third International Consensus …" for Singer et al.'s "The
+  Third International …"), graded that work's title `match`; it is
+  `partial`, as the same title given as a field is (#168).
+
 ## 0.37.1
 
 Added:

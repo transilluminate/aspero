@@ -30,6 +30,8 @@
 //! - `derivative.rs`: replies, corrections and notices about a work.
 //! - `same_work.rs`: identifier agreement, and whether two records are one
 //!   work.
+//! - `written.rs`: a free-text reference's title and authors as written,
+//!   for the claim as read.
 
 mod assess;
 mod authors;
@@ -40,6 +42,7 @@ mod preprint;
 mod same_work;
 mod text;
 mod titles;
+mod written;
 
 use serde::{Deserialize, Serialize};
 

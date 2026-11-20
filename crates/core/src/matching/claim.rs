@@ -172,11 +172,30 @@ impl Claim {
 
     /// The claim as read: as given, with what its text says of the year
     /// (when it gives one), journal, volume and first page filled in where
-    /// not given. Free text's title and authors aren't parsed out: they're
-    /// scored by finding a work's own in the text; the journal is read only
-    /// where it can be told ([`Claim::cited_container`]).
+    /// not given, and its title and authors as written where its layout
+    /// tells them (Vancouver, APA, Harvard, a quoted title); nothing where
+    /// it doesn't. The journal is read only where it can be told
+    /// ([`Claim::cited_container`]). Matching doesn't use these readings:
+    /// it finds a work's own title and authors in the text.
     pub fn as_read(&self) -> Claim {
+        self.as_read_beside(None)
+    }
+
+    /// [`Claim::as_read`], with free text's title and authors read where
+    /// `work`'s title stands in it (the work found for it): that stretch of
+    /// text, and the names before it, as written ("Seymour CW", "Liu VX").
+    /// Its layout's reading where the work's title isn't there.
+    pub fn as_read_beside(&self, work: Option<&crate::work::Work>) -> Claim {
         let mut read = self.clone();
+        if let Some(text) = &self.text
+            && (read.title.is_none() || read.authors.is_empty())
+        {
+            let written = super::written::written(text, work);
+            read.title = read.title.or(written.title);
+            if read.authors.is_empty() {
+                read.authors = written.authors;
+            }
+        }
         if read.year.is_none()
             && let [year] = dedup_years(self.cited_years())[..]
         {

@@ -770,6 +770,9 @@ async fn the_claim_as_read_and_cited_values_come_back() {
         (v.read.volume.as_deref(), v.read.page.as_deref()),
         (Some("521"), Some("436"))
     );
+    // #169: the title and authors as written, where the work's title is.
+    assert_eq!(v.read.title.as_deref(), Some("Deep learning"));
+    assert_eq!(v.read.authors, ["LeCun Y", "Bengio Y", "Hinton G"]);
     let year = v
         .reason
         .differs()

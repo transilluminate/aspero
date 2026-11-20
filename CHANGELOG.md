@@ -3,6 +3,20 @@
 Releases 0.10 to 0.19 are in [docs/changelog/0.1x.md](docs/changelog/0.1x.md),
 and 0.1 to 0.9 in [docs/changelog/0.0x.md](docs/changelog/0.0x.md).
 
+## Unreleased
+
+Added:
+
+- An author's OpenAlex id (#174, an embedder's ask): `Person.openalex_id`
+  ("A5001226970"), from OpenAlex's records, and carried onto the same
+  author in another source's record of the same version (a shared DOI or
+  PMID) when family name and first initial agree, so a Crossref-led work
+  names it too. It is what an `authorId` search takes, for an author's
+  works without an ORCID. The JSON gives it as `openalex_id`, after
+  `orcid`. In Swift, `Author` gains `openalexId: String?`, last,
+  defaulting to `nil`, so existing calls still compile. Works saved
+  before this have none until fetched again.
+
 ## 0.38.1
 
 Fixed:

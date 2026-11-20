@@ -3,8 +3,8 @@
 
 use aspero_core::matching::{self, id_agreement, same_work_id};
 use aspero_core::{
-    Agreement, Claim, IdKind, Notice, OpenAccess, PartialDate, ProviderId, SourceRecord, Usage,
-    WorkId, WorkType,
+    Agreement, Claim, IdKind, Notice, OpenAccess, PartialDate, Person, ProviderId, SourceRecord,
+    Usage, WorkId, WorkType,
 };
 
 use super::rank::rank;
@@ -121,7 +121,57 @@ fn merged_values(a: &mut SourceRecord, b: &mut SourceRecord, counts: (bool, bool
     };
     a.work.issued = issued;
     b.work.issued = issued;
+    share_author_ids(&mut a.work.authors, &b.work.authors);
+    share_author_ids(&mut b.work.authors, &a.work.authors);
     (counted, counted)
+}
+
+/// Gives `to`'s authors the OpenAlex ids `from`'s have (#174), so a work
+/// led by another source's record still names them. Two authors are the
+/// same one when their family names agree and their first initials don't
+/// differ, at the same place in both lists, or as the only such pair in
+/// either list ("Wei Zhang" and "Li Zhang" are told apart wherever they
+/// stand).
+fn share_author_ids(to: &mut [Person], from: &[Person]) {
+    let key = |p: &Person| {
+        let (family, given) = p.parts()?;
+        let family = matching::normalise(&family);
+        let initial = given.and_then(|g| matching::normalise(&g).chars().next());
+        (!family.is_empty()).then_some((family, initial))
+    };
+    let alike = |a: &(String, Option<char>), b: &(String, Option<char>)| {
+        a.0 == b.0 && (a.1.is_none() || b.1.is_none() || a.1 == b.1)
+    };
+    let theirs: Vec<_> = from.iter().map(key).collect();
+    let mine: Vec<_> = to.iter().map(key).collect();
+    for (i, person) in to.iter_mut().enumerate() {
+        let Some(k) = &mine[i] else { continue };
+        if person.openalex_id.is_some() {
+            continue;
+        }
+        let matches = |list: &[Option<(String, Option<char>)>]| {
+            list.iter()
+                .enumerate()
+                .filter(|(_, o)| o.as_ref().is_some_and(|o| alike(k, o)))
+                .map(|(j, _)| j)
+                .collect::<Vec<_>>()
+        };
+        let same = if theirs
+            .get(i)
+            .and_then(Option::as_ref)
+            .is_some_and(|o| alike(k, o))
+        {
+            Some(i)
+        } else {
+            match (matches(&theirs).as_slice(), matches(&mine).len()) {
+                (&[j], 1) => Some(j),
+                _ => None,
+            }
+        };
+        if let Some(j) = same {
+            person.openalex_id.clone_from(&from[j].openalex_id);
+        }
+    }
 }
 
 /// The more informative of two open-access records; on a tie, the first.
@@ -690,6 +740,48 @@ mod tests {
         assert_eq!(article.work.cited_by_count, Some(10));
         assert_eq!(article.work.issued.unwrap().to_string(), "2021");
         assert!(article.work.open_access.as_ref().is_some_and(|oa| oa.is_oa));
+    }
+
+    #[test]
+    fn authors_get_the_openalex_ids_of_another_record_of_their_version() {
+        // #174: a Crossref-led work still names its authors' OpenAlex ids.
+        let person = |given: &str, family: &str| aspero_core::Person::new(given, family);
+        let with_id = |name: &str, id: &str| {
+            let mut p = aspero_core::Person::literal(name);
+            p.openalex_id = Some(id.into());
+            p
+        };
+        let mut crossref = plasticenta("crossref", &[DOI], "2021", None, None);
+        crossref.work.authors = vec![
+            person("Antonio", "Ragusa"),
+            person("Wei", "Zhang"),
+            person("Li", "Zhang"),
+            person("Alessandro", "Svelato"),
+        ];
+        let mut openalex = plasticenta("openalex", &[DOI], "2021", None, None);
+        openalex.work.authors = vec![
+            with_id("Antonio Ragusa", "A1"),
+            with_id("Li Zhang", "A2"),
+            with_id("Wei Zhang", "A3"),
+        ];
+        merged_values(&mut crossref, &mut openalex, (false, true));
+        let ids: Vec<_> = crossref
+            .work
+            .authors
+            .iter()
+            .map(|p| p.openalex_id.as_deref())
+            .collect();
+        // By name and place; the two Zhangs, out of place, by their
+        // initials; Svelato isn't on the other.
+        assert_eq!(ids, [Some("A1"), Some("A3"), Some("A2"), None]);
+
+        // Records of another version (no shared DOI or PMID) keep their own.
+        let mut preprint = plasticenta("openalex", &["arxiv:2001.00001"], "2020", None, None);
+        preprint.work.authors = vec![with_id("Antonio Ragusa", "A1")];
+        let mut article = plasticenta("crossref", &[DOI], "2021", None, None);
+        article.work.authors = vec![person("Antonio", "Ragusa")];
+        merged_values(&mut article, &mut preprint, (false, true));
+        assert_eq!(article.work.authors[0].openalex_id, None);
     }
 
     #[test]

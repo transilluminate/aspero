@@ -8,8 +8,8 @@ use std::collections::BTreeMap;
 
 use aspero_core::csl::{null_default, plain_text};
 use aspero_core::{
-    ArxivId, Doi, FieldSet, Notice, NoticeKind, OpenAccess, OpenAlexId, PartialDate, Person, Pmcid,
-    Pmid, Raw, SourceRecord, Work, WorkId, WorkType, orcid, tidy_abstract,
+    ArxivId, AuthorId, Doi, FieldSet, Notice, NoticeKind, OpenAccess, OpenAlexId, PartialDate,
+    Person, Pmcid, Pmid, Raw, SourceRecord, Work, WorkId, WorkType, orcid, tidy_abstract,
 };
 use jiff::Timestamp;
 use serde::Deserialize;
@@ -78,6 +78,7 @@ struct WireAuthorship {
 #[derive(Debug, Default, Deserialize)]
 #[serde(default)]
 struct WireAuthor {
+    id: Option<String>,
     display_name: Option<String>,
     orcid: Option<String>,
 }
@@ -307,6 +308,10 @@ impl WireAuthorship {
         }
         let mut person = Person::literal(name.to_owned());
         person.orcid = self.author.orcid.as_deref().and_then(orcid);
+        person.openalex_id = match self.author.id.as_deref().and_then(AuthorId::parse) {
+            Some(AuthorId::OpenAlex(id)) => Some(id),
+            _ => None,
+        };
         Some(person)
     }
 }
@@ -384,6 +389,7 @@ mod tests {
     fn authorship(display: Option<&str>, raw: Option<&str>) -> Option<Person> {
         let wire = WireAuthorship {
             author: WireAuthor {
+                id: None,
                 display_name: display.map(str::to_owned),
                 orcid: None,
             },

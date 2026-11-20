@@ -55,14 +55,19 @@ pub fn work(record: &SourceRecord, full: bool) -> Value {
 }
 
 /// One author, the same shape lean or full: always a `name`, then the ORCID
-/// iD, and with `full` the name's parts.
+/// iD and the OpenAlex id, and with `full` the name's parts.
 fn author(person: &Person, full: bool) -> Option<Value> {
     let mut out = Map::new();
     out.insert("name".into(), json!(person.display_name()?));
     if full && let Ok(Value::Object(parts)) = serde_json::to_value(person) {
         out.extend(parts);
-    } else if let Some(orcid) = &person.orcid {
-        out.insert("orcid".into(), json!(orcid));
+    } else {
+        if let Some(orcid) = &person.orcid {
+            out.insert("orcid".into(), json!(orcid));
+        }
+        if let Some(id) = &person.openalex_id {
+            out.insert("openalex_id".into(), json!(id));
+        }
     }
     Some(Value::Object(out))
 }
@@ -298,10 +303,15 @@ mod tests {
         let mut r = record();
         let mut lecun = Person::new("Yann", "LeCun");
         lecun.orcid = Some("0000-0000-0000-0001".into());
+        lecun.openalex_id = Some("A5001226970".into());
         r.work.authors = vec![lecun];
         assert_eq!(
             work(&r, false)["authors"],
-            json!([{"name": "Yann LeCun", "orcid": "0000-0000-0000-0001"}])
+            json!([{
+                "name": "Yann LeCun",
+                "orcid": "0000-0000-0000-0001",
+                "openalex_id": "A5001226970",
+            }])
         );
         assert_eq!(
             work(&r, true)["authors"],
@@ -310,6 +320,7 @@ mod tests {
                 "given": "Yann",
                 "family": "LeCun",
                 "orcid": "0000-0000-0000-0001",
+                "openalex_id": "A5001226970",
             }])
         );
     }

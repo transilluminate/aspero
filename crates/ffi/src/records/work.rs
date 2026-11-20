@@ -20,6 +20,10 @@ pub struct Author {
     pub given: Option<String>,
     /// As Vancouver writes it: "Laan DV"; an organisation as `name`.
     pub short: String,
+    /// The author's OpenAlex id, bare ("A5023888391"), where an OpenAlex
+    /// record of the work gives it: for `SearchField.authorId`.
+    #[uniffi(default = None)]
+    pub openalex_id: Option<String>,
 }
 
 #[derive(Debug, Clone, uniffi::Record)]
@@ -87,6 +91,7 @@ impl Work {
                         family: parts.as_ref().map(|(f, _)| f.clone()),
                         given: parts.and_then(|(_, g)| g),
                         short: p.short()?,
+                        openalex_id: p.openalex_id.clone(),
                     })
                 })
                 .collect(),
@@ -241,15 +246,19 @@ impl Work {
             .unwrap_or_else(|| {
                 self.authors
                     .iter()
-                    .map(|a| match &a.family {
-                        Some(family) => {
-                            let mut p = aspero_core::Person::default();
-                            p.family = Some(family.clone());
-                            p.given.clone_from(&a.given);
-                            p.orcid.clone_from(&a.orcid);
-                            p
-                        }
-                        None => aspero_core::Person::literal(&a.name),
+                    .map(|a| {
+                        let mut p = match &a.family {
+                            Some(family) => {
+                                let mut p = aspero_core::Person::default();
+                                p.family = Some(family.clone());
+                                p.given.clone_from(&a.given);
+                                p.orcid.clone_from(&a.orcid);
+                                p
+                            }
+                            None => aspero_core::Person::literal(&a.name),
+                        };
+                        p.openalex_id.clone_from(&a.openalex_id);
+                        p
                     })
                     .collect()
             });

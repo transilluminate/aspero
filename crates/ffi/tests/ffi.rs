@@ -289,6 +289,7 @@ fn works_export_as_bibtex_and_ris() {
             family: Some("LeCun".into()),
             given: Some("Yann".into()),
             short: "LeCun Y".into(),
+            openalex_id: None,
         }],
         issued: None,
         year: Some(2015),
@@ -349,6 +350,7 @@ fn work(title: &str, author: &str, year: i16) -> Work {
             family: None,
             given: None,
             short: author.into(),
+            openalex_id: None,
         }],
         issued: None,
         year: Some(year),
@@ -1377,6 +1379,7 @@ fn jama(title: &str, authors: &[(&str, &str)], page: &str, doi: &str) -> Work {
             family: Some((*family).into()),
             given: Some((*given).into()),
             short: (*family).into(),
+            openalex_id: None,
         })
         .collect();
     w.container = Some("JAMA".into());

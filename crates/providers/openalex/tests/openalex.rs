@@ -316,6 +316,37 @@ fn batch_lookup_answers_every_id_in_request_order() {
 }
 
 #[test]
+fn authors_carry_their_openalex_ids_for_an_author_search() {
+    // #174: "works by this author" without an ORCID.
+    let (oa, _) = provider([recorded("works_batch_doi")]);
+    let requested = [
+        id("10.48550/arXiv.1706.03762"),
+        id("10.5555/aspero-does-not-exist"),
+        id("10.1038/nature14539"),
+    ];
+    let resp = block_on(oa.lookup(&requested, FieldSet::ALL)).unwrap();
+    let work = &resp.value[2].record.as_ref().unwrap().work;
+    let ids: Vec<_> = work
+        .authors
+        .iter()
+        .map(|p| (p.display_name().unwrap(), p.openalex_id.clone().unwrap()))
+        .collect();
+    assert_eq!(
+        ids,
+        [
+            ("Yann LeCun".to_owned(), "A5001226970".to_owned()),
+            ("Yoshua Bengio".to_owned(), "A5086198262".to_owned()),
+            ("Geoffrey E. Hinton".to_owned(), "A5108093963".to_owned()),
+        ]
+    );
+    // As an author search takes it.
+    assert_eq!(
+        aspero_core::AuthorId::parse(&ids[0].1),
+        Some(aspero_core::AuthorId::OpenAlex("A5001226970".into()))
+    );
+}
+
+#[test]
 fn mixed_batch_makes_one_call_per_kind_and_sums_cost() {
     let (oa, http) = provider([
         recorded("works_batch_openalex"),

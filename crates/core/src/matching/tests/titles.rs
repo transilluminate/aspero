@@ -160,6 +160,57 @@ fn a_title_with_words_added_is_not_the_records() {
 }
 
 #[test]
+fn a_title_cited_as_another_ones_subtitle_is_not_the_records() {
+    // #168: Seymour's title has Singer's as its subtitle. Free text grades
+    // it as the fields do: partly the same, never the same.
+    let singer = article(
+        "The Third International Consensus Definitions for Sepsis and Septic Shock (Sepsis-3)",
+        &[
+            "Mervyn Singer",
+            "Clifford S. Deutschman",
+            "Christopher Warren Seymour",
+        ],
+        2016,
+        ("JAMA", "315", "801-810"),
+    );
+    let title = "Assessment of Clinical Criteria for Sepsis: For the Third International \
+                 Consensus Definitions for Sepsis and Septic Shock (Sepsis-3)";
+    let text =
+        format!("Seymour CW, Liu VX, Iwashyna TJ, et al. {title}. JAMA. 2016;315(8):762-774.");
+    let as_text = assess(&Claim::from_text(text), &singer);
+    let as_fields = assess(
+        &Claim {
+            title: Some(title.into()),
+            ..Claim::default()
+        },
+        &singer,
+    );
+    assert_eq!(as_text.title.agreement, Agreement::Partial, "{as_text:?}");
+    assert_eq!(
+        as_fields.title.agreement,
+        Agreement::Partial,
+        "{as_fields:?}"
+    );
+    assert_eq!(as_text.title.score, as_fields.title.score);
+    // A label before the title isn't a main title: an acronym's, a
+    // number's, a work's short name, a notice's.
+    for text in [
+        "Singer M, Deutschman CS, Seymour CW. Consensus3: The Third International Consensus \
+         Definitions for Sepsis and Septic Shock (Sepsis-3). JAMA. 2016;315(8):801-810.",
+        "Singer M, Deutschman CS, Seymour CW. Author Correction: The Third International \
+         Consensus Definitions for Sepsis and Septic Shock (Sepsis-3). JAMA. \
+         2016;315(8):801-810.",
+        "Singer M, Deutschman CS, Seymour CW. SEPSIS: The Third International Consensus \
+         Definitions for Sepsis and Septic Shock (Sepsis-3). JAMA. 2016;315(8):801-810.",
+        "Singer M, Deutschman CS, Seymour CW. Sepsis-3: The Third International Consensus \
+         Definitions for Sepsis and Septic Shock (Sepsis-3). JAMA. 2016;315(8):801-810.",
+    ] {
+        let a = assess(&Claim::from_text(text), &singer);
+        assert_eq!(a.title.agreement, Agreement::Match, "{text}: {a:?}");
+    }
+}
+
+#[test]
 fn a_title_cited_as_is_or_without_its_subtitle_is_the_records() {
     for (text, record) in [
         (

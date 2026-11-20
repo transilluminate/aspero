@@ -360,6 +360,10 @@ impl Normalised {
     /// venue's, in a reference without stops: "Attention is all you need
     /// ICML 2017"), or the journal and year ("… in Nature 2015"); a word
     /// before it may be its authors' (`names`) or a joining word ("The").
+    /// A main title of the citation's own before it, the record's title its
+    /// subtitle ("Assessment of Clinical Criteria for Sepsis: For the Third
+    /// International Consensus …" for "The Third International …", #168),
+    /// is more words too.
     /// With `subtitle_ok`, a subtitle after the record's whole title is
     /// not more words.
     pub(super) fn extends_title(
@@ -411,7 +415,45 @@ impl Normalised {
                 && !names.contains(word)
                 && significant(i - 1..i)
         };
-        after(span.end) || (span.start > 0 && before(span.start))
+        // Back over the joining words opening a subtitle ("For the"), to a
+        // colon or spaced dash with a title's word before it: not an
+        // acronym's ("PROSEVA: Prone positioning …"), a number's
+        // ("Sepsis-3: …"), nor the authors'.
+        let subtitle_of = |start: usize| {
+            let gap = |i: usize| &self.raw[self.spans[i - 1].end..self.spans[i].start];
+            let mut i = start;
+            while i > 0
+                && gap(i).trim().is_empty()
+                && STOPWORDS.contains(&self.words[i - 1].as_str())
+            {
+                i -= 1;
+            }
+            let separated = i > 0
+                && match gap(i).trim() {
+                    ":" => true,
+                    "—" | "–" | "-" => gap(i).contains(' '),
+                    _ => false,
+                };
+            // A title of four words or more, back to the sentence's start:
+            // not a work's short name ("CodeAct: Executable Code Actions
+            // …", "Multicalibration: …") nor a label ("Correction: …",
+            // "Clinical practice guideline: …").
+            let boundary = |gap: &str| {
+                gap.contains(['.', '(', ')', '[', ']', ';', '"', '“', '”'])
+                    || (gap.contains(['\'', '‘']) && gap.contains(' '))
+            };
+            let mut from = i - 1;
+            while from > 0 && !boundary(gap(from)) {
+                from -= 1;
+            }
+            separated && i - from >= 4 && {
+                let raw = &self.raw[self.spans[i - 1].clone()];
+                raw.chars().any(char::is_lowercase)
+                    && !names.contains(&self.words[i - 1])
+                    && significant(i - 1..i)
+            }
+        };
+        after(span.end) || (span.start > 0 && (before(span.start) || subtitle_of(span.start)))
     }
 
     /// 1.0 if the title (or its main title, without subtitle) appears as a

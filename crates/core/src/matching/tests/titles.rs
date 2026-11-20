@@ -371,6 +371,51 @@ fn another_title_at_the_right_place_is_a_different_title() {
             "{text}: {a:?}"
         );
     }
+    // A short title, read from the layout, is given too (#172): Littman's
+    // and Ghahramani's papers, beside LeCun's at Nature 521, aren't
+    // "Deep learning".
+    let lecun_text = "LeCun Y, Bengio Y, Hinton G. Deep learning. Nature. \
+                      2015;521(7553):436-444. doi:10.1038/nature14540";
+    for (title, authors, pages) in [
+        (
+            "Reinforcement learning improves behaviour from evaluative feedback",
+            &["Michael L. Littman"][..],
+            "445-451",
+        ),
+        (
+            "Probabilistic machine learning and artificial intelligence",
+            &["Zoubin Ghahramani"][..],
+            "452-459",
+        ),
+    ] {
+        let mut other = placed(&[], title, authors, 2015, ("Nature", "521", pages));
+        other.work.work_type = Some(crate::work::WorkType::JournalArticle);
+        let a = assess(&Claim::from_text(lecun_text), &other);
+        assert_eq!(a.title.agreement, Agreement::Mismatch, "{title}: {a:?}");
+        assert!(a.confidence < PLAUSIBLE, "{title}: {a:?}");
+    }
+    let a = assess(&Claim::from_text(lecun_text), &lecun());
+    assert_eq!(a.title.agreement, Agreement::Match, "{a:?}");
+    // Beside the work's own authors, a short label is no other title
+    // (wild-2's "RESP score", for Schmidt's paper at its place).
+    let mut resp = placed(
+        &["10.1164/rccm.201311-2023OC"],
+        "Predicting survival after extracorporeal membrane oxygenation for severe acute \
+         respiratory failure. The Respiratory Extracorporeal Membrane Oxygenation Survival \
+         Prediction (RESP) score",
+        &["Matthieu Schmidt", "Michael Bailey"],
+        2014,
+        (
+            "American Journal of Respiratory and Critical Care Medicine",
+            "189",
+            "1374-1382",
+        ),
+    );
+    resp.work.work_type = Some(crate::work::WorkType::JournalArticle);
+    let text = "Schmidt M, et al. RESP score. Am J Respir Crit Care Med 2014;189:1374-82.";
+    let a = assess(&Claim::from_text(text), &resp);
+    assert_eq!(a.title.agreement, Agreement::Unknown, "{a:?}");
+    assert!(a.confidence >= VERIFIED, "{a:?}");
     // Without a title, the place still names the work.
     for text in [
         "Rivers E, et al. N Engl J Med. 2001;345:1368.",

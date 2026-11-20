@@ -262,6 +262,10 @@ pub struct Person {
     /// Bare ORCID iD, e.g. `0000-0002-1825-0097`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub orcid: Option<String>,
+    /// The author's OpenAlex id, bare: `A5023888391`. Only OpenAlex's
+    /// records give it (and records of the same work merged with one).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub openalex_id: Option<String>,
 }
 
 impl Person {

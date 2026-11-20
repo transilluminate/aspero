@@ -390,8 +390,10 @@ pub struct Verification {
     pub notices: Vec<Notice>,
     /// The claim as read: identifiers as written (with the other readings
     /// tried in `alternativeIds`), and from free text the year, journal
-    /// (`container`, where it can be told), volume and first page. `nil`
-    /// for an invalid claim.
+    /// (`container`, where it can be told), volume, first page, and the
+    /// title and authors as written: where `bestMatch`'s title stands in
+    /// it, else where the layout tells them; empty where it can't be told.
+    /// `nil` for an invalid claim.
     pub read: Option<Claim>,
     /// The work the verdict is about: the match, or the best guess.
     pub best_match: Option<Candidate>,

@@ -51,8 +51,10 @@ pub struct Verification {
     pub notices: Vec<Notice>,
     /// The claim as read: its identifiers as written (a DOI cut short at a
     /// line break, with the readings tried in `alternatives`), and from
-    /// free text the year, journal (where it can be told), volume and
-    /// first page ([`Claim::as_read`]).
+    /// free text the year, journal (where it can be told), volume, first
+    /// page, and the title and authors as written: where the best match's
+    /// title stands in it, else where its layout tells them
+    /// ([`Claim::as_read_beside`]).
     pub read: Claim,
     /// The candidate the verdict is about, as an index into
     /// `report.candidates`: the matching work, or the best guess at what was
@@ -377,7 +379,7 @@ pub(crate) fn judge(claim: &Claim, report: ResolveReport) -> Verification {
         reason_text: reason,
         reason: why,
         notices,
-        read: claim.as_read(),
+        read: claim.as_read_beside(best.map(|i| &report.candidates[i].record.work)),
         best_match: best,
         chosen_by_site: report.chosen_by_site && best == Some(0),
         report,

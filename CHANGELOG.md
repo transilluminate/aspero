@@ -3,6 +3,22 @@
 Releases 0.10 to 0.19 are in [docs/changelog/0.1x.md](docs/changelog/0.1x.md),
 and 0.1 to 0.9 in [docs/changelog/0.0x.md](docs/changelog/0.0x.md).
 
+## Unreleased
+
+Added:
+
+- Free text's title and authors in the claim as read (#169):
+  `Verification.read.title` and `read.authors` (and the JSON's
+  `read.title`, `read.authors`), as the citation writes them, not as the
+  record has them. Where a work was found, the stretch of text that
+  matched its title and the names before it ("Seymour CW", "Liu VX", …,
+  those before "et al." included); where none was, what the common
+  layouts tell (Vancouver, APA, Harvard, Chicago, a quoted title). Left
+  empty where it can't be told: a wrong title is worse than none. On the
+  red-team corpora, the layout's title is the found one 99.8% of the
+  times it answers, and answers for 78% of citations. Verdicts don't
+  change.
+
 ## 0.37.0
 
 Added:

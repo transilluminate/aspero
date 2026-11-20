@@ -278,6 +278,19 @@ examples are comments at the rule in `matching/assess.rs`, its numbers in
   chapter too (the free sources may hold only the reprint). "RETRACTED:"
   markers are ignored.
 
+**The claim as read** (`Verification.read`, `Claim::as_read_beside`)
+is what the claim says, for callers to show, pre-fill a correction with,
+or search from; scoring never uses it. From free text it takes the year,
+journal (where it can be told), volume and first page, and the title and
+authors as written (#169, `matching/written.rs`): where the best match's
+title stands in the text, that stretch and the byline before it; else
+the layout's (Vancouver, APA, Harvard, Chicago, a quoted title), only
+after a byline that reads as names throughout and before a journal, year
+or place. Where it can't be told, nothing: on the red-team corpora's
+verified citations the layout's title agrees with the found one 99.8% of
+the times it answers (2,462 of 2,468; the misses are titles with a stop
+inside, cut short), and answers for 78% of them.
+
 **Sites** (#98, `crates/core/src/site.rs`). A claim's `site` is evidence
 of the publisher, never a claimed field, and only counts for a claim
 without identifiers on a site in `PUBLISHERS` (registrable domain, no

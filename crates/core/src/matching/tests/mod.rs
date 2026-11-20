@@ -22,6 +22,7 @@ mod scoring;
 mod titles;
 mod venue;
 mod versions;
+mod written;
 
 fn record(ids: &[&str], title: &str, authors: &[&str], year: i16) -> SourceRecord {
     let work = Work {

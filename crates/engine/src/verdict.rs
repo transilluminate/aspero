@@ -67,6 +67,30 @@ pub struct Verification {
     pub report: ResolveReport,
 }
 
+const INTERNAL: &str = "aspero failed on this citation (an internal error); please report it";
+
+impl Verification {
+    /// The verification of a claim whose verify panicked: unverifiable,
+    /// [`Reason::InternalError`], the panic's message in `reason_text`.
+    pub(crate) fn internal(claim: &Claim, panic: &(dyn std::any::Any + Send)) -> Self {
+        let message = panic
+            .downcast_ref::<&str>()
+            .copied()
+            .or_else(|| panic.downcast_ref::<String>().map(String::as_str))
+            .unwrap_or("no message");
+        Verification {
+            verdict: Verdict::Unverifiable,
+            reason_text: format!("{INTERNAL}: {message}"),
+            reason: Reason::InternalError,
+            notices: Vec::new(),
+            read: claim.as_read(),
+            best_match: None,
+            chosen_by_site: false,
+            report: ResolveReport::default(),
+        }
+    }
+}
+
 /// Why a verdict was reached. "The work" is the verdict's candidate
 /// ([`Verification::best_match`]); "the identifiers" are those the claim gave.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -109,6 +133,9 @@ pub enum Reason {
     IdMissing,
     /// Providers failed, so nothing conclusive can be said. (Unverifiable)
     ProvidersFailed,
+    /// aspero itself failed on this claim (a bug, caught so the rest of a
+    /// batch goes on). (Unverifiable)
+    InternalError,
 }
 
 impl Reason {
@@ -126,6 +153,7 @@ impl Reason {
         IdMissingElsewhere,
         IdMissing,
         ProvidersFailed,
+        InternalError,
     );
 
     /// A short machine-friendly name.
@@ -144,6 +172,7 @@ impl Reason {
             Reason::IdMissingElsewhere => "id_missing_elsewhere",
             Reason::IdMissing => "id_missing",
             Reason::ProvidersFailed => "providers_failed",
+            Reason::InternalError => "internal_error",
         }
     }
 
@@ -549,6 +578,7 @@ fn explain(claim: &Claim, report: &ResolveReport, why: &Reason, best: Option<usi
             "providers failed; nothing conclusive".into()
         }
         Reason::ProvidersFailed => format!("could not look up {claimed}: providers failed"),
+        Reason::InternalError => INTERNAL.into(),
     }
 }
 

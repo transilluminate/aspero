@@ -14,6 +14,7 @@ use aspero_core::{
 use aspero_engine::{CitedField, Engine, Reason, Verdict, Via, WorkKind};
 use async_trait::async_trait;
 use common::*;
+use futures::StreamExt;
 
 #[tokio::test]
 async fn a_lookalike_from_the_matcher_leads_to_the_real_paper() {
@@ -461,6 +462,47 @@ async fn a_record_linking_two_candidates_merges_them() {
     let c = &report.candidates[0];
     assert_eq!(c.ids.len(), 2);
     assert_eq!(c.sightings.len(), 3);
+}
+
+#[tokio::test]
+async fn a_panic_on_one_claim_leaves_the_rest_of_the_batch() {
+    struct Buggy(Capabilities);
+    #[async_trait]
+    impl Provider for Buggy {
+        fn id(&self) -> ProviderId {
+            ProviderId::from_static("buggy")
+        }
+        fn capabilities(&self) -> &Capabilities {
+            &self.0
+        }
+        async fn search(&self, q: &SearchQuery) -> Result<Response<Page>> {
+            assert!(!format!("{q:?}").contains("Boom"), "a bug, on {q:?}");
+            Err(Error::AuthRejected { message: None })
+        }
+    }
+    let mut caps = Capabilities::default();
+    caps.search = true;
+    caps.citation_search = true;
+    let engine = Engine::builder()
+        .provider(Arc::new(Buggy(caps)), ResiliencePolicy::default(), 0)
+        .build();
+
+    let claims = [
+        Claim::from_text("Boom goes the matcher, 2020"),
+        Claim::from_text("Anything at all, 2020"),
+    ];
+    let mut got: Vec<_> = engine.verify_batch(&claims, 5).collect().await;
+    got.sort_by_key(|(i, _)| *i);
+    assert_eq!(got.len(), 2);
+    let (crashed, fine) = (&got[0].1, &got[1].1);
+    assert_eq!(crashed.verdict, Verdict::Unverifiable);
+    assert_eq!(crashed.reason, Reason::InternalError);
+    assert!(
+        crashed.reason_text.contains("a bug"),
+        "{}",
+        crashed.reason_text
+    );
+    assert_eq!(fine.reason, Reason::ProvidersFailed, "{}", fine.reason_text);
 }
 
 #[tokio::test]

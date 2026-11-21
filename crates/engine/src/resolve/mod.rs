@@ -33,6 +33,7 @@ use aspero_core::{
     Assessment, Claim, FieldSet, IdKind, Notice, ProviderId, SourceRecord, Usage, WorkId,
 };
 
+use futures::FutureExt as _;
 use futures::stream::{self, Stream, StreamExt};
 
 use crate::verdict::{Verification, judge};
@@ -153,8 +154,17 @@ impl Engine {
 
     /// Decides whether `claim` refers to a real work, stopping early once it
     /// does.
+    ///
+    /// A panic in aspero's own code (a bug) is caught here: the claim is
+    /// [unverifiable](crate::Reason::InternalError), and the rest of a batch
+    /// goes on.
     pub async fn verify(&self, claim: &Claim, limit: u32) -> Verification {
-        let work = Box::pin(self.verify_claim(claim, limit));
+        let work = Box::pin(async {
+            std::panic::AssertUnwindSafe(self.verify_claim(claim, limit))
+                .catch_unwind()
+                .await
+                .unwrap_or_else(|panic| Verification::internal(claim, &*panic))
+        });
         let input = || format!("{claim:?}");
         self.observed("verify", 1, input, work, crate::observe::never_fails)
             .await

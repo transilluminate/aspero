@@ -725,6 +725,24 @@ pub fn assess(claim: &Claim, record: &SourceRecord) -> Assessment {
     {
         confidence = confidence.max(PLAUSIBLE);
     }
+    // A claimed identifier that is the work's, beside its authors, names it
+    // whatever free text stands where its title would: a trial's label
+    // ("AReSVi-006 (GSK, RSVPreF3 OA):"), a description, a short form
+    // ("Hash Layers (Roller et al.) | 2106.04426"). The record's title,
+    // searched for in the text, isn't the title cited. Plausible, its
+    // title to check; never verified. Not with the year, volume or page
+    // wrong: another paper's identifier, beside a namesake's surname
+    // (holdout-6 #802).
+    if ids == Agreement::Match
+        && claimed_title.is_none()
+        && title.agreement == Agreement::Mismatch
+        && authors.score.is_some_and(|s| s >= CORROBORATING_AUTHORS)
+        && [year, volume, page]
+            .iter()
+            .all(|c| c.agreement != Agreement::Mismatch)
+    {
+        confidence = confidence.max(PLAUSIBLE);
+    }
     if located
         && container.agreement == Agreement::Match
         && title.agreement != Agreement::Mismatch

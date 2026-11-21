@@ -16,6 +16,15 @@ Changed:
   so a `switch` over it without `default` needs one more arm; a stored
   reason reads back as it was written.
 
+Fixed:
+
+- A cited identifier that is the work's, beside its authors and a year
+  that isn't wrong, is plausible (the title to check) when the words
+  where its title would stand are something else: a trial's label
+  ("AReSVi-006 (GSK, RSVPreF3 OA): …"), a description, or a short form
+  ("Hash Layers (Roller et al.) | 2106.04426"). It was a mismatch: the
+  work's title, looked for in the text, wasn't there (wild-4, 20 rows).
+
 ## 0.38.3
 
 Fixed:

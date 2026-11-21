@@ -7,6 +7,11 @@ and 0.1 to 0.9 in [docs/changelog/0.0x.md](docs/changelog/0.0x.md).
 
 Changed:
 
+- `aspero lookup`'s text says when a free copy is a page with no file
+  link known ("Free copy (green): … (a page; no file link known)"): a
+  repository's record may hold no file. `lookup --help` now says so for
+  the JSON (`open_access` without `pdf_url`), and that a work's date is
+  `issued` ("2016-07-04"; there is no separate `year`).
 - A bug that panics while verifying one claim no longer stops the rest
   of a batch: that claim is `unverifiable`, with the new reason
   `internal_error` and the panic's message in `reason_text` (please

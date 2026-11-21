@@ -167,7 +167,14 @@ pub fn work_text(record: &SourceRecord, indent: &str) -> String {
         } else {
             format!(" ({})", terms.join(", "))
         };
-        lines.push(format!("{indent}Free copy{terms}: {link}"));
+        // Without a PDF, the copy's page only: a repository's record may
+        // hold no file.
+        let page_only = if oa.pdf_url.is_none() && !link.is_empty() {
+            " (a page; no file link known)"
+        } else {
+            ""
+        };
+        lines.push(format!("{indent}Free copy{terms}: {link}{page_only}"));
     }
     lines.join("\n")
 }
@@ -459,6 +466,25 @@ mod tests {
         assert_eq!(
             work_text(&record(), "  "),
             "  Deep learning\n  Yann LeCun, Yoshua Bengio, Geoffrey Hinton, et al. · 2015 · Nature · journal article\n  doi:10.1038/nature14539"
+        );
+    }
+
+    #[test]
+    fn a_free_copy_without_a_file_says_it_is_a_page() {
+        let mut r = record();
+        let mut oa = aspero_core::OpenAccess::default();
+        oa.is_oa = true;
+        oa.status = Some("green".into());
+        oa.url = Some("https://repository.example/record/1".into());
+        r.work.open_access = Some(oa.clone());
+        assert!(work_text(&r, "").ends_with(
+            "Free copy (green): https://repository.example/record/1 (a page; no file link known)"
+        ));
+        oa.pdf_url = Some("https://repository.example/record/1.pdf".into());
+        r.work.open_access = Some(oa);
+        assert!(
+            work_text(&r, "")
+                .ends_with("Free copy (green): https://repository.example/record/1.pdf")
         );
     }
 

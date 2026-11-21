@@ -3,7 +3,7 @@
 Releases 0.10 to 0.19 are in [docs/changelog/0.1x.md](docs/changelog/0.1x.md),
 and 0.1 to 0.9 in [docs/changelog/0.0x.md](docs/changelog/0.0x.md).
 
-## Unreleased
+## 0.39.0
 
 Changed:
 
@@ -52,9 +52,6 @@ Fixed:
   work and no longer verifies as it ("The Priests" for "The
   Christianization of Iceland: Priests, Power, and Social Change"), so
   the book's own record ranks first.
-
-Fixed:
-
 - A bare ISBN-13 in a reference, without "ISBN" before it, is read as
   the book's ISBN: 13 digits, hyphens allowed, starting 978 or 979 and
   with a valid check digit, as models write them in a table's cell
@@ -95,9 +92,6 @@ Fixed:
   reference no longer reads as a family name and an initial, naming
   someone the record lacks; nor is a model's "Title:" field label a
   name.
-
-Fixed:
-
 - A record's title is compared without the markup and furniture a
   provider writes into it, where the citation doesn't give them too:
   tags (`<em>…</em>`), math markup (`$$\sqrt{s}=13\,\text {Te}\text
@@ -128,7 +122,6 @@ Fixed:
   more title search for such references. A hit sharing exactly that
   title is searched first, though it came third behind hits sharing it
   and more (wild-4 #574).
-
 - A DOI whose registry (Crossref) contradicts OpenAlex's record of it on
   two of date, volume and page now gets the registry's record (#183).
   OpenAlex sometimes merges two works into one: it has two corrections to
@@ -143,7 +136,6 @@ Fixed:
   2025. Records that differ on one field only (an online-first year, an
   article number for a page) and other providers' records merge as
   before.
-
 - A plain `lookup` (without `--full`) now does the same for a record that
   looks like two works merged into one, so `aspero lookup
   10.1111/1471-0528.70298` serves Crossref's record too (#183). OpenAlex's

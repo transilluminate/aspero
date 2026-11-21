@@ -179,20 +179,20 @@ fn edition(title: &str) -> Option<usize> {
         .or_else(|| trimmed.strip_suffix(" ed"))?
         .trim_end();
     let ordinal = rest.rsplit([' ', ',', '(']).next()?;
-    let numbered = ordinal.len() > 2
-        && ordinal[..ordinal.len() - 2]
-            .chars()
-            .all(|c| c.is_ascii_digit())
-        && ["st", "nd", "rd", "th"]
-            .iter()
-            .any(|s| ordinal.ends_with(s));
+    let numbered = ["st", "nd", "rd", "th"].iter().any(|s| {
+        ordinal
+            .strip_suffix(s)
+            .is_some_and(|n| !n.is_empty() && n.bytes().all(|b| b.is_ascii_digit()))
+    });
     if !numbered && !ORDINALS.contains(&ordinal) {
         return None;
     }
     let at = rest.len() - ordinal.len();
     // Lowercasing kept byte offsets only if it changed no length; else
     // find the same place in the title as written.
-    (lower.len() == title.len()).then_some(at)
+    // (Same length overall needn't mean the same offsets: check the place
+    // is one in the title.)
+    (lower.len() == title.len() && title.is_char_boundary(at)).then_some(at)
 }
 
 /// Where a library's statement of who wrote or edited the work begins:
@@ -261,6 +261,22 @@ fn bracket(title: &str, book: bool) -> Option<usize> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Found by fuzzing (0.39.0 panicked): a word of another script where
+    /// an ordinal would stand, before "edition".
+    #[test]
+    fn an_edition_word_after_a_dash_does_not_panic() {
+        for title in [
+            "Physics — edition",
+            "Physics —th edition",
+            "Kelvin \u{212a}th edition",
+        ] {
+            let _ = edition(title);
+            let _ = record_title(title, "", true);
+        }
+        assert_eq!(edition("Physics — edition"), None);
+        assert!(edition("Physics, 14th Edition").is_some());
+    }
 
     #[test]
     fn math_markup_and_overbars_read_as_letters() {

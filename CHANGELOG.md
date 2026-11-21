@@ -7,6 +7,12 @@ and 0.1 to 0.9 in [docs/changelog/0.0x.md](docs/changelog/0.0x.md).
 
 Fixed:
 
+- Two panics in 0.39.0, found by fuzzing, both on text of other
+  scripts where an ASCII form was expected: a bracketed year whose first
+  four bytes split a character ("(200\u{ad}9)", a soft hyphen) after a
+  byline and title, and a record's title ending in a dash and "edition"
+  ("… — edition"). Either stopped a `verify` of the claim (as an
+  `internal_error` since 0.39.0, not the whole batch).
 - An abstract OpenAlex read off a publisher's landing page, its author
   list, affiliations and links and all (Wiley's, the ACP journals',
   "Volume 154, Issue S1 p. 3-31 … Search for more papers by this

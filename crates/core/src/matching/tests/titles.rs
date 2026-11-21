@@ -639,3 +639,16 @@ fn a_journals_words_in_the_title_are_the_titles() {
     let a = assess(&titleless, &gh);
     assert!(a.confidence >= VERIFIED, "{a:?}");
 }
+
+/// Found by fuzzing (0.39.0 panicked): a soft hyphen inside the bracketed
+/// year after a byline and title.
+#[test]
+fn a_year_with_a_soft_hyphen_does_not_panic() {
+    for text in [
+        "Einar Arnórsson, Réttarsaga Alþingis (200\u{ad}9)",
+        "B. P. Abbott et al.. Prog. Phys 7.6, 72909 (200\u{ad}9). DOI: 10*1088/00s4-.",
+        "Einar Arnórsson, Réttarsaga Alþingis (\u{2014}\u{2014})",
+    ] {
+        let _ = probable_title(text);
+    }
+}

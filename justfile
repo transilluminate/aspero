@@ -15,7 +15,8 @@ check:
     cargo check -p aspero-engine --no-default-features
     cargo check -p aspero-engine --no-default-features --features crossref
 
-# Run CI's quick gates (formatting, navigability) before each commit.
+# Run CI's quick gates (formatting, navigability) before each commit, and
+# its docs build before each push.
 hooks:
     git config core.hooksPath .githooks
 

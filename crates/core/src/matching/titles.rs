@@ -418,18 +418,53 @@ pub fn shared_title(candidate_title: &str, reference: &str) -> Option<String> {
 /// title, else the longest quoted span (Harvard's 'An image is worth
 /// 16x16 words', IEEE's "…,"), else the sentence after the byline
 /// ("Lundberg SM, Lee SI. A unified approach to interpreting model
-/// predictions. Adv Neural …"). `None` when nothing looks like one.
+/// predictions. Adv Neural …"). In a table's row, its first cell's
+/// ("Katzung's Basic & Clinical Pharmacology | Katzung, Vanderah | 15th
+/// (2020) | …"), when it holds one. `None` when nothing looks like one.
 pub fn probable_title(text: &str) -> Option<String> {
     if let Some(given) = given_title(text) {
         return Some(given);
     }
+    first_cell(text)
+        .and_then(guessed_title)
+        .or_else(|| guessed_title(text))
+}
+
+/// A table's row's first cell that isn't blank (Markdown's `**` aside),
+/// when the text is one and it holds words enough for a title: one word,
+/// with a note or not, is a label ("GIN | Xu et al., How Powerful are …",
+/// "CHAMP (0.01%, 0.02%) | Zadnik K, et al. …").
+fn first_cell(text: &str) -> Option<&str> {
+    if !text.contains(" | ") {
+        return None;
+    }
+    let cell = text
+        .split('|')
+        .map(|cell| cell.trim().trim_matches(['*', '_']).trim())
+        .find(|cell| !cell.is_empty())?;
+    let words = without_trailing_note(cell)
+        .split_whitespace()
+        .filter(|w| w.chars().any(char::is_alphabetic))
+        .count();
+    (words >= 2).then_some(cell)
+}
+
+/// The title a reference's layout suggests ([`probable_title`]'s, but for
+/// a marked one).
+fn guessed_title(text: &str) -> Option<String> {
     if let Some(title) = after_comma_byline(text) {
         return Some(title);
     }
     // Of its sentences, not a byline, a publisher or locator (";"), the
-    // one most in sentence case, then the longest; a year opening one
-    // (Harvard's "(2011) Viking coinage …", after initials) is the year's.
-    // Nor editors' names ("Ragep, eds").
+    // one most in sentence case (a link's no word of it), then the
+    // longest; a year opening one
+    // (Harvard's "(2011) Viking coinage …", after initials) is the year's,
+    // as is a byline before it ("WHO (2003) Kangaroo …") or a name before
+    // a comma, its year after ("Einar Arnórsson, Réttarsaga Alþingis
+    // (1945)"). Nor editors' names ("Ragep, eds"), a note in brackets
+    // ending it ("… Human Anatomy & Physiology (Pearson)"), a place and
+    // publisher ("Atlanta: Scholars Press, 1998"), nor, rather than
+    // another, a series' volume ("Writings from the Ancient World 2").
     let editors = |s: &str| {
         s.split_whitespace().last().is_some_and(|w| {
             matches!(
@@ -441,8 +476,16 @@ pub fn probable_title(text: &str) -> Option<String> {
         })
     };
     text.split(". ")
-        .filter(|s| !s.contains(';') && !super::authors::names_given(s) && !editors(s))
-        .map(without_leading_year)
+        .map(|s| without_trailing_note(without_name_byline(s)))
+        .enumerate()
+        .filter(|(i, s)| {
+            !(s.contains(';')
+                || super::authors::names_given(s)
+                || editors(s)
+                || published_by(s)
+                || (*i == 0 && family_given(s)))
+        })
+        .map(|(_, s)| without_byline_year(without_leading_year(s)))
         .filter_map(title_like)
         .enumerate()
         // Of sentences alike, the first: a title precedes its place.
@@ -450,11 +493,146 @@ pub fn probable_title(text: &str) -> Option<String> {
             let words: Vec<&str> = s.split_whitespace().collect();
             let lower = words
                 .iter()
-                .filter(|w| w.chars().count() >= 3 && w.starts_with(char::is_lowercase))
+                .filter(|w| {
+                    w.chars().count() >= 3 && w.starts_with(char::is_lowercase) && !w.contains('/')
+                })
                 .count();
-            (lower, words.len(), std::cmp::Reverse(*i))
+            // A series' volume after another ("Hittite Myths. 2nd ed.
+            // Writings from the Ancient World 2"), not a title ending in
+            // a number ("Fast gapped-read alignment with Bowtie 2").
+            let series = *i > 0 && numbered(s);
+            (!series, lower, words.len(), std::cmp::Reverse(*i))
         })
         .map(|(_, s)| s)
+}
+
+/// A sentence without the note in brackets that ends it, a publisher's,
+/// an author's, a year's or an edition's ("(Pearson)", "(Waller,
+/// Sampson)", "(2004, in Icelandic)"), when words are left before it. Not
+/// one in capitals, an acronym the title may spell out ("… Respiratory
+/// Syndrome (MERS)", "… Joint National Committee (JNC 8)").
+fn without_trailing_note(s: &str) -> &str {
+    let t = s.trim_end().trim_end_matches('.');
+    let Some(inner) = t.strip_suffix(')') else {
+        return s;
+    };
+    let Some(open) = inner.rfind(" (") else {
+        return s;
+    };
+    let note = &inner[open + 2..];
+    let acronym = note.chars().any(char::is_uppercase) && !note.chars().any(char::is_lowercase);
+    let before = &inner[..open];
+    let wordy = before
+        .split_whitespace()
+        .any(|w| w.chars().filter(|c| c.is_alphabetic()).count() >= 3);
+    if acronym || note.contains(['(', ')']) || !wordy {
+        return s;
+    }
+    before.trim_end()
+}
+
+/// A place and publisher with the year after them, as Chicago gives them:
+/// "Atlanta: Scholars Press, 1998", "New York: Simon & Schuster, 2023".
+fn published_by(s: &str) -> bool {
+    let Some((place, rest)) = s.split_once(": ") else {
+        return false;
+    };
+    let capitalised = |p: &str| {
+        let words: Vec<&str> = p.split_whitespace().collect();
+        (1..=3).contains(&words.len())
+            && words
+                .iter()
+                .all(|w| w.starts_with(char::is_uppercase) || *w == "&")
+    };
+    let Some((publisher, year)) = rest.trim_end_matches('.').rsplit_once(", ") else {
+        return false;
+    };
+    capitalised(place)
+        && publisher.split_whitespace().count() <= 5
+        && publisher.starts_with(char::is_uppercase)
+        && year.len() == 4
+        && year.bytes().all(|b| b.is_ascii_digit())
+}
+
+/// A byline of a family name and a given name written out, Chicago's
+/// opening sentence: "Singer, Itamar", "Nightingale, Florence".
+fn family_given(s: &str) -> bool {
+    let Some((family, given)) = s.split_once(", ") else {
+        return false;
+    };
+    let name = |w: &str| {
+        w.starts_with(char::is_uppercase)
+            && w.chars().any(char::is_lowercase)
+            && w.chars()
+                .all(|c| c.is_alphabetic() || matches!(c, '-' | '\'' | '’' | '.'))
+    };
+    let family: Vec<&str> = family.split_whitespace().collect();
+    let given: Vec<&str> = given.split_whitespace().collect();
+    (1..=2).contains(&family.len())
+        && (1..=3).contains(&given.len())
+        && family.iter().chain(&given).all(|w| name(w))
+}
+
+/// Whether a sentence ends in a bare number of one to three digits, as a
+/// series' volume does ("Writings from the Ancient World 2"), and some
+/// titles ("Bowtie 2").
+fn numbered(s: &str) -> bool {
+    let mut words = s.split_whitespace().rev();
+    let last = words.next().unwrap_or_default();
+    words.next().is_some()
+        && (1..=3).contains(&last.len())
+        && last.bytes().all(|b| b.is_ascii_digit())
+}
+
+/// A sentence without the byline and year in brackets opening it: "WHO
+/// (2003) Kangaroo Mother Care", "Nightingale, Florence (1858) Notes on
+/// …": up to six words, each capitalised, then the year.
+fn without_byline_year(s: &str) -> &str {
+    let Some(open) = s.find(" (") else {
+        return s;
+    };
+    let byline: Vec<&str> = s[..open].split_whitespace().collect();
+    let capitalised = byline
+        .iter()
+        .all(|w| w.starts_with(|c: char| c.is_uppercase()) || *w == "&");
+    let after = without_leading_year(&s[open + 1..]);
+    if byline.is_empty()
+        || byline.len() > 6
+        || !capitalised
+        || after.len() == s[open + 1..].len()
+        || !after.starts_with(char::is_uppercase)
+    {
+        return s;
+    }
+    after
+}
+
+/// A sentence without a byline of a name written out and a comma before
+/// a title that a year in brackets ends: "Einar Arnórsson, Réttarsaga
+/// Alþingis (1945)", "Eddie Faye Gates, They Came Searching: … (1997)".
+/// Two to four words, each a capitalised word of letters.
+fn without_name_byline(s: &str) -> &str {
+    let Some((name, rest)) = s.split_once(", ") else {
+        return s;
+    };
+    let words: Vec<&str> = name.split_whitespace().collect();
+    let named = (2..=4).contains(&words.len())
+        && words.iter().all(|w| {
+            w.starts_with(char::is_uppercase)
+                && w.chars().any(char::is_lowercase)
+                && w.chars()
+                    .all(|c| c.is_alphabetic() || matches!(c, '-' | '\'' | '’'))
+        });
+    let t = rest.trim_end().trim_end_matches('.');
+    let dated = t
+        .strip_suffix(')')
+        .and_then(|t| t.rfind(" (").map(|at| &t[at + 2..]))
+        .is_some_and(|year| year.len() >= 4 && year[..4].bytes().all(|b| b.is_ascii_digit()));
+    if named && dated && rest.starts_with(char::is_uppercase) {
+        without_trailing_note(rest)
+    } else {
+        s
+    }
 }
 
 /// A sentence without the year in brackets opening it: "(2011) Viking
@@ -567,7 +745,7 @@ fn after_comma_byline(text: &str) -> Option<String> {
 fn title_like(s: &str) -> Option<String> {
     let s = s
         .trim()
-        .trim_matches(|c: char| c.is_whitespace() || ",.;:'\"“”‘’".contains(c));
+        .trim_matches(|c: char| c.is_whitespace() || ",.;:'\"“”‘’*".contains(c));
     let wordy = s
         .split_whitespace()
         .any(|w| w.chars().filter(|c| c.is_alphabetic()).count() >= 3);

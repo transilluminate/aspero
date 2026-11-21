@@ -65,6 +65,18 @@ Fixed:
   Paper.", without a number) is another version of the one cited:
   plausible, as for a preprint, not verified. A record whose venue is
   a working-paper series is still not read as a preprint server's.
+- The title searched for a free-text reference no citation matcher
+  found leaves out more of what isn't its title: a table row's other
+  cells (its first cell is the title), a byline and year before it
+  ("WHO (2003) Kangaroo Mother Care …"), a name written out before a
+  comma ("Einar Arnórsson, Réttarsaga Alþingis (1945)"), a note in
+  brackets ending it ("(Pearson)", "(2004, in Icelandic)"; one in
+  capitals, such as "(MERS)" or "(JNC 8)", stays), a place and
+  publisher ("Atlanta: Scholars Press, 1998"), and a series' volume
+  ("Writings from the Ancient World 2") after the book's own title; a
+  link ("https://doi.org/…") no longer outranks the title as a
+  sentence. Open Library finds none of these books by the longer
+  query.
 
 ## 0.38.3
 

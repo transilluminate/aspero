@@ -158,3 +158,103 @@ fn a_journals_article_cited_as_a_working_paper_is_another_version() {
     let a = assess(&Claim::from_text(&text), &article);
     assert!(a.confidence >= VERIFIED, "{text}: {a:?}");
 }
+
+#[test]
+fn the_probable_title_leaves_out_bylines_notes_cells_and_series() {
+    // wild-4's not_found books: what was searched kept a byline, a year,
+    // a note in brackets, a table's other cells or a series' name.
+    for (text, title) in [
+        (
+            "WHO (2003) Kangaroo Mother Care: A Practical Guide. Geneva: World Health \
+             Organization.",
+            "Kangaroo Mother Care: A Practical Guide",
+        ),
+        (
+            "WHO (2022) WHO Recommendations for Care of the Preterm or Low-Birth-Weight Infant. \
+             Geneva: World Health Organization.",
+            "WHO Recommendations for Care of the Preterm or Low-Birth-Weight Infant",
+        ),
+        (
+            "Marieb & Hoehn's Human Anatomy & Physiology (Pearson)",
+            "Marieb & Hoehn's Human Anatomy & Physiology",
+        ),
+        ("Goðamenning (2004, in Icelandic)", "Goðamenning"),
+        (
+            "Katzung's Basic & Clinical Pharmacology | Katzung, Vanderah | 15th (2020) | \
+             978-1260452310",
+            "Katzung's Basic & Clinical Pharmacology",
+        ),
+        (
+            "Rang & Dale's Pharmacology | Ritter, Flower, Henderson, et al. | 9th (2019) | \
+             978-0702074486",
+            "Rang & Dale's Pharmacology",
+        ),
+        (
+            "Medical Pharmacology and Therapeutics (Waller, Sampson) | Waller, Sampson | 5th \
+             (2018) | not sure",
+            "Medical Pharmacology and Therapeutics",
+        ),
+        (
+            "Towards Understanding MoE in Deep Learning (Chen et al.) | 2208.02813 | ICLR 2023",
+            "Towards Understanding MoE in Deep Learning",
+        ),
+        (
+            "Einar Arnórsson, Réttarsaga Alþingis (1945)",
+            "Réttarsaga Alþingis",
+        ),
+        (
+            "Lúðvík Ingvarsson, Goðorð og goðorðsmenn (1986–87)",
+            "Goðorð og goðorðsmenn",
+        ),
+        (
+            "Jón Viðar Sigurðsson, Chieftains and Power in the Icelandic Commonwealth (1999).",
+            "Chieftains and Power in the Icelandic Commonwealth",
+        ),
+        (
+            "Hoffner, Harry A. Hittite Myths. 2nd ed. Writings from the Ancient World 2. \
+             Atlanta: Scholars Press, 1998.",
+            "Hittite Myths",
+        ),
+        (
+            "Singer, Itamar. Hittite Prayers. Writings from the Ancient World 11. Atlanta: \
+             Scholars Press, 2002.",
+            "Hittite Prayers",
+        ),
+        // An acronym the title spells out stays.
+        (
+            "Smith J. Middle East respiratory syndrome (MERS). Lancet. 2015.",
+            "Middle East respiratory syndrome (MERS)",
+        ),
+        (
+            "James PA, Oparil S. 2014 Evidence-Based Guideline for the Management of High Blood \
+             Pressure in Adults: Report From the Panel Members Appointed to the Eighth Joint \
+             National Committee (JNC 8). JAMA. 2014.",
+            "2014 Evidence-Based Guideline for the Management of High Blood Pressure in Adults: \
+             Report From the Panel Members Appointed to the Eighth Joint National Committee (JNC \
+             8)",
+        ),
+        // A title ending in a number, before its journal's place.
+        (
+            "Langmead B, Salzberg SL. Fast gapped-read alignment with Bowtie 2. Nature Methods 9, \
+             357-359 (2012).",
+            "Fast gapped-read alignment with Bowtie 2",
+        ),
+        // A link is no word in sentence case (holdout-4 #265).
+        (
+            "Hutton, P. H. (1987). The Art of Memory Reconceived: From Rhetoric to \
+             Psychoanalysis. Journal of the History of Ideas, 48(3), 371. \
+             https://doi.org/10.2307/2709758",
+            "The Art of Memory Reconceived: From Rhetoric to Psychoanalysis",
+        ),
+    ] {
+        assert_eq!(probable_title(text).as_deref(), Some(title), "{text}");
+    }
+    // A one-word first cell is a label, not the title: the row is read
+    // as before, a byline here.
+    assert_eq!(
+        probable_title(
+            "GIN | Xu et al., How Powerful are Graph Neural Networks? | 1810.00826 | ICLR 2019"
+        ),
+        None
+    );
+}

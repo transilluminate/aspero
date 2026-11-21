@@ -115,6 +115,14 @@ Fixed:
   ("Proceedings of the conference - Association for Computational
   Linguistics. Meeting") is ACL's (wild-4 #377, #382, #469, #485, #595,
   #748; wild-2 #790).
+- A book's own title, as its reference's shape suggests, is searched
+  beside a citation matcher's hit that shares only a fragment of it (a
+  one-word review titled "Wilding", for "Wilding: The return of nature
+  to a British farm"), when that hit is the only pointer and the
+  reference has no identifier or volume and page to look it up by: one
+  more title search for such references. A hit sharing exactly that
+  title is searched first, though it came third behind hits sharing it
+  and more (wild-4 #574).
 
 ## 0.38.3
 

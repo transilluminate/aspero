@@ -1,6 +1,6 @@
-doi:10.1038/nature14539  found via openalex
+doi:10.1038/nature14539  found via crossref
   Deep learning
-  Yann LeCun, Yoshua Bengio, Geoffrey Hinton · 2016
+  Yann LeCun, Yoshua Bengio, Geoffrey Hinton · 2015
   doi:10.1038/nature14539
   ⚠ the DOI's registry disagrees: issued 2016 (vs 2015); volume 521 (vs 522)
 

@@ -28,7 +28,9 @@ pub struct AbstractsReport {
 
 impl Engine {
     /// The abstract for each work: its own record's if present, otherwise
-    /// the first other provider's (by priority) that has one. Works are
+    /// the first other provider's (by priority) that has one, but not, for
+    /// a record of the DOI's registry, from a record it overrules (another
+    /// work's, #183). Works are
     /// identified by their records' identifiers; pass a record with merged
     /// identifiers to widen the search.
     pub async fn abstracts(&self, works: &[&SourceRecord]) -> AbstractsReport {
@@ -58,6 +60,9 @@ impl Engine {
                 .enumerate()
                 .filter(|(i, _)| found[*i].is_none());
             for (i, record) in self.ask_about(entry, missing, &mut usage).await {
+                if self.overruled(&record, works[i]) {
+                    continue;
+                }
                 if let Some(text) = non_blank(record.work.abstract_text) {
                     found[i] = Some(Abstract {
                         text,

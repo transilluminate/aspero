@@ -32,6 +32,8 @@ impl Engine {
             claim,
             report: ResolveReport::default(),
             counted: Vec::new(),
+            registry: self.registry().map(|e| e.provider.id()),
+            registered: Vec::new(),
         };
         let done = |acc: &Accumulator| stop_when_verified && acc.verified();
         let query = |text: &str, citation: bool| {

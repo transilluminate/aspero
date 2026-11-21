@@ -91,9 +91,11 @@ impl Engine {
         let mut latest: Vec<Option<SourceRecord>> = vec![None; n];
         let mut abstracts: Vec<Option<Option<Abstract>>> = vec![None; n];
         if extras.full {
+            // First, so a record the registry's replaces (#183) is the one
+            // filled in.
+            disagreements = self.cross_check(&mut report).await;
             self.add_notices(&mut report).await;
             self.add_open_access(&mut report).await;
-            disagreements = self.cross_check(&mut report).await;
             let found: Vec<(usize, &SourceRecord)> =
                 found_records(&report.results, |_| true).collect();
             let records: Vec<&SourceRecord> = found.iter().map(|(_, r)| *r).collect();

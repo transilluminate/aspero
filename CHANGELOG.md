@@ -124,6 +124,22 @@ Fixed:
   title is searched first, though it came third behind hits sharing it
   and more (wild-4 #574).
 
+- A DOI whose registry (Crossref) contradicts OpenAlex's record of it on
+  two of date, volume and page now gets the registry's record (#183).
+  OpenAlex sometimes merges two works into one: it has two corrections to
+  one guideline, 10.1111/1471-0528.18258 and 10.1111/1471-0528.70298, as
+  one work, with the second's DOI and the first's date, volume, page and
+  PDF. `lookup --full` of the second now serves Crossref's record (2026,
+  133, 1823), with none of the merged record's other identifiers, PDF or
+  abstract, and still lists the `disagreements`. A lookup of the first no
+  longer carries the second's DOI, nor PMIDs and PMCIDs the registry
+  doesn't confirm. `verify` no longer merges such a record with the
+  registry's: a citation of the 2026 correction verifies as 2026, not
+  2025. Records that differ on one field only (an online-first year, an
+  article number for a page) and other providers' records merge as
+  before. A plain `lookup` (without `--full`) doesn't ask the registry,
+  so it is unchanged.
+
 ## 0.38.3
 
 Fixed:

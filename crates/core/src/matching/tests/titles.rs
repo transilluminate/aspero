@@ -211,6 +211,21 @@ fn a_title_cited_as_another_ones_subtitle_is_not_the_records() {
 }
 
 #[test]
+fn a_title_after_only_joining_words_does_not_crash() {
+    // A panic (index underflow) killed the wild-4 recorder run: the walk
+    // back over joining words before the title ("The", "A") reached the
+    // first word, and the title's start before it was taken as `0 - 1`.
+    for text in [
+        "The Deep learning. Nature. 2015;521:436-444.",
+        "A The Deep learning. Nature 2015",
+        "of the Deep learning",
+    ] {
+        let a = assess(&Claim::from_text(text), &lecun());
+        assert_ne!(a.title.agreement, Agreement::Mismatch, "{text}: {a:?}");
+    }
+}
+
+#[test]
 fn a_title_cited_as_is_or_without_its_subtitle_is_the_records() {
     for (text, record) in [
         (

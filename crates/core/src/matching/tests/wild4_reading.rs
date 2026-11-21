@@ -125,3 +125,36 @@ fn an_nber_working_papers_number_is_its_doi() {
         ["doi:10.1257/jel.20231736"]
     );
 }
+
+#[test]
+fn a_journals_article_cited_as_a_working_paper_is_another_version() {
+    // wild-4 #723, its number left out: the journal's article is matched,
+    // the working paper cited.
+    let mut article = record(
+        &["doi:10.1257/jel.20231736"],
+        "Generative AI for Economic Research: Use Cases and Implications for Economists",
+        &["Anton Korinek"],
+        2023,
+    );
+    article.work.work_type = Some(crate::work::WorkType::JournalArticle);
+    article.work.container_title = Some("Journal of Economic Literature".into());
+    let title =
+        "\"Generative AI for Economic Research: Use Cases and Implications for Economists.\"";
+    for series in [
+        "NBER Working Paper.",
+        "NBER WP.",
+        "Brookings working papers.",
+    ] {
+        let text = format!("Korinek, A. (2023). {title} {series}");
+        let a = assess(&Claim::from_text(&text), &article);
+        assert_eq!(a.container.agreement, Agreement::Mismatch, "{text}");
+        assert!(
+            (PLAUSIBLE..VERIFIED).contains(&a.confidence),
+            "{text}: {a:?}"
+        );
+    }
+    // Cited in its journal: verified, as before.
+    let text = format!("Korinek, A. (2023). {title} Journal of Economic Literature.");
+    let a = assess(&Claim::from_text(&text), &article);
+    assert!(a.confidence >= VERIFIED, "{text}: {a:?}");
+}

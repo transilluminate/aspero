@@ -24,13 +24,25 @@ const PREPRINT_WORDS: &[&str] = &[
 /// Whether a venue is a preprint server's: "arXiv (Cornell University)",
 /// "medRxiv", "Research Square", "SSRN Electronic Journal".
 pub(super) fn preprint_server(name: &str) -> bool {
-    names_preprint(&words(name))
+    names_server(&words(name))
 }
 
-/// Whether words name a preprint server or a preprint.
-pub(super) fn names_preprint(words: &[String]) -> bool {
+/// Whether words name a preprint server.
+fn names_server(words: &[String]) -> bool {
     words.iter().any(|w| PREPRINT_WORDS.contains(&w.as_str()))
         || words.windows(2).any(|w| w == ["research", "square"])
+}
+
+/// Whether a reference's words name a preprint server or a version before
+/// publication: a preprint, or a working paper ("NBER Working Paper",
+/// "NBER WP"), which a journal's article is not. A series of working
+/// papers as a record's venue is no preprint server.
+pub(super) fn names_preprint(words: &[String]) -> bool {
+    names_server(words)
+        || words.windows(2).any(|w| {
+            (w[0] == "working" && matches!(w[1].as_str(), "paper" | "papers"))
+                || w == ["nber", "wp"]
+        })
 }
 
 /// Preprint servers by their DOIs' prefixes (and, for bioRxiv's and

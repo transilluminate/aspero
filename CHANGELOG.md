@@ -61,6 +61,10 @@ Fixed:
   Paper w31113", "NBER Working Paper No. 16449", "NBER WP 9804"), and
   the reference gives no DOI. A wrong number then finds the other paper
   it names, instead of the cited title verifying alone (wild-4 #723).
+- A journal's article cited as a working paper ("… NBER Working
+  Paper.", without a number) is another version of the one cited:
+  plausible, as for a preprint, not verified. A record whose venue is
+  a working-paper series is still not read as a preprint server's.
 
 ## 0.38.3
 

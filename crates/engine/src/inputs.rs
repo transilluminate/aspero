@@ -41,7 +41,8 @@ pub struct Looked {
     pub result: LookupResult,
     /// Found only with the trailing punctuation kept.
     pub found_with_trailing_punctuation: bool,
-    /// With `full`: where the record contradicts the DOI's registry.
+    /// With `full`, or for a record that looks like two works merged into
+    /// one: where the record contradicts the DOI's registry.
     pub disagreements: Vec<Disagreement>,
     /// With `full`: the latest version, if the work was superseded.
     pub latest: Option<SourceRecord>,
@@ -106,6 +107,10 @@ impl Engine {
             for (p, u) in versions.usage {
                 add_usage(&mut report.usage, &p, u);
             }
+        } else {
+            // Without `full`, only records that look merged are checked
+            // with the DOI's registry, so the rest cost no request (#183).
+            disagreements = self.cross_check_merged(&mut report).await;
         }
         if extras.abstracts {
             let found: Vec<(usize, &SourceRecord)> =

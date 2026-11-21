@@ -63,7 +63,7 @@ const PREPRINT_DOIS: &[(&str, &str)] = &[
 ];
 
 /// The preprint server whose DOI `id` is, if it is one.
-fn preprint_server_of(id: &WorkId) -> Option<&'static str> {
+pub fn preprint_server_of(id: &WorkId) -> Option<&'static str> {
     if id.kind() != IdKind::Doi {
         return None;
     }

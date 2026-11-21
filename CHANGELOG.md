@@ -91,6 +91,19 @@ Fixed:
   someone the record lacks; nor is a model's "Title:" field label a
   name.
 
+Fixed:
+
+- A record's title is compared without the markup and furniture a
+  provider writes into it, where the citation doesn't give them too:
+  tags (`<em>…</em>`), math markup (`$$\sqrt{s}=13\,\text {Te}\text
+  {V} $$`) and an overbar ("tt¯H") read as the letters they mark; an
+  edition (", 14th Edition"), a code in brackets ("(MPB-35)"), a
+  library's statement of who wrote it ("/ Elaine N. Marieb, Katja
+  Hoehn") and a book's series in brackets ("(Verso Classics, 10)") are
+  left out. Such books and papers were found but only partly matched, or
+  lost to another work (wild-4 #319, #343, #367, #369, #455, #540, #543,
+  #804; wild-3 #761).
+
 ## 0.38.3
 
 Fixed:

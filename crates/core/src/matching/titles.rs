@@ -627,7 +627,10 @@ fn without_name_byline(s: &str) -> &str {
     let dated = t
         .strip_suffix(')')
         .and_then(|t| t.rfind(" (").map(|at| &t[at + 2..]))
-        .is_some_and(|year| year.len() >= 4 && year[..4].bytes().all(|b| b.is_ascii_digit()));
+        .is_some_and(|year| {
+            year.get(..4)
+                .is_some_and(|y| y.bytes().all(|b| b.is_ascii_digit()))
+        });
     if named && dated && rest.starts_with(char::is_uppercase) {
         without_trailing_note(rest)
     } else {

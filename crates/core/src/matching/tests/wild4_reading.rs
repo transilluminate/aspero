@@ -258,3 +258,108 @@ fn the_probable_title_leaves_out_bylines_notes_cells_and_series() {
         None
     );
 }
+
+fn trial(
+    ids: &[&str],
+    title: &str,
+    authors: &[&str],
+    year: i16,
+    at: (&str, &str, &str),
+) -> SourceRecord {
+    let mut r = placed(ids, title, authors, year, at);
+    r.work.work_type = Some(crate::work::WorkType::JournalArticle);
+    r
+}
+
+#[test]
+fn a_lists_label_is_neither_title_nor_author() {
+    // wild-4 plausible fix 2: a trial's name opening a model-written
+    // reference, before its byline.
+    let dapa = trial(
+        &["doi:10.1056/nejmoa1911303", "pmid:31535829"],
+        "Dapagliflozin in Patients with Heart Failure and Reduced Ejection Fraction",
+        &[
+            "John J.V. McMurray",
+            "Scott D. Solomon",
+            "Silvio E. Inzucchi",
+        ],
+        2019,
+        ("New England Journal of Medicine", "381", "1995-2008"),
+    );
+    let finfer = trial(
+        &["doi:10.1056/nejmoa2114464"],
+        "Balanced Multielectrolyte Solution versus Saline in Critically Ill Adults",
+        &["Simon Finfer", "Sharon Micallef", "Naomi Hammond"],
+        2022,
+        ("New England Journal of Medicine", "386", "815-826"),
+    );
+    let pirandola = trial(
+        &["doi:10.1364/aop.361502"],
+        "Advances in quantum cryptography",
+        &["S. Pirandola", "U. L. Andersen", "L. Banchi"],
+        2020,
+        ("Advances in Optics and Photonics", "12", "1012"),
+    );
+    for (text, record) in [
+        (
+            "DAPA-HF: McMurray JJV, Solomon SD, Inzucchi SE, et al. N Engl J Med. \
+             2019;381(21):1995-2008.\n   DOI: 10.1056/NEJMoa1911303 | PMID: 31535829",
+            &dapa,
+        ),
+        (
+            "2. BaSICS (Finfer S et al. Balanced Multielectrolyte Solution versus Saline in \
+             Critically Ill Adults)\n- Journal: N Engl J Med 2022;386(9):815–826",
+            &finfer,
+        ),
+        (
+            "Aktueller Überblick: S. Pirandola et al. (2020), Advances in quantum cryptography, \
+             Adv. Opt. Photon. 12, 1012. DOI: 10.1364/AOP.361502.",
+            &pirandola,
+        ),
+    ] {
+        let a = assess(&Claim::from_text(text), record);
+        assert_ne!(a.title.agreement, Agreement::Mismatch, "{text}: {a:?}");
+        assert_eq!(a.authors.agreement, Agreement::Match, "{text}: {a:?}");
+        assert!(a.confidence >= VERIFIED, "{text}: {a:?}");
+    }
+    // A title's words before the byline are no label: another title at
+    // the work's place is still one.
+    let text = "Empagliflozin in heart failure: McMurray JJV, Solomon SD, Inzucchi SE, et al. N \
+                Engl J Med. 2019;381(21):1995-2008.";
+    let a = assess(&Claim::from_text(text), &dapa);
+    assert_eq!(a.title.agreement, Agreement::Mismatch, "{a:?}");
+}
+
+#[test]
+fn commentary_after_the_place_is_no_title() {
+    // wild-4 #12: a model's table, its notes in the cell after the place.
+    let petersen = trial(
+        &["doi:10.1177/0363546511419277", "pmid:21825112"],
+        "Preventive Effect of Eccentric Training on Acute Hamstring Injuries in Men's Soccer",
+        &[
+            "Jesper Petersen",
+            "Kristian Thorborg",
+            "Michael Bachmann Nielsen",
+        ],
+        2011,
+        ("The American Journal of Sports Medicine", "39", "2296-2303"),
+    );
+    for text in [
+        "Petersen et al. 2011, Am J Sports Med 39(11):2296-303 | Cluster RCT in Danish \
+         professional and amateur male players. Adding the NHE roughly halved the rate of \
+         hamstring injuries. | 10.1177/0363546511419277 | 21825112",
+        "Petersen et al. 2011, Am J Sports Med 39(11):2296-303. Cluster RCT in Danish \
+         professional and amateur male players.",
+    ] {
+        let claim = Claim::from_text(text);
+        let a = assess(&claim, &petersen);
+        assert_ne!(a.title.agreement, Agreement::Mismatch, "{text}: {a:?}");
+        assert!(a.confidence >= VERIFIED, "{text}: {a:?}");
+        assert_eq!(claim.as_read().title, None, "{text}");
+    }
+    // Before the place, words are a title: another one there differs.
+    let text = "Petersen J, Thorborg K. Cluster RCT in Danish professional and amateur male \
+                players. Am J Sports Med 39(11):2296-303.";
+    let a = assess(&Claim::from_text(text), &petersen);
+    assert_eq!(a.title.agreement, Agreement::Mismatch, "{a:?}");
+}

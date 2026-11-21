@@ -77,6 +77,14 @@ Fixed:
   link ("https://doi.org/…") no longer outranks the title as a
   sentence. Open Library finds none of these books by the longer
   query.
+- A model-written list's furniture is no longer read as a reference's
+  title or authors: a label opening it, a trial's or a model's name
+  before the byline ("DAPA-HF: McMurray JJV, …", "BaSICS (Finfer S et
+  al. …", "Aktueller Überblick: S. Pirandola et al. …"), and commentary
+  after the volume and page it cites, in its sentence or a later table
+  cell ("… 39(11):2296-303 | Cluster RCT in Danish players. …"). Such a
+  reference at the work's place, with its authors, was plausible for a
+  title it never gave; it is verified.
 
 ## 0.38.3
 

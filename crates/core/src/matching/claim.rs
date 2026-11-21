@@ -375,29 +375,60 @@ pub(super) fn byline(
 
 /// A byline without the label a reference may open with, a trial's or a
 /// guideline's ("EMPEROR-Reduced (empagliflozin, n=3,730): Packer M, …",
-/// "HOPE-3: Yusuf S, …"): a few words before a colon, no comma among
-/// them outside brackets, and a name with its initials after it (not a
-/// title's words: "NICE (2010) Delirium: prevention, …").
+/// "HOPE-3: Yusuf S, …", "`BaSICS` (Finfer S et al. …", "Aktueller
+/// Überblick: S. Pirandola et al. …"): see [`label_end`].
 fn unlabelled(byline: &str) -> &str {
-    let Some(colon) = byline.find(": ") else {
-        return byline;
+    &byline[label_end(byline, false)..]
+}
+
+/// Where a reference proper starts after a label it opens with (and a
+/// list's number before it: "2. `BaSICS` (…"): a few words before a colon,
+/// or one before a bracket, no comma among them outside brackets, and a
+/// name with its initials after it ("`McMurray` JJV", "S. Pirandola"), not
+/// a title's words ("NICE (2010) Delirium: prevention, …"). `acronym`
+/// asks the label to start as a trial's or a model's name does, with two
+/// capitals or a digit ("DAPA-HF", "`BaSICS`"), not as a title's words do
+/// ("Deep learning: LeCun Y, …"). 0 without one.
+fn label_end(text: &str, acronym: bool) -> usize {
+    // A list's number: "2. ", "12) ".
+    let digits = text.bytes().take_while(u8::is_ascii_digit).count();
+    let start = match text[digits..].strip_prefix(['.', ')']) {
+        Some(rest) if (1..=3).contains(&digits) && rest.starts_with(' ') => {
+            text.len() - rest.trim_start().len()
+        }
+        _ => 0,
     };
-    let mut after = byline[colon + 2..].split_whitespace();
+    let rest = &text[start..];
+    // The label's end and where the names start: a colon's, else a
+    // bracket's after one word.
+    let (label, names) = match rest.find(": ") {
+        Some(colon) => (&rest[..colon], colon + 2),
+        None => match rest.find(" (") {
+            Some(open) if !rest[..open].contains(char::is_whitespace) => (&rest[..open], open + 2),
+            _ => return 0,
+        },
+    };
+    let mut after = rest[names..].split_whitespace();
     let initials = |t: &str| {
         let t = t.trim_end_matches([',', '.', ';']);
-        (1..=3).contains(&t.chars().count())
+        (1..=3).contains(&t.chars().filter(|c| *c != '.' && *c != '-').count())
             && t.chars().all(|c| c.is_uppercase() || c == '.' || c == '-')
     };
+    let name = |t: &str| {
+        t.starts_with(char::is_uppercase)
+            && t.chars().filter(|c| c.is_alphabetic()).count() > 1
+            && t.chars().any(char::is_lowercase)
+    };
     let named = match (after.next(), after.next()) {
-        (Some(name), Some(next)) => {
-            name.starts_with(char::is_uppercase) && name.chars().count() > 1 && initials(next)
+        (Some(first), Some(next)) => {
+            (name(first) && initials(next))
+                || (initials(first) && first.ends_with('.') && name(next))
         }
         _ => false,
     };
     if !named {
-        return byline;
+        return 0;
     }
-    let label = &byline[..colon];
     let mut depth = 0usize;
     let bare: String = label
         .chars()
@@ -410,10 +441,44 @@ fn unlabelled(byline: &str) -> &str {
             false
         })
         .collect();
-    if bare.contains(',') || bare.split_whitespace().count() > 4 {
-        return byline;
+    let words: Vec<&str> = bare.split_whitespace().collect();
+    let shaped = words.first().is_some_and(|w| {
+        w.chars().filter(|c| c.is_uppercase()).count() >= 2
+            || w.contains(|c: char| c.is_ascii_digit())
+    });
+    if bare.contains(',') || words.is_empty() || words.len() > 4 || (acronym && !shaped) {
+        return 0;
     }
-    &byline[colon + 2..]
+    start + names
+}
+
+/// The stretch of a free-text reference where a title it gives stands:
+/// after a label it opens with ([`label_end`], a trial's or a model's
+/// name: "DAPA-HF: `McMurray` JJV, …"), and before what follows the volume
+/// and page it cites, in its sentence or table's cell (a model's
+/// commentary: "… Am J Sports Med 39(11):2296-303 | Cluster RCT in Danish
+/// players. …"). All of it where it cites no place.
+pub(super) fn title_region(text: &str) -> &str {
+    let from = label_end(text, true);
+    let text = &text[from..];
+    let whole = publication::locator(text);
+    let (Some(volume), Some(page)) = (&whole.volume, &whole.page) else {
+        return text;
+    };
+    let stops = text
+        .match_indices(" | ")
+        .chain(text.match_indices(". "))
+        .chain(text.match_indices('\n'))
+        .map(|(at, _)| at);
+    let mut stops: Vec<usize> = stops.collect();
+    stops.sort_unstable();
+    stops
+        .into_iter()
+        .find(|&at| {
+            let before = publication::locator(&text[..at]);
+            before.volume.as_ref() == Some(volume) && before.page.as_ref() == Some(page)
+        })
+        .map_or(text, |at| &text[..at])
 }
 
 /// The venue a claim cites, to tell a conference by: its container, a

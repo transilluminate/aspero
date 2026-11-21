@@ -101,7 +101,8 @@ fn stretch(text: &Normalised, span: &Range<usize>) -> String {
 /// names; else, after a byline that reads as names throughout (and the
 /// year after it, APA's and Harvard's), the sentence that follows, when a
 /// journal, year or place follows that. Nothing otherwise. Emphasis
-/// marks (`*…*`) aren't the title's.
+/// marks (`*…*`) aren't the title's, nor does a title run across a
+/// table's cells ("… 39(11):2296-303 | Cluster RCT in …").
 pub(super) fn laid_out(text: &str) -> Written {
     let plain = text.replace(['*', '_'], "");
     let text = unnumbered(plain.trim());
@@ -154,6 +155,7 @@ pub(super) fn laid_out(text: &str) -> Written {
                 && balanced('(', ')')
                 && balanced('[', ']')
                 && !title.contains(';')
+                && !title.contains(" | ")
                 && !title
                     .split(", ")
                     .skip(1)

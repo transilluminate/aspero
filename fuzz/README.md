@@ -36,6 +36,7 @@ New inputs collect in `corpus/<target>`, failures in `artifacts/<target>`;
 | `docx` | `.docx` files, or their XML zipped by the target | |
 | `references` | `split_references`, and `split_lines` with indents | spans usable and in order; line ranges in bounds |
 | `claim` | `Claim` from free text and `verify` stdin lines, scored against a record | ids round-trip; confidence within 0–1 |
+| `titled` | free-text claims scored against a record cut from the claim (title, authors, journal, shifted or changed a little) | confidence and similarities within 0–1 |
 | `query` | query trees as JSON, and every source's offline `search_supports` | written back, re-parses to itself; normalising is idempotent; the serde type agrees |
 | `mcp_args` | the MCP `search_supports` tool's arguments, end to end | never spends |
 

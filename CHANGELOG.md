@@ -3,6 +3,16 @@
 Releases 0.10 to 0.19 are in [docs/changelog/0.1x.md](docs/changelog/0.1x.md),
 and 0.1 to 0.9 in [docs/changelog/0.0x.md](docs/changelog/0.0x.md).
 
+## Unreleased
+
+Fixed:
+
+- A panic (index out of bounds) verifying free text whose cited title
+  had only joining words before it ("The Deep learning. Nature. …"):
+  looking back for a main title before it reached the first word. In
+  0.38.0 to 0.38.2; one such claim stopped a whole `aspero verify`
+  batch, and failed an embedder's call.
+
 ## 0.38.2
 
 Added:

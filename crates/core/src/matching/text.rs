@@ -428,12 +428,17 @@ impl Normalised {
             {
                 i -= 1;
             }
+            // No colon or dash before (or nothing but joining words, back
+            // to the first word): no subtitle.
             let separated = i > 0
                 && match gap(i).trim() {
                     ":" => true,
                     "—" | "–" | "-" => gap(i).contains(' '),
                     _ => false,
                 };
+            if !separated {
+                return false;
+            }
             // A title of four words or more, back to the sentence's start:
             // not a work's short name ("CodeAct: Executable Code Actions
             // …", "Multicalibration: …") nor a label ("Correction: …",
@@ -446,7 +451,7 @@ impl Normalised {
             while from > 0 && !boundary(gap(from)) {
                 from -= 1;
             }
-            separated && i - from >= 4 && {
+            i - from >= 4 && {
                 let raw = &self.raw[self.spans[i - 1].clone()];
                 raw.chars().any(char::is_lowercase)
                     && !names.contains(&self.words[i - 1])

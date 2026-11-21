@@ -189,7 +189,8 @@ fn a_short_title_inside_text_is_not_enough() {
     let entry = record(&[], "Aspero", &[], 2012);
     for text in ["aspero 0.6.5 is in", "Aspero 2012"] {
         let a = assess(&Claim::from_text(text), &entry);
-        assert_eq!(a.title.agreement, Agreement::Match);
+        // Found, but a word: only partly the work's title (wild-4 #619).
+        assert_eq!(a.title.agreement, Agreement::Partial);
         assert!(a.confidence < PLAUSIBLE, "{text}: {a:?}");
     }
     // With the authors, a short title is a match.

@@ -468,12 +468,27 @@ fn weigh(claim: &Claim, report: &ResolveReport) -> (Verdict, Reason, Option<usiz
         .candidates
         .iter()
         .position(|c| matches!(c.assessment.ids, Agreement::Match | Agreement::Partial));
+    // Not, from the identifiers' work at the place cited (its journal,
+    // volume and first page) with its title or authors, a lookalike whose
+    // identifiers or page disagree: the identifier and the place both name
+    // the work. (Another paper's title and authors, cited at this one's
+    // place, are still that paper's.)
     let elsewhere = |skip: Option<usize>| {
-        report
-            .candidates
-            .iter()
-            .enumerate()
-            .position(|(i, c)| Some(i) != skip && c.assessment.confidence >= PLAUSIBLE)
+        let placed = skip.is_some_and(|i| {
+            let a = &report.candidates[i].assessment;
+            [a.container, a.volume, a.page]
+                .iter()
+                .all(|f| f.agreement == Agreement::Match)
+                && !(a.title.agreement == Agreement::Mismatch
+                    && a.authors.agreement == Agreement::Mismatch)
+        });
+        report.candidates.iter().enumerate().position(|(i, c)| {
+            let a = &c.assessment;
+            Some(i) != skip
+                && a.confidence >= PLAUSIBLE
+                && !(placed
+                    && (a.ids == Agreement::Mismatch || a.page.agreement == Agreement::Mismatch))
+        })
     };
     match by_id.map(|i| (i, &report.candidates[i])) {
         // Beside the identifiers, at most a year, journal, volume or page:

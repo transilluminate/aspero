@@ -16,6 +16,38 @@ Changed:
   so a `switch` over it without `default` needs one more arm; a stored
   reason reads back as it was written.
 
+Fixed:
+
+- A cited identifier that is the work's, beside its authors and a year
+  that isn't wrong, is plausible (the title to check) when the words
+  where its title would stand are something else: a trial's label
+  ("AReSVi-006 (GSK, RSVPreF3 OA): …"), a description, or a short form
+  ("Hash Layers (Roller et al.) | 2106.04426"). It was a mismatch: the
+  work's title, looked for in the text, wasn't there (wild-4, 20 rows).
+- A cited identifier and the exact place it names (journal, volume and
+  first page) that agree are plausible when the title or the byline
+  differs ("Observation of ttH production" for "… tt¯H …"), unless both
+  differ. A lookalike with another identifier or page (a talk on the same
+  result) no longer outvotes them as the work "the citation matches".
+- A title cited with the work's own identifier and nothing else
+  ("MoE-Mamba: … . arXiv:2401.04081") verifies, as the identifier alone
+  does. The identifier now counts as a second field when everything else
+  cited agrees; it was held at plausible ("gives too little to confirm
+  it"). A title alone, a book's say, still can't verify.
+- A title found in free text only as a word or two is no full match unless
+  the authors, an identifier, the journal or the place say which work it
+  is: "Iceland" of "Iceland: A Peaceful Secession" inside "The History of
+  Iceland", or a one-word title ("13th"). Such a work was reported as the
+  closest, a mismatch ("its authors differs"); now nothing is found.
+- A title's opening words followed by "…" or "..." ("Scaling Rectified
+  Flow Transformers… (Stable Diffusion 3)") partly match the work's title
+  instead of differing from it.
+- A book cited, its chapter's record found: a chapter whose book is the
+  title cited, cited without "In:", editors or a page, is part of the
+  work and no longer verifies as it ("The Priests" for "The
+  Christianization of Iceland: Priests, Power, and Social Change"), so
+  the book's own record ranks first.
+
 ## 0.38.3
 
 Fixed:

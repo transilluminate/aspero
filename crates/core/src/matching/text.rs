@@ -6,6 +6,7 @@ use std::ops::Range;
 
 use unicode_normalization::UnicodeNormalization;
 
+use super::caps::{EXTENDED_TITLE, SHORT_TITLE_WORDS};
 use super::titles::{
     first_sentence, main_title, probable_title, replaced, significant_word, significant_words,
     unmarked,
@@ -486,11 +487,65 @@ impl Normalised {
             .filter(|w| self.words.contains(w))
             .count();
         let share = present as f64 / title_words.len() as f64;
-        if share < 2.0 / 3.0 {
+        let share = if share < 2.0 / 3.0 {
             share / 2.0
         } else {
             share
+        };
+        // Its opening words, then "…": the title cut short, partly given.
+        if self.cut_short(title) {
+            share.max(EXTENDED_TITLE)
+        } else {
+            share
         }
+    }
+
+    /// Whether the text gives `title`'s opening words, at least
+    /// [`SHORT_TITLE_WORDS`] of them content words, then an ellipsis ("…"
+    /// or "..."): "Scaling Rectified Flow Transformers… (Stable Diffusion
+    /// 3)" for "Scaling Rectified Flow Transformers for High-Resolution
+    /// Image Synthesis".
+    fn cut_short(&self, title: &str) -> bool {
+        let title_words = words(title);
+        (0..self.words.len()).any(|i| {
+            let k = title_words
+                .iter()
+                .zip(&self.words[i..])
+                .take_while(|(a, b)| a == b)
+                .count();
+            k > 0
+                && k < title_words.len()
+                && content_words(&title_words[..k].join(" ")).len() >= SHORT_TITLE_WORDS
+                && {
+                    let rest = self.raw[self.spans[i + k - 1].end..].trim_start();
+                    rest.starts_with('…') || rest.starts_with("...")
+                }
+        })
+    }
+
+    /// Whether `title` is found as a phrase only in a short form: its main
+    /// title or first sentence, of fewer than [`SHORT_TITLE_WORDS`]
+    /// content words, without the rest ("Iceland" of "Iceland: A Peaceful
+    /// Secession"), or the whole title when it is a single word ("13th").
+    /// A word or two turn up in any text. (A whole title of two words,
+    /// "Philosophy of Psychology", is the title cited.)
+    pub(super) fn found_only_short(&self, title: &str) -> bool {
+        let title = unmarked(title);
+        let phrase = |t: &str| {
+            let norm = normalise(t);
+            !norm.is_empty() && self.padded.contains(&format!(" {norm} "))
+        };
+        if phrase(title) {
+            return content_words(title).len() < 2;
+        }
+        let parts: Vec<&str> = [first_sentence(title), main_title(title)]
+            .into_iter()
+            .filter(|t| *t != title && phrase(t))
+            .collect();
+        !parts.is_empty()
+            && parts
+                .iter()
+                .all(|t| content_words(t).len() < SHORT_TITLE_WORDS)
     }
 
     /// Citation styles routinely list only the first author or two ("Vaswani

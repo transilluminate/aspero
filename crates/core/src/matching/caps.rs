@@ -17,7 +17,8 @@ const YEAR_MISMATCH_PENALTY: f64 = 0.5;
 const TITLE_MISMATCH_PENALTY: f64 = 0.5;
 /// Multiplier when the authors clearly differ.
 const AUTHORS_MISMATCH_PENALTY: f64 = 0.5;
-/// Confidence ceiling when fewer than two fields could be compared.
+/// Confidence ceiling when fewer than two fields could be compared (a
+/// claimed identifier that is the work's counts as one).
 pub(super) const SINGLE_FIELD_CAP: f64 = 0.7;
 /// Confidence ceiling without corroborating authors or identifiers.
 pub(super) const UNCORROBORATED_CAP: f64 = 0.8;
@@ -86,7 +87,15 @@ pub const VERIFIED: f64 = 0.85;
 /// Plausible at or above this, below [`VERIFIED`].
 pub const PLAUSIBLE: f64 = 0.6;
 
-pub(super) fn combine(title: FieldCheck, authors: FieldCheck, year: FieldCheck) -> f64 {
+/// `identified`: a claimed identifier is the work's and every other field
+/// cited agrees, so it counts as a field compared (the identifier alone
+/// verifies; more that agrees can't make it weaker).
+pub(super) fn combine(
+    title: FieldCheck,
+    authors: FieldCheck,
+    year: FieldCheck,
+    identified: bool,
+) -> f64 {
     let parts = [(title, W_TITLE), (authors, W_AUTHORS), (year, W_YEAR)];
     let known: Vec<(f64, f64)> = parts
         .iter()
@@ -108,7 +117,7 @@ pub(super) fn combine(title: FieldCheck, authors: FieldCheck, year: FieldCheck) 
     if authors.agreement == Agreement::Mismatch {
         confidence *= AUTHORS_MISMATCH_PENALTY;
     }
-    if known.len() < 2 {
+    if known.len() + usize::from(identified) < 2 {
         confidence = confidence.min(SINGLE_FIELD_CAP);
     }
     confidence

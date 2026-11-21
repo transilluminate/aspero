@@ -69,3 +69,59 @@ fn other_numbers_are_no_bare_isbn() {
         ["isbn:9780262035613"]
     );
 }
+
+fn dois(text: &str) -> Vec<String> {
+    Claim::from_text(text)
+        .ids
+        .into_iter()
+        .filter(|id| id.kind() == IdKind::Doi)
+        .map(|id| id.to_string())
+        .collect()
+}
+
+#[test]
+fn an_nber_working_papers_number_is_its_doi() {
+    for (text, want) in [
+        // wild-4 #723: the number is another paper's, so its lookup says so.
+        (
+            "Korinek, A. (2023). \"Generative AI for Economic Research: Use Cases and \
+             Implications for Economists.\" NBER Working Paper w31113. A survey.",
+            "doi:10.3386/w31113",
+        ),
+        (
+            "Bloom, N. (2019) 'The impact of Brexit on UK firms', NBER Working Paper No. 26218. \
+             Cambridge, MA: National Bureau of Economic Research.",
+            "doi:10.3386/w26218",
+        ),
+        (
+            "Sala-i-Martin, X. (2003). \"Addressing the Natural Resource Curse.\" NBER WP 9804.",
+            "doi:10.3386/w9804",
+        ),
+        (
+            "Narayanan, V. G. (1999). ABC at Insteel Industries (Working Paper Series No. 727). \
+             National Bureau of Economic Research.",
+            "doi:10.3386/w0727",
+        ),
+    ] {
+        assert_eq!(dois(text), [want], "{text}");
+    }
+    for text in [
+        // Another series, or NBER's journal.
+        "Auer, R. (2020). Rise of the central bank digital currencies (BIS Working Paper No. \
+         880). Bank for International Settlements.",
+        "Posen, A. (1995). \"Declarations Are Not Enough.\" NBER Macroeconomics Annual, 10, \
+         253–274.",
+        "Rendova, M. (2023). Household energy arrears (Working Paper No. 23-07). Centre for \
+         Energy Affordability Studies.",
+    ] {
+        assert_eq!(dois(text), Vec::<String>::new(), "{text}");
+    }
+    // A DOI given names the version cited.
+    assert_eq!(
+        dois(
+            "Korinek, A. (2023). Generative AI for Economic Research. Journal of Economic \
+             Literature 61(4). doi:10.1257/jel.20231736. Also NBER Working Paper w30957."
+        ),
+        ["doi:10.1257/jel.20231736"]
+    );
+}

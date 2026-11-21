@@ -56,6 +56,11 @@ Fixed:
   ("… | 15th (2020) | 978-1260452310"). ISBN-10s are still read only
   when labelled. `scan`'s mentions are unchanged: this is read only
   when a reference is read as a claim.
+- An NBER working paper's number is read as its DOI
+  (`10.3386/w<number>`) when NBER is named beside it ("NBER Working
+  Paper w31113", "NBER Working Paper No. 16449", "NBER WP 9804"), and
+  the reference gives no DOI. A wrong number then finds the other paper
+  it names, instead of the cited title verifying alone (wild-4 #723).
 
 ## 0.38.3
 

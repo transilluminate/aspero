@@ -93,6 +93,9 @@ impl Claim {
                 ids.push(id);
             }
         }
+        if !ids.iter().any(|id| id.kind() == IdKind::Doi) {
+            ids.extend(nber_paper(&text));
+        }
         if ids.is_empty() {
             ids.extend(bare_arxiv(&text));
         }
@@ -574,6 +577,61 @@ fn bare_pmid(text: &str, ids: &[WorkId]) -> Option<WorkId> {
         return None;
     };
     format!("pmid:{pmid}").parse().ok()
+}
+
+/// The DOI of the NBER working paper a reference gives by its number, as
+/// economics cites them ("NBER Working Paper w31113", "NBER Working Paper
+/// No. 16449", "NBER WP 9804", "Working Paper 24871 … National Bureau of
+/// Economic Research"): NBER registers each as `10.3386/w<number>`, four
+/// digits at least. Only with NBER named beside it (a working paper's
+/// number is any series' otherwise), and read only when the reference
+/// gives no DOI (one given names the version it cites).
+fn nber_paper(text: &str) -> Option<WorkId> {
+    let tokens: Vec<String> = text
+        .split_whitespace()
+        .map(|t| {
+            t.trim_matches(|c: char| !c.is_alphanumeric())
+                .to_lowercase()
+        })
+        .collect();
+    let t = |i: usize| tokens.get(i).map_or("", String::as_str);
+    let nber_at = |i: usize| {
+        t(i) == "nber"
+            || (i >= 4
+                && (i - 4..=i)
+                    .map(t)
+                    .eq(["national", "bureau", "of", "economic", "research"]))
+    };
+    for (i, token) in tokens.iter().enumerate() {
+        let digits = token.strip_prefix('w').unwrap_or(token);
+        if !(1..=6).contains(&digits.len()) || !digits.bytes().all(|b| b.is_ascii_digit()) {
+            continue;
+        }
+        // Back past "No." or "#" to the series: "Working Paper (Series)",
+        // "Working Papers" or "WP".
+        let mut at = i;
+        if at > 0 && matches!(t(at - 1), "no" | "number" | "nr" | "") {
+            at -= 1;
+        }
+        if at > 0 && t(at - 1) == "series" {
+            at -= 1;
+        }
+        let series = if at > 0 && t(at - 1) == "wp" {
+            at - 1
+        } else if at > 1 && matches!(t(at - 1), "paper" | "papers") && t(at - 2) == "working" {
+            at - 2
+        } else {
+            continue;
+        };
+        // NBER right before the series, or the bureau named after it
+        // ("Working Paper No. 24871. Cambridge, MA: National Bureau …").
+        let named = (series > 0 && nber_at(series - 1)) || (i + 1..i + 12).any(nber_at);
+        let number: u32 = digits.parse().ok()?;
+        if named && number > 0 {
+            return format!("doi:10.3386/w{number:04}").parse().ok();
+        }
+    }
+    None
 }
 
 /// The ISBN-13s a reference gives bare, as models write them in a table's

@@ -15,6 +15,10 @@ check:
     cargo check -p aspero-engine --no-default-features
     cargo check -p aspero-engine --no-default-features --features crossref
 
+# Run CI's quick gates (formatting, navigability) before each commit.
+hooks:
+    git config core.hooksPath .githooks
+
 # Format, and apply clippy's suggested fixes.
 fix:
     cargo fmt --all

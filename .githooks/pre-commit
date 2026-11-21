@@ -1,0 +1,19 @@
+#!/usr/bin/env bash
+# CI's quick gates before each commit: formatting (the main workspace,
+# and the fuzz crate's when it's staged) and the navigability gates.
+# Clippy and the tests stay in `just check`. Enable with
+# `just hooks` (git config core.hooksPath .githooks); skip once with
+# `git commit --no-verify`.
+set -euo pipefail
+cd "$(git rev-parse --show-toplevel)"
+
+fail() { echo "pre-commit: $1" >&2; exit 1; }
+
+cargo fmt --all --check >/dev/null 2>&1 \
+  || fail "not formatted; run \`cargo fmt --all\` (or \`just fix\`)"
+if git diff --cached --name-only | grep -q '^fuzz/.*\.rs$'; then
+  cargo fmt --manifest-path fuzz/Cargo.toml --all --check >/dev/null 2>&1 \
+    || fail "fuzz/ not formatted; run \`cargo fmt --manifest-path fuzz/Cargo.toml --all\`"
+fi
+scripts/file-sizes.py >/dev/null || fail "scripts/file-sizes.py failed"
+scripts/doc-paths.py >/dev/null || fail "scripts/doc-paths.py failed"

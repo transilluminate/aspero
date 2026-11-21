@@ -44,11 +44,11 @@ struct WireLocation {
 /// - its locations name two PubMed records (two articles PubMed keeps
 ///   apart; an erratum's notice merged into its article is one too);
 /// - its locations name another DOI under its own DOI's prefix, not a
-///   version or part of it ([`versions`]);
+///   version or part of it (`versions`);
 /// - or `asked`, a DOI, isn't the record's own: the record is another
 ///   work's that carries it.
 ///
-/// A preprint's or a dataset's DOI beside the article's ([`version_doi`])
+/// A preprint's or a dataset's DOI beside the article's (`version_doi`)
 /// is OpenAlex's usual merge of one work's versions, not a sign. False for
 /// another provider's record.
 pub fn looks_merged(record: &SourceRecord, asked: &WorkId) -> bool {

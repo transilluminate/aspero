@@ -363,3 +363,39 @@ fn commentary_after_the_place_is_no_title() {
     let a = assess(&Claim::from_text(text), &petersen);
     assert_eq!(a.title.agreement, Agreement::Mismatch, "{a:?}");
 }
+
+#[test]
+fn a_journals_series_letter_is_no_authors_initial() {
+    // wild-4 #357: "Letters B" read as a family name and an initial, so
+    // the reference named someone not on the record.
+    let mut atlas = placed(
+        &["doi:10.1016/j.physletb.2012.08.020", "arxiv:1207.7214"],
+        "Observation of a new particle in the search for the Standard Model Higgs boson with \
+         the ATLAS detector at the LHC",
+        &["G. Aad", "T. Abajyan", "B. Abbott"],
+        2012,
+        ("Physics Letters B", "716", "1-29"),
+    );
+    atlas.work.work_type = Some(crate::work::WorkType::JournalArticle);
+    let text = "Title: Observation of a new particle in the search for the Standard Model Higgs \
+                boson with the ATLAS detector at the LHC\n- Journal: Physics Letters B, vol. 716, \
+                pp. 1–29 (2012)\n- DOI: 10.1016/j.physletb.2012.08.020\n- arXiv: 1207.7214";
+    let a = assess(&Claim::from_text(text), &atlas);
+    assert_ne!(a.authors.agreement, Agreement::Mismatch, "{a:?}");
+    assert!(a.confidence >= VERIFIED, "{a:?}");
+    for journal in [
+        "Physics Letters B 716 (2012) 1",
+        "Physical Review D 93, 122004",
+        "Journal of Materials Chemistry A 5 (2017) 100",
+        "Proceedings of the Royal Society A 470",
+    ] {
+        assert!(!crate::matching::authors::names_given(journal), "{journal}");
+    }
+    // A name and its initial still is one.
+    assert!(crate::matching::authors::names_given(
+        "Letters B, Smith J. A title."
+    ));
+    assert!(crate::matching::authors::names_given(
+        "Laan D, Smith J. A title."
+    ));
+}

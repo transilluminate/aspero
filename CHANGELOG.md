@@ -85,6 +85,11 @@ Fixed:
   cell ("… 39(11):2296-303 | Cluster RCT in Danish players. …"). Such a
   reference at the work's place, with its authors, was plausible for a
   title it never gave; it is verified.
+- A journal's series letter is no author's initial: "Physics Letters
+  B", "Physical Review D" or "Journal of Materials Chemistry A" in a
+  reference no longer reads as a family name and an initial, naming
+  someone the record lacks; nor is a model's "Title:" field label a
+  name.
 
 ## 0.38.3
 

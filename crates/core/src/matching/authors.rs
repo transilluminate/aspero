@@ -16,8 +16,10 @@ const BYLINE_WORDS: &[&str] = &[
 ];
 
 /// Capitalised words before a title that aren't names: a reference's
-/// furniture, a notice's label ("Correction: …").
+/// furniture (a model's field, "Title: …"), a notice's label
+/// ("Correction: …").
 const NOT_NAMES: &[&str] = &[
+    "title",
     "jr",
     "sr",
     "dr",
@@ -367,11 +369,45 @@ pub(super) fn author_overlap(claimed: &[String], families: &[String]) -> f64 {
     0.5 * f64::from(u8::from(first_matches)) + 0.5 * found as f64 / claimed.len() as f64
 }
 
+/// Words a journal's name puts before its series' letter ("Physics
+/// Letters B", "Physical Review D", "Journal of Materials Chemistry A",
+/// "Proceedings of the Royal Society A", "Transportation Research Part
+/// B"): with one capital after them, no family name and an initial.
+const SERIES_STEMS: &[&str] = &[
+    "letters",
+    "letter",
+    "review",
+    "reviews",
+    "physics",
+    "physica",
+    "chemistry",
+    "society",
+    "series",
+    "section",
+    "part",
+    "transactions",
+    "proceedings",
+    "journal",
+    "science",
+    "sciences",
+    "research",
+    "communications",
+    "acta",
+    "annals",
+    "bulletin",
+    "materials",
+    "engineering",
+    "mathematics",
+    "statistics",
+];
+
 /// Whether a reference names authors: "et al", or a family name followed
 /// by initials ("Laan DV", "Smith, J."). A family name is never followed by
-/// a full stop, so "Int. J. Care Injured" in a running header isn't one.
-/// One in capitals is set off as a name ("SMITH JA,", "DUPONT, J."), not
-/// two words of a title in capitals ("WOMEN ON ORAL").
+/// a full stop, so "Int. J. Care Injured" in a running header isn't one;
+/// nor is a journal's word before its series' letter ("Physics Letters
+/// B", [`SERIES_STEMS`]). One in capitals is set off as a name ("SMITH
+/// JA,", "DUPONT, J."), not two words of a title in capitals ("WOMEN ON
+/// ORAL").
 pub(super) fn names_given(text: &str) -> bool {
     if normalise(text).contains("et al") {
         return true;
@@ -385,7 +421,10 @@ pub(super) fn names_given(text: &str) -> bool {
             .filter(|c| *c != '.')
             .collect();
         let capitals = !family.chars().any(char::is_lowercase);
+        let series =
+            initials.chars().count() == 1 && SERIES_STEMS.contains(&family.to_lowercase().as_str());
         !w[0].ends_with('.')
+            && !series
             && family.chars().count() >= 2
             && family.chars().next().is_some_and(char::is_uppercase)
             && family

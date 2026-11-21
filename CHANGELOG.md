@@ -24,6 +24,11 @@ Fixed:
   ("AReSVi-006 (GSK, RSVPreF3 OA): …"), a description, or a short form
   ("Hash Layers (Roller et al.) | 2106.04426"). It was a mismatch: the
   work's title, looked for in the text, wasn't there (wild-4, 20 rows).
+- A cited identifier and the exact place it names (journal, volume and
+  first page) that agree are plausible when the title or the byline
+  differs ("Observation of ttH production" for "… tt¯H …"), unless both
+  differ. A lookalike with another identifier or page (a talk on the same
+  result) no longer outvotes them as the work "the citation matches".
 
 ## 0.38.3
 

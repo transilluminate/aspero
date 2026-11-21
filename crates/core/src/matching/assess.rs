@@ -743,6 +743,21 @@ pub fn assess(claim: &Claim, record: &SourceRecord) -> Assessment {
     {
         confidence = confidence.max(PLAUSIBLE);
     }
+    // A claimed identifier and the exact place (journal, volume, first
+    // page) name the same work twice: a title or a byline that differs
+    // there is the citation's error ("Observation of ttH production" for
+    // "… tt¯H production", a table's label read as a byline). Plausible,
+    // unless both differ (another paper's title and authors at its place).
+    // Not beside a claimed PMID another paper's: then an identifier
+    // differs too.
+    if ids == Agreement::Match
+        && located
+        && container.agreement == Agreement::Match
+        && year.agreement != Agreement::Mismatch
+        && !(title.agreement == Agreement::Mismatch && authors.agreement == Agreement::Mismatch)
+    {
+        confidence = confidence.max(PLAUSIBLE);
+    }
     if located
         && container.agreement == Agreement::Match
         && title.agreement != Agreement::Mismatch

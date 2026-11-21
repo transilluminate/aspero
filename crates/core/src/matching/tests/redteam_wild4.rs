@@ -105,3 +105,41 @@ fn an_id_beside_a_namesake_at_another_place_is_not_lifted() {
     assert_eq!(a.ids, Agreement::Match);
     assert!(a.confidence < PLAUSIBLE, "{a:?}");
 }
+
+/// CMS's tt¯H observation, as OpenAlex has it: PRL 120, 231801.
+fn tth() -> SourceRecord {
+    let mut r = placed(
+        &["10.1103/physrevlett.120.231801", "arXiv:1804.02610"],
+        "Observation of tt¯H Production",
+        &["A. M. Sirunyan", "A. Tumasyan", "W. Adam"],
+        2018,
+        ("Physical Review Letters", "120", "231801"),
+    );
+    r.work.work_type = Some(crate::work::WorkType::JournalArticle);
+    r
+}
+
+/// wild-4 #367: the DOI and the exact place agree, the title's notation
+/// doesn't ("ttH" for "tt¯H"), and the table's label is no byline of it.
+#[test]
+fn an_identifier_and_the_exact_place_that_agree_are_plausible() {
+    let claim = Claim::from_text(
+        "CMS ttH observation | Observation of ttH production | PRL 120, 231801 (2018) | \
+         10.1103/PhysRevLett.120.231801 | 1804.02610",
+    );
+    let a = assess(&claim, &tth());
+    assert_eq!(a.ids, Agreement::Match);
+    assert!(a.confidence >= PLAUSIBLE, "{a:?}");
+}
+
+/// Not when the title and the byline both differ: another paper's, cited
+/// at this one's place.
+#[test]
+fn an_identifier_and_place_beside_another_title_and_authors_are_not_lifted() {
+    let claim = Claim::from_text(
+        "Smith J, Jones K. Measurement of the top quark mass in dilepton events. \
+         Phys Rev Lett 120, 231801 (2018). doi:10.1103/PhysRevLett.120.231801",
+    );
+    let a = assess(&claim, &tth());
+    assert!(a.confidence < PLAUSIBLE, "{a:?}");
+}

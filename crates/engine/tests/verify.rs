@@ -13,8 +13,8 @@ use aspero_core::{
 };
 use aspero_engine::{CitedField, Engine, Reason, Verdict, Via, WorkKind};
 use async_trait::async_trait;
-use futures::StreamExt;
 use common::*;
+use futures::StreamExt;
 
 #[tokio::test]
 async fn a_lookalike_from_the_matcher_leads_to_the_real_paper() {
@@ -497,7 +497,11 @@ async fn a_panic_on_one_claim_leaves_the_rest_of_the_batch() {
     let (crashed, fine) = (&got[0].1, &got[1].1);
     assert_eq!(crashed.verdict, Verdict::Unverifiable);
     assert_eq!(crashed.reason, Reason::InternalError);
-    assert!(crashed.reason_text.contains("a bug"), "{}", crashed.reason_text);
+    assert!(
+        crashed.reason_text.contains("a bug"),
+        "{}",
+        crashed.reason_text
+    );
     assert_eq!(fine.reason, Reason::ProvidersFailed, "{}", fine.reason_text);
 }
 

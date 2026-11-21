@@ -38,6 +38,7 @@ impl Reason {
             Reason::IdMissing => "id_missing",
             Reason::ProvidersFailed => "providers_failed",
             Reason::InvalidClaim { .. } => "invalid_claim",
+            Reason::InternalError => "internal_error",
         }
     }
 
@@ -102,6 +103,7 @@ pub fn reason_from_json(json: String) -> Option<Reason> {
         "id_missing_elsewhere" => Reason::IdMissingElsewhere,
         "id_missing" => Reason::IdMissing,
         "providers_failed" => Reason::ProvidersFailed,
+        "internal_error" => Reason::InternalError,
         "invalid_claim" => Reason::InvalidClaim {
             why: text(&v, "why").unwrap_or_default(),
         },
@@ -393,6 +395,7 @@ mod tests {
             Reason::InvalidClaim {
                 why: "no identifier, title or text".into(),
             },
+            Reason::InternalError,
         ]
     }
 

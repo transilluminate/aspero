@@ -3,6 +3,19 @@
 Releases 0.10 to 0.19 are in [docs/changelog/0.1x.md](docs/changelog/0.1x.md),
 and 0.1 to 0.9 in [docs/changelog/0.0x.md](docs/changelog/0.0x.md).
 
+## Unreleased
+
+Changed:
+
+- A bug that panics while verifying one claim no longer stops the rest
+  of a batch: that claim is `unverifiable`, with the new reason
+  `internal_error` and the panic's message in `reason_text` (please
+  report it), and the others are verified as usual. The CLI's
+  `aspero verify` batches, the MCP `verify` tool and an embedder's batch
+  call all get this. In Swift, `Reason` gains the case `internalError`,
+  so a `switch` over it without `default` needs one more arm; a stored
+  reason reads back as it was written.
+
 ## 0.38.3
 
 Fixed:

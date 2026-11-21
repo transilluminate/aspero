@@ -278,6 +278,9 @@ pub enum Reason {
     InvalidClaim {
         why: String,
     },
+    /// aspero itself failed on this claim (a bug, caught so the rest of a
+    /// batch goes on); the verification's `reason_text` has the message.
+    InternalError,
 }
 
 impl Reason {
@@ -301,6 +304,7 @@ impl Reason {
             engine::Reason::IdDisagrees => Reason::IdDisagrees,
             engine::Reason::IdMissingElsewhere => Reason::IdMissingElsewhere,
             engine::Reason::IdMissing => Reason::IdMissing,
+            engine::Reason::InternalError => Reason::InternalError,
             _ => Reason::ProvidersFailed,
         }
     }

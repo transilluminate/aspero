@@ -30,6 +30,9 @@
 //! - `derivative.rs`: replies, corrections and notices about a work.
 //! - `same_work.rs`: identifier agreement, and whether two records are one
 //!   work.
+//! - `venue.rs`: the venue cited against a record's: a chapter cited as an
+//!   article or the reverse, another conference or meeting, a preprint at
+//!   one.
 //! - `written.rs`: a free-text reference's title and authors as written,
 //!   for the claim as read.
 
@@ -42,6 +45,7 @@ mod preprint;
 mod same_work;
 mod text;
 mod titles;
+mod venue;
 mod written;
 
 use serde::{Deserialize, Serialize};

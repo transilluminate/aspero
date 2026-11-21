@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+# CI's docs build before each push: public docs must not link to private
+# items (rustdoc -D warnings). Slower than the pre-commit gates (a few
+# seconds warm), so it runs per push, not per commit. Skip once with
+# `git push --no-verify`.
+set -euo pipefail
+cd "$(git rev-parse --show-toplevel)"
+RUSTDOCFLAGS="-D warnings" nice -n 10 cargo doc --workspace --no-deps -q \
+  || { echo "pre-push: cargo doc failed (RUSTDOCFLAGS=-D warnings); fix the docs above" >&2; exit 1; }

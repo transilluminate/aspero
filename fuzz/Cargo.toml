@@ -90,3 +90,10 @@ path = "fuzz_targets/mcp_args.rs"
 test = false
 doc = false
 bench = false
+
+[[bin]]
+name = "titled"
+path = "fuzz_targets/titled.rs"
+test = false
+doc = false
+bench = false

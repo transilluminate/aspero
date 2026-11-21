@@ -14,7 +14,7 @@ shift $(($# < 2 ? $# : 2))
 
 case "$target" in
   webpage) dict=html ;;
-  scan | id_parse | claim | references) dict=ids ;;
+  scan | id_parse | claim | titled | references) dict=ids ;;
   bib_read | docx) dict=bib ;;
   query | mcp_args) dict=query ;;
   *) echo "unknown target: $target" >&2; exit 2 ;;

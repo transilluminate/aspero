@@ -103,6 +103,18 @@ Fixed:
   left out. Such books and papers were found but only partly matched, or
   lost to another work (wild-4 #319, #343, #367, #369, #455, #540, #543,
   #804; wild-3 #761).
+- Journals told in more of the ways they're named: OpenAlex's name
+  doubled over a slash ("Physical review. D/Physical review. D.") is
+  read as each of its names, so "PRD" is Physical Review D; one word
+  cited that is the initials of a run of the journal's words ("PRD" of
+  "Physical Review D: Particles, Fields, …") is no other journal; an
+  acronym of four letters or more written with each word's first letter
+  or two ("TREE" for Trends in Ecology & Evolution) is the journal; "AER:
+  Papers & Proceedings" at the American Economic Review's own volume and
+  page is that journal; and OpenAlex's name for ACL's proceedings
+  ("Proceedings of the conference - Association for Computational
+  Linguistics. Meeting") is ACL's (wild-4 #377, #382, #469, #485, #595,
+  #748; wild-2 #790).
 
 ## 0.38.3
 

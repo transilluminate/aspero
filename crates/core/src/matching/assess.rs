@@ -383,7 +383,7 @@ pub fn assess(claim: &Claim, record: &SourceRecord) -> Assessment {
                         other_journal(cited, actual)
                     }) || (journals.len() > 1
                         && publication::significant(cited).len() == 1
-                        && !same_journal(cited, actual))
+                        && !publication::names_journal(cited, actual))
                 }) =>
         {
             FieldCheck::exact(false)

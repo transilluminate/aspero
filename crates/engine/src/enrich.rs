@@ -44,7 +44,9 @@ impl Engine {
     }
 
     /// Fills in where works can be read free, for records whose provider
-    /// didn't say, from the first provider (by priority) that does.
+    /// didn't say, from the first provider (by priority) that does; not,
+    /// for a record of the DOI's registry, from a record it overrules
+    /// (another work's link, #183).
     pub async fn add_open_access(&self, report: &mut LookupReport) {
         for entry in &self.entries {
             if !entry
@@ -57,13 +59,27 @@ impl Engine {
             }
             let works = found_records(&report.results, |r| r.work.open_access.is_none());
             for (i, found) in self.ask_about(entry, works, &mut report.usage).await {
-                if let (Some(oa), Some(record)) =
-                    (found.work.open_access, report.results[i].record.as_mut())
-                {
+                let Some(record) = report.results[i].record.as_mut() else {
+                    continue;
+                };
+                if self.overruled(&found, record) {
+                    continue;
+                }
+                if let Some(oa) = found.work.open_access {
                     record.work.open_access = Some(oa);
                 }
             }
         }
+    }
+
+    /// Whether `record` is the DOI registry's and it [overrules] `other`:
+    /// what `other` says is then of another work.
+    ///
+    /// [overrules]: crate::registry::overrules
+    pub(crate) fn overruled(&self, other: &SourceRecord, record: &SourceRecord) -> bool {
+        self.registry()
+            .is_some_and(|r| r.provider.id() == record.source)
+            && crate::registry::overrules(record, other)
     }
 
     /// One provider's records of works it didn't supply itself, each asked

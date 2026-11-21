@@ -9,6 +9,7 @@ use aspero_core::{
 
 use super::rank::rank;
 use super::{Candidate, ResolveReport, Sighting, Via};
+use crate::registry::{carries_doi, drop_foreign, overrules};
 use crate::{EngineError, SearchReport, add_usage};
 
 /// Confidence at which `verify` stops gathering candidates early.
@@ -245,12 +246,18 @@ pub(super) struct Accumulator<'a> {
     pub(super) report: ResolveReport,
     /// Whether each candidate's cited-by count is OpenAlex's.
     pub(super) counted: Vec<bool>,
+    /// The DOI registry (Crossref), if it's here.
+    pub(super) registry: Option<ProviderId>,
+    /// The registry's records seen so far, one per DOI.
+    pub(super) registered: Vec<SourceRecord>,
 }
 
 impl Accumulator<'_> {
     /// Adds a record, merging it into an existing candidate that shares an
     /// identifier, and then any other candidate the record links it to.
-    pub(super) fn add(&mut self, record: SourceRecord, sighting: Sighting) {
+    /// The registry's record of a DOI wins for it first ([`Self::defer`]).
+    pub(super) fn add(&mut self, mut record: SourceRecord, sighting: Sighting) {
+        self.defer(&mut record);
         let claim = self.claim;
         let candidates = &mut self.report.candidates;
         let shares = |c: &Candidate, ids: &[WorkId]| {
@@ -304,6 +311,37 @@ impl Accumulator<'_> {
         // Judge claimed identifiers against everything known about the work.
         let candidate = &mut candidates[at];
         candidate.assessment.ids = id_agreement(&claim.ids, &candidate.ids);
+    }
+
+    /// The registry's record of a DOI wins for that DOI (#183): the
+    /// aggregator's record, where it contradicts the registry's
+    /// ([`overrules`]: two works it merged into one), doesn't carry that
+    /// DOI, nor the PMIDs and PMCIDs the registry's record doesn't confirm
+    /// ([`drop_foreign`]), so it isn't merged with the registry's record
+    /// and lends it none of its values. A registry record takes them from
+    /// the candidates already found; the aggregator's loses them as it's
+    /// added. A record that agrees merges as before.
+    fn defer(&mut self, record: &mut SourceRecord) {
+        if self.registry.as_ref() != Some(&record.source) {
+            for registered in &self.registered {
+                if carries_doi(&record.ids, registered) && overrules(registered, record) {
+                    drop_foreign(&mut record.ids, registered);
+                }
+            }
+            return;
+        }
+        let claim = self.claim;
+        for c in &mut self.report.candidates {
+            if carries_doi(&c.ids, record) && overrules(record, &c.record) {
+                drop_foreign(&mut c.ids, record);
+                drop_foreign(&mut c.record.ids, record);
+                c.assessment = assess(claim, &c.record, &c.ids);
+                c.assessment.ids = id_agreement(&claim.ids, &c.ids);
+            }
+        }
+        if !self.registered.iter().any(|r| carries_doi(&r.ids, record)) {
+            self.registered.push(record.clone());
+        }
     }
 
     /// Adds one search's hits; returns the hits' titles.
@@ -631,6 +669,8 @@ mod tests {
                     claim,
                     report: ResolveReport::default(),
                     counted: Vec::new(),
+                    registry: None,
+                    registered: Vec::new(),
                 };
                 let all = records();
                 for i in order {
@@ -690,6 +730,8 @@ mod tests {
                 claim: &claim,
                 report: ResolveReport::default(),
                 counted: Vec::new(),
+                registry: None,
+                registered: Vec::new(),
             };
             for i in order {
                 let record = records[i].clone();

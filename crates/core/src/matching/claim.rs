@@ -97,6 +97,11 @@ impl Claim {
             ids.extend(bare_arxiv(&text));
         }
         ids.extend(bare_pmid(&text, &ids));
+        for id in bare_isbns(&text) {
+            if !ids.iter().any(|f| same_work_id(f, &id)) {
+                ids.push(id);
+            }
+        }
         Claim {
             ids,
             text: Some(text),
@@ -569,6 +574,37 @@ fn bare_pmid(text: &str, ids: &[WorkId]) -> Option<WorkId> {
         return None;
     };
     format!("pmid:{pmid}").parse().ok()
+}
+
+/// The ISBN-13s a reference gives bare, as models write them in a table's
+/// cell ("… | 15th (2020) | 978-1260452310") or after a note ("ISBN-13
+/// (Dover): 978-0486445687"): a word of its own of 13 digits, hyphens
+/// allowed, with a book prefix (978 or 979) and a valid check digit.
+/// [`crate::id::scan`] reads ISBNs only when labelled, and its mentions
+/// are unchanged; in a reference this shape is a book's number (a phone
+/// number has fewer digits, and another number that starts 978 or 979
+/// passes the check one time in ten). Not an ISBN-10, which looks like
+/// other numbers, nor digits inside a DOI or link
+/// ("10.1017/cbo9781107049963").
+fn bare_isbns(text: &str) -> Vec<WorkId> {
+    let hyphen = |c: char| matches!(c, '-' | '\u{2010}' | '\u{2011}');
+    let mut found: Vec<WorkId> = Vec::new();
+    for word in text.split(|c: char| c.is_whitespace() || c == '|') {
+        let word = word.trim_matches(|c: char| "()[]{}.,;:\"'“”‘’*_".contains(c));
+        let digits = word.chars().filter(char::is_ascii_digit).count();
+        let shaped = digits == 13
+            && word.chars().all(|c| c.is_ascii_digit() || hyphen(c))
+            && word.starts_with(|c: char| c.is_ascii_digit())
+            && word.ends_with(|c: char| c.is_ascii_digit())
+            && !word.contains("--");
+        if shaped
+            && let Ok(id) = WorkId::parse_as(IdKind::Isbn, word)
+            && !found.contains(&id)
+        {
+            found.push(id);
+        }
+    }
+    found
 }
 
 /// The distinct identifiers mentioned in free text (see [`crate::id::scan`]).

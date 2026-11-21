@@ -48,6 +48,15 @@ Fixed:
   Christianization of Iceland: Priests, Power, and Social Change"), so
   the book's own record ranks first.
 
+Fixed:
+
+- A bare ISBN-13 in a reference, without "ISBN" before it, is read as
+  the book's ISBN: 13 digits, hyphens allowed, starting 978 or 979 and
+  with a valid check digit, as models write them in a table's cell
+  ("… | 15th (2020) | 978-1260452310"). ISBN-10s are still read only
+  when labelled. `scan`'s mentions are unchanged: this is read only
+  when a reference is read as a claim.
+
 ## 0.38.3
 
 Fixed:

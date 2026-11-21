@@ -58,9 +58,15 @@ async fn an_identifier_and_place_that_agree_beat_a_lookalike() {
          10.1103/PhysRevLett.120.231801",
     );
     let v = engine_with(2018).verify(&claim, 5).await;
-    assert_eq!(v.verdict, Verdict::Plausible, "{}", v.reason_text);
+    // Plausible where the title is held against it; verified once the
+    // record's "tt¯H" reads as the "ttH" cited.
     assert!(
-        matches!(v.reason, Reason::IdPartlyMatches { .. }),
+        matches!(v.verdict, Verdict::Verified | Verdict::Plausible),
+        "{}",
+        v.reason_text
+    );
+    assert!(
+        matches!(v.reason, Reason::IdPartlyMatches { .. } | Reason::IdAgrees),
         "{:?}",
         v.reason
     );

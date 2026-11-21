@@ -3,6 +3,19 @@
 Releases 0.10 to 0.19 are in [docs/changelog/0.1x.md](docs/changelog/0.1x.md),
 and 0.1 to 0.9 in [docs/changelog/0.0x.md](docs/changelog/0.0x.md).
 
+## Unreleased
+
+Fixed:
+
+- An abstract OpenAlex read off a publisher's landing page, its author
+  list, affiliations and links and all (Wiley's, the ACP journals',
+  "Volume 154, Issue S1 p. 3-31 … Search for more papers by this
+  author"), is no abstract: the work has none from OpenAlex, and another
+  source's is used if one has it. A page footer run into a real abstract
+  ("…Received 18 September 1952DOI:https://doi.org/…©1952 American
+  Physical Society") is cut off. About 1 in 1,000 of OpenAlex's
+  abstracts on the red team's tape.
+
 ## 0.39.0
 
 Changed:

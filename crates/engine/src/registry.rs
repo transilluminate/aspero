@@ -142,11 +142,11 @@ impl Engine {
     /// answered itself). Cached, like lookups.
     ///
     /// The registry's record wins for its DOI (#183): the aggregator's
-    /// record, where it [`contradicts`] the registry's on two of date,
-    /// volume and page ([`overrules`]), is replaced by it, with none of the
+    /// record, where it `contradicts` the registry's on two of date,
+    /// volume and page (`overrules`), is replaced by it, with none of the
     /// record's other identifiers or links; and where it carries another
     /// DOI whose registry record it contradicts, it loses that DOI and the
-    /// PMIDs and PMCIDs that record doesn't confirm ([`drop_foreign`]).
+    /// PMIDs and PMCIDs that record doesn't confirm (`drop_foreign`).
     pub async fn cross_check(&self, report: &mut LookupReport) -> Vec<Vec<Disagreement>> {
         let mut found = vec![Vec::new(); report.results.len()];
         let Some(registry) = self.registry() else {

@@ -342,6 +342,9 @@ JSON works:
                they can differ from looking up the notice DOI itself when
                another provider answers that wrongly; --full then shows
                `disagreements` there.
+  issued       the publication date, as precise as known (\"2016-07-04\",
+               \"2016\"): the year is its first four digits; there is no
+               separate `year`
   type         CSL types; notices themselves are \"erratum\" or \"retraction\"
   notice_for   for a notice itself, the works it updates: [{\"kind\",
                \"work\", \"date\", \"source\"}]
@@ -349,7 +352,9 @@ JSON works:
                \"status\": gold|diamond|hybrid|bronze|green|closed, \"pdf_url\",
                \"url\", \"license\", \"version\", \"source\"}; absent if unknown.
                \"closed\" means no free copy is known to the source (OpenAlex
-               carries Unpaywall's data), not that none exists
+               carries Unpaywall's data), not that none exists. Without
+               `pdf_url` only a page is known (`url`): a repository's record
+               may hold no file, and publishers' pages often turn scripts away
   `lookup --full` also asks Crossref for notices in both directions, and
   other providers for open access when the first didn't say. A superseded
   work's result gains `latest`: the newest version, following the chain

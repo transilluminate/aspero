@@ -42,6 +42,11 @@ Fixed:
 - A title's opening words followed by "…" or "..." ("Scaling Rectified
   Flow Transformers… (Stable Diffusion 3)") partly match the work's title
   instead of differing from it.
+- A book cited, its chapter's record found: a chapter whose book is the
+  title cited, cited without "In:", editors or a page, is part of the
+  work and no longer verifies as it ("The Priests" for "The
+  Christianization of Iceland: Priests, Power, and Social Change"), so
+  the book's own record ranks first.
 
 ## 0.38.3
 

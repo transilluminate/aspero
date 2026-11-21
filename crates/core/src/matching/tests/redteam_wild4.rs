@@ -261,3 +261,57 @@ fn a_whole_two_word_title_found_in_the_text_still_matches() {
     let a = assess(&claim, &r);
     assert_eq!(a.title.agreement, Agreement::Match, "{a:?}");
 }
+
+/// wild-4 #623: a book cited, its chapter's record found. The chapter's
+/// title is a word of the cited subtitle and its book is the title cited:
+/// part of the work, so the book's own record ranks first.
+#[test]
+fn a_chapter_of_the_cited_book_is_not_the_book() {
+    let authors = ["Orri Vésteinsson"];
+    let priests = chapter(
+        "The Priests",
+        &authors,
+        2000,
+        "The Christianization of Iceland",
+    );
+    let mut book = record(
+        &[],
+        "The Christianization of Iceland: Priests, Power, and Social Change 1000-1300",
+        &authors,
+        2000,
+    );
+    book.work.work_type = Some(crate::work::WorkType::Book);
+    let claim = Claim::from_text(
+        "Orri Vésteinsson, The Christianization of Iceland: Priests, Power, and Social \
+         Change, 1000–1300 (2000).",
+    );
+    let part = assess(&claim, &priests);
+    let whole = assess(&claim, &book);
+    assert!(part.confidence < VERIFIED, "{part:?}");
+    assert!(whole.confidence > part.confidence, "{whole:?} {part:?}");
+
+    // Cited as a chapter, in its book: the chapter.
+    let claim = Claim::from_text(
+        "Orri Vésteinsson. The Priests. In: The Christianization of Iceland. Oxford: \
+         Oxford University Press; 2000.",
+    );
+    assert!(assess(&claim, &priests).confidence >= VERIFIED);
+}
+
+/// holdout-6 #249, #711: a chapter cited by its own title, then its book
+/// ("In *StatPearls*", "In Critical Readings on Tang China (pp. …)"), is
+/// the chapter.
+#[test]
+fn a_chapter_cited_by_its_title_then_its_book_is_the_chapter() {
+    let r = chapter(
+        "Second Victim Syndrome",
+        &["Carl J. Sachs", "Rachel Mamo", "Nikki Wheaton"],
+        2026,
+        "StatPearls",
+    );
+    let claim = Claim::from_text(
+        "Sachs, C. J., Mamo, R., & Wheaton, N. (2026). Second Victim Syndrome. In \
+         *StatPearls*. StatPearls Publishing.",
+    );
+    assert!(assess(&claim, &r).confidence >= VERIFIED);
+}

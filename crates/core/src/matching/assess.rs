@@ -918,6 +918,36 @@ pub fn assess(claim: &Claim, record: &SourceRecord) -> Assessment {
     {
         confidence = confidence.max(EDITION);
     }
+    // A chapter whose book is the title cited ("Orri Vésteinsson, The
+    // Christianization of Iceland: Priests, Power, and Social Change"
+    // for its chapter "The Priests"), cited as the book (no "In:", no
+    // editors, no page), is part of the work cited, not it: the book's
+    // record ranks first, and without it, plausible. Not when the
+    // chapter's own title is cited before its book's ("Second Victim
+    // Syndrome. In *StatPearls*"), or is its book's.
+    let book_span = match (&text, &work.container_title) {
+        (Some(text), Some(book)) => text.title_span(book),
+        _ => None,
+    };
+    let chapter_cited_first = matches!(
+        (&title_span, &book_span),
+        (Some(own), Some(book)) if own.start <= book.start
+    );
+    let chapter_for_book = work.work_type == Some(WorkType::Chapter)
+        && claimed_title.is_none()
+        && container.agreement == Agreement::Match
+        && book_span.is_some()
+        && !chapter_cited_first
+        && cited_place.page.is_none()
+        && !reprint
+        && !named
+        && !claim
+            .text
+            .as_deref()
+            .is_some_and(|t| cites_chapter(t) || cites_edited_book(t));
+    if chapter_for_book {
+        confidence = confidence.min(LOCATION_MISMATCH_CAP);
+    }
     // A dataset's or software's record carries its latest version's date:
     // the claimed identifier and title name it, whatever year is cited
     // (MIMIC-III's DOI, cited as of 2016, registered in 2023).

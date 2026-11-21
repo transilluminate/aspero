@@ -659,10 +659,18 @@ pub fn assess(claim: &Claim, record: &SourceRecord) -> Assessment {
 
     // A claim of identifiers alone is fully confirmed by a matching ID.
     let id_only = [title, authors, year].iter().all(|c| c.score.is_none());
+    // A claimed identifier that is the work's, beside a title, authors and
+    // year (and journal and place) that all agree as far as they're given,
+    // is a second field: "Title. arXiv:ID" is no weaker than the identifier
+    // alone. (A title alone, without one, can be a review's or a
+    // correction's.)
+    let agree = [title, authors, year, container, volume, page]
+        .iter()
+        .all(|c| matches!(c.agreement, Agreement::Match | Agreement::Unknown));
     let mut confidence = if id_only && named {
         1.0
     } else {
-        combine(title, authors, year)
+        combine(title, authors, year, ids == Agreement::Match && agree)
     };
     // Title and year alone can't verify: a short or generic title ("Health
     // technology assessment") turns up inside many references, and letters

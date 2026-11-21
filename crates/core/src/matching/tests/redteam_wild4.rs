@@ -143,3 +143,45 @@ fn an_identifier_and_place_beside_another_title_and_authors_are_not_lifted() {
     let a = assess(&claim, &tth());
     assert!(a.confidence < PLAUSIBLE, "{a:?}");
 }
+
+fn moe_mamba() -> SourceRecord {
+    arxiv_preprint(
+        "arXiv:2401.04081",
+        "MoE-Mamba: Efficient Selective State Space Models with Mixture of Experts",
+        &["Maciej Pióro", "Kamil Ciebiera", "Krystian Król"],
+        2024,
+    )
+}
+
+/// wild-4 #484 and others: the title and the work's own identifier, nothing
+/// else cited. The identifier counts as the second field.
+#[test]
+fn a_title_beside_its_works_identifier_verifies() {
+    let claim = Claim::from_text(
+        "MoE-Mamba: Efficient Selective State Space Models with Mixture of Experts. \
+         arXiv:2401.04081",
+    );
+    let a = assess(&claim, &moe_mamba());
+    assert_eq!(a.ids, Agreement::Match);
+    assert!(a.confidence >= VERIFIED, "{a:?}");
+}
+
+/// The title alone, without an identifier, is still one field: reviews and
+/// corrections carry it too.
+#[test]
+fn a_title_alone_is_still_one_field() {
+    let claim = Claim::from_text(
+        "MoE-Mamba: Efficient Selective State Space Models with Mixture of Experts",
+    );
+    let a = assess(&claim, &moe_mamba());
+    assert!(a.confidence <= SINGLE_FIELD_CAP, "{a:?}");
+}
+
+/// Nor does the identifier lift a title that only partly agrees.
+#[test]
+fn a_partly_agreeing_title_beside_the_identifier_stays_capped() {
+    let claim =
+        Claim::from_text("MoE-Mamba: Efficient Selective State Space Models. arXiv:2401.04081");
+    let a = assess(&claim, &moe_mamba());
+    assert!(a.confidence < VERIFIED, "{a:?}");
+}

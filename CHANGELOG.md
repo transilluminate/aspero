@@ -29,6 +29,11 @@ Fixed:
   differs ("Observation of ttH production" for "… tt¯H …"), unless both
   differ. A lookalike with another identifier or page (a talk on the same
   result) no longer outvotes them as the work "the citation matches".
+- A title cited with the work's own identifier and nothing else
+  ("MoE-Mamba: … . arXiv:2401.04081") verifies, as the identifier alone
+  does. The identifier now counts as a second field when everything else
+  cited agrees; it was held at plausible ("gives too little to confirm
+  it"). A title alone, a book's say, still can't verify.
 
 ## 0.38.3
 

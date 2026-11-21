@@ -261,7 +261,9 @@ impl WireWork {
         work.abstract_text = self
             .abstract_inverted_index
             .as_ref()
-            .map(|index| tidy_abstract(&rebuild_abstract(index)));
+            .map(|index| tidy_abstract(&rebuild_abstract(index)))
+            .and_then(without_footer)
+            .filter(|text| !scraped_page(text));
         work.url = self
             .primary_location
             .as_ref()
@@ -368,6 +370,111 @@ fn is_article(openalex: &str) -> bool {
     matches!(openalex, "article" | "review" | "letter" | "editorial")
 }
 
+/// Whether an "abstract" is a publisher's landing page read as one, its
+/// furniture and all (OpenAlex has some): Wiley's and the ACP journals'
+/// "Search for more papers by this author" beside each author, Wiley's
+/// header (the journal's name run into "Volume 154, Issue S1 p. 3-31"), a journal site's "Back to table of contents".
+/// None of these is in an abstract; the work is better without one.
+fn scraped_page(text: &str) -> bool {
+    const FURNITURE: &[&str] = &[
+        "Search for more papers by this author",
+        "Back to table of contents Previous article Next article",
+    ];
+    if FURNITURE.iter().any(|f| text.contains(f)) {
+        return true;
+    }
+    // A section's name run into its date and the title ("Letters16 March
+    // 2020COVID-19 and the Risk …", "Quality ImprovementSeptember 1,
+    // 2004Review: …"): the ACP journals' pages.
+    if glued_date(text) {
+        return true;
+    }
+    // "<journal>Volume 154, Issue S1 p. 3-31": the journal's name run into
+    // its issue's, near the start.
+    let head: String = text.chars().take(200).collect();
+    head.find("Volume ").is_some_and(|at| {
+        let glued = head[..at].ends_with(|c: char| c.is_alphabetic());
+        let rest = &head[at + "Volume ".len()..];
+        let number = rest
+            .split(',')
+            .next()
+            .is_some_and(|n| !n.is_empty() && n.chars().all(|c| c.is_ascii_digit()));
+        glued && number && rest.contains(", Issue ") && rest.contains(" p. ")
+    })
+}
+
+/// Shortest text before a page's footer that is still an abstract.
+const ABSTRACT_BEFORE_FOOTER: usize = 100;
+
+/// An abstract without the page footer OpenAlex ran into it ("… the
+/// long-range order in the lattice.Received 18 September 1952DOI:https://
+/// doi.org/10.1103/…©1952 American Physical Society"), `None` when too
+/// little is left to be one ("A Reply to the Comment by Robert Alicki.").
+fn without_footer(text: String) -> Option<String> {
+    let Some(doi) = text
+        .find("DOI:https://doi.org/")
+        .filter(|_| text.contains('©'))
+    else {
+        return Some(text);
+    };
+    let start = text[..doi]
+        .rfind("Received ")
+        .filter(|at| doi - at < 30)
+        .unwrap_or(doi);
+    let kept = text[..start].trim();
+    (kept.chars().count() >= ABSTRACT_BEFORE_FOOTER).then(|| kept.to_string())
+}
+
+const MONTHS: [&str; 12] = [
+    "January",
+    "February",
+    "March",
+    "April",
+    "May",
+    "June",
+    "July",
+    "August",
+    "September",
+    "October",
+    "November",
+    "December",
+];
+
+/// Whether, in its first 60 characters, `text` has a date ("16 March 2020",
+/// "September 1, 2004") with a letter run into it before and a capital
+/// after: a page's heading, not a sentence.
+fn glued_date(text: &str) -> bool {
+    let head: String = text.chars().take(60).collect();
+    let year_then_capital = |rest: &str| {
+        let digits = rest.chars().take_while(char::is_ascii_digit).count();
+        digits == 4 && rest[4..].starts_with(|c: char| c.is_uppercase())
+    };
+    MONTHS.iter().any(|month| {
+        head.match_indices(month).any(|(at, _)| {
+            let before = &head[..at];
+            let after = &head[at + month.len()..];
+            // "…Letters16 March 2020C…"
+            let day_first = before
+                .strip_suffix(' ')
+                .map(|b| b.trim_end_matches(|c: char| c.is_ascii_digit()))
+                .is_some_and(|b| {
+                    b.len() + 1 < before.len()
+                        && b.len() + 3 >= before.len()
+                        && b.ends_with(|c: char| c.is_alphabetic())
+                })
+                && after.strip_prefix(' ').is_some_and(year_then_capital);
+            // "…ImprovementSeptember 1, 2004R…"
+            let month_first = before.ends_with(|c: char| c.is_lowercase())
+                && after.strip_prefix(' ').is_some_and(|a| {
+                    let day = a.chars().take_while(char::is_ascii_digit).count();
+                    (1..=2).contains(&day)
+                        && a[day..].strip_prefix(", ").is_some_and(year_then_capital)
+                });
+            day_first || month_first
+        })
+    })
+}
+
 /// OpenAlex ships abstracts as `{word: [positions]}`; put the words back in order.
 fn rebuild_abstract(index: &BTreeMap<String, Vec<usize>>) -> String {
     let mut positioned: Vec<(usize, &str)> = index
@@ -461,6 +568,48 @@ mod tests {
         let w = in_repository(&[("repository", "arXiv (Cornell University)")]);
         assert_eq!(w.work_type, Some(WorkType::JournalArticle));
         assert_eq!(w.container_title, None);
+    }
+
+    #[test]
+    fn a_landing_page_read_as_an_abstract_is_none() {
+        let wiley = "International Journal of Gynecology & ObstetricsVolume 154, Issue S1 \
+            p. 3-31 SUPPLEMENT ARTICLEOpen Access A literature review and best practice \
+            advice … Liona C. Poon, Corresponding Author Liona C. Poon";
+        assert!(scraped_page(wiley));
+        let acp = "Letters11 November 2020Sixty-Day Outcomes Among Patients Hospitalized \
+            With COVID-19FREEVineet Chopra, MD, MScSearch for more papers by this author";
+        assert!(scraped_page(acp));
+        assert!(scraped_page(
+            "Quality ImprovementSeptember 1, 2004Review: Individualized written action plans"
+        ));
+        assert_eq!(
+            without_footer(
+                "Received 6 December 2005DOI:https://doi.org/10.1103/PhysRevLett.96.039901\
+                 ©2006 American Physical Society"
+                    .into()
+            ),
+            None
+        );
+        let ising = "The spontaneous magnetization of a two-dimensional Ising model is \
+            calculated exactly. The result also gives the long-range order in the lattice.";
+        assert_eq!(
+            without_footer(format!(
+                "{ising}Received 18 September 1952DOI:https://doi.org/10.1103/PhysRev.85.808\
+                 ©1952 American Physical Society"
+            ))
+            .as_deref(),
+            Some(ising)
+        );
+        for real in [
+            "On 16 March 2020 the WHO declared a pandemic. We studied 400 patients.",
+            "Between September 1, 2004 and May 2005, we enrolled 120 adults.",
+            "BACKGROUND: Coronary heart disease is the leading cause of mortality worldwide.",
+            "We report outcomes (Volume 3, Issue 2 p. 4 of the registry) for 2,000 patients.",
+            "Journal Article Future Directions in the Sociology of Religion Get access \
+             Social Forces, Volume 86, Issue 4, June 2008",
+        ] {
+            assert!(!scraped_page(real), "{real}");
+        }
     }
 
     #[test]

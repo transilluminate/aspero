@@ -15,6 +15,7 @@
 //! works from the best 100 of them.
 
 mod http;
+mod merged;
 mod tree;
 mod wire;
 
@@ -31,6 +32,7 @@ use aspero_core::{
 use async_trait::async_trait;
 use secrecy::{ExposeSecret, SecretString};
 
+pub use crate::merged::looks_merged;
 use crate::wire::WireList;
 
 pub const ID: ProviderId = ProviderId::from_static("openalex");

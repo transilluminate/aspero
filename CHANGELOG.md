@@ -142,8 +142,18 @@ Fixed:
   registry's: a citation of the 2026 correction verifies as 2026, not
   2025. Records that differ on one field only (an online-first year, an
   article number for a page) and other providers' records merge as
-  before. A plain `lookup` (without `--full`) doesn't ask the registry,
-  so it is unchanged.
+  before.
+
+- A plain `lookup` (without `--full`) now does the same for a record that
+  looks like two works merged into one, so `aspero lookup
+  10.1111/1471-0528.70298` serves Crossref's record too (#183). OpenAlex's
+  record looks merged when its locations name two PubMed records, or
+  another DOI of the same publisher's, or when it was found by a DOI that
+  isn't its own. A preprint's or a dataset's DOI beside the article's,
+  and one DOI spelled two ways, don't count. Such a lookup costs one
+  Crossref request more, and lists the `disagreements` it finds. About 2%
+  of OpenAlex's DOI lookups look merged; the rest ask Crossref nothing, as
+  before.
 
 ## 0.38.3
 

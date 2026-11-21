@@ -4,13 +4,28 @@
 //! Where the aggregator's record contradicts the registry's record of a DOI
 //! it carries, the registry's wins for that DOI (#183): a lookup serves it
 //! instead, and the record loses that DOI ([`overrules`],
-//! [`drop_foreign`]).
+//! [`drop_foreign`]). A full lookup checks every record; a plain one only
+//! those that look merged ([`looks_merged`]), so the rest cost no request.
 
 use aspero_core::matching::{same_work_id, title_similarity};
 use aspero_core::publication::first_page;
 use aspero_core::{FieldSet, IdKind, NoticeKind, PartialDate, ProviderId, SourceRecord, WorkId};
 
-use crate::{Engine, Entry, LookupReport};
+use crate::{Engine, Entry, LookupReport, LookupResult};
+
+/// Whether `record`, found by `asked`, looks like two works an aggregator
+/// merged into one: OpenAlex's record naming two works' PMIDs or DOIs in
+/// its locations, or found by a DOI not its own
+/// ([`aspero_openalex::looks_merged`]).
+#[cfg(feature = "openalex")]
+fn looks_merged(record: &SourceRecord, asked: &WorkId) -> bool {
+    aspero_openalex::looks_merged(record, asked)
+}
+
+#[cfg(not(feature = "openalex"))]
+fn looks_merged(_: &SourceRecord, _: &WorkId) -> bool {
+    false
+}
 
 /// One field on which a record and the registry's record of the same DOI
 /// disagree.
@@ -148,6 +163,31 @@ impl Engine {
     /// DOI whose registry record it contradicts, it loses that DOI and the
     /// PMIDs and PMCIDs that record doesn't confirm (`drop_foreign`).
     pub async fn cross_check(&self, report: &mut LookupReport) -> Vec<Vec<Disagreement>> {
+        self.cross_check_where(report, |_| true).await
+    }
+
+    /// [`Self::cross_check`] for the results whose record looks like two
+    /// works an aggregator merged into one ([`looks_merged`]), and only
+    /// those: a plain lookup's check, which spends a request on the
+    /// registry only where its record shows the signs (#183).
+    pub(crate) async fn cross_check_merged(
+        &self,
+        report: &mut LookupReport,
+    ) -> Vec<Vec<Disagreement>> {
+        self.cross_check_where(report, |r| {
+            r.record
+                .as_ref()
+                .is_some_and(|rec| looks_merged(rec, &r.id))
+        })
+        .await
+    }
+
+    /// [`Self::cross_check`] for the results `check` picks.
+    async fn cross_check_where(
+        &self,
+        report: &mut LookupReport,
+        check: impl Fn(&LookupResult) -> bool,
+    ) -> Vec<Vec<Disagreement>> {
         let mut found = vec![Vec::new(); report.results.len()];
         let Some(registry) = self.registry() else {
             return found;
@@ -157,7 +197,7 @@ impl Engine {
         // Per result, its own DOI (the one asked for, if a DOI) first, then
         // the record's other DOIs.
         let mut wanted: Vec<(usize, WorkId)> = Vec::new();
-        for (i, result) in report.results.iter().enumerate() {
+        for (i, result) in report.results.iter().enumerate().filter(|(_, r)| check(r)) {
             let Some(record) = result.record.as_ref().filter(|r| r.source != provider) else {
                 continue;
             };

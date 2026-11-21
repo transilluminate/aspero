@@ -6,7 +6,9 @@ mod common;
 
 use std::sync::Arc;
 
-use aspero_core::{Claim, FieldSet, IdKind, Notice, NoticeKind, PartialDate, SourceRecord, WorkId};
+use aspero_core::{
+    Claim, FieldSet, IdKind, Notice, NoticeKind, PartialDate, Raw, SourceRecord, WorkId,
+};
 use aspero_engine::{Extras, InputLookup, Verdict};
 use common::*;
 
@@ -141,7 +143,27 @@ fn merged() -> SourceRecord {
     oa.is_oa = true;
     oa.pdf_url = Some(EARLIER_PDF.into());
     r.work.open_access = Some(oa);
+    r.raw = merged_raw(&[
+        &format!("https://doi.org/{LATER}"),
+        &format!("https://doi.org/{EARLIER}"),
+        "https://pubmed.ncbi.nlm.nih.gov/40536112",
+        "https://pubmed.ncbi.nlm.nih.gov/42381193",
+    ]);
     r
+}
+
+/// W4411450779's response, but for its locations: these landing pages.
+fn merged_raw(locations: &[&str]) -> Raw {
+    let locations: Vec<_> = locations
+        .iter()
+        .map(|u| serde_json::json!({"landing_page_url": u}))
+        .collect();
+    Raw::json(&serde_json::json!({
+        "id": "https://openalex.org/W4411450779",
+        "doi": format!("https://doi.org/{LATER}"),
+        "ids": {"doi": format!("https://doi.org/{LATER}")},
+        "locations": locations,
+    }))
 }
 
 fn registered_earlier() -> SourceRecord {
@@ -219,6 +241,120 @@ async fn the_registrys_record_of_each_doi_wins_over_an_aggregators_merge() {
         earlier.disagreements.is_empty(),
         "{:?}",
         earlier.disagreements
+    );
+}
+
+#[tokio::test]
+async fn a_plain_lookup_checks_a_record_that_looks_merged_with_the_registry() {
+    // A plain lookup asks the registry only where OpenAlex's record shows
+    // signs of a merge (#183); W4411450779 shows three.
+    let looked = |report: &aspero_engine::InputsReport, i: usize| match &report.items[i] {
+        InputLookup::Looked(l) => l.clone(),
+        InputLookup::Invalid(e) => panic!("{e}"),
+    };
+    let both = corrections(vec![]);
+    let inputs = [EARLIER, LATER].map(String::from);
+    let report = both.lookup_inputs(&inputs, Extras::default()).await;
+
+    // The 2026 correction: Crossref's record, the contradiction reported.
+    let later = looked(&report, 1);
+    let record = later.result.record.as_ref().unwrap();
+    assert_eq!(record.source.as_str(), "crossref");
+    assert_eq!(record.work.issued.unwrap().to_string(), "2026-06-30");
+    assert_eq!(record.work.volume.as_deref(), Some("133"));
+    assert_eq!(record.work.page.as_deref(), Some("1823-1823"));
+    assert_eq!(record.ids, [id(LATER)]);
+    let fields: Vec<&str> = later.disagreements.iter().map(|d| d.field).collect();
+    assert_eq!(fields, ["issued", "volume", "page"]);
+
+    // The 2025 correction (found by a DOI not the record's own): its own
+    // date, volume and page, without the other's DOI and PMIDs.
+    let earlier = looked(&report, 0);
+    let record = earlier.result.record.as_ref().unwrap();
+    assert_eq!(record.work.issued.unwrap().to_string(), "2025-06-19");
+    assert_eq!(record.work.volume.as_deref(), Some("132"));
+    assert_eq!(record.work.page.as_deref(), Some("1541"));
+    assert!(record.ids.contains(&id(EARLIER)));
+    assert_eq!(foreign(&record.ids, LATER), [], "{:?}", record.ids);
+    assert!(earlier.disagreements.is_empty());
+
+    // Each sign alone does it: two PubMed records, or another DOI of the
+    // publisher's.
+    for locations in [
+        [
+            "https://pubmed.ncbi.nlm.nih.gov/40536112",
+            "https://pubmed.ncbi.nlm.nih.gov/42381193",
+        ],
+        [
+            &format!("https://doi.org/{LATER}"),
+            &format!("https://doi.org/{EARLIER}"),
+        ],
+    ] {
+        let mut record = merged();
+        record.raw = merged_raw(&locations);
+        let openalex = Scripted::new("openalex").with(vec![record]);
+        let mut crossref = Scripted::new("crossref").with(vec![registered_later()]);
+        crossref.caps.notices = true;
+        let engine = engine(vec![Arc::new(openalex), Arc::new(crossref)]);
+        let report = engine
+            .lookup_inputs(&[LATER.to_owned()], Extras::default())
+            .await;
+        let served = looked(&report, 0).result.record.unwrap();
+        assert_eq!(served.source.as_str(), "crossref", "{locations:?}");
+        assert_eq!(served.work.volume.as_deref(), Some("133"), "{locations:?}");
+    }
+}
+
+#[tokio::test]
+async fn a_plain_lookup_of_a_preprint_merged_record_asks_the_registry_nothing() {
+    // OpenAlex's usual merge: the journal's article with its bioRxiv
+    // preprint, one PubMed record. A registry record contradicting it (as
+    // the preprint's date and no volume or page might) isn't asked for
+    // without `full`.
+    let doi = "10.3389/fpls.2023.1185616";
+    let preprint = "10.1101/2022.12.11.519980";
+    let record = |source, y, volume: &str, page: &str| {
+        let mut r = work(source, &["W4379468661", doi, preprint], "Defence", &[], y);
+        r.work.volume = Some(volume.into());
+        r.work.page = Some(page.into());
+        r
+    };
+    let mut aggregated = record("openalex", 2023, "14", "1185616");
+    aggregated.raw = Raw::json(&serde_json::json!({
+        "doi": format!("https://doi.org/{doi}"),
+        "locations": [
+            {"landing_page_url": format!("https://doi.org/{doi}")},
+            {"landing_page_url": format!("https://doi.org/{preprint}")},
+            {"landing_page_url": "https://www.biorxiv.org/content/10.1101/2022.12.11.519980"},
+            {"landing_page_url": "https://pubmed.ncbi.nlm.nih.gov/37332715"},
+        ],
+    }));
+    let openalex = Scripted::new("openalex").with(vec![aggregated]);
+    let mut crossref = Scripted::new("crossref").with(vec![record("crossref", 2022, "1", "1")]);
+    crossref.caps.notices = true;
+    let engine = engine(vec![Arc::new(openalex), Arc::new(crossref)]);
+
+    for asked in [doi, preprint] {
+        let report = engine
+            .lookup_inputs(&[asked.to_owned()], Extras::default())
+            .await;
+        let InputLookup::Looked(l) = &report.items[0] else {
+            panic!()
+        };
+        let served = l.result.record.as_ref().unwrap();
+        assert_eq!(served.source.as_str(), "openalex", "{asked}");
+        assert!(l.disagreements.is_empty(), "{asked}: {:?}", l.disagreements);
+    }
+    // A full lookup asks, and the contradiction shows.
+    let report = engine
+        .lookup_inputs(&[doi.to_owned()], Extras::full())
+        .await;
+    let InputLookup::Looked(l) = &report.items[0] else {
+        panic!()
+    };
+    assert_eq!(
+        l.result.record.as_ref().unwrap().source.as_str(),
+        "crossref"
     );
 }
 

@@ -656,6 +656,26 @@ pub fn assess(claim: &Claim, record: &SourceRecord) -> Assessment {
         } else {
             title
         };
+    // A title found in free text only as a word or two ("Iceland" of
+    // "Iceland: A Peaceful Secession" inside "The History of Iceland";
+    // "13th") is no full match: only partly the work's, unless its
+    // authors, a claimed identifier, the place or the journal say which
+    // work it is. Nor, then, is it the same title with another field
+    // wrong (a closest work).
+    let pinned_by_more = authors.score.is_some_and(|s| s >= CORROBORATING_AUTHORS)
+        || named
+        || located
+        || container.agreement == Agreement::Match;
+    let title = match (&claimed_title, &work_title, &text) {
+        (None, Some(actual), Some(text))
+            if title.agreement == Agreement::Match
+                && !pinned_by_more
+                && text.found_only_short(actual) =>
+        {
+            FieldCheck::scored(title.score.unwrap_or(1.0).min(EXTENDED_TITLE))
+        }
+        _ => title,
+    };
 
     // A claim of identifiers alone is fully confirmed by a matching ID.
     let id_only = [title, authors, year].iter().all(|c| c.score.is_none());

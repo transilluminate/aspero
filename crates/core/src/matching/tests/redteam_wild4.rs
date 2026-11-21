@@ -185,3 +185,79 @@ fn a_partly_agreeing_title_beside_the_identifier_stays_capped() {
     let a = assess(&claim, &moe_mamba());
     assert!(a.confidence < VERIFIED, "{a:?}");
 }
+
+/// wild-4 #619: a one-word main title ("Iceland") found inside another
+/// title cited, with other authors: no title match, so no closest work.
+#[test]
+fn a_one_word_main_title_found_in_the_text_is_no_full_match() {
+    let mut r = record(
+        &[],
+        "Iceland: A Peaceful Secession",
+        &["Gudmundur Halfdanarson"],
+        1999,
+    );
+    r.work.work_type = Some(crate::work::WorkType::Book);
+    let claim = Claim::from_text("Gunnar Karlsson, The History of Iceland (2000)");
+    let a = assess(&claim, &r);
+    assert_ne!(a.title.agreement, Agreement::Match, "{a:?}");
+    assert!(a.confidence < PLAUSIBLE, "{a:?}");
+}
+
+/// With its authors, a short main title still names the work.
+#[test]
+fn a_short_main_title_beside_its_authors_still_matches() {
+    let mut r = record(
+        &[],
+        "Sapiens: A Brief History of Humankind",
+        &["Yuval Noah Harari"],
+        2014,
+    );
+    r.work.work_type = Some(crate::work::WorkType::Book);
+    let claim = Claim::from_text("Harari, Y. N. (2014). Sapiens. Harper.");
+    let a = assess(&claim, &r);
+    assert_eq!(a.title.agreement, Agreement::Match, "{a:?}");
+}
+
+/// wild-4 #433: the title's opening words, then "…": partly given, not
+/// another title.
+#[test]
+fn a_title_cut_with_an_ellipsis_is_partly_given() {
+    let r = arxiv_preprint(
+        "arXiv:2403.03206",
+        "Scaling Rectified Flow Transformers for High-Resolution Image Synthesis",
+        &["Patrick Esser", "Sumith Kulal", "Andreas Blattmann"],
+        2024,
+    );
+    for cut in ["…", "..."] {
+        let claim = Claim::from_text(format!(
+            "Esser et al., Scaling Rectified Flow Transformers{cut} (Stable Diffusion 3) | \
+             2403.03206 | ICML 2024"
+        ));
+        let a = assess(&claim, &r);
+        assert_eq!(a.title.agreement, Agreement::Partial, "{cut}: {a:?}");
+        assert!(a.confidence >= PLAUSIBLE, "{cut}: {a:?}");
+    }
+    // Two words then "…" are too few to tell.
+    let text = Normalised::new("Scaling Rectified… (Stable Diffusion 3)");
+    assert!(
+        text.title_coverage(
+            "Scaling Rectified Flow Transformers for High-Resolution Image Synthesis"
+        ) < 0.5
+    );
+}
+
+/// holdout-6 #700: a whole title of two words is the title cited, whoever
+/// is named: the same book, its author wrong.
+#[test]
+fn a_whole_two_word_title_found_in_the_text_still_matches() {
+    let mut r = record(
+        &[],
+        "Philosophy of Psychology",
+        &["José Luis Bermúdez"],
+        2004,
+    );
+    r.work.work_type = Some(crate::work::WorkType::Book);
+    let claim = Claim::from_text("Field, G. (2004) Philosophy of Psychology. Routledge.");
+    let a = assess(&claim, &r);
+    assert_eq!(a.title.agreement, Agreement::Match, "{a:?}");
+}

@@ -34,6 +34,14 @@ Fixed:
   does. The identifier now counts as a second field when everything else
   cited agrees; it was held at plausible ("gives too little to confirm
   it"). A title alone, a book's say, still can't verify.
+- A title found in free text only as a word or two is no full match unless
+  the authors, an identifier, the journal or the place say which work it
+  is: "Iceland" of "Iceland: A Peaceful Secession" inside "The History of
+  Iceland", or a one-word title ("13th"). Such a work was reported as the
+  closest, a mismatch ("its authors differs"); now nothing is found.
+- A title's opening words followed by "…" or "..." ("Scaling Rectified
+  Flow Transformers… (Stable Diffusion 3)") partly match the work's title
+  instead of differing from it.
 
 ## 0.38.3
 

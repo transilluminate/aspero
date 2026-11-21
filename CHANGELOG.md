@@ -48,6 +48,49 @@ Fixed:
   Christianization of Iceland: Priests, Power, and Social Change"), so
   the book's own record ranks first.
 
+Fixed:
+
+- A bare ISBN-13 in a reference, without "ISBN" before it, is read as
+  the book's ISBN: 13 digits, hyphens allowed, starting 978 or 979 and
+  with a valid check digit, as models write them in a table's cell
+  ("… | 15th (2020) | 978-1260452310"). ISBN-10s are still read only
+  when labelled. `scan`'s mentions are unchanged: this is read only
+  when a reference is read as a claim.
+- An NBER working paper's number is read as its DOI
+  (`10.3386/w<number>`) when NBER is named beside it ("NBER Working
+  Paper w31113", "NBER Working Paper No. 16449", "NBER WP 9804"), and
+  the reference gives no DOI. A wrong number then finds the other paper
+  it names, instead of the cited title verifying alone (wild-4 #723).
+- A journal's article cited as a working paper ("… NBER Working
+  Paper.", without a number) is another version of the one cited:
+  plausible, as for a preprint, not verified. A record whose venue is
+  a working-paper series is still not read as a preprint server's.
+- The title searched for a free-text reference no citation matcher
+  found leaves out more of what isn't its title: a table row's other
+  cells (its first cell is the title), a byline and year before it
+  ("WHO (2003) Kangaroo Mother Care …"), a name written out before a
+  comma ("Einar Arnórsson, Réttarsaga Alþingis (1945)"), a note in
+  brackets ending it ("(Pearson)", "(2004, in Icelandic)"; one in
+  capitals, such as "(MERS)" or "(JNC 8)", stays), a place and
+  publisher ("Atlanta: Scholars Press, 1998"), and a series' volume
+  ("Writings from the Ancient World 2") after the book's own title; a
+  link ("https://doi.org/…") no longer outranks the title as a
+  sentence. Open Library finds none of these books by the longer
+  query.
+- A model-written list's furniture is no longer read as a reference's
+  title or authors: a label opening it, a trial's or a model's name
+  before the byline ("DAPA-HF: McMurray JJV, …", "BaSICS (Finfer S et
+  al. …", "Aktueller Überblick: S. Pirandola et al. …"), and commentary
+  after the volume and page it cites, in its sentence or a later table
+  cell ("… 39(11):2296-303 | Cluster RCT in Danish players. …"). Such a
+  reference at the work's place, with its authors, was plausible for a
+  title it never gave; it is verified.
+- A journal's series letter is no author's initial: "Physics Letters
+  B", "Physical Review D" or "Journal of Materials Chemistry A" in a
+  reference no longer reads as a family name and an initial, naming
+  someone the record lacks; nor is a model's "Title:" field label a
+  name.
+
 ## 0.38.3
 
 Fixed:

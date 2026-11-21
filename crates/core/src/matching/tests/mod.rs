@@ -23,6 +23,7 @@ mod scoring;
 mod titles;
 mod venue;
 mod versions;
+mod wild4_reading;
 mod written;
 
 fn record(ids: &[&str], title: &str, authors: &[&str], year: i16) -> SourceRecord {

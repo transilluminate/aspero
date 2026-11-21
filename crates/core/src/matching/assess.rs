@@ -12,7 +12,7 @@ use super::caps::{
     PLACED_YEAR_WRONG, PLAUSIBLE, SHORT_TITLE_WORDS, STRANGERS_CAP, UNCORROBORATED_CAP,
     UNPLACED_CAP, VERSION, combine,
 };
-use super::claim::{byline, cites_chapter, cites_edited_book};
+use super::claim::{byline, cites_chapter, cites_edited_book, title_region};
 use super::derivative::{self, WorkKind, record_derivative_kind};
 use super::preprint::{names_preprint, preprint_server, preprint_version_claimed};
 use super::same_work::{id_agreement, same_work_id};
@@ -476,12 +476,15 @@ pub fn assess(claim: &Claim, record: &SourceRecord) -> Assessment {
     // one is a label for it ("Schmidt M, et al. RESP score. Am J Respir
     // Crit Care Med 2014;189:1374").
     let others = authors.score.is_none_or(|s| s < CORROBORATING_AUTHORS);
+    // Not a label it opens with, nor words after its place (a model's
+    // commentary): `claim::title_region`.
     let titled = text.as_ref().is_some_and(|t| {
         let journal = work.container_title.as_deref();
-        t.title_run(&families, journal) >= SHORT_TITLE_WORDS
+        let region = Normalised::new(title_region(&t.raw));
+        region.title_run(&families, journal) >= SHORT_TITLE_WORDS
             || titles::given_title(&t.raw).is_some()
             || (others
-                && written::laid_out(&t.raw)
+                && written::laid_out(&region.raw)
                     .title
                     .is_some_and(|read| Normalised::new(&read).title_run(&families, journal) > 0))
     });

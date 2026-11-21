@@ -93,10 +93,18 @@ impl Claim {
                 ids.push(id);
             }
         }
+        if !ids.iter().any(|id| id.kind() == IdKind::Doi) {
+            ids.extend(nber_paper(&text));
+        }
         if ids.is_empty() {
             ids.extend(bare_arxiv(&text));
         }
         ids.extend(bare_pmid(&text, &ids));
+        for id in bare_isbns(&text) {
+            if !ids.iter().any(|f| same_work_id(f, &id)) {
+                ids.push(id);
+            }
+        }
         Claim {
             ids,
             text: Some(text),
@@ -367,29 +375,60 @@ pub(super) fn byline(
 
 /// A byline without the label a reference may open with, a trial's or a
 /// guideline's ("EMPEROR-Reduced (empagliflozin, n=3,730): Packer M, …",
-/// "HOPE-3: Yusuf S, …"): a few words before a colon, no comma among
-/// them outside brackets, and a name with its initials after it (not a
-/// title's words: "NICE (2010) Delirium: prevention, …").
+/// "HOPE-3: Yusuf S, …", "`BaSICS` (Finfer S et al. …", "Aktueller
+/// Überblick: S. Pirandola et al. …"): see [`label_end`].
 fn unlabelled(byline: &str) -> &str {
-    let Some(colon) = byline.find(": ") else {
-        return byline;
+    &byline[label_end(byline, false)..]
+}
+
+/// Where a reference proper starts after a label it opens with (and a
+/// list's number before it: "2. `BaSICS` (…"): a few words before a colon,
+/// or one before a bracket, no comma among them outside brackets, and a
+/// name with its initials after it ("`McMurray` JJV", "S. Pirandola"), not
+/// a title's words ("NICE (2010) Delirium: prevention, …"). `acronym`
+/// asks the label to start as a trial's or a model's name does, with two
+/// capitals or a digit ("DAPA-HF", "`BaSICS`"), not as a title's words do
+/// ("Deep learning: LeCun Y, …"). 0 without one.
+fn label_end(text: &str, acronym: bool) -> usize {
+    // A list's number: "2. ", "12) ".
+    let digits = text.bytes().take_while(u8::is_ascii_digit).count();
+    let start = match text[digits..].strip_prefix(['.', ')']) {
+        Some(rest) if (1..=3).contains(&digits) && rest.starts_with(' ') => {
+            text.len() - rest.trim_start().len()
+        }
+        _ => 0,
     };
-    let mut after = byline[colon + 2..].split_whitespace();
+    let rest = &text[start..];
+    // The label's end and where the names start: a colon's, else a
+    // bracket's after one word.
+    let (label, names) = match rest.find(": ") {
+        Some(colon) => (&rest[..colon], colon + 2),
+        None => match rest.find(" (") {
+            Some(open) if !rest[..open].contains(char::is_whitespace) => (&rest[..open], open + 2),
+            _ => return 0,
+        },
+    };
+    let mut after = rest[names..].split_whitespace();
     let initials = |t: &str| {
         let t = t.trim_end_matches([',', '.', ';']);
-        (1..=3).contains(&t.chars().count())
+        (1..=3).contains(&t.chars().filter(|c| *c != '.' && *c != '-').count())
             && t.chars().all(|c| c.is_uppercase() || c == '.' || c == '-')
     };
+    let name = |t: &str| {
+        t.starts_with(char::is_uppercase)
+            && t.chars().filter(|c| c.is_alphabetic()).count() > 1
+            && t.chars().any(char::is_lowercase)
+    };
     let named = match (after.next(), after.next()) {
-        (Some(name), Some(next)) => {
-            name.starts_with(char::is_uppercase) && name.chars().count() > 1 && initials(next)
+        (Some(first), Some(next)) => {
+            (name(first) && initials(next))
+                || (initials(first) && first.ends_with('.') && name(next))
         }
         _ => false,
     };
     if !named {
-        return byline;
+        return 0;
     }
-    let label = &byline[..colon];
     let mut depth = 0usize;
     let bare: String = label
         .chars()
@@ -402,10 +441,44 @@ fn unlabelled(byline: &str) -> &str {
             false
         })
         .collect();
-    if bare.contains(',') || bare.split_whitespace().count() > 4 {
-        return byline;
+    let words: Vec<&str> = bare.split_whitespace().collect();
+    let shaped = words.first().is_some_and(|w| {
+        w.chars().filter(|c| c.is_uppercase()).count() >= 2
+            || w.contains(|c: char| c.is_ascii_digit())
+    });
+    if bare.contains(',') || words.is_empty() || words.len() > 4 || (acronym && !shaped) {
+        return 0;
     }
-    &byline[colon + 2..]
+    start + names
+}
+
+/// The stretch of a free-text reference where a title it gives stands:
+/// after a label it opens with ([`label_end`], a trial's or a model's
+/// name: "DAPA-HF: `McMurray` JJV, …"), and before what follows the volume
+/// and page it cites, in its sentence or table's cell (a model's
+/// commentary: "… Am J Sports Med 39(11):2296-303 | Cluster RCT in Danish
+/// players. …"). All of it where it cites no place.
+pub(super) fn title_region(text: &str) -> &str {
+    let from = label_end(text, true);
+    let text = &text[from..];
+    let whole = publication::locator(text);
+    let (Some(volume), Some(page)) = (&whole.volume, &whole.page) else {
+        return text;
+    };
+    let stops = text
+        .match_indices(" | ")
+        .chain(text.match_indices(". "))
+        .chain(text.match_indices('\n'))
+        .map(|(at, _)| at);
+    let mut stops: Vec<usize> = stops.collect();
+    stops.sort_unstable();
+    stops
+        .into_iter()
+        .find(|&at| {
+            let before = publication::locator(&text[..at]);
+            before.volume.as_ref() == Some(volume) && before.page.as_ref() == Some(page)
+        })
+        .map_or(text, |at| &text[..at])
 }
 
 /// The venue a claim cites, to tell a conference by: its container, a
@@ -569,6 +642,92 @@ fn bare_pmid(text: &str, ids: &[WorkId]) -> Option<WorkId> {
         return None;
     };
     format!("pmid:{pmid}").parse().ok()
+}
+
+/// The DOI of the NBER working paper a reference gives by its number, as
+/// economics cites them ("NBER Working Paper w31113", "NBER Working Paper
+/// No. 16449", "NBER WP 9804", "Working Paper 24871 … National Bureau of
+/// Economic Research"): NBER registers each as `10.3386/w<number>`, four
+/// digits at least. Only with NBER named beside it (a working paper's
+/// number is any series' otherwise), and read only when the reference
+/// gives no DOI (one given names the version it cites).
+fn nber_paper(text: &str) -> Option<WorkId> {
+    let tokens: Vec<String> = text
+        .split_whitespace()
+        .map(|t| {
+            t.trim_matches(|c: char| !c.is_alphanumeric())
+                .to_lowercase()
+        })
+        .collect();
+    let t = |i: usize| tokens.get(i).map_or("", String::as_str);
+    let nber_at = |i: usize| {
+        t(i) == "nber"
+            || (i >= 4
+                && (i - 4..=i)
+                    .map(t)
+                    .eq(["national", "bureau", "of", "economic", "research"]))
+    };
+    for (i, token) in tokens.iter().enumerate() {
+        let digits = token.strip_prefix('w').unwrap_or(token);
+        if !(1..=6).contains(&digits.len()) || !digits.bytes().all(|b| b.is_ascii_digit()) {
+            continue;
+        }
+        // Back past "No." or "#" to the series: "Working Paper (Series)",
+        // "Working Papers" or "WP".
+        let mut at = i;
+        if at > 0 && matches!(t(at - 1), "no" | "number" | "nr" | "") {
+            at -= 1;
+        }
+        if at > 0 && t(at - 1) == "series" {
+            at -= 1;
+        }
+        let series = if at > 0 && t(at - 1) == "wp" {
+            at - 1
+        } else if at > 1 && matches!(t(at - 1), "paper" | "papers") && t(at - 2) == "working" {
+            at - 2
+        } else {
+            continue;
+        };
+        // NBER right before the series, or the bureau named after it
+        // ("Working Paper No. 24871. Cambridge, MA: National Bureau …").
+        let named = (series > 0 && nber_at(series - 1)) || (i + 1..i + 12).any(nber_at);
+        let number: u32 = digits.parse().ok()?;
+        if named && number > 0 {
+            return format!("doi:10.3386/w{number:04}").parse().ok();
+        }
+    }
+    None
+}
+
+/// The ISBN-13s a reference gives bare, as models write them in a table's
+/// cell ("… | 15th (2020) | 978-1260452310") or after a note ("ISBN-13
+/// (Dover): 978-0486445687"): a word of its own of 13 digits, hyphens
+/// allowed, with a book prefix (978 or 979) and a valid check digit.
+/// [`crate::id::scan`] reads ISBNs only when labelled, and its mentions
+/// are unchanged; in a reference this shape is a book's number (a phone
+/// number has fewer digits, and another number that starts 978 or 979
+/// passes the check one time in ten). Not an ISBN-10, which looks like
+/// other numbers, nor digits inside a DOI or link
+/// ("10.1017/cbo9781107049963").
+fn bare_isbns(text: &str) -> Vec<WorkId> {
+    let hyphen = |c: char| matches!(c, '-' | '\u{2010}' | '\u{2011}');
+    let mut found: Vec<WorkId> = Vec::new();
+    for word in text.split(|c: char| c.is_whitespace() || c == '|') {
+        let word = word.trim_matches(|c: char| "()[]{}.,;:\"'“”‘’*_".contains(c));
+        let digits = word.chars().filter(char::is_ascii_digit).count();
+        let shaped = digits == 13
+            && word.chars().all(|c| c.is_ascii_digit() || hyphen(c))
+            && word.starts_with(|c: char| c.is_ascii_digit())
+            && word.ends_with(|c: char| c.is_ascii_digit())
+            && !word.contains("--");
+        if shaped
+            && let Ok(id) = WorkId::parse_as(IdKind::Isbn, word)
+            && !found.contains(&id)
+        {
+            found.push(id);
+        }
+    }
+    found
 }
 
 /// The distinct identifiers mentioned in free text (see [`crate::id::scan`]).

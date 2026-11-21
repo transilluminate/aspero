@@ -15,6 +15,7 @@ use super::caps::{
 use super::claim::{byline, cites_chapter, cites_edited_book, title_region};
 use super::derivative::{self, WorkKind, record_derivative_kind};
 use super::preprint::{names_preprint, preprint_server, preprint_version_claimed};
+use super::record_title::record_title;
 use super::same_work::{id_agreement, same_work_id};
 use super::text::{Normalised, content_words, words};
 use super::titles::{self, title_similarity, unmarked};
@@ -59,7 +60,16 @@ pub fn assess(claim: &Claim, record: &SourceRecord) -> Assessment {
     });
     // A placeholder record's "title" may be a URL (a registration agency's
     // notice page): no title at all.
-    let work_title = work.title.clone().filter(|t| !is_url(t));
+    // Markup and a record's furniture the citation doesn't give taken out
+    // ("tt¯H", ", 14th Edition", "(Verso Classics, 10)").
+    let work_title = work.title.as_deref().filter(|t| !is_url(t)).map(|t| {
+        let cited = claim.title.as_deref().or(claim.text.as_deref());
+        record_title(
+            t,
+            cited.unwrap_or_default(),
+            work.work_type == Some(WorkType::Book),
+        )
+    });
     // A claimed identifier names the work, even beside another (a PMID)
     // that is another's: identified, though not confirmed (#148).
     let ids = id_agreement(&claim.ids, &record.ids);
@@ -373,7 +383,7 @@ pub fn assess(claim: &Claim, record: &SourceRecord) -> Assessment {
                         other_journal(cited, actual)
                     }) || (journals.len() > 1
                         && publication::significant(cited).len() == 1
-                        && !same_journal(cited, actual))
+                        && !publication::names_journal(cited, actual))
                 }) =>
         {
             FieldCheck::exact(false)

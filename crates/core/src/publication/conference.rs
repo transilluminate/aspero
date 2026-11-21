@@ -43,6 +43,13 @@ const CONFERENCES: &[(&[&str], &[&str])] = &[
             "linguistics",
         ],
     ),
+    // As OpenAlex names its proceedings: "Proceedings of the conference -
+    // Association for Computational Linguistics. Meeting" (not a
+    // chapter's: NAACL's, EACL's).
+    (
+        &["acl"],
+        &["association", "computational", "linguistics", "meeting"],
+    ),
     (
         &["emnlp"],
         &["empirical", "methods", "natural", "language", "processing"],
@@ -176,12 +183,20 @@ pub(crate) fn conferences(name: &str) -> Vec<usize> {
         .map(str::to_owned)
         .collect();
     let named = |phrase: &[&str]| words.windows(phrase.len()).any(|run| run == phrase);
-    CONFERENCES
+    // A conference named two ways (ACL's) is one: its first entry's.
+    let mut found: Vec<usize> = CONFERENCES
         .iter()
         .enumerate()
         .filter(|(_, (acronyms, phrase))| acronyms.iter().any(|a| acronym(a)) || named(phrase))
-        .map(|(i, _)| i)
-        .collect()
+        .map(|(i, (acronyms, _))| {
+            CONFERENCES
+                .iter()
+                .position(|(first, _)| first[0] == acronyms[0])
+                .unwrap_or(i)
+        })
+        .collect();
+    found.dedup();
+    found
 }
 
 /// Whether the acronym at `tokens[i]` names who holds a meeting rather
@@ -636,6 +651,31 @@ mod tests {
         assert_eq!(
             named("Proceedings of the 2019 CHI Conference on Human Factors in Computing Systems"),
             ["chi"]
+        );
+        // OpenAlex's name for ACL's proceedings (wild-4 #469), not a
+        // chapter's.
+        assert!(
+            named(
+                "Proceedings of the conference - Association for Computational Linguistics. \
+                 Meeting"
+            )
+            .contains(&"acl")
+        );
+        assert_eq!(
+            conferences(
+                "Proceedings of the conference - Association for Computational Linguistics. \
+                 Meeting"
+            ),
+            conferences(
+                "Proceedings of the Annual Meeting of the Association for Computational Linguistics"
+            )
+        );
+        assert!(
+            !named(
+                "Proceedings of the 2019 Conference of the North American Chapter of the \
+                 Association for Computational Linguistics: Human Language Technologies"
+            )
+            .contains(&"acl")
         );
         // Words that are acronyms too, not in capitals, name none.
         assert!(named("Chi H, Acl reconstruction outcomes. Am J Sports Med.").is_empty());

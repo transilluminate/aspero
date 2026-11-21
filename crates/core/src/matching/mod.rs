@@ -42,6 +42,7 @@ mod caps;
 mod claim;
 mod derivative;
 mod preprint;
+mod record_title;
 mod same_work;
 mod text;
 mod titles;

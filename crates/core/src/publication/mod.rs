@@ -31,6 +31,7 @@ pub(crate) use bibtex::{bibtex_field, delatex};
 pub(crate) use cited_journal::{cited_journal, cited_journals};
 pub(crate) use conference::{conferences, meeting_name, proceedings, proceedings_agree};
 pub(crate) use journal::{
-    journal_in, journal_word, other_journal_read, section_of, significant, sister_journal_as,
+    journal_in, journal_word, names_journal, other_journal_read, section_of, significant,
+    sister_journal_as,
 };
 pub(crate) use locator::{Locator, cites_issue, is_month, locator};

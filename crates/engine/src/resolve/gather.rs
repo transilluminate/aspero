@@ -114,28 +114,13 @@ impl Engine {
         // cleaned-up keywords) on every keyword provider. Results are added
         // in provider-then-title order, so merging stays deterministic.
         titles = distinct(titles);
-        // No hit pointed to the title (a conference paper without a DOI, a
-        // book Crossref lacks): the title the reference's shape suggests,
-        // else the cleaned-up keywords (a bare title ranks far better). So
-        // too, first, when the hits point only to part of it ("graph
-        // convolutional networks" of "Semi-Supervised Classification with
-        // Graph Convolutional Networks") or past it, to other words the
-        // reference shares with them (a publisher's: "addison wesley
-        // longman").
-        // A part only of a title the reference marks as one (BibTeX's, a
-        // quoted one): a title guessed from its sentences may be the part.
         if claim.title.is_none()
             && let Some(text) = claim.text.as_deref()
-            && let Some(title) = matching::probable_title(text)
         {
-            let given = matching::given_title(text).is_some();
-            if titles.iter().all(|t| match beside_title(t, &title, text) {
-                Beside::Part => given,
-                Beside::Apart | Beside::Longer => true,
-                Beside::Same => false,
-            }) {
-                titles.insert(0, title);
-            }
+            // Only a reference that a lookup or its place can't find
+            // (a book's) is worth a search beside a fragment.
+            let bookish = claim.ids.is_empty() && claim.place().is_none();
+            titles = with_guess(titles, text, bookish);
         }
         titles.truncate(MAX_TITLE_SEARCHES);
         let keywords = titles.is_empty();
@@ -240,6 +225,58 @@ impl Engine {
     }
 }
 
+/// `titles`, the runs a matcher's hits share with `text` (distinct, in hit
+/// order), with the title `text`'s shape suggests, where it's wanted:
+/// - first, when no hit pointed to it (a conference paper without a DOI,
+///   a book Crossref lacks), or the hits point past it, to other words the
+///   reference shares with them (a publisher's: "addison wesley
+///   longman"), or only to part of a title the reference marks as one
+///   (BibTeX's, a quoted one: "graph convolutional networks" of
+///   "Semi-Supervised Classification with Graph Convolutional Networks").
+///   A part of a title guessed from its sentences may be the title;
+/// - beside a hit's only run when that is a fragment of it, under half its
+///   words ("of the british army" of "A Contribution to the Sanitary
+///   History of the British Army …", a one-word review's "Wilding" of
+///   "Wilding: The return of nature to a British farm"): in the slot no
+///   other run takes, so nothing searched before is put out; and only for
+///   a reference with no identifier or place to look it up by
+///   (`bookish`), as a book's: otherwise the search finds what those
+///   already do, or nothing (an invented article's).
+///
+/// A hit's run that is the guess itself is searched however far down the
+/// hits it came, before runs that only hold it and run on.
+fn with_guess(mut titles: Vec<String>, text: &str, bookish: bool) -> Vec<String> {
+    let Some(title) = matching::probable_title(text) else {
+        return titles;
+    };
+    let given = matching::given_title(text).is_some();
+    let guess = matching::normalise(&title);
+    let equal = titles.iter().position(|t| matching::normalise(t) == guess);
+    if let Some(at) = equal {
+        // Cut, behind runs that only hold it and run on ("pidgin
+        // and creole linguistics oxford", "1997 pidgin and creole
+        // linguistics"): first, in their place.
+        if at >= MAX_TITLE_SEARCHES
+            && titles[..at]
+                .iter()
+                .all(|t| beside_title(t, &title, text) == Beside::Longer)
+        {
+            let found = titles.remove(at);
+            titles.insert(0, found);
+        }
+    } else if titles.iter().all(|t| match beside_title(t, &title, text) {
+        Beside::Part => given,
+        Beside::Apart | Beside::Longer => true,
+        Beside::Same => false,
+    }) || (bookish
+        && titles.len() < MAX_TITLE_SEARCHES
+        && titles.iter().all(|t| fragment(t, &title, text)))
+    {
+        titles.insert(0, title);
+    }
+    titles
+}
+
 /// How a title a matcher's hit shares with the reference stands to the
 /// title the reference's shape suggests.
 #[derive(Debug, PartialEq, Eq)]
@@ -302,6 +339,43 @@ fn beside_title(shared: &str, probable: &str, reference: &str) -> Beside {
     }
 }
 
+/// Joining words, which a fragment of a title may be all of ("of the").
+const JOINING: &[&str] = &[
+    "a", "an", "the", "of", "in", "on", "for", "and", "or", "to", "with", "by", "at", "from",
+];
+
+/// Whether `shared`, a title a matcher's hit shares with `reference`,
+/// holds under half of `probable`'s own words (joining words aside) where
+/// both stand in it: a fragment of the title the reference's shape
+/// suggests, not that title found. Not when either can't be placed.
+fn fragment(shared: &str, probable: &str, reference: &str) -> bool {
+    let words = |s: &str| -> Vec<String> {
+        matching::normalise(s)
+            .split(' ')
+            .filter(|w| !w.is_empty())
+            .map(str::to_owned)
+            .collect()
+    };
+    let (text, shared, probable) = (words(reference), words(shared), words(probable));
+    let at = |run: &[String]| {
+        (!run.is_empty())
+            .then(|| text.windows(run.len()).position(|w| w == run))
+            .flatten()
+            .map(|i| i..i + run.len())
+    };
+    let (Some(s), Some(p)) = (at(&shared), at(&probable)) else {
+        return false;
+    };
+    let own = |range: std::ops::Range<usize>| {
+        text[range]
+            .iter()
+            .filter(|w| !JOINING.contains(&w.as_str()))
+            .count()
+    };
+    let overlap = s.start.max(p.start)..s.end.min(p.end).max(s.start.max(p.start));
+    own(overlap) * 2 < own(p)
+}
+
 /// Titles with duplicates (by normalised form) removed, order kept.
 fn distinct(titles: Vec<String>) -> Vec<String> {
     let mut seen = Vec::new();
@@ -354,6 +428,75 @@ mod tests {
             ),
             Beside::Same
         );
+    }
+
+    #[test]
+    fn the_guess_is_searched_where_a_hit_points_to_a_fragment_of_it() {
+        let owned = |v: &[&str]| v.iter().map(|s| (*s).to_owned()).collect::<Vec<_>>();
+        // wild-4 #799: a one-word review's title, alone.
+        let tree = "Tree, I. (2018). Wilding: The return of nature to a British farm. Picador.";
+        assert_eq!(
+            with_guess(owned(&["wilding"]), tree, true),
+            owned(&["Wilding: The return of nature to a British farm", "wilding"])
+        );
+        // Not for an article cited by its place.
+        assert_eq!(
+            with_guess(owned(&["wilding"]), tree, false),
+            owned(&["wilding"])
+        );
+        // Beside two runs, nothing put out.
+        assert_eq!(
+            with_guess(owned(&["wilding", "british farm picador"]), tree, true),
+            owned(&["wilding", "british farm picador"])
+        );
+        // wild-4 #574: the guess itself, third, behind runs that hold it
+        // and run on.
+        let pidgin = "Mühlhäusler, Peter (1986/1997). Pidgin and Creole Linguistics. Oxford: \
+                      Blackwell (2nd ed. London: Battlebridge, 1997).";
+        let runs = owned(&[
+            "pidgin and creole linguistics oxford",
+            "1997 pidgin and creole linguistics",
+            "pidgin and creole linguistics",
+        ]);
+        assert_eq!(
+            with_guess(runs, pidgin, true)[0],
+            "pidgin and creole linguistics"
+        );
+        // Not behind a run of the title's own: the guess may be wrong
+        // (wild-3 #555's is its publisher).
+        let poole = "Poole, Robert, ed. \"Peterloo\": The English Uprising. Oxford: Oxford \
+                     University Press, 2019.";
+        let runs = owned(&[
+            "peterloo the english uprising oxford oxford university press 2019",
+            "peterloo the english uprising",
+            "oxford oxford university press 2019",
+        ]);
+        assert_eq!(with_guess(runs.clone(), poole, true), runs);
+    }
+
+    #[test]
+    fn a_hits_fragment_of_the_guessed_title_is_searched_beside_it() {
+        // wild-4 #799, #231, #230: a one-word review's title, a phrase of
+        // the title, a run straddling the title's end and the publisher.
+        let tree = "Tree, I. (2018). Wilding: The return of nature to a British farm. Picador.";
+        let guess = "Wilding: The return of nature to a British farm";
+        assert_eq!(beside_title("wilding", guess, tree), Beside::Part);
+        assert!(fragment("wilding", guess, tree));
+        let army = "Notes on Matters Affecting the Health, Efficiency, and Hospital \
+                    Administration of the British Army. London: Harrison, 1858.";
+        let guess = "Notes on Matters Affecting the Health, Efficiency, and Hospital \
+                     Administration of the British Army";
+        assert!(fragment("of the british army london harrison", guess, army));
+        // Most of the guess is the title found: the guess may run on past
+        // it.
+        let kitaw = "Kitaw, Y. (2006). The evolution of public health in Ethiopia 1950-2000.";
+        assert!(!fragment(
+            "the evolution of public health in ethiopia",
+            "The evolution of public health in Ethiopia 1950-2000",
+            kitaw
+        ));
+        // Unplaced, no fragment.
+        assert!(!fragment("graph networks", guess, army));
     }
 
     #[test]

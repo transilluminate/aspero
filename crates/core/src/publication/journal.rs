@@ -9,9 +9,41 @@ pub(super) const JOURNAL_STOPWORDS: &[&str] = &[
     "fuer", "et", "y", "di", "del", "della", "voor",
 ];
 
+/// A journal's names, where a record gives several apart by a slash: one
+/// name twice (OpenAlex's "Physical review. D/Physical review. D."), or
+/// in two languages. Each of two words or more, else the slash is the
+/// name's own ("AIDS/HIV Research").
+fn names(name: &str) -> Vec<&str> {
+    let parts: Vec<&str> = name.split('/').map(str::trim).collect();
+    if parts.len() > 1 && parts.iter().all(|p| significant(p).len() > 1) {
+        parts
+    } else {
+        vec![name]
+    }
+}
+
+/// `test` over every pairing of `a`'s and `b`'s [`names`], when either
+/// has several: whether it holds for `all` of them, else for any. `None`
+/// for two names of one each.
+fn over_names(a: &str, b: &str, test: impl Fn(&str, &str) -> bool, all: bool) -> Option<bool> {
+    let (a, b) = (names(a), names(b));
+    if a.len() == 1 && b.len() == 1 {
+        return None;
+    }
+    let mut pairs = a.iter().flat_map(|x| b.iter().map(move |y| (*x, *y)));
+    Some(if all {
+        pairs.all(|(x, y)| test(x, y))
+    } else {
+        pairs.any(|(x, y)| test(x, y))
+    })
+}
+
 /// Whether two journal names are the same journal: equal, or one
 /// abbreviates the other.
 pub fn same_journal(a: &str, b: &str) -> bool {
+    if let Some(any) = over_names(a, b, same_journal, false) {
+        return any;
+    }
     let (a, b) = (significant(a), significant(b));
     !a.is_empty() && (a == b || abbreviates(&a, &b) || abbreviates(&b, &a))
 }
@@ -38,6 +70,9 @@ pub(crate) fn other_journal_read(cited: &str, actual: &str) -> bool {
 }
 
 fn other_journal_as(cited: &str, actual: &str, read: bool) -> bool {
+    if let Some(all) = over_names(cited, actual, |c, a| other_journal_as(c, a, read), true) {
+        return all;
+    }
     let (c, a) = (significant(cited), significant(actual));
     if c.is_empty() || a.is_empty() || same_journal(cited, actual) {
         return false;
@@ -123,6 +158,9 @@ pub fn sister_journal(cited: &str, actual: &str) -> bool {
 /// "IEEE Trans. Inform. Theory."), so the record's name ending in it is no
 /// sister ("Energy" for Applied Energy goes untold).
 pub(crate) fn sister_journal_as(cited: &str, actual: &str, read: bool) -> bool {
+    if let Some(all) = over_names(cited, actual, |c, a| sister_journal_as(c, a, read), true) {
+        return all;
+    }
     let readings: Vec<&str> = if read {
         std::iter::once(cited)
             .chain(cited.match_indices(". ").map(|(i, _)| &cited[i + 2..]))
@@ -228,6 +266,10 @@ const SECTION_WORDS: &[&str] = &[
     "supplements",
     "suppl",
     "supp",
+    // The American Economic Review's May issue: "AER: Papers &
+    // Proceedings".
+    "papers",
+    "proceedings",
 ];
 
 /// Whether `cited` names a section of `actual`: its name with section
@@ -235,6 +277,9 @@ const SECTION_WORDS: &[&str] = &[
 /// The Astrophysical Journal, whose letters its volumes numbered until
 /// 2010). Only at the record's own volume and page is it the journal.
 pub(crate) fn section_of(cited: &str, actual: &str) -> bool {
+    if let Some(any) = over_names(cited, actual, section_of, false) {
+        return any;
+    }
     let (c, a) = (significant(cited), significant(actual));
     let own_c = distinguishing(&c, &a);
     !own_c.is_empty()
@@ -361,6 +406,9 @@ fn loosely_abbreviates(short: &str, full: &str) -> bool {
 /// not any word with its letters ("mice" for "Medicine"), and a name's
 /// initials ("SR", "N") are not a journal's.
 pub(crate) fn journal_in(words: &[String], journal: &str) -> bool {
+    if let [_, _, ..] = &names(journal)[..] {
+        return names(journal).iter().any(|name| journal_in(words, name));
+    }
     let full = significant(journal);
     if full.is_empty() {
         return false;
@@ -409,7 +457,7 @@ pub(crate) fn significant(name: &str) -> Vec<String> {
 /// `short` abbreviates `full` word by word, or is its initials.
 fn abbreviates(short: &[String], full: &[String]) -> bool {
     match short {
-        [one] if full.len() > 1 => is_initials(one, full),
+        [one] if full.len() > 1 => is_initials(one, full) || loose_initials(one, full),
         _ => {
             short.len() == full.len() && short.iter().zip(full).all(|(s, f)| abbreviates_word(s, f))
         }
@@ -425,6 +473,37 @@ fn abbreviates_word(short: &str, full: &str) -> bool {
 
 fn is_initials(word: &str, full: &[String]) -> bool {
     word.chars().count() == full.len() && word.chars().zip(full).all(|(c, f)| f.starts_with(c))
+}
+
+/// Whether `word`, of four letters or more, is `full`'s initials written
+/// loosely: each word's first letter or two, in order ("TREE" for
+/// "Trends in Ecology & Evolution"). Only as a cited journal's whole
+/// name: as any word of a reference ("tree") it would name too much.
+fn loose_initials(word: &str, full: &[String]) -> bool {
+    fn spelt(word: &[char], full: &[String]) -> bool {
+        match full {
+            [] => word.is_empty(),
+            [first, rest @ ..] => (1..=2.min(word.len())).any(|n| {
+                first.chars().take(n).eq(word[..n].iter().copied()) && spelt(&word[n..], rest)
+            }),
+        }
+    }
+    let word: Vec<char> = word.chars().collect();
+    word.len() >= 4 && full.len() >= 2 && word.len() > full.len() && spelt(&word, full)
+}
+
+/// Whether `cited`, read as one word of a reference's ("PRD"), names the
+/// journal `actual`: [`same_journal`], or the initials of a run of its
+/// words ("PRD" of "Physical Review D: Particles, Fields, Gravitation
+/// and Cosmology").
+pub(crate) fn names_journal(cited: &str, actual: &str) -> bool {
+    same_journal(cited, actual)
+        || match &significant(cited)[..] {
+            [one] => names(actual)
+                .iter()
+                .any(|name| initials_of_run(one, &significant(name)).is_some_and(|r| r.len() > 1)),
+            _ => false,
+        }
 }
 
 #[cfg(test)]
@@ -600,5 +679,35 @@ mod tests {
             assert!(!other_journal(cited, actual), "{cited} ~ {actual}");
             assert!(!sister_journal(cited, actual), "{cited} ~ {actual}");
         }
+    }
+
+    #[test]
+    fn a_journals_names_initials_and_sections() {
+        // wild-4 #377: OpenAlex's name doubled over a slash.
+        let prd = "Physical review. D/Physical review. D.";
+        assert!(same_journal("PRD", prd));
+        assert!(same_journal("Phys. Rev. D", prd));
+        assert!(!other_journal("PRD", prd));
+        assert!(journal_in(&["phys".into(), "rev".into(), "d".into()], prd));
+        assert!(other_journal("Physical Review Letters", prd));
+        // A slash of the name's own is no second name.
+        assert_eq!(names("AIDS/HIV Research"), ["AIDS/HIV Research"]);
+        // The initials of a run of its words, as one word read.
+        let full = "Physical Review D: Particles, Fields, Gravitation and Cosmology";
+        assert!(names_journal("PRD", full));
+        assert!(!names_journal("PRL", full));
+        // wild-4 #595: loose initials, a word's first letter or two.
+        let tree = "Trends in Ecology & Evolution";
+        assert!(same_journal("TREE", tree));
+        assert!(!other_journal("TREE", tree));
+        assert!(!same_journal("Neuron", "Neuro-Oncology"));
+        assert!(!same_journal("TRE", tree));
+        // As any word of a reference, only strictly.
+        assert!(!journal_in(&["tree".into()], tree));
+        // wild-4 #748: the American Economic Review's May issue.
+        assert!(section_of(
+            "American Economic Review: Papers & Proceedings",
+            "American Economic Review"
+        ));
     }
 }

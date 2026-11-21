@@ -91,6 +91,39 @@ Fixed:
   someone the record lacks; nor is a model's "Title:" field label a
   name.
 
+Fixed:
+
+- A record's title is compared without the markup and furniture a
+  provider writes into it, where the citation doesn't give them too:
+  tags (`<em>…</em>`), math markup (`$$\sqrt{s}=13\,\text {Te}\text
+  {V} $$`) and an overbar ("tt¯H") read as the letters they mark; an
+  edition (", 14th Edition"), a code in brackets ("(MPB-35)"), a
+  library's statement of who wrote it ("/ Elaine N. Marieb, Katja
+  Hoehn") and a book's series in brackets ("(Verso Classics, 10)") are
+  left out. Such books and papers were found but only partly matched, or
+  lost to another work (wild-4 #319, #343, #367, #369, #455, #540, #543,
+  #804; wild-3 #761).
+- Journals told in more of the ways they're named: OpenAlex's name
+  doubled over a slash ("Physical review. D/Physical review. D.") is
+  read as each of its names, so "PRD" is Physical Review D; one word
+  cited that is the initials of a run of the journal's words ("PRD" of
+  "Physical Review D: Particles, Fields, …") is no other journal; an
+  acronym of four letters or more written with each word's first letter
+  or two ("TREE" for Trends in Ecology & Evolution) is the journal; "AER:
+  Papers & Proceedings" at the American Economic Review's own volume and
+  page is that journal; and OpenAlex's name for ACL's proceedings
+  ("Proceedings of the conference - Association for Computational
+  Linguistics. Meeting") is ACL's (wild-4 #377, #382, #469, #485, #595,
+  #748; wild-2 #790).
+- A book's own title, as its reference's shape suggests, is searched
+  beside a citation matcher's hit that shares only a fragment of it (a
+  one-word review titled "Wilding", for "Wilding: The return of nature
+  to a British farm"), when that hit is the only pointer and the
+  reference has no identifier or volume and page to look it up by: one
+  more title search for such references. A hit sharing exactly that
+  title is searched first, though it came third behind hits sharing it
+  and more (wild-4 #574).
+
 ## 0.38.3
 
 Fixed:

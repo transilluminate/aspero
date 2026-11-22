@@ -73,6 +73,9 @@ fn other_journal_as(cited: &str, actual: &str, read: bool) -> bool {
     if let Some(all) = over_names(cited, actual, |c, a| other_journal_as(c, a, read), true) {
         return all;
     }
+    if initials_head(cited, actual) {
+        return false;
+    }
     let (c, a) = (significant(cited), significant(actual));
     if c.is_empty() || a.is_empty() || same_journal(cited, actual) {
         return false;
@@ -161,6 +164,9 @@ pub(crate) fn sister_journal_as(cited: &str, actual: &str, read: bool) -> bool {
     if let Some(all) = over_names(cited, actual, |c, a| sister_journal_as(c, a, read), true) {
         return all;
     }
+    if initials_head(cited, actual) {
+        return false;
+    }
     let readings: Vec<&str> = if read {
         std::iter::once(cited)
             .chain(cited.match_indices(". ").map(|(i, _)| &cited[i + 2..]))
@@ -173,6 +179,23 @@ pub(crate) fn sister_journal_as(cited: &str, actual: &str, read: bool) -> bool {
             && main_name(actual).is_none_or(|main| sister_names(cited, main, read))
             && main_name(cited).is_none_or(|main| sister_names(main, actual, read))
     })
+}
+
+/// Whether `cited` opens with an acronym, before a colon, that is
+/// `actual`'s initials: a journal renamed around its acronym ("OTJR:
+/// Occupation, Participation and Health", formerly "The Occupational
+/// Therapy Journal of Research").
+fn initials_head(cited: &str, actual: &str) -> bool {
+    let Some((head, _)) = cited.split_once(':') else {
+        return false;
+    };
+    let head = head.trim();
+    let full = significant(actual);
+    head.chars().count() >= 3
+        && head.chars().all(|c| c.is_ascii_uppercase())
+        && full.len() >= 3
+        && (is_initials(&head.to_ascii_lowercase(), &full)
+            || loose_initials(&head.to_ascii_lowercase(), &full))
 }
 
 /// A journal's name before a subtitle that describes it, if it has one:
@@ -254,8 +277,40 @@ fn sister_names(cited: &str, actual: &str, read: bool) -> bool {
     if read && own_c.is_empty() && own_a.iter().all(|&i| i < shared[0]) {
         return false;
     }
+    // A society's acronym before the journal's own name, which its
+    // abbreviation leaves out: "J Wireless Com Network" for the "EURASIP
+    // Journal on Wireless Communications and Networking", "Trans Inf
+    // Theory" for "IEEE Transactions on …" (not "Oncology" for JAMA
+    // Oncology: the name kept begins with the journal's form).
+    let society = unbracketed(actual)
+        .split_whitespace()
+        .next()
+        .is_some_and(|w| w.len() >= 3 && w.chars().all(|ch| ch.is_ascii_uppercase()));
+    if society
+        && own_c.is_empty()
+        && own_a == [0]
+        && a.get(1).is_some_and(|form| {
+            FORM_WORDS.contains(&form.as_str()) && c.first().is_some_and(|w| pair(w, form))
+        })
+    {
+        return false;
+    }
     !(own_c.is_empty() && own_a.is_empty())
 }
+
+/// Words a journal's name begins with to say what form it takes.
+const FORM_WORDS: &[&str] = &[
+    "journal",
+    "transactions",
+    "proceedings",
+    "letters",
+    "annals",
+    "archives",
+    "reviews",
+    "review",
+    "reports",
+    "bulletin",
+];
 
 /// Words naming a section a journal may number in its own volumes.
 const SECTION_WORDS: &[&str] = &[
@@ -617,6 +672,10 @@ mod tests {
                 "International Journal of Nursing Studies",
             ),
             ("Circulation", "Circulation: Heart Failure"),
+            // A journal's name with its form left out (holdout-5 #750),
+            // or a family's brand: another journal.
+            ("Hand Therapy", "Journal of Hand Therapy"),
+            ("Oncology", "JAMA Oncology"),
             // A word with a name's consonants isn't its abbreviation.
             ("BMJ Open Gastroenterology", "Gut"),
         ] {
@@ -675,6 +734,20 @@ mod tests {
             ("Science", "Science (New York, N.Y.)"),
             ("Lancet Infect Dis", "The Lancet Infectious Diseases"),
             ("", "The Lancet"),
+            // Renamed around its acronym (wild-3 #137).
+            (
+                "OTJR: Occupation, Participation and Health",
+                "The Occupational Therapy Journal of Research",
+            ),
+            // A society's acronym left out (holdout-2 #673).
+            (
+                "J Wireless Com Network",
+                "EURASIP Journal on Wireless Communications and Networking",
+            ),
+            (
+                "Trans Inf Theory",
+                "IEEE Transactions on Information Theory",
+            ),
         ] {
             assert!(!other_journal(cited, actual), "{cited} ~ {actual}");
             assert!(!sister_journal(cited, actual), "{cited} ~ {actual}");

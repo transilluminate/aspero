@@ -359,6 +359,12 @@ fn read_journal(tokens: &[&str], end: usize, dotted: bool, after: After) -> Opti
     }];
     // What ended the name: a closing quote (true) or a stop (false).
     let mut ended = None;
+    // Words with a comma, as a subtitle after a colon lists them ("Journal
+    // of Experimental Psychology: Learning, Memory, and Cognition"): kept
+    // only if the colon comes.
+    let mut listed = false;
+    // A list's "and" ("…, Memory, and Cognition"), read already.
+    let mut joined = false;
     while k > 0 {
         let t = tokens[k - 1];
         let stopped = t.strip_suffix('.');
@@ -377,6 +383,17 @@ fn read_journal(tokens: &[&str], end: usize, dotted: bool, after: After) -> Opti
                 return None;
             }
         } else if name_word(t) || colon_name(t) {
+            if colon_name(t) {
+                listed = false;
+            }
+            joined |= t == "and" || t == "&";
+            words.push(t);
+        } else if let Some(w) = t
+            .strip_suffix(',')
+            .filter(|w| joined && ((name_word(w) && capitalised(w)) || colon_name(w)))
+        {
+            // The colon compacted into the word after it: "Psychology:Learning,".
+            listed = !colon_name(w);
             words.push(t);
         } else if sentence_end(t) {
             // "Int. J. Care Injured": a stop inside a dotted name.
@@ -395,6 +412,9 @@ fn read_journal(tokens: &[&str], end: usize, dotted: bool, after: After) -> Opti
             return None;
         }
         k -= 1;
+    }
+    if listed {
+        return None;
     }
     let follows = match after {
         After::Anything => true,
@@ -501,6 +521,14 @@ mod tests {
             (
                 "LeCun Y, Bengio Y, Hinton G. Deep learning. Nature 521, 436–444 (2015).",
                 "Nature",
+            ),
+            // A subtitle after a colon, its words listed with commas
+            // (holdout-5 #784).
+            (
+                "Kulkarni, M., & Hannula, D. E. (2024). Control of Memory Retrieval Alters \
+                 Memory-Based Eye Movements. Journal of Experimental Psychology: Learning, \
+                 Memory, and Cognition, 50(8), 1199–1219.",
+                "Journal of Experimental Psychology: Learning, Memory, and Cognition",
             ),
             ("Injury 47 (2016) 797–804", "Injury"),
             (
@@ -833,6 +861,10 @@ mod tests {
             "Smith J. Some title. Nature.",
             "Smith J. Growth in Cell Cultures (2020 edition).",
             "Ji J, Chen W. Mitigating Deceptive Alignment via Self-Monitoring. 2025. arXiv:2505.18807",
+            // Words listed with commas, after no colon: no name's.
+            "Smith J. Title. Learning, Memory, and Cognition, 50(8), 1199–1219.",
+            // Nor a publisher after its place (wild-4 #841).
+            "———. Essence of Decision: Explaining the Cuban Missile Crisis. Boston: Little, Brown, 1971.",
         ] {
             assert_eq!(cited_journal(text), None, "{text}");
         }

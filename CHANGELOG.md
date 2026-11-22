@@ -27,6 +27,49 @@ Fixed:
   text, an author, a title or a search tree's term now goes to DataCite as
   a space, which it splits words at anyway.
 
+- A journal read from a reference right after the work's title is taken
+  whole, not as the record's name cut short, so a sister journal named
+  there is another journal: "Hand Therapy" for the Journal of Hand Therapy,
+  "Healthcare" for the International Journal of Environmental Research and
+  Public Health (holdout-5 `w:sister-journal`). Plausible, the journal
+  named.
+- A preprint's DOI cited with its journal version's name and place
+  verified when the journal had a subtitle listing words with commas
+  ("… Journal of Experimental Psychology: Learning, Memory, and Cognition,
+  50(8), 1199–1219. https://doi.org/10.31234/osf.io/q4fvs"; holdout-5
+  `w:preprint-as-journal`), which was not read as a journal, or when the
+  merged record of the two gave no volume. Such a name is read, and a
+  record named in a journal is placed there: plausible, the preprint
+  server named. A journal renamed around its acronym, cited by its new
+  name ("OTJR: Occupation, Participation and Health" for The Occupational
+  Therapy Journal of Research), is still the record's.
+- A preprint cited with its journal version's title, a subtitle added and
+  an article left out ("Quantifying Online News Media Coverage of the
+  COVID-19 Pandemic: Text Mining Study and Resource" for "Quantifying the
+  online news media coverage of the COVID-19 pandemic"; holdout-6
+  `w:journal-as-preprint`), verified: the title was only found word for
+  word. It is now found with an article given or left out, and the words
+  added are another title's: plausible, the title named.
+- A paper cited at a sister conference verified when the conference's
+  acronym could be spelt from the record's proceedings with its
+  publisher's initial ("ICC" for the "IEEE Global Communications
+  Conference"; holdout-6 `w:wrong-conference`), or when the meeting was
+  named only by its society (SIGCOMM for an Internet Measurement
+  Conference paper; holdout-5). A publisher's name gives an acronym no
+  letter, and SIGCOMM and IMC are now told by name: plausible, the venue
+  named. A proceedings' own record, its title the venue a reference names
+  and cited at a page, is no longer offered as the paper.
+- A Cochrane review's versions are told apart by what a citation gives
+  (holdout-5 and holdout-6 `w:cochrane-old-version`). A superseded
+  version's record merged with its newer version's (OpenAlex's) no longer
+  takes the newer version's year as its own when its own DOI is cited, and
+  a newer version's record, which names the version it supersedes, cited
+  with another of its authors first (the earlier version's byline) is
+  plausible, and so is one cited by the identifier of the version it
+  supersedes, though a merged record carries both (its identifier named).
+  What the records of one version say of the versions before and after
+  it is weighed whichever record is kept.
+
 ## 0.39.2
 
 Fixed:

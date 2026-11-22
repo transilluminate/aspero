@@ -279,6 +279,52 @@ fn reprints_and_versions_cited_with_another_year_are_plausible() {
 }
 
 #[test]
+fn a_preprint_cited_as_its_journal_version_without_a_volume_is_another_version() {
+    // holdout-5 #784: OpenAlex's record of the journal's article, merged
+    // with the PsyArXiv preprint, names its journal but no volume; cited
+    // with the journal's place and the preprint's DOI.
+    let mut record = article(
+        "Control of memory retrieval alters memory-based eye movements",
+        &[
+            "Mrinmayi Kulkarni",
+            "Allison E. Nickel",
+            "Greta N. Minor",
+            "Deborah E. Hannula",
+        ],
+        2024,
+        (
+            "Journal of Experimental Psychology Learning Memory and Cognition",
+            "50",
+            "1199",
+        ),
+    );
+    record.work.volume = None;
+    record.work.page = None;
+    record.ids = vec![
+        "doi:10.1037/xlm0001321".parse().unwrap(),
+        "doi:10.31234/osf.io/q4fvs".parse().unwrap(),
+    ];
+    let cited = |doi: &str| {
+        format!(
+            "Kulkarni, M., Nickel, A. E., Minor, G., & Hannula, D. E. (2024). Control of Memory \
+             Retrieval Alters Memory-Based Eye Movements. Journal of Experimental Psychology: \
+             Learning, Memory, and Cognition, 50(8), 1199–1219. https://doi.org/{doi}"
+        )
+    };
+    let claim = Claim::from_text(cited("10.31234/osf.io/q4fvs"));
+    assert_eq!(preprint_version_claimed(&claim, &record), Some("PsyArXiv"));
+    let a = assess(&claim, &record);
+    assert_eq!(a.container.agreement, Agreement::Mismatch, "{a:?}");
+    assert!((PLAUSIBLE..VERIFIED).contains(&a.confidence), "{a:?}");
+    // The journal's own DOI: the article.
+    let a = assess(&Claim::from_text(cited("10.1037/xlm0001321")), &record);
+    assert!(a.confidence >= VERIFIED, "{a:?}");
+    // A record in no journal and at no volume is none placed.
+    record.work.container_title = None;
+    assert_eq!(preprint_version_claimed(&claim, &record), None);
+}
+
+#[test]
 fn a_preprint_cited_as_its_journal_version_is_another_version() {
     // holdout-4's `w:preprint-as-journal`: the preprint's DOI given with
     // the journal's name and place, found on the journal article's record
@@ -423,4 +469,145 @@ fn a_notice_is_not_the_original_it_corrects() {
         let a = assess(&claim, &retracted);
         assert!(a.confidence >= VERIFIED, "{title}: {a:?}");
     }
+}
+
+#[test]
+fn a_preprint_cited_with_its_journal_versions_longer_title_is_another_version() {
+    // holdout-6 #798: the medRxiv preprint cited with its journal
+    // version's title, a subtitle added and an article left out.
+    let mut preprint = record(
+        &["doi:10.1101/2020.12.24.20248813"],
+        "Quantifying the online news media coverage of the COVID-19 pandemic",
+        &["Konrad Krawczyk", "Tomasz Chelkowski", "Daniel J. Laydon"],
+        2020,
+    );
+    preprint.work.work_type = Some(crate::work::WorkType::Preprint);
+    preprint.work.container_title = Some("medRxiv".into());
+    let cited = "Krawczyk, K. et al. (2020) 'Quantifying Online News Media Coverage of the \
+                 COVID-19 Pandemic: Text Mining Study and Resource', medRxiv [Preprint].";
+    let a = assess(&Claim::from_text(cited), &preprint);
+    assert!((PLAUSIBLE..VERIFIED).contains(&a.confidence), "{a:?}");
+    // Its own title, the article left out, verifies.
+    let cited = "Krawczyk, K. et al. (2020) 'Quantifying Online News Media Coverage of the \
+                 COVID-19 Pandemic', medRxiv [Preprint].";
+    let a = assess(&Claim::from_text(cited), &preprint);
+    assert!(a.confidence >= VERIFIED, "{a:?}");
+}
+
+#[test]
+fn a_cochrane_reviews_versions_are_told_apart_by_year_and_byline() {
+    use crate::work::{Notice, NoticeFor, NoticeKind, PartialDate};
+    // holdout-6 #481: OpenAlex's record of the 2015 version, merged with
+    // the 2020 version's (its year among the record's), cited by the 2015
+    // version's DOI with the 2020 version's year.
+    let title = "Multi-professional simulation-based team training in obstetric emergencies \
+                 for improving patient outcomes and trainees' performance";
+    let mut old = record(
+        &[
+            "doi:10.1002/14651858.cd011545",
+            "doi:10.1002/14651858.cd011545.pub2",
+        ],
+        title,
+        &[
+            "Annemarie F. Fransen",
+            "Joost van de Ven",
+            "Franyke R. Banga",
+        ],
+        2015,
+    );
+    old.work.container_title = Some("Cochrane Database of Systematic Reviews".into());
+    old.work.other_years = vec![2020];
+    let mut superseded = Notice::new(NoticeKind::NewVersion);
+    superseded.notice = Some("doi:10.1002/14651858.cd011545.pub2".parse().unwrap());
+    superseded.date = Some("2020-12-16".parse::<PartialDate>().unwrap());
+    old.work.notices = vec![superseded];
+    let cited = |year: i16, doi: &str| {
+        format!(
+            "Fransen AF, van de Ven J, Banga FR. {title}. Cochrane Database Syst Rev. \
+             {year};12:CD011545. doi: {doi}"
+        )
+    };
+    let a = assess(
+        &Claim::from_text(cited(2020, "10.1002/14651858.cd011545")),
+        &old,
+    );
+    assert_eq!(a.year.agreement, Agreement::Mismatch, "{a:?}");
+    assert!(a.confidence < VERIFIED, "{a:?}");
+    // Its own year, or the newer version's DOI with its year, verify.
+    let a = assess(
+        &Claim::from_text(cited(2015, "10.1002/14651858.cd011545")),
+        &old,
+    );
+    assert!(a.confidence >= VERIFIED, "{a:?}");
+    let a = assess(
+        &Claim::from_text(cited(2020, "10.1002/14651858.cd011545.pub2")),
+        &old,
+    );
+    assert!(a.confidence >= VERIFIED, "{a:?}");
+
+    // The 2020 version's record, holding the 2015 version's DOI too (from
+    // OpenAlex's merged record) and naming it as the one before: cited by
+    // that DOI, another version is named.
+    let mut current = record(
+        &[
+            "doi:10.1002/14651858.cd011545.pub2",
+            "doi:10.1002/14651858.cd011545",
+        ],
+        title,
+        &[
+            "Annemarie F. Fransen",
+            "Joost van de Ven",
+            "Franyke R. Banga",
+        ],
+        2020,
+    );
+    current.work.container_title = Some("Cochrane Database of Systematic Reviews".into());
+    current.work.notice_for = vec![NoticeFor::new(
+        NoticeKind::NewVersion,
+        "doi:10.1002/14651858.cd011545".parse().unwrap(),
+    )];
+    let claim = Claim::from_text(cited(2020, "10.1002/14651858.cd011545"));
+    assert!(crate::matching::earlier_id_claimed(&claim, &current));
+    let a = assess(&claim, &current);
+    assert_eq!(a.ids, Agreement::Partial, "{a:?}");
+    assert!((PLAUSIBLE..VERIFIED).contains(&a.confidence), "{a:?}");
+    let a = assess(
+        &Claim::from_text(cited(2020, "10.1002/14651858.cd011545.pub2")),
+        &current,
+    );
+    assert!(a.confidence >= VERIFIED, "{a:?}");
+
+    // holdout-5 #866: the 2021 version, whose record names the 2019
+    // version it supersedes, cited with the earlier version's first author.
+    let mut newer = record(
+        &["doi:10.1002/14651858.cd013367.pub2"],
+        "Humour-based interventions for people with schizophrenia",
+        &[
+            "Yasushi Tsujimoto",
+            "Yuri Nakamura",
+            "Masahiro Banno",
+            "Kunihiro Kohmura",
+            "Hiraku Tsujimoto",
+            "Yuki Kataoka",
+        ],
+        2021,
+    );
+    newer.work.container_title = Some("Cochrane Database of Systematic Reviews".into());
+    newer.work.notice_for = vec![NoticeFor::new(
+        NoticeKind::NewVersion,
+        "doi:10.1002/14651858.cd013367".parse().unwrap(),
+    )];
+    let earlier = "Kohmura K, Banno M, Tsujimoto H, Tsujimoto Y, Kataoka Y. Humour-based \
+                   interventions for people with schizophrenia. Cochrane Database Syst Rev. \
+                   2021;CD013367.";
+    let a = assess(&Claim::from_text(earlier), &newer);
+    assert!((PLAUSIBLE..VERIFIED).contains(&a.confidence), "{a:?}");
+    // Its own byline verifies; so does any work's byline in another order
+    // without an earlier version.
+    let own = "Tsujimoto Y, Nakamura Y, Banno M, Kohmura K, Tsujimoto H, Kataoka Y. \
+               Humour-based interventions for people with schizophrenia. Cochrane Database \
+               Syst Rev. 2021;CD013367.";
+    assert!(assess(&Claim::from_text(own), &newer).confidence >= VERIFIED);
+    newer.work.notice_for.clear();
+    assert!(assess(&Claim::from_text(earlier), &newer).confidence >= VERIFIED);
 }

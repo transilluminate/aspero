@@ -10,7 +10,7 @@ use super::caps::{
     EXTENDED_TITLE_CAP, ID_CONFLICT_CAP, JOURNAL_MISMATCH_CAP, JOURNAL_MISMATCH_PENALTY,
     LOCATION_MISMATCH_CAP, NO_EVIDENCE_CAP, OTHER_IN_SERIES, PLACED, PLACED_YEAR_OFF,
     PLACED_YEAR_WRONG, PLAUSIBLE, SHORT_TITLE_WORDS, STRANGERS_CAP, UNCORROBORATED_CAP,
-    UNPLACED_CAP, VERSION, combine,
+    UNPLACED_CAP, VENUE_RECORD_CAP, VERSION, combine,
 };
 use super::claim::{byline, cites_chapter, cites_edited_book, title_region};
 use super::derivative::{self, WorkKind, record_derivative_kind};
@@ -20,6 +20,7 @@ use super::same_work::{id_agreement, same_work_id};
 use super::text::{Normalised, content_words, words};
 use super::titles::{self, title_similarity, unmarked};
 use super::venue;
+use super::version;
 use super::written;
 use super::{Agreement, Assessment, Claim, FieldCheck};
 use crate::id::{IdKind, is_digits, starts_with_ci};
@@ -72,7 +73,12 @@ pub fn assess(claim: &Claim, record: &SourceRecord) -> Assessment {
     });
     // A claimed identifier names the work, even beside another (a PMID)
     // that is another's: identified, though not confirmed (#148).
-    let ids = id_agreement(&claim.ids, &record.ids);
+    // An earlier version's identifier, named by a newer version's record
+    // (a Cochrane review's), names that version, not this one.
+    let ids = match id_agreement(&claim.ids, &record.ids) {
+        Agreement::Match if version::earlier_id_claimed(claim, record) => Agreement::Partial,
+        agreement => agreement,
+    };
     let named = matches!(ids, Agreement::Match | Agreement::Partial);
 
     let families: Vec<String> = work.authors.iter().filter_map(family_name).collect();
@@ -162,8 +168,18 @@ pub fn assess(claim: &Claim, record: &SourceRecord) -> Assessment {
         } else {
             claimed_strangers(&claim.authors, &work.authors)
         };
+    // Or names an earlier version's first author.
+    let earlier = authors.agreement != Agreement::Unknown
+        && version::earlier_byline(
+            claim,
+            record,
+            text.as_ref()
+                .and_then(|t| byline(t, work_title.as_deref(), title_span.as_ref()))
+                .as_deref(),
+            &families,
+        );
     let authors = match authors.score {
-        Some(s) if strangers => FieldCheck::scored(s.min(CORROBORATING_AUTHORS)),
+        Some(s) if strangers || earlier => FieldCheck::scored(s.min(CORROBORATING_AUTHORS)),
         _ => authors,
     };
     // The record's title with words added: another work's title that
@@ -176,7 +192,14 @@ pub fn assess(claim: &Claim, record: &SourceRecord) -> Assessment {
         && work_title
             .as_deref()
             .is_some_and(|t| titles::main_title(unmarked(t)) == unmarked(t));
-    let extended = match (&claimed_title, &work_title, &text, &title_span) {
+    // Found with an article given or left out, too.
+    let loose_span = title_span.clone().or_else(|| {
+        work_title
+            .as_deref()
+            .zip(text.as_ref())
+            .and_then(|(t, x)| x.loose_title_span(t))
+    });
+    let extended = match (&claimed_title, &work_title, &text, &loose_span) {
         (Some(claimed), Some(actual), _, _) => titles::extends(claimed, actual, subtitle_ok),
         (None, Some(_), Some(text), Some(span)) => {
             let journal = work
@@ -235,11 +258,18 @@ pub fn assess(claim: &Claim, record: &SourceRecord) -> Assessment {
         _ => title,
     };
 
+    // Not a newer version's year, merged in, for this version claimed.
+    let newer = version::newer_years(claim, record);
     let actual_years: Vec<i16> = work
         .issued
         .map(|d| d.year())
         .into_iter()
-        .chain(work.other_years.iter().copied())
+        .chain(
+            work.other_years
+                .iter()
+                .copied()
+                .filter(|y| !newer.contains(y)),
+        )
         .collect();
     // A year inside the title ("Cancer statistics, 2020") is not the year
     // cited.
@@ -350,7 +380,19 @@ pub fn assess(claim: &Claim, record: &SourceRecord) -> Assessment {
     // every one.
     // A sister journal's name holds the record's ("JAMA Intern Med" for
     // JAMA) but is another journal.
-    let read = claim.container.is_none() && !bibtex;
+    // Not one read right after the work's title ("… trial. Hand Therapy.
+    // 2014;27(4)" for the Journal of Hand Therapy): whole, not cut short.
+    let read_from = |cited: &str| {
+        claim.container.is_none()
+            && !bibtex
+            && !title_span
+                .as_ref()
+                .zip(text.as_ref())
+                .is_some_and(|(span, t)| {
+                    let name = words(cited);
+                    !name.is_empty() && t.words[span.end..].starts_with(&name)
+                })
+    };
     // A journal's section numbered in its volumes ("The Astrophysical
     // Journal Letters, 195, L51" for The Astrophysical Journal's L51) is
     // the journal, at the record's own place.
@@ -364,7 +406,7 @@ pub fn assess(claim: &Claim, record: &SourceRecord) -> Assessment {
         Some(actual)
             if journals.iter().any(|cited| {
                 (same_journal(cited, actual) || journal_in(&words(cited), actual))
-                    && (!publication::sister_journal_as(cited, actual, read)
+                    && (!publication::sister_journal_as(cited, actual, read_from(cited))
                         || (at_its_place && publication::section_of(cited, actual)))
             }) =>
         {
@@ -377,7 +419,7 @@ pub fn assess(claim: &Claim, record: &SourceRecord) -> Assessment {
             if cites_journal
                 && (article || claim.container.is_some())
                 && journals.iter().all(|cited| {
-                    (if read {
+                    (if read_from(cited) {
                         publication::other_journal_read(cited, actual)
                     } else {
                         other_journal(cited, actual)
@@ -796,6 +838,22 @@ pub fn assess(claim: &Claim, record: &SourceRecord) -> Assessment {
     if chapter_for_book {
         confidence = confidence.min(LOCATION_MISMATCH_CAP);
     }
+    // A proceedings' own record (the volume: "2014 IEEE International
+    // Conference on Communications Workshops (ICC)"), cited at a page, is
+    // the venue of the paper cited, not the paper (holdout-6 #1010).
+    let volume_for_paper = matches!(&work.work_type, Some(WorkType::Other(t)) if t == "proceedings")
+        && (cited_place.page.is_some()
+            || claim.text.as_deref().is_some_and(|t| {
+                t.split_whitespace().any(|w| {
+                    let w = w.trim_matches(|c: char| !c.is_ascii_digit());
+                    w.split_once(['-', '–'])
+                        .is_some_and(|(a, b)| is_digits(a) && is_digits(b) && a != b)
+                })
+            }))
+        && !named;
+    if volume_for_paper {
+        confidence = confidence.min(VENUE_RECORD_CAP);
+    }
     // A dataset's or software's record carries its latest version's date:
     // the claimed identifier and title name it, whatever year is cited
     // (MIMIC-III's DOI, cited as of 2016, registered in 2023).
@@ -807,8 +865,9 @@ pub fn assess(claim: &Claim, record: &SourceRecord) -> Assessment {
         confidence = confidence.max(VERSION);
     }
     // Authors the work doesn't have are an error in the citation, and a
-    // tell of invented references, whatever else agrees.
-    if strangers {
+    // tell of invented references, whatever else agrees. An earlier
+    // version's byline is another version's.
+    if strangers || earlier {
         confidence = confidence.min(STRANGERS_CAP);
     }
     // Nor can a record without a byline confirm the people a citation

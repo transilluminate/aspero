@@ -149,6 +149,21 @@ const CONFERENCES: &[(&[&str], &[&str])] = &[
     (&["wsdm"], &["web", "search", "data", "mining"]),
     (&["cikm"], &["information", "knowledge", "management"]),
     (&["recsys"], &["recommender", "systems"]),
+    // Networking's: SIGCOMM by its proceedings' name before 2010, IMC as
+    // its sponsor named it ("… ACM SIGCOMM Conference on Internet
+    // Measurement").
+    (
+        &["sigcomm"],
+        &[
+            "applications",
+            "technologies",
+            "architectures",
+            "protocols",
+            "computer",
+            "communications",
+        ],
+    ),
+    (&["imc"], &["internet", "measurement"]),
 ];
 
 /// Acronyms that are words or names too ("ACL" a ligament, "Chi" a
@@ -312,6 +327,11 @@ const PROCEEDINGS_BOILERPLATE: &[&str] = &[
     "with",
 ];
 
+/// Publishers and societies of meetings, in a proceedings' name.
+const PUBLISHERS: &[&str] = &[
+    "acm", "ieee", "cvf", "rsj", "ifip", "siam", "spie", "usenix",
+];
+
 /// Ordinals spelt out, as editions are: "Tenth Annual …".
 const ORDINALS: &[&str] = &[
     "first",
@@ -376,6 +396,9 @@ impl Subject {
         let letters: Vec<(Vec<char>, bool)> = tokens
             .iter()
             .filter(|t| t.chars().next().is_some_and(char::is_alphabetic))
+            // A publisher's name gives an acronym no letter: "ICC" isn't
+            // "IEEE Global Communications Conference".
+            .filter(|t| !PUBLISHERS.contains(&t.to_ascii_lowercase().as_str()))
             .map(|t| {
                 let lower: String = t.chars().flat_map(char::to_lowercase).collect();
                 let furniture = JOURNAL_STOPWORDS.contains(&lower.as_str())
@@ -680,6 +703,39 @@ mod tests {
         // Words that are acronyms too, not in capitals, name none.
         assert!(named("Chi H, Acl reconstruction outcomes. Am J Sports Med.").is_empty());
         assert!(named("Pattern Recognition").is_empty());
+        // SIGCOMM by its old proceedings' name or its acronym; IMC by its
+        // subject, whoever holds it.
+        assert_eq!(
+            named(
+                "Proceedings of the 2005 conference on Applications, technologies, \
+                 architectures, and protocols for computer communications"
+            ),
+            ["sigcomm"]
+        );
+        assert_eq!(
+            named("Proceedings of the ACM SIGCOMM 2024 Conference"),
+            ["sigcomm"]
+        );
+        assert_eq!(
+            named("Proceedings of the 2003 ACM SIGCOMM conference on Internet measurement"),
+            ["imc"]
+        );
+        // A publisher's name gives an acronym no letter.
+        let globecom = "2014 IEEE Global Communications Conference";
+        assert_eq!(
+            proceedings_agree(
+                "2014 IEEE International Conference on Communications (ICC)",
+                globecom
+            ),
+            Some(false)
+        );
+        assert_eq!(
+            proceedings_agree(
+                "2019 IEEE International Conference on Communications (ICC)",
+                "ICC 2019 - 2019 IEEE International Conference on Communications (ICC)"
+            ),
+            Some(true)
+        );
         assert!(proceedings("In: Proceedings of the 5th Workshop on Things"));
         assert!(!proceedings("Journal of Machine Learning Research"));
     }

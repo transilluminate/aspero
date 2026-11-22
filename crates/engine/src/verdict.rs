@@ -360,9 +360,28 @@ fn differences(claim: &Claim, c: &Candidate, known_only: bool) -> Vec<Difference
 /// every identifier its records carry; else one that isn't the work's (a
 /// different work's record carries it), beside the work's of its kind.
 fn contested_id(claim: &Claim, c: &Candidate) -> Option<Difference> {
+    // An earlier version's identifier, beside the newer version's record.
+    let earlier = || {
+        claim.ids.iter().find(|id| {
+            c.record.work.notice_for.iter().any(|n| {
+                n.kind == aspero_core::NoticeKind::NewVersion && matching::same_work_id(id, &n.work)
+            })
+        })
+    };
     let (cited, actual) =
         if let Some((cited, actual)) = matching::conflicting_id(&claim.ids, &c.ids) {
             (cited, Some(actual))
+        } else if let Some(cited) = earlier() {
+            let own = c.record.ids.iter().find(|k| {
+                k.kind() == cited.kind()
+                    && !c
+                        .record
+                        .work
+                        .notice_for
+                        .iter()
+                        .any(|n| matching::same_work_id(k, &n.work))
+            });
+            (cited, own)
         } else {
             let cited = claim
                 .ids

@@ -531,6 +531,76 @@ fn bibtex_harvard_and_single_page_locators_are_checked() {
 }
 
 #[test]
+fn a_journal_read_right_after_the_title_is_whole() {
+    // holdout-5's `w:sister-journal` (#750, #928, #120): a name read from
+    // text may be the record's cut short ("Energy" of "… Applied Energy"),
+    // but not one read right after the work's title: "Hand Therapy" names
+    // a journal of its own, not the Journal of Hand Therapy.
+    let hand = article(
+        "Rigid versus semi-rigid orthotic use following TMC arthroplasty: a randomized \
+         controlled trial",
+        &["Ruth Prosser", "Mark J. Hancock", "Leslie Nicholson"],
+        2014,
+        ("Journal of Hand Therapy", "27", "265"),
+    );
+    let ijerph = article(
+        "An Integration Method for Regional PM2.5 Pollution Control Optimization Based on \
+         Meta-Analysis and Systematic Review",
+        &["Bingkui Qiu", "Min Zhou", "Yang Qiu"],
+        2021,
+        (
+            "International Journal of Environmental Research and Public Health",
+            "19",
+            "344",
+        ),
+    );
+    for (claim, record) in [
+        (
+            "Prosser R, Hancock MJ, Nicholson L. Rigid versus semi-rigid orthotic use following \
+             TMC arthroplasty: a randomized controlled trial. Hand Therapy. 2014;27(4):265-70.",
+            &hand,
+        ),
+        (
+            "Qiu B, Zhou M, Qiu Y, et al. An Integration Method for Regional PM2.5 Pollution \
+             Control Optimization Based on Meta-Analysis and Systematic Review. Healthcare. \
+             2021;19(1):344.",
+            &ijerph,
+        ),
+    ] {
+        let a = assess(&Claim::from_text(claim), record);
+        assert_eq!(a.container.agreement, Agreement::Mismatch, "{claim}");
+        assert!(
+            (PLAUSIBLE..VERIFIED).contains(&a.confidence),
+            "{claim}: {a:?}"
+        );
+    }
+    // Its own name and abbreviation verify.
+    for journal in ["Journal of Hand Therapy", "J Hand Ther", "J. Hand Ther."] {
+        let claim = format!(
+            "Prosser R, Hancock MJ, Nicholson L. Rigid versus semi-rigid orthotic use following \
+             TMC arthroplasty: a randomized controlled trial. {journal} 2014;27(4):265-70."
+        );
+        let a = assess(&Claim::from_text(claim.as_str()), &hand);
+        assert!(a.confidence >= VERIFIED, "{claim}: {a:?}");
+    }
+    // So does a name without its society's acronym (holdout-5 #659's).
+    let bat = article(
+        "A bat algorithm for SDN network scheduling",
+        &["Rongheng Lin", "Zezhou Ye"],
+        2018,
+        (
+            "EURASIP Journal on Wireless Communications and Networking",
+            "2018",
+            "120",
+        ),
+    );
+    let claim = "Lin R, Ye Z. A bat algorithm for SDN network scheduling. J Wireless Com Network. \
+                 2018;2018(1):120.";
+    let a = assess(&Claim::from_text(claim), &bat);
+    assert!(a.confidence >= VERIFIED, "{a:?}");
+}
+
+#[test]
 fn a_sister_journal_cited_is_another_journal() {
     // holdout-4's `w:sister-journal`: the family's parent cited for a
     // sister's article, or a sister for the parent's.

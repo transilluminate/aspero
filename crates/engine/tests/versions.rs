@@ -5,6 +5,7 @@ mod common;
 use std::sync::Arc;
 
 use aspero_core::{Notice, NoticeKind, SourceRecord, WorkId};
+use aspero_engine::{Engine, Verdict};
 use common::*;
 
 fn id(s: &str) -> WorkId {
@@ -50,4 +51,64 @@ async fn chains_are_followed_to_the_latest_version() {
     assert_eq!(latest(0).as_deref(), Some("doi:10.1002/x.pub7"));
     assert_eq!(latest(1), None, "already the latest");
     assert_eq!(latest(2).as_deref(), Some("doi:10.1002/loop.b"));
+}
+
+/// A Cochrane review's 2015 version, as OpenAlex merges it with its 2020
+/// version (both DOIs, no notice), and as Crossref gives it (superseded).
+fn merged_versions() -> Engine {
+    let title = "Multi-professional simulation-based team training in obstetric emergencies";
+    let authors = [
+        "Annemarie F. Fransen",
+        "Joost van de Ven",
+        "Franyke R. Banga",
+    ];
+    let mut merged = work(
+        "openalex",
+        &[
+            "10.1002/14651858.cd011545",
+            "10.1002/14651858.cd011545.pub2",
+        ],
+        title,
+        &authors,
+        2015,
+    );
+    merged.work.other_years = vec![2020];
+    let mut old = work(
+        "crossref",
+        &["10.1002/14651858.cd011545"],
+        title,
+        &authors,
+        2015,
+    );
+    let mut u = Notice::new(NoticeKind::NewVersion);
+    u.notice = Some(id("10.1002/14651858.cd011545.pub2"));
+    u.date = Some("2020-12-16".parse().unwrap());
+    old.work.notices.push(u);
+    for r in [&mut merged, &mut old] {
+        r.work.container_title = Some("Cochrane Database of Systematic Reviews".into());
+    }
+    // Crossref's looked up; OpenAlex's found by searching for the
+    // citation, and kept only if it matches better.
+    let crossref = Scripted::new("crossref").with(vec![old]);
+    let openalex = Scripted::new("openalex").matcher(vec![merged]);
+    engine(vec![Arc::new(crossref), Arc::new(openalex)])
+}
+
+#[tokio::test]
+async fn a_superseded_version_cited_with_its_newer_versions_year_is_not_verified() {
+    // holdout-6 #481: the notice Crossref's record gives is weighed for
+    // OpenAlex's record too, which would otherwise match better (the newer
+    // version's year among its own) and be kept.
+    let engine = merged_versions();
+    let cited = |year: i16| {
+        aspero_core::Claim::from_text(format!(
+            "Fransen AF, van de Ven J, Banga FR. Multi-professional simulation-based team \
+             training in obstetric emergencies. Cochrane Database Syst Rev. {year};CD011545. \
+             doi: 10.1002/14651858.cd011545"
+        ))
+    };
+    let v = engine.verify(&cited(2020), 5).await;
+    assert_ne!(v.verdict, Verdict::Verified, "{}", v.reason_text);
+    let v = engine.verify(&cited(2015), 5).await;
+    assert_eq!(v.verdict, Verdict::Verified, "{}", v.reason_text);
 }

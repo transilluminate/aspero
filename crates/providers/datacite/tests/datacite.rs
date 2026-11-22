@@ -152,6 +152,48 @@ fn query_syntax_in_user_text_is_escaped() {
     assert!(query(&http, 0).contains(&pair("query", r"(BERT\: pre\-training \(deep\))")));
 }
 
+/// DataCite reads `/`, even escaped, as a regular expression's start: it
+/// goes as a space, in text, field clauses and trees alike (wild-4
+/// #339).
+#[test]
+fn slashes_in_user_text_are_spaces() {
+    let (dc, http) = provider([recorded("search")]);
+    block_on(dc.search(&SearchQuery::new(
+        "JRCALC Clinical Guidelines: Class Professional Publishing / AACE",
+    )))
+    .unwrap();
+    assert!(query(&http, 0).contains(&pair(
+        "query",
+        r"(JRCALC Clinical Guidelines\: Class Professional Publishing AACE)"
+    )));
+
+    let (dc, http) = provider([empty_page()]);
+    let mut q = SearchQuery::new("");
+    q.author = Some("Smith/Jones".into());
+    q.title = Some("Orange/Gariep river".into());
+    block_on(dc.search(&q)).unwrap();
+    assert_eq!(
+        query(&http, 0)[0],
+        pair(
+            "query",
+            "creators.name:(Smith Jones) AND titles.title:(Orange Gariep river)"
+        )
+    );
+
+    let (dc, http) = provider([empty_page()]);
+    let tree = QueryNode::All(vec![
+        QueryNode::phrase(TermField::Title, "perovskite/silicon tandem"),
+        QueryNode::term(TermField::Keywords, "AHA/ACC/HRS"),
+    ]);
+    block_on(dc.search(&tree_query(tree))).unwrap();
+    let q = query(&http, 0)[0].1.clone();
+    assert!(!q.contains('/'), "{q}");
+    assert!(
+        q.contains(r#"titles.title:"perovskite silicon tandem""#),
+        "{q}"
+    );
+}
+
 fn empty_page() -> HttpResponse {
     response(
         200,

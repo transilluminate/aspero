@@ -297,7 +297,13 @@ pub(super) fn byline_strangers(byline: &str, authors: &[Person], journal: Option
 /// A person's family name, normalised: the `family` field, or the last
 /// word of a literal name.
 pub(super) fn family_name(p: &Person) -> Option<String> {
-    let name = p.family.as_deref().or(p.literal.as_deref())?;
+    let name = match (&p.family, &p.literal) {
+        (Some(family), _) => family.as_str(),
+        // Its suffixes and degrees aside: "James M. Ritter DPhil FRCP" is
+        // Ritter.
+        (None, Some(literal)) => crate::work::without_post_nominals(literal),
+        (None, None) => return None,
+    };
     let last = if p.family.is_some() {
         normalise(name)
     } else if let Some((family, _)) = crate::work::inverted(name) {
@@ -307,6 +313,15 @@ pub(super) fn family_name(p: &Person) -> Option<String> {
         words(name).pop()?
     };
     (!last.is_empty()).then_some(last)
+}
+
+/// Whether two bylines name a person in common, by family name: two
+/// editions of one book, whose records list its authors differently.
+pub fn share_an_author(a: &[Person], b: &[Person]) -> bool {
+    let theirs: Vec<String> = b.iter().filter_map(family_name).collect();
+    a.iter()
+        .filter_map(family_name)
+        .any(|f| theirs.iter().any(|g| same_family(&f, g)))
 }
 
 /// The family name in a claimed author string: "Vaswani, A." → "vaswani",

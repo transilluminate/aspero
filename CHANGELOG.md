@@ -3,6 +3,30 @@
 Releases 0.10 to 0.19 are in [docs/changelog/0.1x.md](docs/changelog/0.1x.md),
 and 0.1 to 0.9 in [docs/changelog/0.0x.md](docs/changelog/0.0x.md).
 
+## Unreleased
+
+Fixed:
+
+- A book cited by its ISBN, its title and year the ISBN's record's, was a
+  mismatch when another edition of it matched the byline better ("Rang &
+  Dale's Pharmacology | Ritter, Flower, Henderson, et al. | 9th (2019) |
+  978-0702074486", wild-4 #322 and #325): the verdict named the other
+  edition. Another edition of the same book, with an author in common, is
+  no reason to call the cited ISBN another work's; it is plausible or
+  verified on its own record. An ISBN of another author's book, or of a
+  book with another title, is still a mismatch.
+- Names printed with degrees and honours after them, as Open Library
+  prints some ("James M. Ritter DPhil FRCP FBPharmacolS FMedSci",
+  "Arthur J. Atkinson Jr."), were read with the last degree as the family
+  name, so the authors cited didn't match. The family name is now the one
+  before them.
+- A DataCite search for text with a `/` in it ("Class Professional
+  Publishing / AACE", "perovskite/silicon", a DOI written in the text)
+  failed as a bad request, or, with two, found nothing: DataCite reads the
+  escaped `\/` aspero sent as a regular expression's start. A `/` in
+  text, an author, a title or a search tree's term now goes to DataCite as
+  a space, which it splits words at anyway.
+
 ## 0.39.2
 
 Fixed:

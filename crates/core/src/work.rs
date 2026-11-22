@@ -447,10 +447,53 @@ pub(crate) fn inverted(literal: &str) -> Option<(&str, &str)> {
     .then_some((family, given))
 }
 
+/// Suffixes, degrees and honours written after a name, as written (case
+/// matters: "MA" is a degree, "Ma" a family name), dots dropped.
+const POST_NOMINALS: &[&str] = &[
+    "Jr", "Sr", "II", "III", "IV", "PhD", "DPhil", "MD", "MB", "BS", "BCh", "ChB", "MBBS", "MBChB",
+    "BM", "BSc", "MSc", "DSc", "MA", "BA", "MS", "MPH", "MBA", "RN", "DO", "PharmD", "EdD", "PsyD",
+    "DDS", "DMD", "DVM", "JD", "LLB", "LLM", "FRS", "FRSE", "FRCP", "FRCS", "FRCPC", "FACP",
+    "FACS", "FMedSci", "MRCP", "OBE", "CBE", "MBE", "Hon",
+];
+
+/// Post-nominals that are family names too ("Wei MA", printed in
+/// capitals): taken as post-nominal only before another.
+const NAMES_TOO: &[&str] = &["MA", "BA", "DO", "MS"];
+
+/// A name without what follows it, as some records print one (`James M.
+/// Ritter DPhil FRCP FBPharmacolS FMedSci`, `Arthur J. Atkinson Jr.`): the
+/// words before its first suffix or degree, once a given name and a family
+/// name stand before it. Everything after that word goes too, however
+/// written (a fellowship's letters: `FBPharmacolS`).
+pub(crate) fn without_post_nominals(literal: &str) -> &str {
+    let words: Vec<(usize, &str)> = literal
+        .split_whitespace()
+        .map(|w| (w.as_ptr() as usize - literal.as_ptr() as usize, w))
+        .collect();
+    let bare = |w: &str| w.trim_end_matches([',', ';']).replace('.', "");
+    let letters = |w: &str| w.chars().filter(|c| c.is_alphabetic()).count();
+    let cut = (2..words.len()).find(|&i| {
+        let w = bare(words[i].1);
+        // After a family name, not an initial: "Julio A., M.D. Ramirez"
+        // (Open Library's) has its family name after the degree.
+        letters(words[i - 1].1) >= 2
+            && POST_NOMINALS.contains(&w.as_str())
+            && (!NAMES_TOO.contains(&w.as_str())
+                || words
+                    .get(i + 1)
+                    .is_some_and(|(_, next)| POST_NOMINALS.contains(&bare(next).as_str())))
+    });
+    match cut {
+        Some(i) => literal[..words[i].0].trim_end().trim_end_matches(','),
+        None => literal,
+    }
+}
+
 /// A personal name written whole ("Yann LeCun", "Vincent van Gogh"), as
 /// family and given names; `None` for anything that may be an
 /// organisation's.
 fn split_literal(literal: &str) -> Option<(String, Option<String>)> {
+    let literal = without_post_nominals(literal);
     if literal.contains(',') {
         return inverted(literal)
             .map(|(family, given)| (family.to_owned(), Some(given.to_owned())));
@@ -821,6 +864,41 @@ mod tests {
             Some(("Li".into(), Some("J.".into())))
         );
         assert_eq!(Person::literal("Wei Wu").short().as_deref(), Some("Wu W"));
+    }
+
+    /// Open Library prints degrees and honours after names (wild-4 #322,
+    /// #325): the family name is before them.
+    #[test]
+    fn suffixes_and_degrees_after_a_name_are_not_its_family_name() {
+        let parts = |name: &str| Person::literal(name).parts();
+        let family = |name: &str| parts(name).map(|(family, _)| family);
+        assert_eq!(
+            parts("James M. Ritter DPhil FRCP FBPharmacolS FMedSci"),
+            Some(("Ritter".into(), Some("James M.".into())))
+        );
+        assert_eq!(
+            family("Yoon Kong Loke MB  BS  MRCP  MD").as_deref(),
+            Some("Loke")
+        );
+        assert_eq!(
+            family("David MacEwan PhD  FRSB  FBPhS  SFHEA").as_deref(),
+            Some("MacEwan")
+        );
+        assert_eq!(
+            family("Arthur J. Atkinson  Jr.").as_deref(),
+            Some("Atkinson")
+        );
+        assert_eq!(family("John Smith, M.D.").as_deref(), Some("Smith"));
+        // A family name that is a degree's letters too, in capitals.
+        assert_eq!(family("Wei Jun MA").as_deref(), Some("MA"));
+        // Not after an initial: the family name may follow ("Julio A.,
+        // M.D. Ramirez", holdout-1 #660), or a degree's letters be a name.
+        assert_eq!(
+            without_post_nominals("Julio A., M.D. Ramirez"),
+            "Julio A., M.D. Ramirez"
+        );
+        assert_eq!(without_post_nominals("Smith Jr."), "Smith Jr.");
+        assert_eq!(without_post_nominals("Ma Long"), "Ma Long");
     }
 
     #[test]

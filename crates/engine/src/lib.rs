@@ -130,7 +130,7 @@ pub use aspero_store::{
 pub use inputs::{Extras, InputLookup, InputsReport, Looked};
 use jiff::Timestamp;
 pub use lookup::{Attempt, LookupReport, LookupResult, Outcome};
-pub use observe::CallId;
+pub use observe::{CallId, EVENTS_VERSION};
 pub use options::CallOptions;
 pub use search::SearchReport;
 pub use transport::{HttpTape, TapeMode};

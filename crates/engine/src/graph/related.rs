@@ -50,7 +50,7 @@ use super::spend::{Purse, Spend, TheSet, merge_versions};
 use super::{
     Incomplete, IncompleteKind, MAX_FILTER, MIN_CITING, Section, Seed, Stage, openalex_id,
 };
-use crate::observe::{self, op};
+use crate::observe::{self, FromCache, op};
 use crate::{Engine, Entry};
 
 mod plan;
@@ -626,13 +626,13 @@ impl Engine {
                     }
                 }
                 Err(e) if e.kind() == ErrorKind::BudgetCapped => {
-                    tracing::info!(target: "aspero::engine", status = %e.kind().as_str(), "citing works stopped at the daily cap");
+                    tracing::info!(target: "aspero::engine", error = %e.kind().as_str(), "citing works stopped at the daily cap");
                     tracing::debug!(target: "aspero::engine", error = %e, %filter, "citing_detail");
                     read.budget = true;
                     break;
                 }
                 Err(e) => {
-                    tracing::warn!(target: "aspero::engine", status = %e.kind().as_str(), "citing works failed");
+                    tracing::warn!(target: "aspero::engine", error = %e.kind().as_str(), "citing works failed");
                     tracing::debug!(target: "aspero::engine", error = %e, %filter, "citing_detail");
                     read.failed = true;
                     break;
@@ -686,8 +686,8 @@ impl Engine {
                 _ => break,
             }
         }
-        observe::served(provider, op::CITING, "hit", "none", pages.len() - stale);
-        observe::served(provider, op::CITING, "stale", "offline", stale);
+        observe::served(provider, op::CITING, FromCache::Hit, pages.len() - stale);
+        observe::served(provider, op::CITING, FromCache::Stale("offline"), stale);
         pages
     }
 
@@ -745,7 +745,7 @@ impl Engine {
             .collect();
         let provider = ProviderId::from_static(super::OPENALEX);
         let hits = rows.iter().flatten().count();
-        observe::served(&provider, op::CITING, "hit", "none", hits);
+        observe::served(&provider, op::CITING, FromCache::Hit, hits);
         rows.into_iter()
             .map(|row| {
                 let (ids, complete) = row?;

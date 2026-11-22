@@ -148,7 +148,7 @@ impl Engine {
         let current = self.current(&entry, self.cache_policy.references);
         if current {
             let provider = aspero_core::ProviderId::from_static(super::OPENALEX);
-            crate::observe::served(&provider, op::REFERENCES, "hit", "none", 1);
+            crate::observe::served(&provider, op::REFERENCES, crate::observe::FromCache::Hit, 1);
         }
         current.then_some(entry.value.ids)
     }

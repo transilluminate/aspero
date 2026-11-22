@@ -26,7 +26,7 @@ use aspero_core::{
 };
 use jiff::civil::Date;
 
-use crate::observe::{self, op};
+use crate::observe::{self, FromCache, op};
 use crate::{Engine, EngineError, Entry, Served};
 
 #[derive(Debug, Clone)]
@@ -202,12 +202,12 @@ impl Engine {
         if self.options.offline {
             return match cached {
                 Some((page, fresh)) => {
-                    let (cache, status) = if fresh {
-                        ("hit", "none")
+                    let cached = if fresh {
+                        FromCache::Hit
                     } else {
-                        ("stale", "offline")
+                        FromCache::Stale("offline")
                     };
-                    observe::served(&provider, op::SEARCH, cache, status, 1);
+                    observe::served(&provider, op::SEARCH, cached, 1);
                     Ok(report(
                         page,
                         None,
@@ -221,7 +221,7 @@ impl Engine {
             };
         }
         if let Some((page, true)) = cached {
-            observe::served(&provider, op::SEARCH, "hit", "none", 1);
+            observe::served(&provider, op::SEARCH, FromCache::Hit, 1);
             return Ok(report(page, None, Served::Cache));
         }
         // Finished and cached, once sent, even if the caller stops waiting.
@@ -242,7 +242,12 @@ impl Engine {
             Ok(resp) => Ok(report(resp.value, resp.usage, Served::Live)),
             Err(error) => match cached {
                 Some((page, _)) => {
-                    observe::served(&provider, op::SEARCH, "stale", error.kind().as_str(), 1);
+                    observe::served(
+                        &provider,
+                        op::SEARCH,
+                        FromCache::Stale(error.kind().as_str()),
+                        1,
+                    );
                     Ok(report(page, None, Served::Stale))
                 }
                 None => Err(EngineError::Provider {

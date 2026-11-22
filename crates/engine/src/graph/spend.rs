@@ -107,7 +107,7 @@ pub(super) fn failed_lookups(
             failed += 1;
             let error = e.to_string();
             if !seen.contains(&error) {
-                tracing::warn!(target: "aspero::engine", provider = %attempt.provider, status = %e.kind().as_str(), "{what}");
+                tracing::warn!(target: "aspero::engine", provider = %attempt.provider, error = %e.kind().as_str(), "{what}");
                 tracing::debug!(target: "aspero::engine", provider = %attempt.provider, %error, "lookup_detail");
                 seen.push(error);
             }

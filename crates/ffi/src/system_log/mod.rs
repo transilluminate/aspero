@@ -282,18 +282,38 @@ mod tests {
         let written = logged(LevelFilter::INFO, || {
             tracing::info!(
                 target: "aspero::net",
-                provider = %"openalex", op = "search", status = 200u16, ms = 12u64,
+                v = 2u8, provider = %"openalex", op = "search", status = 200u16, ms = 12u64,
                 cost_usd = %"0.001000", "request"
             );
+            tracing::info!(
+                target: "aspero::net",
+                v = 2u8, provider = %"openalex", op = "search", status = 503u16,
+                error = %"server", ms = 30u64, "request"
+            );
+            tracing::info!(
+                target: "aspero::net",
+                v = 2u8, provider = %"crossref", op = "lookup", status = None::<u16>,
+                error = %"timeout", ms = 10000u64, "request"
+            );
         });
+        let line =
+            |category: &str, text: &str| (category.to_owned(), Level::INFO, false, text.to_owned());
         assert_eq!(
             written,
-            [(
-                "net.openalex".to_owned(),
-                Level::INFO,
-                false,
-                "request provider=openalex op=search status=200 ms=12 cost_usd=0.001000".to_owned()
-            )]
+            [
+                line(
+                    "net.openalex",
+                    "request v=2 provider=openalex op=search status=200 ms=12 cost_usd=0.001000"
+                ),
+                line(
+                    "net.openalex",
+                    "request v=2 provider=openalex op=search status=503 error=server ms=30"
+                ),
+                line(
+                    "net.crossref",
+                    "request v=2 provider=crossref op=lookup error=timeout ms=10000"
+                ),
+            ]
         );
     }
 

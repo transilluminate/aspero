@@ -7,7 +7,7 @@ use aspero_core::{
 };
 
 use crate::inflight::Answer;
-use crate::observe::{self, op};
+use crate::observe::{self, FromCache, op};
 use crate::{Engine, Entry, Served, add_usage, transport};
 
 /// The outcome of one provider's attempt at one ID.
@@ -256,7 +256,7 @@ impl Engine {
             };
         }
 
-        observe::served(&provider, op::LOOKUP, "hit", "none", from_cache);
+        observe::served(&provider, op::LOOKUP, FromCache::Hit, from_cache);
         // Ask about the rest, unless another caller is already asking.
         let wanted: Vec<(usize, WorkId)> = pending.iter().map(|&i| (i, ids[i].clone())).collect();
         let (mut leads, joined) = self.inflight.claim(&provider, &wanted, fields);
@@ -330,8 +330,8 @@ impl Engine {
                     None => (attempt(Outcome::Failed(error.clone()), Served::Live), None),
                 });
             }
-            let status = error.kind().as_str();
-            observe::served(&provider, op::LOOKUP, "stale", status, stale_served);
+            let cached = FromCache::Stale(error.kind().as_str());
+            observe::served(&provider, op::LOOKUP, cached, stale_served);
         }
         leads.publish(&answers);
         drop(leads);
@@ -538,14 +538,9 @@ impl Engine {
             })
             .collect();
         let count = |served| answers.iter().filter(|(a, _)| a.served == served).count();
-        observe::served(provider, op::LOOKUP, "hit", "none", count(Served::Cache));
-        observe::served(
-            provider,
-            op::LOOKUP,
-            "stale",
-            "offline",
-            count(Served::Stale),
-        );
+        observe::served(provider, op::LOOKUP, FromCache::Hit, count(Served::Cache));
+        let stale = count(Served::Stale);
+        observe::served(provider, op::LOOKUP, FromCache::Stale("offline"), stale);
         answers
     }
 

@@ -32,7 +32,55 @@ fn fields<'a>(e: &'a Captured, names: &[&str]) -> Vec<&'a str> {
     names.iter().map(|n| e.field(n).unwrap_or("-")).collect()
 }
 
-const CALL: [&str; 8] = [
+/// Why a request failed or has no code, as `error` says (DESIGN
+/// "Diagnostics events"), and the error kinds a test here meets.
+const ERRORS: [&str; 13] = [
+    "timeout",
+    "dns",
+    "refused",
+    "reset",
+    "connect",
+    "body",
+    "network",
+    "cancelled",
+    "offline",
+    "server",
+    "not_found",
+    "rate_limited",
+    "not_cached",
+];
+
+/// A contract event's schema (`v=2`): `v` first, `status` an HTTP code
+/// or absent, `error` a kind or absent.
+fn contract(e: &Captured) {
+    assert_eq!(e.names().first(), Some(&"v"), "{e:?}");
+    assert_eq!(e.field("v"), Some("2"), "{e:?}");
+    if let Some(status) = e.field("status") {
+        assert!(status.parse::<u16>().is_ok(), "status {status}: {e:?}");
+    }
+    if let Some(error) = e.field("error") {
+        assert!(ERRORS.contains(&error), "error {error}: {e:?}");
+    }
+}
+
+/// Every contract event captured, checked ([`contract`]).
+fn all_contract(events: &Events) {
+    let all = events.all();
+    let contract_events = all.iter().filter(|e| {
+        matches!(
+            (e.target.as_str(), e.name.as_str()),
+            ("aspero::net", "request" | "retry")
+                | ("aspero::cache", "request")
+                | ("aspero::engine", "call")
+        )
+    });
+    for e in contract_events {
+        contract(e);
+    }
+}
+
+const CALL: [&str; 9] = [
+    "v",
     "op",
     "items",
     "patience",
@@ -63,6 +111,7 @@ async fn an_engine_call_says_its_op_items_providers_and_outcome_but_not_its_clai
     assert_eq!(calls.len(), 1, "one event, its parts not counted again");
     let call = &calls[0];
     assert_eq!(call.names(), CALL);
+    all_contract(&events);
     assert_eq!(
         fields(
             call,
@@ -173,6 +222,8 @@ async fn a_call_dropped_before_it_ends_is_cancelled() {
         fields(&calls[0], &["op", "patience", "providers", "ms", "outcome"]),
         ["search", "interactive", "crossref", "1000", "cancelled"]
     );
+    assert_eq!(calls[0].field("error"), None, "cancelled is no error");
+    all_contract(&events);
 }
 
 #[cfg(feature = "openalex")]
@@ -212,11 +263,16 @@ mod openalex {
     }
 
     fn openalex() -> Engine {
-        let answers = [
+        openalex_answering([
             Err(Error::Timeout),
             Ok(fixture(FIXTURES, "works_search")),
             Ok(fixture(FIXTURES, "work_by_doi")),
-        ];
+        ])
+    }
+
+    fn openalex_answering(
+        answers: impl IntoIterator<Item = Result<HttpResponse, Error>>,
+    ) -> Engine {
         let http = Arc::new(Flaky(Mutex::new(answers.into_iter().collect())));
         let paced = Arc::new(Paced::new("openalex", http, Duration::ZERO));
         let mut config = OpenAlexConfig::default();
@@ -230,10 +286,12 @@ mod openalex {
             .build()
     }
 
-    const REQUEST: [&str; 8] = [
+    const REQUEST: [&str; 10] = [
+        "v",
         "provider",
         "op",
         "status",
+        "error",
         "ms",
         "waited_ms",
         "attempt",
@@ -256,28 +314,51 @@ mod openalex {
         assert_eq!(
             said,
             [
-                ["openalex", "search", "timeout", "0", "0", "1", "miss", "-"],
                 [
-                    "openalex", "search", "200", "0", "0", "2", "miss", "0.001000"
+                    "2", "openalex", "search", "-", "timeout", "0", "0", "1", "miss", "-"
                 ],
                 [
-                    "openalex", "lookup", "200", "0", "0", "1", "miss", "0.000000"
+                    "2", "openalex", "search", "200", "-", "0", "0", "2", "miss", "0.001000"
+                ],
+                [
+                    "2", "openalex", "lookup", "200", "-", "0", "0", "1", "miss", "0.000000"
                 ],
             ]
         );
         assert!(live.iter().all(|e| e.field("detached").is_none()));
         let retry = events.named("aspero::net", "retry");
         assert_eq!(
-            fields(&retry[0], &["provider", "op", "attempt", "status"]),
-            ["openalex", "search", "1", "timeout"]
+            fields(
+                &retry[0],
+                &["v", "provider", "op", "attempt", "status", "error"]
+            ),
+            ["2", "openalex", "search", "1", "-", "timeout"]
         );
 
         let hits = events.named("aspero::cache", "request");
         assert_eq!(hits.len(), 1);
         assert_eq!(
-            fields(&hits[0], &[&REQUEST[..7], &["items"]].concat()),
-            ["openalex", "search", "none", "0", "0", "0", "hit", "1"]
+            fields(&hits[0], &[&REQUEST[..9], &["items"]].concat()),
+            [
+                "2", "openalex", "search", "-", "-", "0", "0", "0", "hit", "1"
+            ]
         );
+        assert_eq!(
+            hits[0].names(),
+            [
+                "v",
+                "provider",
+                "op",
+                "ms",
+                "waited_ms",
+                "attempt",
+                "cache",
+                "items",
+                "call"
+            ],
+            "no status or error for a hit"
+        );
+        all_contract(&events);
 
         let calls = events.named("aspero::engine", "call");
         let said: Vec<Vec<&str>> = calls
@@ -338,9 +419,46 @@ mod openalex {
         let inputs = events.named("aspero::engine", "call_input");
         assert_eq!(ids(&inputs), [searched, cached, looked]);
     }
+
+    /// An HTTP error response says its code and its kind, both: the
+    /// `request` the code's (core's `status_error`), the `retry` the
+    /// provider's reading of it. `error` follows `status`.
+    #[tokio::test(start_paused = true)]
+    async fn an_http_error_says_its_status_and_its_kind() {
+        let (events, _guard) = Events::install();
+        let engine = openalex_answering([
+            Ok(aspero_core::testing::response(503, &[], "busy")),
+            Ok(fixture(FIXTURES, "works_search")),
+        ]);
+        let query = SearchQuery::new("deep learning");
+        engine.search(Some("openalex"), &query).await.unwrap();
+
+        let live = events.named("aspero::net", "request");
+        assert_eq!(
+            fields(
+                &live[0],
+                &["v", "provider", "op", "status", "error", "attempt"]
+            ),
+            ["2", "openalex", "search", "503", "server", "1"]
+        );
+        let names = live[0].names();
+        let at = |n| names.iter().position(|x| *x == n).unwrap();
+        assert_eq!(at("error"), at("status") + 1, "{names:?}");
+        assert_eq!(live[1].field("error"), None, "none on success");
+        let retry = events.named("aspero::net", "retry");
+        assert_eq!(
+            retry[0].names(),
+            [
+                "v", "provider", "op", "attempt", "status", "error", "delay_ms", "call"
+            ]
+        );
+        assert_eq!(fields(&retry[0], &["status", "error"]), ["503", "server"]);
+        all_contract(&events);
+    }
 }
 
-/// A request dropped in flight is `status=cancelled` and says why, last
+/// A request dropped in flight is `error=cancelled`, no `status`, and says
+/// why, last
 /// (#156): its deadline passed, its call was done with it (a verify found
 /// its verdict), or its caller stopped waiting.
 #[cfg(feature = "crossref")]
@@ -383,8 +501,10 @@ mod cancelled {
         events
             .named("aspero::net", "request")
             .iter()
-            .filter(|e| e.field("status") == Some("cancelled"))
+            .filter(|e| e.field("error") == Some("cancelled"))
             .map(|e| {
+                contract(e);
+                assert_eq!(e.field("status"), None, "no code: {e:?}");
                 assert_eq!(e.names().last(), Some(&"why"), "{:?}", e.names());
                 e.field("why").unwrap().to_owned()
             })
@@ -399,6 +519,16 @@ mod cancelled {
         let result = engine.search(Some("crossref"), &query).await;
         assert!(result.is_err());
         assert_eq!(whys(&events), ["deadline"]);
+        // The call failed: `outcome=error`, its kind in `error`, after it.
+        let calls = events.named("aspero::engine", "call");
+        assert_eq!(
+            fields(&calls[0], &["outcome", "error"]),
+            ["error", "timeout"]
+        );
+        let names = calls[0].names();
+        let at = |n| names.iter().position(|x| *x == n).unwrap();
+        assert_eq!(at("error"), at("outcome") + 1, "{names:?}");
+        all_contract(&events);
     }
 
     #[tokio::test(start_paused = true)]
@@ -443,7 +573,7 @@ mod cancelled {
             events
                 .named("aspero::net", "request")
                 .iter()
-                .filter(|e| e.field("status") != Some("cancelled"))
+                .filter(|e| e.field("error") != Some("cancelled"))
                 .all(|e| e.field("why").is_none())
         );
     }

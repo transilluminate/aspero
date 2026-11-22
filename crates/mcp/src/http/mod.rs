@@ -698,7 +698,7 @@ impl HttpServer {
                     }
                 });
             if let Err(e) = spawned {
-                tracing::warn!(target: "aspero::mcp", status = %e.kind(), "no activity thread");
+                tracing::warn!(target: "aspero::mcp", error = %e.kind(), "no activity thread");
             }
             tx
         });
@@ -962,7 +962,7 @@ async fn accept(listener: TcpListener, state: Arc<State>, cancel: CancellationTo
                 }
                 Err(e) => {
                     // Out of file descriptors, say: wait, then go on.
-                    tracing::warn!(target: "aspero::mcp", status = %e.kind(), "accept failed");
+                    tracing::warn!(target: "aspero::mcp", error = %e.kind(), "accept failed");
                     tokio::time::sleep(Duration::from_millis(50)).await;
                 }
             }

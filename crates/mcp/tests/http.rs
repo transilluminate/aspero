@@ -1667,12 +1667,13 @@ async fn each_tool_call_is_logged_with_the_keys_name_and_no_query() {
         .into_iter()
         .filter(|e| e.field("key") == Some("events agent"))
         .collect();
-    let said: Vec<(&str, &str, &str)> = logged
+    let said: Vec<(&str, &str, &str, &str)> = logged
         .iter()
         .map(|e| {
             (
                 e.field("tool").unwrap(),
                 e.field("outcome").unwrap(),
+                e.field("error").unwrap_or("-"),
                 e.field("cost_usd").unwrap(),
             )
         })
@@ -1680,19 +1681,22 @@ async fn each_tool_call_is_logged_with_the_keys_name_and_no_query() {
     assert_eq!(
         said,
         [
-            ("search", "ok", "0.250000"),
-            ("history_search", "ok", "0.000000"),
-            ("history_fail", "refused", "0.000000"),
-            ("unknown", "unknown_tool", "0.000000"),
+            ("search", "ok", "-", "0.250000"),
+            ("history_search", "ok", "-", "0.000000"),
+            ("history_fail", "error", "refused", "0.000000"),
+            ("unknown", "error", "unknown_tool", "0.000000"),
         ]
     );
-    let fields = ["tool", "key", "outcome", "ms", "cost_usd"];
+    let fields = ["v", "tool", "key", "outcome", "ms", "cost_usd"];
+    let failed = ["v", "tool", "key", "outcome", "error", "ms", "cost_usd"];
     assert_eq!(logged[0].names(), [&fields[..], &["call"]].concat());
-    for e in &logged[1..] {
-        assert_eq!(e.names(), fields);
+    assert_eq!(logged[1].names(), fields);
+    for e in &logged[2..] {
+        assert_eq!(e.names(), failed);
     }
     for e in &logged {
         assert_eq!(e.level, tracing::Level::INFO);
+        assert_eq!(e.field("v"), Some("2"), "v=2 first");
     }
     // The search tool's engine call, by its id.
     let call = logged[0].field("call").unwrap();

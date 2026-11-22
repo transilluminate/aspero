@@ -10,7 +10,7 @@ fn the_system_log_is_enabled_once() {
     assert!(!enable_system_log("a\0b".into(), LogLevel::Info));
     let first = enable_system_log("org.aspero.tests".into(), LogLevel::Debug);
     assert_eq!(first, cfg!(target_vendor = "apple"));
-    tracing::info!(target: "aspero::engine", op = "verify", outcome = "ok", "call");
+    tracing::info!(target: "aspero::engine", v = 2u8, op = "verify", outcome = "ok", "call");
     tracing::debug!(target: "aspero::net", provider = %"openalex", url = %"/works/x", "request_url");
     // Called again, it says no and leaves the first in place.
     assert!(!enable_system_log(

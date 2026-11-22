@@ -6,7 +6,7 @@ use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
 
-use aspero_core::http::Method;
+use aspero_core::http::{Method, status_error};
 use aspero_core::{Error, HttpClient, HttpRequest, HttpResponse};
 use aspero_store::{Pacing, SqliteTape, StoreError, TapeKey};
 use async_trait::async_trait;
@@ -188,8 +188,8 @@ impl HttpClient for Paced {
         };
         let result = self.inner.send(request).await;
         match &result {
-            Ok(resp) => event.emit(&resp.status, cost(resp), None),
-            Err(e) => event.emit(&Failed(e), None, None),
+            Ok(resp) => event.emit(Some(resp.status), answered(resp), cost(resp), None),
+            Err(e) => event.emit(None, Some(failure(e)), None, None),
         }
         result
     }
@@ -208,14 +208,23 @@ struct RequestEvent<'a> {
 }
 
 impl RequestEvent<'_> {
-    /// `why` only for a request dropped in flight ([`observe::why_dropped`]).
-    fn emit(&mut self, status: &dyn std::fmt::Display, cost: Option<f64>, why: Option<&str>) {
+    /// `status`, the HTTP code, when one came; `error`, why it failed
+    /// ([`answered`], [`failure`], `cancelled`); `why` only for a request
+    /// dropped in flight ([`observe::why_dropped`]).
+    fn emit(
+        &mut self,
+        status: Option<u16>,
+        error: Option<&str>,
+        cost: Option<f64>,
+        why: Option<&str>,
+    ) {
         self.done = true;
         let (op, attempt) = observe::request();
         let ms = observe::ms(self.started, Instant::now());
         tracing::info!(
             target: "aspero::net",
-            provider = %self.provider, op = %op, status = %status, ms, waited_ms = self.waited_ms,
+            v = crate::EVENTS_VERSION, provider = %self.provider, op = %op, status,
+            error = error.map(tracing::field::display), ms, waited_ms = self.waited_ms,
             attempt, cache = %"miss", cost_usd = cost.map(|c| tracing::field::display(Usd(c))),
             detached = detach::detached().then_some(true), call = observe::call_id(),
             why = why.map(tracing::field::display), "request"
@@ -233,7 +242,7 @@ impl RequestEvent<'_> {
 impl Drop for RequestEvent<'_> {
     fn drop(&mut self) {
         if !self.done {
-            self.emit(&"cancelled", None, Some(observe::why_dropped()));
+            self.emit(None, Some("cancelled"), None, Some(observe::why_dropped()));
         }
     }
 }
@@ -244,19 +253,19 @@ fn cost(resp: &HttpResponse) -> Option<f64> {
     resp.header("x-ratelimit-cost-usd")?.trim().parse().ok()
 }
 
-/// A failed request's `status`, worked out only when it's logged.
-struct Failed<'a>(&'a Error);
-
-impl std::fmt::Display for Failed<'_> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(failure(self.0))
-    }
+/// A response's `error`: none for a success, else the kind core gives a
+/// code a provider doesn't map itself ([`status_error`]: `not_found`,
+/// `rate_limited`, otherwise `server`). A provider's own reading of it
+/// (`key_rejected`, `budget_spent`, a 404 as an empty answer) is on its
+/// `retry` and `call`.
+fn answered(resp: &HttpResponse) -> Option<&'static str> {
+    (!resp.is_success()).then(|| status_error(resp, None).kind().as_str())
 }
 
-/// A failed request's `status`: what went wrong, by kind (`timeout`,
+/// A failed request's `error`: what went wrong, by kind (`timeout`,
 /// `dns`, `refused`, `reset`, `connect`, `body`, `network`), or the
 /// error's kind when it isn't the network's.
-fn failure(e: &Error) -> &'static str {
+pub(crate) fn failure(e: &Error) -> &'static str {
     let Error::Network(source) = e else {
         return e.kind().as_str();
     };
@@ -439,7 +448,8 @@ impl HttpClient for TapeClient {
                 let (op, attempt) = observe::request();
                 tracing::info!(
                     target: "aspero::net",
-                    provider = %self.label, op = %op, status = replayed.status, ms = 0u64,
+                    v = crate::EVENTS_VERSION, provider = %self.label, op = %op, status = replayed.status,
+                    error = answered(&replayed).map(tracing::field::display), ms = 0u64,
                     waited_ms = 0u64, attempt, cache = %"replayed",
                     cost_usd = cost(&replayed).map(|c| tracing::field::display(Usd(c))),
                     call = observe::call_id(), "request"

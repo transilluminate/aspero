@@ -373,7 +373,7 @@ impl Engine {
         if let Err(e) = asked {
             tracing::warn!(
                 target: "aspero::budget",
-                provider = %entry.provider.id(), status = %e.kind().as_str(), "couldn't ask the budget"
+                provider = %entry.provider.id(), error = %e.kind().as_str(), "couldn't ask the budget"
             );
             tracing::debug!(target: "aspero::budget", error = %e, "budget_detail");
         }

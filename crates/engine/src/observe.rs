@@ -40,6 +40,24 @@ use tokio::time::Instant;
 
 use crate::{Engine, lock};
 
+/// The contract events' schema version, their first field (`v=2`): a
+/// line without one is the form before 0.41, whose `status` held a
+/// failure's kind too. Fields are only added at the end within a version;
+/// a change in any field's meaning bumps it.
+pub const EVENTS_VERSION: u8 = 2;
+
+const V: u8 = EVENTS_VERSION;
+
+/// An answer served from the cache, for its `request` event ([`served`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum FromCache {
+    /// Fresh.
+    Hit,
+    /// Served because the provider failed: its `error`, the failure's
+    /// kind, or `offline`.
+    Stale(&'static str),
+}
+
 /// What a provider is asked: the `op` of a `request` event.
 pub(crate) mod op {
     pub const LOOKUP: &str = "lookup";
@@ -232,20 +250,19 @@ pub(crate) fn carried<F: Future>(work: F) -> impl Future<Output = F::Output> {
 
 /// Answers served from the cache: a `request` event (target
 /// `aspero::cache`) for `items` of them at `provider` for `op`, `cache`
-/// `hit` (fresh) or `stale` (the provider failed, `status` its error kind,
-/// or `offline`).
-pub(crate) fn served(
-    provider: &ProviderId,
-    op: &'static str,
-    cache: &'static str,
-    status: &'static str,
-    items: usize,
-) {
+/// `hit` (fresh) or `stale` (the provider failed: `error` its kind, or
+/// `offline`). No `status`: no response came.
+pub(crate) fn served(provider: &ProviderId, op: &'static str, cached: FromCache, items: usize) {
     if items > 0 {
+        let (cache, error) = match cached {
+            FromCache::Hit => ("hit", None),
+            FromCache::Stale(error) => ("stale", Some(error)),
+        };
         tracing::info!(
             target: "aspero::cache",
-            provider = %provider, op = %op, status = %status, ms = 0u64, waited_ms = 0u64,
-            attempt = 0u32, cache = %cache, items, call = call_id(), "request"
+            v = V, provider = %provider, op = %op, error = error.map(tracing::field::display),
+            ms = 0u64, waited_ms = 0u64, attempt = 0u32, cache = %cache, items,
+            call = call_id(), "request"
         );
     }
 }
@@ -298,7 +315,10 @@ struct CallEvent {
     fresh: bool,
     scope: Arc<CallScope>,
     started: Instant,
+    /// `ok`, `cancelled` (dropped first) or `error`.
     outcome: &'static str,
+    /// The error's kind, for `outcome=error`.
+    error: Option<&'static str>,
     parent: Option<u64>,
 }
 
@@ -307,9 +327,10 @@ impl Drop for CallEvent {
         let asked = lock(&self.scope.asked);
         tracing::info!(
             target: "aspero::engine",
-            op = %self.op, items = self.items, patience = %self.patience, fresh = self.fresh,
+            v = V, op = %self.op, items = self.items, patience = %self.patience, fresh = self.fresh,
             providers = %Asked(&asked), ms = ms(self.started, Instant::now()),
-            outcome = %self.outcome, call = self.scope.id, parent = self.parent, "call"
+            outcome = %self.outcome, error = self.error.map(tracing::field::display),
+            call = self.scope.id, parent = self.parent, "call"
         );
     }
 }
@@ -317,7 +338,7 @@ impl Drop for CallEvent {
 impl Engine {
     /// Runs `work`, the engine call `op` on `items` inputs, emitting its
     /// `call` event as it completes (`outcome` says how, from its result:
-    /// `None` for `ok`, else the error kind) or `cancelled` if it's
+    /// `None` for `ok`, else `error` and the error's kind) or `cancelled` if it's
     /// dropped first. `input` describes what was asked, for the `debug`
     /// companion only. Within another engine call, it's that call's part:
     /// no event, and its requests carry that call's id. Within a batch,
@@ -351,17 +372,19 @@ impl Engine {
             scope: scope.clone(),
             started: Instant::now(),
             outcome: "cancelled",
+            error: None,
             parent,
         };
         let result = CALL.scope(scope, work).await;
-        event.outcome = outcome(&result).unwrap_or("ok");
+        event.error = outcome(&result);
+        event.outcome = if event.error.is_some() { "error" } else { "ok" };
         drop(event);
         result
     }
 }
 
 /// Why a request still in flight was dropped: the `why` of its
-/// `status=cancelled` event. A drop the engine doesn't make is its caller's.
+/// `error=cancelled` event. A drop the engine doesn't make is its caller's.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Why {
     /// Its attempt's deadline passed ([`with_retries`](crate::retry::with_retries)).

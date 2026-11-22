@@ -512,6 +512,14 @@ has its API's quirks; these shape the design:
   relevance; full Lucene.
 - **Open Library.** Books. Some ISBNs carry unrelated records, so scoring
   decides, not the identifier. A query that only excludes fails (500).
+  One book is often several works (a reissue's, a duplicate's), each with
+  its editions at `/works/{key}/editions.json` (publishers, dates, ISBNs;
+  `size` counts them, paged by `offset`; checked live 2026-11-22), the
+  `editions` parameter of its search. A verified book cited with a
+  publisher its record doesn't name is checked against them
+  (`crates/engine/src/editions.rs`): one search by title and first
+  author unless the work is among the candidates, then one page of
+  editions, both cached as searches are.
 - **DBLP.** REST API and mirrors sit behind a proof-of-work bot challenge;
   we don't solve it. SPARQL has no text index (title search a 2–9 s scan
   of ~7M titles), so DBLP is no search provider; key lookups take ~0.1 s.

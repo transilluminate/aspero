@@ -184,7 +184,7 @@ impl Engine {
         let settled = settle_alternatives(claim, &mut report);
         self.detail_notices(&mut report).await;
         let mut v = judge(&settled, report);
-        crate::editions::check_edition(&settled, &mut v);
+        self.check_edition(&settled, &mut v).await;
         // As written, not as settled: a DOI cut short at a line break shows
         // beside the one found.
         v.read = claim.as_read();

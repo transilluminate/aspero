@@ -97,7 +97,16 @@ pub fn preprint_version_claimed(claim: &Claim, record: &SourceRecord) -> Option<
         .ids
         .iter()
         .any(|id| held(id) && preprint_server_of(id).is_none());
-    if !published || claimed_published || record.work.volume.is_none() {
+    // Placed in a journal: at a volume, or named in one (OpenAlex's merged
+    // record may give no volume: "Journal of Experimental Psychology:
+    // Learning, Memory, and Cognition", cited with PsyArXiv's DOI).
+    let placed = record.work.volume.is_some()
+        || record
+            .work
+            .container_title
+            .as_deref()
+            .is_some_and(|c| !preprint_server(c));
+    if !published || claimed_published || !placed {
         return None;
     }
     claim

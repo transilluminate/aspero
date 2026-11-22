@@ -73,6 +73,9 @@ fn other_journal_as(cited: &str, actual: &str, read: bool) -> bool {
     if let Some(all) = over_names(cited, actual, |c, a| other_journal_as(c, a, read), true) {
         return all;
     }
+    if initials_head(cited, actual) {
+        return false;
+    }
     let (c, a) = (significant(cited), significant(actual));
     if c.is_empty() || a.is_empty() || same_journal(cited, actual) {
         return false;
@@ -161,6 +164,9 @@ pub(crate) fn sister_journal_as(cited: &str, actual: &str, read: bool) -> bool {
     if let Some(all) = over_names(cited, actual, |c, a| sister_journal_as(c, a, read), true) {
         return all;
     }
+    if initials_head(cited, actual) {
+        return false;
+    }
     let readings: Vec<&str> = if read {
         std::iter::once(cited)
             .chain(cited.match_indices(". ").map(|(i, _)| &cited[i + 2..]))
@@ -173,6 +179,23 @@ pub(crate) fn sister_journal_as(cited: &str, actual: &str, read: bool) -> bool {
             && main_name(actual).is_none_or(|main| sister_names(cited, main, read))
             && main_name(cited).is_none_or(|main| sister_names(main, actual, read))
     })
+}
+
+/// Whether `cited` opens with an acronym, before a colon, that is
+/// `actual`'s initials: a journal renamed around its acronym ("OTJR:
+/// Occupation, Participation and Health", formerly "The Occupational
+/// Therapy Journal of Research").
+fn initials_head(cited: &str, actual: &str) -> bool {
+    let Some((head, _)) = cited.split_once(':') else {
+        return false;
+    };
+    let head = head.trim();
+    let full = significant(actual);
+    head.chars().count() >= 3
+        && head.chars().all(|c| c.is_ascii_uppercase())
+        && full.len() >= 3
+        && (is_initials(&head.to_ascii_lowercase(), &full)
+            || loose_initials(&head.to_ascii_lowercase(), &full))
 }
 
 /// A journal's name before a subtitle that describes it, if it has one:
@@ -711,6 +734,11 @@ mod tests {
             ("Science", "Science (New York, N.Y.)"),
             ("Lancet Infect Dis", "The Lancet Infectious Diseases"),
             ("", "The Lancet"),
+            // Renamed around its acronym (wild-3 #137).
+            (
+                "OTJR: Occupation, Participation and Health",
+                "The Occupational Therapy Journal of Research",
+            ),
             // A society's acronym left out (holdout-2 #673).
             (
                 "J Wireless Com Network",

@@ -279,6 +279,52 @@ fn reprints_and_versions_cited_with_another_year_are_plausible() {
 }
 
 #[test]
+fn a_preprint_cited_as_its_journal_version_without_a_volume_is_another_version() {
+    // holdout-5 #784: OpenAlex's record of the journal's article, merged
+    // with the PsyArXiv preprint, names its journal but no volume; cited
+    // with the journal's place and the preprint's DOI.
+    let mut record = article(
+        "Control of memory retrieval alters memory-based eye movements",
+        &[
+            "Mrinmayi Kulkarni",
+            "Allison E. Nickel",
+            "Greta N. Minor",
+            "Deborah E. Hannula",
+        ],
+        2024,
+        (
+            "Journal of Experimental Psychology Learning Memory and Cognition",
+            "50",
+            "1199",
+        ),
+    );
+    record.work.volume = None;
+    record.work.page = None;
+    record.ids = vec![
+        "doi:10.1037/xlm0001321".parse().unwrap(),
+        "doi:10.31234/osf.io/q4fvs".parse().unwrap(),
+    ];
+    let cited = |doi: &str| {
+        format!(
+            "Kulkarni, M., Nickel, A. E., Minor, G., & Hannula, D. E. (2024). Control of Memory \
+             Retrieval Alters Memory-Based Eye Movements. Journal of Experimental Psychology: \
+             Learning, Memory, and Cognition, 50(8), 1199–1219. https://doi.org/{doi}"
+        )
+    };
+    let claim = Claim::from_text(cited("10.31234/osf.io/q4fvs"));
+    assert_eq!(preprint_version_claimed(&claim, &record), Some("PsyArXiv"));
+    let a = assess(&claim, &record);
+    assert_eq!(a.container.agreement, Agreement::Mismatch, "{a:?}");
+    assert!((PLAUSIBLE..VERIFIED).contains(&a.confidence), "{a:?}");
+    // The journal's own DOI: the article.
+    let a = assess(&Claim::from_text(cited("10.1037/xlm0001321")), &record);
+    assert!(a.confidence >= VERIFIED, "{a:?}");
+    // A record in no journal and at no volume is none placed.
+    record.work.container_title = None;
+    assert_eq!(preprint_version_claimed(&claim, &record), None);
+}
+
+#[test]
 fn a_preprint_cited_as_its_journal_version_is_another_version() {
     // holdout-4's `w:preprint-as-journal`: the preprint's DOI given with
     // the journal's name and place, found on the journal article's record
@@ -423,4 +469,27 @@ fn a_notice_is_not_the_original_it_corrects() {
         let a = assess(&claim, &retracted);
         assert!(a.confidence >= VERIFIED, "{title}: {a:?}");
     }
+}
+
+#[test]
+fn a_preprint_cited_with_its_journal_versions_longer_title_is_another_version() {
+    // holdout-6 #798: the medRxiv preprint cited with its journal
+    // version's title, a subtitle added and an article left out.
+    let mut preprint = record(
+        &["doi:10.1101/2020.12.24.20248813"],
+        "Quantifying the online news media coverage of the COVID-19 pandemic",
+        &["Konrad Krawczyk", "Tomasz Chelkowski", "Daniel J. Laydon"],
+        2020,
+    );
+    preprint.work.work_type = Some(crate::work::WorkType::Preprint);
+    preprint.work.container_title = Some("medRxiv".into());
+    let cited = "Krawczyk, K. et al. (2020) 'Quantifying Online News Media Coverage of the \
+                 COVID-19 Pandemic: Text Mining Study and Resource', medRxiv [Preprint].";
+    let a = assess(&Claim::from_text(cited), &preprint);
+    assert!((PLAUSIBLE..VERIFIED).contains(&a.confidence), "{a:?}");
+    // Its own title, the article left out, verifies.
+    let cited = "Krawczyk, K. et al. (2020) 'Quantifying Online News Media Coverage of the \
+                 COVID-19 Pandemic', medRxiv [Preprint].";
+    let a = assess(&Claim::from_text(cited), &preprint);
+    assert!(a.confidence >= VERIFIED, "{a:?}");
 }

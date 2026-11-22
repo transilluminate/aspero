@@ -33,6 +33,23 @@ Fixed:
   "Healthcare" for the International Journal of Environmental Research and
   Public Health (holdout-5 `w:sister-journal`). Plausible, the journal
   named.
+- A preprint's DOI cited with its journal version's name and place
+  verified when the journal had a subtitle listing words with commas
+  ("… Journal of Experimental Psychology: Learning, Memory, and Cognition,
+  50(8), 1199–1219. https://doi.org/10.31234/osf.io/q4fvs"; holdout-5
+  `w:preprint-as-journal`), which was not read as a journal, or when the
+  merged record of the two gave no volume. Such a name is read, and a
+  record named in a journal is placed there: plausible, the preprint
+  server named. A journal renamed around its acronym, cited by its new
+  name ("OTJR: Occupation, Participation and Health" for The Occupational
+  Therapy Journal of Research), is still the record's.
+- A preprint cited with its journal version's title, a subtitle added and
+  an article left out ("Quantifying Online News Media Coverage of the
+  COVID-19 Pandemic: Text Mining Study and Resource" for "Quantifying the
+  online news media coverage of the COVID-19 pandemic"; holdout-6
+  `w:journal-as-preprint`), verified: the title was only found word for
+  word. It is now found with an article given or left out, and the words
+  added are another title's: plausible, the title named.
 
 ## 0.39.2
 

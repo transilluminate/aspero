@@ -176,7 +176,14 @@ pub fn assess(claim: &Claim, record: &SourceRecord) -> Assessment {
         && work_title
             .as_deref()
             .is_some_and(|t| titles::main_title(unmarked(t)) == unmarked(t));
-    let extended = match (&claimed_title, &work_title, &text, &title_span) {
+    // Found with an article given or left out, too.
+    let loose_span = title_span.clone().or_else(|| {
+        work_title
+            .as_deref()
+            .zip(text.as_ref())
+            .and_then(|(t, x)| x.loose_title_span(t))
+    });
+    let extended = match (&claimed_title, &work_title, &text, &loose_span) {
         (Some(claimed), Some(actual), _, _) => titles::extends(claimed, actual, subtitle_ok),
         (None, Some(_), Some(text), Some(span)) => {
             let journal = work

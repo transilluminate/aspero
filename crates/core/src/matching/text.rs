@@ -222,6 +222,33 @@ impl Normalised {
             })
     }
 
+    /// [`Normalised::title_span`], an article ("the", "a", "an") given or
+    /// left out on either side ("Quantifying Online News Media Coverage …"
+    /// for "Quantifying the online news media coverage …").
+    pub(super) fn loose_title_span(&self, title: &str) -> Option<Range<usize>> {
+        let article = |w: &str| matches!(w, "the" | "a" | "an");
+        let phrase: Vec<String> = words(unmarked(title))
+            .into_iter()
+            .filter(|w| !article(w))
+            .collect();
+        if phrase.len() < 3 {
+            return None;
+        }
+        (0..self.words.len()).find_map(|start| {
+            let mut k = 0;
+            let mut i = start;
+            while k < phrase.len() && i < self.words.len() {
+                if self.words[i] == phrase[k] {
+                    k += 1;
+                } else if !article(&self.words[i]) || i == start {
+                    return None;
+                }
+                i += 1;
+            }
+            (k == phrase.len()).then_some(start..i)
+        })
+    }
+
     /// Whether the reference gives `title` with a word or two put in place
     /// of its own, not misspelt ("Hydroxychloroquine in hospitalized
     /// patients with Covid-19" for "Dexamethasone in …"): another title

@@ -201,6 +201,11 @@ pub struct OpenAccess {
     pub pdf_url: Option<String>,
     pub url: Option<String>,
     pub license: Option<String>,
+    /// What kind of copy this is: whether `pdf_url` can be fetched by a
+    /// program, or the work is free to read in a browser only. Always set
+    /// by aspero; optional only so records made in Swift needn't give it.
+    #[uniffi(default = None)]
+    pub free_copy: Option<FreeCopyKind>,
 }
 
 impl From<&aspero_core::OpenAccess> for OpenAccess {
@@ -211,6 +216,32 @@ impl From<&aspero_core::OpenAccess> for OpenAccess {
             pdf_url: oa.pdf_url.clone(),
             url: oa.url.clone(),
             license: oa.license.clone(),
+            free_copy: Some(oa.free_copy().into()),
+        }
+    }
+}
+
+/// What kind of free copy is known (#204).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Enum)]
+pub enum FreeCopyKind {
+    /// `pdfUrl` is a PDF not known to turn programs away.
+    Pdf,
+    /// Free to read, but only as a page, or through a PDF link that turns
+    /// programs away (PubMed Central's and Europe PMC's): PMC's author
+    /// manuscripts and articles outside its open-access subset.
+    BrowserOnly,
+    /// No free copy is known (`isOa` false). Not `none`, which Swift
+    /// would confuse with an optional's.
+    NoneKnown,
+}
+
+impl From<aspero_core::FreeCopyKind> for FreeCopyKind {
+    fn from(kind: aspero_core::FreeCopyKind) -> Self {
+        match kind {
+            aspero_core::FreeCopyKind::Pdf => FreeCopyKind::Pdf,
+            aspero_core::FreeCopyKind::BrowserOnly => FreeCopyKind::BrowserOnly,
+            // Non-exhaustive: a kind added later is no fetchable copy.
+            _ => FreeCopyKind::NoneKnown,
         }
     }
 }

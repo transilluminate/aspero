@@ -6,7 +6,7 @@ use aspero_engine::{
 };
 use aspero_json::Status;
 
-use super::{ErrorKind, ProviderUsage, Verification, Work};
+use super::{ErrorKind, FreeCopyKind, OpenAccess, ProviderUsage, Verification, Work};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Enum)]
 pub enum LookupStatus {
@@ -57,6 +57,27 @@ pub struct Attempt {
     pub kind: Option<ErrorKind>,
     /// For failures: what went wrong, in English.
     pub error: Option<String>,
+}
+
+impl From<&engine::Attempt> for Attempt {
+    fn from(a: &engine::Attempt) -> Self {
+        #[allow(clippy::match_same_arms)] // the wildcard: see below
+        let (outcome, failure) = match &a.outcome {
+            Outcome::Found => (AttemptOutcome::Found, None),
+            Outcome::Failed(e) => (AttemptOutcome::Failed, Some(e)),
+            Outcome::NotFound => (AttemptOutcome::NotFound, None),
+            // `Outcome` is non-exhaustive: an outcome added later found
+            // nothing usable here, and it isn't a failure the app could
+            // word, so it shows as not found.
+            _ => (AttemptOutcome::NotFound, None),
+        };
+        Attempt {
+            provider: a.provider.to_string(),
+            outcome,
+            kind: failure.map(|e| e.kind().into()),
+            error: failure.map(ToString::to_string),
+        }
+    }
 }
 
 /// Where a record contradicts its DOI's registry.
@@ -139,28 +160,7 @@ impl Lookup {
             _ => LookupStatus::NotFound,
         };
         let served = result.served().map(Freshness::from);
-        let attempts = result
-            .attempts
-            .iter()
-            .map(|a| {
-                #[allow(clippy::match_same_arms)] // the wildcard: see below
-                let (outcome, failure) = match &a.outcome {
-                    Outcome::Found => (AttemptOutcome::Found, None),
-                    Outcome::Failed(e) => (AttemptOutcome::Failed, Some(e)),
-                    Outcome::NotFound => (AttemptOutcome::NotFound, None),
-                    // `Outcome` is non-exhaustive: an outcome added later
-                    // found nothing usable here, and it isn't a failure the
-                    // app could word, so it shows as not found.
-                    _ => (AttemptOutcome::NotFound, None),
-                };
-                Attempt {
-                    provider: a.provider.to_string(),
-                    outcome,
-                    kind: failure.map(|e| e.kind().into()),
-                    error: failure.map(ToString::to_string),
-                }
-            })
-            .collect();
+        let attempts = result.attempts.iter().map(Attempt::from).collect();
         let work = result.record.as_ref().map(Work::from_record);
         Lookup {
             input: input.to_owned(),
@@ -182,6 +182,33 @@ pub struct Lookups {
     /// One per input, in order.
     pub results: Vec<Lookup>,
     pub usage: Vec<ProviderUsage>,
+}
+
+/// A work's free copy ([`Aspero::free_copy`](crate::Aspero::free_copy)).
+#[derive(Debug, Clone, uniffi::Record)]
+pub struct FreeCopy {
+    /// What kind of copy is known: a PDF a program can fetch, a copy to
+    /// read in a browser only, or none.
+    pub kind: FreeCopyKind,
+    /// The work's open access, with the fetchable PDF where one was found
+    /// (`source` then `pmc`); `None` when nothing is known.
+    pub open_access: Option<OpenAccess>,
+    /// PMC's open data's answer, when it was asked: not for a work that
+    /// already has a fetchable PDF or has no PMCID. A failure leaves
+    /// `open_access` as the work had it.
+    pub attempt: Option<Attempt>,
+    pub usage: Vec<ProviderUsage>,
+}
+
+impl From<&engine::FreeCopy> for FreeCopy {
+    fn from(copy: &engine::FreeCopy) -> Self {
+        FreeCopy {
+            kind: copy.kind().into(),
+            open_access: copy.open_access.as_ref().map(OpenAccess::from),
+            attempt: copy.attempt.as_ref().map(Attempt::from),
+            usage: super::usage(&copy.usage),
+        }
+    }
 }
 
 /// What decided which work a document is, surest first.

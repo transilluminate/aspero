@@ -3,6 +3,7 @@
 
 mod bib;
 mod cite;
+mod free_copy;
 mod graph;
 mod lookup;
 mod page;

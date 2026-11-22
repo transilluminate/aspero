@@ -16,7 +16,8 @@ use std::time::Duration;
 use aspero_core::csl::{null_default, plain_text, strip_markup};
 use aspero_core::http::{escape_lucene, status_error};
 use aspero_core::query::{
-    check_supported, lucene_and, lucene_quoted, lucene_term, lucene_years, render_lucene,
+    check_supported, lucene_and, lucene_quoted, lucene_term, lucene_words, lucene_years,
+    render_lucene,
 };
 use aspero_core::{
     BooleanSupport, Capabilities, Cursor, Doi, Error, FieldSet, Filter, FilterValue, Hit,
@@ -486,7 +487,9 @@ impl Provider for EuropePmc {
             .map_err(Error::UnsupportedQuery)?;
         let mut clauses = Vec::new();
         if !query.text.trim().is_empty() {
-            clauses.push(format!("({})", escape_lucene(query.text.trim())));
+            // Words, never operators: an upper-case AND, OR or NOT in a
+            // citation is searched for (#195).
+            clauses.push(format!("({})", lucene_words(query.text.trim())));
         }
         for (key, value) in &query.extra {
             match key.as_str() {
@@ -509,7 +512,7 @@ impl Provider for EuropePmc {
             clauses.push(format!("AUTH:\"{}\"", escape_lucene(author)));
         }
         if let Some(title) = query.field(Filter::Title) {
-            clauses.push(format!("TITLE:({})", escape_lucene(title)));
+            clauses.push(format!("TITLE:({})", lucene_words(title)));
         }
         if let Some(journal) = query.field(Filter::Container) {
             clauses.push(format!("JOURNAL:\"{}\"", escape_lucene(journal)));

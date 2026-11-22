@@ -180,6 +180,10 @@ fn user_text_is_escaped_and_extras_rejected() {
     let (ol, http) = provider([recorded("search")]);
     block_on(ol.search(&SearchQuery::new("C++: a guide"))).unwrap();
     assert!(query(&http, 0).contains(&pair("q", r"(C\+\+\: a guide)")));
+    // An upper-case operator in a citation is a word (#195).
+    let (ol, http) = provider([recorded("search")]);
+    block_on(ol.search(&SearchQuery::new("WAR AND PEACE"))).unwrap();
+    assert!(query(&http, 0).contains(&pair("q", r#"(WAR "and" PEACE)"#)));
 
     let mut bad = SearchQuery::new("x");
     bad.extra.insert("sort".into(), "new".into());

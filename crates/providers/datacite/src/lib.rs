@@ -21,9 +21,10 @@ mod wire;
 use std::sync::Arc;
 use std::time::Duration;
 
-use aspero_core::http::{escape_lucene, path_segment, status_error};
+use aspero_core::http::{path_segment, status_error};
 use aspero_core::query::{
-    check_supported, lucene_and, lucene_quoted, lucene_term, lucene_years, render_lucene,
+    check_supported, lucene_and, lucene_quoted, lucene_term, lucene_words, lucene_years,
+    render_lucene,
 };
 use aspero_core::{
     AuthorId, BooleanSupport, Capabilities, Cursor, Doi, Error, Field, FieldSet, Filter,
@@ -332,7 +333,8 @@ impl Provider for Datacite {
     }
 }
 
-/// User text as query words: its syntax escaped, and `/` a space. DataCite
+/// User text as query words: its syntax escaped, `AND`, `OR` and `NOT`
+/// quoted as words ([`lucene_words`]), and `/` a space. DataCite
 /// reads `/`, even escaped (`\/`), as a regular expression's start: one is
 /// a bad request ("Class Professional Publishing / AACE", wild-4 #339),
 /// two a regular expression that finds nothing ("AHA/ACC/HRS Guideline",
@@ -340,7 +342,7 @@ impl Provider for Datacite {
 /// searched are the same.
 fn user_text(text: &str) -> String {
     let spaced = text.replace('/', " ");
-    escape_lucene(&spaced.split_whitespace().collect::<Vec<_>>().join(" "))
+    lucene_words(&spaced)
 }
 
 /// A query tree in DataCite's query string (Elasticsearch, checked live

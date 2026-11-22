@@ -506,7 +506,69 @@ fn field_values_lose_the_commas_and_pipes_that_split_filters() {
     block_on(oa.search(&q)).unwrap();
     assert!(query(&http, 0).contains(&(
         "filter".into(),
-        "raw_author_name.search:LeCun YBengio".into()
+        "raw_author_name.search:LeCun Y Bengio".into()
+    )));
+}
+
+/// Text read from a citation is searched for, never obeyed (#195): its
+/// upper-case operators lower-cased, a keyword row's `|`-separated cells
+/// alternatives (empty ones dropped), a filter's `|` a space, unmatched
+/// quotes and brackets dropped.
+#[test]
+fn citation_text_is_words_not_syntax() {
+    let (oa, http) = provider([recorded("works_search_fields")]);
+    let mut q = SearchQuery::new("RISK OR BENEFIT OF ASPIRIN | 10.1136/x | 27660368");
+    q.title = Some(r#"NOT ALL SEPSIS IS THE SAME ("a review"#.into());
+    q.author = Some("Smith AND Jones".into());
+    block_on(oa.search(&q)).unwrap();
+    let params = query(&http, 0);
+    assert!(
+        params.contains(&(
+            "search".into(),
+            "RISK or BENEFIT OF ASPIRIN OR 10.1136/x OR 27660368".into()
+        )),
+        "{params:?}"
+    );
+    assert!(
+        params.contains(&(
+            "filter".into(),
+            "raw_author_name.search:Smith and Jones,title.search:not ALL SEPSIS IS THE SAME a review"
+                .into()
+        )),
+        "{params:?}"
+    );
+}
+
+/// A tree's operators are its own: its OR goes out as one, while an OR in
+/// a leaf's text is a word.
+#[test]
+fn a_trees_or_survives_its_leaves_operators_do_not() {
+    let (oa, http) = provider([recorded("works_search_fields")]);
+    let tree = QueryNode::Any(vec![
+        QueryNode::term(TermField::Title, "RISK OR BENEFIT"),
+        QueryNode::term(TermField::Title, "aspirin|NOT"),
+    ]);
+    block_on(oa.search(&tree_query(tree))).unwrap();
+    assert!(
+        query(&http, 0).contains(&(
+            "filter".into(),
+            "title.search:(RISK or BENEFIT) OR (aspirin not)".into()
+        )),
+        "{:?}",
+        query(&http, 0)
+    );
+}
+
+#[test]
+fn a_journal_from_a_citation_is_words_too() {
+    let empty = r#"{"meta": {"count": 0}, "results": []}"#;
+    let (oa, http) = provider([response(200, &[("x-ratelimit-cost-usd", "0.001")], empty)]);
+    let mut q = SearchQuery::new("");
+    q.container = Some("Journal of Pain AND Symptom | Management".into());
+    block_on(oa.search(&q)).unwrap();
+    assert!(query(&http, 0).contains(&(
+        "filter".into(),
+        "display_name.search:Journal of Pain and Symptom Management".into()
     )));
 }
 

@@ -3,6 +3,16 @@
 Releases 0.10 to 0.19 are in [docs/changelog/0.1x.md](docs/changelog/0.1x.md),
 and 0.1 to 0.9 in [docs/changelog/0.0x.md](docs/changelog/0.0x.md).
 
+## Unreleased
+
+Changed:
+
+- In Swift, `CitedField` gains `publisher`, last (#200, an embedder's
+  ask): a book cited with a publisher neither its record nor its editions
+  name (0.39.4) no longer reaches the app as `journal`. A `switch` over
+  `CitedField` without `default` needs one more arm. Stored reasons write
+  it as `"publisher"`; an older build reads such a difference as none.
+
 ## 0.39.4
 
 Fixed:

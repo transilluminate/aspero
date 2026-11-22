@@ -155,8 +155,6 @@ pub enum CitedField {
     Title,
     Authors,
     Year,
-    /// The journal; for a book, its publisher, which none of its editions
-    /// names (`actual` the one most of them name).
     Journal,
     Volume,
     FirstPage,
@@ -168,10 +166,13 @@ pub enum CitedField {
     /// record carries. `actual` the work's of that kind (`pmid:19623052`),
     /// `cited` the one claimed.
     Identifier,
+    /// A book's publisher, which neither its record nor its editions name
+    /// (`actual` the work's publisher, `cited` the one claimed).
+    Publisher,
 }
 
 /// A cited field the work disagrees with, and the work's value when worth
-/// showing (year, journal, volume, first page).
+/// showing (year, journal, volume, first page, publisher).
 #[derive(Debug, Clone, uniffi::Record)]
 pub struct Difference {
     pub field: CitedField,
@@ -216,9 +217,8 @@ impl From<engine::CitedField> for CitedField {
             engine::CitedField::Title => CitedField::Title,
             engine::CitedField::Authors => CitedField::Authors,
             engine::CitedField::Year => CitedField::Year,
-            // A book's publisher is its container here, as a structured
-            // claim's `container` may give it: no case of its own yet.
-            engine::CitedField::Journal | engine::CitedField::Publisher => CitedField::Journal,
+            engine::CitedField::Journal => CitedField::Journal,
+            engine::CitedField::Publisher => CitedField::Publisher,
             engine::CitedField::Volume => CitedField::Volume,
             engine::CitedField::Kind => CitedField::Kind,
             engine::CitedField::Identifier => CitedField::Identifier,

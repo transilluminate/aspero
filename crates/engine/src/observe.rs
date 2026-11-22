@@ -315,7 +315,10 @@ struct CallEvent {
     fresh: bool,
     scope: Arc<CallScope>,
     started: Instant,
+    /// `ok`, `cancelled` (dropped first) or `error`.
     outcome: &'static str,
+    /// The error's kind, for `outcome=error`.
+    error: Option<&'static str>,
     parent: Option<u64>,
 }
 
@@ -326,7 +329,8 @@ impl Drop for CallEvent {
             target: "aspero::engine",
             v = V, op = %self.op, items = self.items, patience = %self.patience, fresh = self.fresh,
             providers = %Asked(&asked), ms = ms(self.started, Instant::now()),
-            outcome = %self.outcome, call = self.scope.id, parent = self.parent, "call"
+            outcome = %self.outcome, error = self.error.map(tracing::field::display),
+            call = self.scope.id, parent = self.parent, "call"
         );
     }
 }
@@ -334,7 +338,7 @@ impl Drop for CallEvent {
 impl Engine {
     /// Runs `work`, the engine call `op` on `items` inputs, emitting its
     /// `call` event as it completes (`outcome` says how, from its result:
-    /// `None` for `ok`, else the error kind) or `cancelled` if it's
+    /// `None` for `ok`, else `error` and the error's kind) or `cancelled` if it's
     /// dropped first. `input` describes what was asked, for the `debug`
     /// companion only. Within another engine call, it's that call's part:
     /// no event, and its requests carry that call's id. Within a batch,
@@ -368,10 +372,12 @@ impl Engine {
             scope: scope.clone(),
             started: Instant::now(),
             outcome: "cancelled",
+            error: None,
             parent,
         };
         let result = CALL.scope(scope, work).await;
-        event.outcome = outcome(&result).unwrap_or("ok");
+        event.error = outcome(&result);
+        event.outcome = if event.error.is_some() { "error" } else { "ok" };
         drop(event);
         result
     }

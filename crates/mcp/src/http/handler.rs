@@ -294,7 +294,7 @@ impl ServerHandler for Handler {
             tool_event(
                 tool,
                 Some(&key.key.name),
-                e.kind.as_str(),
+                Some(e.kind.as_str()),
                 started,
                 0.0,
                 None,
@@ -336,12 +336,12 @@ impl ServerHandler for Handler {
                 ),
             }
         };
-        let (outcome, cost) = match &activity {
-            Some(a) => (a.error.map_or("ok", ToolErrorKind::as_str), a.cost_usd),
-            None => (ToolErrorKind::UnknownTool.as_str(), 0.0),
+        let (error, cost) = match &activity {
+            Some(a) => (a.error.map(ToolErrorKind::as_str), a.cost_usd),
+            None => (Some(ToolErrorKind::UnknownTool.as_str()), 0.0),
         };
         let tool = activity.is_some().then_some(name.as_str());
-        tool_event(tool, Some(&key.key.name), outcome, started, cost, call);
+        tool_event(tool, Some(&key.key.name), error, started, cost, call);
         if let Some(activity) = activity {
             self.shared.report(activity);
         }

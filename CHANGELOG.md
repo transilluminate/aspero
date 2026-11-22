@@ -24,6 +24,10 @@ updating):
   `status=<kind>`). `retry` says `status` (a server error's code) and
   `error` the same way, and the warnings and the two daily-cap notes that
   put a kind in `status` put it in `error`.
+- `outcome` on `call` and `tool` is `ok`, `cancelled` or `error`, and a
+  failure's kind moves to `error`, right after it (before:
+  `outcome=timeout`; now `outcome=error error=timeout`). So `error` means
+  the same on every contract event.
 
 ## 0.40.0
 

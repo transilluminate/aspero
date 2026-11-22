@@ -87,13 +87,14 @@ pub(crate) fn engine_result(
 /// A tool call's `tool` event (target `aspero::mcp`, DESIGN "Diagnostics
 /// events") as it completes: the tool (`None`, logged `unknown`, for a
 /// name no tool has: the client's text, kept to [`tool_input`]), the key's
-/// name (HTTP; none over stdio), `ok` or the error's kind, its time since
+/// name (HTTP; none over stdio), `outcome=ok`, or `outcome=error` and
+/// `error`, the error's kind (`None` for ok), its time since
 /// `started`, what it cost, and the id of the engine call it made, if it
 /// made one ([`with_call_id`]).
 pub(crate) fn tool_event(
     tool: Option<&str>,
     key: Option<&str>,
-    outcome: &str,
+    error: Option<&str>,
     started: tokio::time::Instant,
     cost_usd: f64,
     call: Option<u64>,
@@ -101,7 +102,8 @@ pub(crate) fn tool_event(
     tracing::info!(
         target: "aspero::mcp",
         v = aspero_engine::EVENTS_VERSION, tool = %tool.unwrap_or("unknown"), key = key.map(tracing::field::display),
-        outcome = %outcome,
+        outcome = %if error.is_some() { "error" } else { "ok" },
+        error = error.map(tracing::field::display),
         ms = u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX),
         cost_usd = %format_args!("{cost_usd:.6}"), call, "tool"
     );
@@ -180,15 +182,15 @@ impl ServerHandler for Handler {
             Value::Object(arguments),
         ))
         .await;
-        let (outcome, cost) = match &result {
-            Ok(output) => ("ok", output.cost_usd),
-            Err(e) => (e.kind.as_str(), e.cost_usd),
+        let (error, cost) = match &result {
+            Ok(output) => (None, output.cost_usd),
+            Err(e) => (Some(e.kind.as_str()), e.cost_usd),
         };
         let known = self.tools.spec(&request.name).is_some();
         tool_event(
             known.then_some(&*request.name),
             None,
-            outcome,
+            error,
             started,
             cost,
             call,

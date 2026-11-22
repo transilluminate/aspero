@@ -222,6 +222,8 @@ async fn a_call_dropped_before_it_ends_is_cancelled() {
         fields(&calls[0], &["op", "patience", "providers", "ms", "outcome"]),
         ["search", "interactive", "crossref", "1000", "cancelled"]
     );
+    assert_eq!(calls[0].field("error"), None, "cancelled is no error");
+    all_contract(&events);
 }
 
 #[cfg(feature = "openalex")]
@@ -517,6 +519,16 @@ mod cancelled {
         let result = engine.search(Some("crossref"), &query).await;
         assert!(result.is_err());
         assert_eq!(whys(&events), ["deadline"]);
+        // The call failed: `outcome=error`, its kind in `error`, after it.
+        let calls = events.named("aspero::engine", "call");
+        assert_eq!(
+            fields(&calls[0], &["outcome", "error"]),
+            ["error", "timeout"]
+        );
+        let names = calls[0].names();
+        let at = |n| names.iter().position(|x| *x == n).unwrap();
+        assert_eq!(at("error"), at("outcome") + 1, "{names:?}");
+        all_contract(&events);
     }
 
     #[tokio::test(start_paused = true)]

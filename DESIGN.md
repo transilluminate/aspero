@@ -640,18 +640,22 @@ at info.
 Within a version, names, fields and values don't change, and fields are
 only added at the end; a change in any field's meaning bumps `v`. A line
 without `v` is the form before 0.41 (v1), whose `status` held an HTTP
-code, a failure's kind or `none`, and had no `error`.
+code, a failure's kind or `none`, whose `outcome` held an error's kind,
+and which had no `error`.
 
 **One meaning per field**, on every contract event:
 
 - `status`: an HTTP code, only where a response came; absent otherwise.
-- `error`: why it failed or there's no code, absent on success. For a
+- `outcome` (`call`, `tool`): `ok`, `cancelled` or `error`, never a kind.
+- `error`: why it failed or there's no code, absent on success (and on
+  `outcome=cancelled`; a cancelled request is `error=cancelled`). For a
   request that got no answer, the network's reason: `timeout`, `dns`,
   `refused`, `reset`, `connect`, `body` (the answer broke off), `network`
   (another); `cancelled` (dropped once sent; `why` says why). Else an
   error's kind (`ErrorKind`: `server`, `rate_limited`, `not_found`,
   `not_cached`, `budget_capped`, …), and `offline` for a stale answer the
-  cache served because aspero was offline. `error` follows `status`.
+  cache served because aspero was offline. `error` follows `status`, or
+  `outcome` on a `call` or `tool`.
 - **An HTTP error response has both**: `status=503 error=server`. On a
   `request`, a code outside 2xx takes the kind core gives a code a
   provider doesn't map itself (`status_error`): 404 `not_found`, 429
@@ -711,8 +715,8 @@ count its provider as asked.
 - `patience`: `batch`, `interactive` (a deadline or retries capped) or
   `offline`; `fresh`: past the cache.
 - `providers`: those asked live, comma-separated, or `none` (all from the
-  cache); `ms`; `outcome`: `ok`, `cancelled` (dropped first), or the
-  error's kind.
+  cache); `ms`; `outcome`: `ok`, `cancelled` (dropped first), or `error`;
+  `error`, the error's kind, only with `outcome=error`.
 - `call`: its id, a number unique within the process (one counter for
   every engine call). An embedder can choose it beforehand (FFI
   `CallToken.id()`, Rust `CallId`), to log beside the call; calls made
@@ -727,7 +731,8 @@ count its provider as asked.
 **`tool`**: an MCP tool call, engine or host tool, as the server sees it
 (target `aspero::mcp`, category `mcp`): `v`, `tool`, `key` (the key's
 *name*, as `Caller.key_name` has it; absent over stdio), `outcome` (`ok`
-or the error's kind: `refused`, `timeout`, `unknown_tool`, …), `ms`,
+or `error`), `error` (only with `outcome=error`, the tool error's kind:
+`refused`, `timeout`, `unknown_tool`, …), `ms`,
 `cost_usd`, `call`: the id of the engine call the tool made, absent where
 it made none (host tools, a refused or invalid call). A name no tool has
 is the client's text: `tool=unknown`, the name only in `tool_input`.

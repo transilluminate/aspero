@@ -82,6 +82,11 @@ pub const ID_CONFLICT_CAP: f64 = LOCATION_MISMATCH_CAP;
 /// claim cites a journal: a lookalike copy can't confirm it.
 pub(super) const UNPLACED_CAP: f64 = LOCATION_MISMATCH_CAP;
 
+/// Confidence ceiling for a proceedings' own record cited at a page: the
+/// venue of the paper cited, plausible at most, and below the paper's own
+/// record cited at another venue ([`JOURNAL_MISMATCH_CAP`] less
+/// [`JOURNAL_MISMATCH_PENALTY`]).
+pub(super) const VENUE_RECORD_CAP: f64 = 0.7;
 /// Verdict thresholds on confidence: verified at or above this.
 pub const VERIFIED: f64 = 0.85;
 /// Plausible at or above this, below [`VERIFIED`].

@@ -756,3 +756,102 @@ fn a_journal_article_cited_as_a_chapter_is_another_container() {
         assert!(a.confidence >= VERIFIED, "{claim}: {a:?}");
     }
 }
+
+#[test]
+fn a_sister_meeting_of_networking_cited_is_another_venue() {
+    // holdout-6 #1010: ICC for a GLOBECOM paper; the acronym takes no
+    // letter from its publisher's name ("IEEE Global …"). Holdout-5 #643:
+    // SIGCOMM for an IMC paper, two meetings its society holds.
+    let globecom = proceedings(
+        "On the value of collaboration in multidimensional location estimation",
+        &["Javier Schloemann", "R. Michael Buehrer"],
+        2014,
+        "2014 IEEE Global Communications Conference",
+        "498-504",
+    );
+    let imc = proceedings(
+        "Measuring Starlink Aviation Around the World",
+        &["Jiacheng Zhao", "Jianli Pan"],
+        2026,
+        "Proceedings of the 2026 ACM Internet Measurement Conference",
+        "1118-1132",
+    );
+    let sigcomm = proceedings(
+        "A first look at modern enterprise traffic",
+        &["Ruoming Pang", "Mark Allman", "Vern Paxson"],
+        2005,
+        "Proceedings of the 2005 conference on Applications, technologies, architectures, and \
+         protocols for computer communications",
+        "15-28",
+    );
+    for (claim, record) in [
+        (
+            "Javier Schloemann and R. Michael Buehrer. 2014. On the value of collaboration in \
+             multidimensional location estimation. In ICC 2014 - 2014 IEEE International \
+             Conference on Communications (ICC). 498-504.",
+            &globecom,
+        ),
+        (
+            "J. Zhao and J. Pan, \u{201c}Measuring Starlink Aviation Around the World,\u{201d} in \
+             Proceedings of the 2026 ACM SIGCOMM Conference (SIGCOMM '26), 2026, pp. 1118–1132.",
+            &imc,
+        ),
+        (
+            "R. Pang, M. Allman, and V. Paxson, \u{201c}A first look at modern enterprise \
+             traffic,\u{201d} in Proc. ACM Internet Measurement Conference (IMC '05), 2005, pp. \
+             15–28.",
+            &sigcomm,
+        ),
+    ] {
+        let a = assess(&Claim::from_text(claim), record);
+        assert_eq!(a.container.agreement, Agreement::Mismatch, "{claim}");
+        assert!(
+            (PLAUSIBLE..VERIFIED).contains(&a.confidence),
+            "{claim}: {a:?}"
+        );
+    }
+    // Each at its own meeting verifies.
+    for (claim, record) in [
+        (
+            "Javier Schloemann and R. Michael Buehrer. 2014. On the value of collaboration in \
+             multidimensional location estimation. In 2014 IEEE Global Communications \
+             Conference. 498-504.",
+            &globecom,
+        ),
+        (
+            "J. Zhao and J. Pan, \u{201c}Measuring Starlink Aviation Around the World,\u{201d} in \
+             Proceedings of the 2026 ACM Internet Measurement Conference (IMC '26), 2026, pp. \
+             1118–1132.",
+            &imc,
+        ),
+        (
+            "R. Pang, M. Allman, and V. Paxson, \u{201c}A first look at modern enterprise \
+             traffic,\u{201d} in Proc. ACM SIGCOMM 2005, pp. 15–28.",
+            &sigcomm,
+        ),
+    ] {
+        let a = assess(&Claim::from_text(claim), record);
+        assert!(a.confidence >= VERIFIED, "{claim}: {a:?}");
+    }
+}
+
+#[test]
+fn a_proceedings_volume_cited_at_a_page_is_the_venue_not_the_paper() {
+    // holdout-6 #1010: the ICC proceedings' own record, its title the
+    // venue a reference names, isn't the paper cited in it: it ranks
+    // below the paper's record at another venue (0.72).
+    let mut volume = record(
+        &["doi:10.1109/icc33012.2014"],
+        "2014 IEEE International Conference on Communications Workshops (ICC)",
+        &[],
+        2014,
+    );
+    volume.work.work_type = Some(crate::work::WorkType::Other("proceedings".into()));
+    let claim = "Javier Schloemann and R. Michael Buehrer. 2014. On the value of collaboration \
+                 in multidimensional location estimation. In ICC 2014 - 2014 IEEE International \
+                 Conference on Communications (ICC). 498-504.";
+    assert!(assess(&Claim::from_text(claim), &volume).confidence <= 0.7);
+    // Cited as itself, without a page, it may be.
+    let claim = "2014 IEEE International Conference on Communications Workshops (ICC). IEEE; 2014.";
+    assert!(assess(&Claim::from_text(claim), &volume).confidence >= PLAUSIBLE);
+}

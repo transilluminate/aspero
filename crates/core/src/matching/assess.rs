@@ -10,7 +10,7 @@ use super::caps::{
     EXTENDED_TITLE_CAP, ID_CONFLICT_CAP, JOURNAL_MISMATCH_CAP, JOURNAL_MISMATCH_PENALTY,
     LOCATION_MISMATCH_CAP, NO_EVIDENCE_CAP, OTHER_IN_SERIES, PLACED, PLACED_YEAR_OFF,
     PLACED_YEAR_WRONG, PLAUSIBLE, SHORT_TITLE_WORDS, STRANGERS_CAP, UNCORROBORATED_CAP,
-    UNPLACED_CAP, VERSION, combine,
+    UNPLACED_CAP, VENUE_RECORD_CAP, VERSION, combine,
 };
 use super::claim::{byline, cites_chapter, cites_edited_book, title_region};
 use super::derivative::{self, WorkKind, record_derivative_kind};
@@ -814,6 +814,22 @@ pub fn assess(claim: &Claim, record: &SourceRecord) -> Assessment {
             .is_some_and(|t| cites_chapter(t) || cites_edited_book(t));
     if chapter_for_book {
         confidence = confidence.min(LOCATION_MISMATCH_CAP);
+    }
+    // A proceedings' own record (the volume: "2014 IEEE International
+    // Conference on Communications Workshops (ICC)"), cited at a page, is
+    // the venue of the paper cited, not the paper (holdout-6 #1010).
+    let volume_for_paper = matches!(&work.work_type, Some(WorkType::Other(t)) if t == "proceedings")
+        && (cited_place.page.is_some()
+            || claim.text.as_deref().is_some_and(|t| {
+                t.split_whitespace().any(|w| {
+                    let w = w.trim_matches(|c: char| !c.is_ascii_digit());
+                    w.split_once(['-', '–'])
+                        .is_some_and(|(a, b)| is_digits(a) && is_digits(b) && a != b)
+                })
+            }))
+        && !named;
+    if volume_for_paper {
+        confidence = confidence.min(VENUE_RECORD_CAP);
     }
     // A dataset's or software's record carries its latest version's date:
     // the claimed identifier and title name it, whatever year is cited

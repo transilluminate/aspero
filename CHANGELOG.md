@@ -50,6 +50,15 @@ Fixed:
   `w:journal-as-preprint`), verified: the title was only found word for
   word. It is now found with an article given or left out, and the words
   added are another title's: plausible, the title named.
+- A paper cited at a sister conference verified when the conference's
+  acronym could be spelt from the record's proceedings with its
+  publisher's initial ("ICC" for the "IEEE Global Communications
+  Conference"; holdout-6 `w:wrong-conference`), or when the meeting was
+  named only by its society (SIGCOMM for an Internet Measurement
+  Conference paper; holdout-5). A publisher's name gives an acronym no
+  letter, and SIGCOMM and IMC are now told by name: plausible, the venue
+  named. A proceedings' own record, its title the venue a reference names
+  and cited at a page, is no longer offered as the paper.
 
 ## 0.39.2
 

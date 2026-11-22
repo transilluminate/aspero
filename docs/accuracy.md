@@ -152,6 +152,84 @@ recorded fixture), so it stays fixed without the network.
 These are the hardest cases (see the note at the top), not typical
 input.
 
+**Round 7 (0.38.3), real model output, held out** —
+`bench/redteam/wild-4.jsonl`. Like every red-team corpus, it measures the
+hard tail on purpose: references as models write them, in table cells and
+beside trial labels and notes, whose wrong ones are near-misses of real
+works. It doesn't measure typical use. The corpus holds 1,135 references
+from 100 fresh model sessions on new topics, each checked by hand (see
+[wild-4.md](../bench/redteam/wild-4.md)). 75 of them are wrong, so one
+wrong `verified` is 1.3 points. It was run live on 2026-11-22, on the
+release it was held out from:
+
+| Criterion | 0.38.3 | Target |
+|---|---|---|
+| Wrong → `verified` | 2/75 (2.7%) | ≤ 2% — not yet met |
+| Correct → `verified` | 875/1060 (82.5%) | ≥ 85% — not yet met |
+| Correct → `verified` or `plausible` | 979/1060 (92.4%) | ≥ 95% — not yet met |
+| Correct → `mismatch` or `not_found` | 72/1060 (6.8%) | ≤ 3% — not yet met |
+| Wrong → `plausible` naming the field that differs | 20/21 (95.2%) | ≥ 80% |
+
+The two wrong verifieds:
+- an arXiv paper cited at another meeting than its own, where only the
+  arXiv record was found;
+- a journal article cited as a working paper whose number is another
+  paper's.
+
+None was in medicine or allied health (0 of 41 wrong there). Most of the
+correct citations missed were model-written lists read wrongly (trial
+labels and commentary in table cells, bare ISBN-13s, short journal names
+such as "PRD"), and books whose own title was never searched.
+
+0.39's fixes were tuned on wild-4, so wild-4 no longer counts as held out.
+On 0.39.1, wild-4 gives:
+- wrong → `verified` 1/75;
+- correct → `verified` 956/1060 (90.2%);
+- correct → `verified` or `plausible` 1031/1060 (97.3%);
+- correct → `mismatch` or `not_found` 11/1060 (1.0%).
+
+The next held-out measurement needs a fresh corpus (wild-5).
+
+**Every corpus on 0.39.1.** These corpora have all been tuned on, so they
+check that the fixes hold. They aren't held-out scores. All were run live
+on 2026-11-22:
+
+| Corpus | Wrong → `verified` | Real → `mismatch` or `not_found` | Real → `verified` | Real → `verified` or `plausible` |
+|---|---|---|---|---|
+| holdout-1 | 2/351 (0.6%) | 2/382 (0.5%) | 354/382 (92.7%) | 380/382 (99.5%) |
+| holdout-2 | 1/399 (0.3%) | 1/441 (0.2%) | 377/441 (85.5%) | 430/441 (97.5%) |
+| holdout-5 | 13/613 (2.1%) | 10/583 (1.7%) | 535/583 (91.8%) | 573/583 (98.3%) |
+| holdout-6 | 39/516 (7.6%) | 10/503 (2.0%) | 473/503 (94.0%) | 493/503 (98.0%) |
+| wild-2 | 4/122 (3.3%) | 7/910 (0.8%) | 835/910 (91.8%) | 902/910 (99.1%) |
+| wild-3 | 9/122 (7.4%) | 25/1013 (2.5%) | 850/1013 (83.9%) | 988/1013 (97.5%) |
+| wild-4 | 1/75 (1.3%) | 11/1060 (1.0%) | 956/1060 (90.2%) | 1031/1060 (97.3%) |
+| Target | ≤ 2% | ≤ 3% | ≥ 85% | ≥ 95% |
+
+The other criteria:
+- Invented works, nonexistent identifiers and another work's DOI or PMID:
+  none verified, in every corpus that has them (0/169, 0/146, 0/180,
+  0/182).
+- Wrong → `plausible` naming the field that differs: 92.9% or more
+  everywhere.
+- Retracted works flagged: all of them, except one of holdout-1's 27.
+
+0.39.2 changed two things, by an offline replay:
+- that retraction is flagged (27/27);
+- 6 of holdout-6's 8 chapters cited as articles are now `plausible`, so
+  its wrong → `verified` is 33/516 (6.4%).
+
+What's left of wrong → `verified`:
+- **holdout-6's books, most of it.** A book cited with another publisher
+  verifies 12/12, and a later edition's year cited as the first verifies
+  9/12. Today's records can't tell which edition a year or publisher
+  belongs to. holdout-6's other 18 (12 on 0.39.2) span ten kinds, one to
+  seven each.
+- **Small groups elsewhere.** holdout-5's 13 are spread over nine kinds,
+  wild-2's 4 are reworded titles, and wild-3's 9 span six kinds.
+
+wild-3's correct → `verified` (83.9%) is the one real-citation figure
+under its target.
+
 **Round 6 (0.32.0 candidate), held out** — `bench/redteam/holdout-6.jsonl`:
 1,049 citations built the same way as holdout-5, weighted towards books
 and monographs (humanities included), reprints, model-style formatting,
@@ -233,6 +311,7 @@ measured on a corpus it had never seen:
 | 5 (0.30.0) | holdout-5 (unseen) | 35/613 (5.7%) | 97.9% |
 | 6 (0.32.0 candidate) | holdout-6 (unseen, books and reprints) | 38/516 (7.4%) | 98.0% |
 | 6 (0.32.0 candidate) | wild-3 (unseen model output) | 25/122 (20.5%) | 95.9% |
+| 7 (0.38.3) | wild-4 (unseen model output) | 2/75 (2.7%) | 92.4% |
 
 Each held-out corpus was built to be harder than the last, so the rates
 aren't a smooth series; what they show is that invented works and other
@@ -271,7 +350,7 @@ Library or Crossref), bare arXiv numbers in model output, and reprints;
 they're the next round's target (issue #126).
 
 The corpora, their method notes (`bench/redteam/holdout-*.md`,
-`wild-1.md`) and each round's notes (`bench/redteam/README.md`) are in the
+`wild-*.md`) and each round's notes (`bench/redteam/README.md`) are in the
 repository.
 
 ## Reproducing it

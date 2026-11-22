@@ -152,6 +152,21 @@ fn query_syntax_in_user_text_is_escaped() {
     assert!(query(&http, 0).contains(&pair("query", r"(BERT\: pre\-training \(deep\))")));
 }
 
+/// An upper-case AND, OR or NOT in user text or a field is a word, not
+/// an operator (#195).
+#[test]
+fn operators_in_user_text_are_words() {
+    let (dc, http) = provider([empty_page()]);
+    let mut q = SearchQuery::new("RISK OR BENEFIT");
+    q.title = Some("NOT ALL SEPSIS".into());
+    q.author = Some("Smith AND Jones".into());
+    block_on(dc.search(&q)).unwrap();
+    assert!(query(&http, 0).contains(&pair(
+        "query",
+        r#"(RISK "or" BENEFIT) AND creators.name:(Smith "and" Jones) AND titles.title:("not" ALL SEPSIS)"#
+    )));
+}
+
 /// DataCite reads `/`, even escaped, as a regular expression's start: it
 /// goes as a space, in text, field clauses and trees alike (wild-4
 /// #339).

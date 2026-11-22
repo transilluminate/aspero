@@ -23,8 +23,10 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use aspero_core::csl::null_default;
-use aspero_core::http::{escape_lucene, status_error};
-use aspero_core::query::{check_supported, lucene_and, lucene_term, lucene_years, render_lucene};
+use aspero_core::http::status_error;
+use aspero_core::query::{
+    check_supported, lucene_and, lucene_term, lucene_words, lucene_years, render_lucene,
+};
 use aspero_core::{
     BooleanSupport, Capabilities, Cursor, Error, FieldSet, Filter, FilterValue, Hit, HttpClient,
     HttpRequest, HttpResponse, IdKind, Isbn, Lookup, Page, PartialDate, Person, Provider,
@@ -498,7 +500,9 @@ impl Provider for OpenLibrary {
             .map_err(Error::UnsupportedQuery)?;
         let mut clauses = Vec::new();
         if !query.text.trim().is_empty() {
-            clauses.push(format!("({})", escape_lucene(query.text.trim())));
+            // Words, never operators: an upper-case AND, OR or NOT in a
+            // citation is searched for (#195).
+            clauses.push(format!("({})", lucene_words(query.text.trim())));
         }
         clauses.extend(query.years.map(|y| lucene_years("first_publish_year", y)));
         let page_number: u32 = match &query.page.cursor {

@@ -216,6 +216,23 @@ fn fields_are_escaped_field_clauses() {
     assert!(!params.iter().any(|(k, _)| k == "sort"), "{params:?}");
 }
 
+/// An upper-case AND, OR or NOT in a citation's text or title is a word
+/// to search for, not an operator (#195).
+#[test]
+fn operators_in_citation_text_are_words() {
+    let (epmc, http) = provider([empty_page()]);
+    let mut q = SearchQuery::new("RISK OR BENEFIT OF ASPIRIN");
+    q.title = Some("NOT ALL SEPSIS IS THE SAME".into());
+    block_on(epmc.search(&q)).unwrap();
+    assert_eq!(
+        query(&http, 0)[0],
+        pair(
+            "query",
+            r#"(RISK "or" BENEFIT OF ASPIRIN) AND TITLE:("not" ALL SEPSIS IS THE SAME)"#
+        )
+    );
+}
+
 /// The parameters of a sorted search for "alphafold", three a page.
 fn sorted_by(sort: &str) -> [(String, String); 6] {
     [

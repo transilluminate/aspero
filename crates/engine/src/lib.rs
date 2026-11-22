@@ -57,6 +57,7 @@ mod budget;
 mod cap;
 mod check;
 mod detach;
+mod editions;
 mod enrich;
 mod graph;
 mod health;

@@ -20,6 +20,12 @@ Fixed:
   "Arthur J. Atkinson Jr."), were read with the last degree as the family
   name, so the authors cited didn't match. The family name is now the one
   before them.
+- A DataCite search for text with a `/` in it ("Class Professional
+  Publishing / AACE", "perovskite/silicon", a DOI written in the text)
+  failed as a bad request, or, with two, found nothing: DataCite reads the
+  escaped `\/` aspero sent as a regular expression's start. A `/` in
+  text, an author, a title or a search tree's term now goes to DataCite as
+  a space, which it splits words at anyway.
 
 ## 0.39.2
 

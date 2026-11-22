@@ -261,14 +261,14 @@ impl Provider for Datacite {
             .map_err(Error::UnsupportedQuery)?;
         let mut clauses = Vec::new();
         if !query.text.trim().is_empty() {
-            clauses.push(format!("({})", escape_lucene(query.text.trim())));
+            clauses.push(format!("({})", user_text(query.text.trim())));
         }
         clauses.extend(query.years.map(|y| lucene_years("publicationYear", y)));
         if let Some(author) = query.field(Filter::Author) {
-            clauses.push(format!("creators.name:({})", escape_lucene(author)));
+            clauses.push(format!("creators.name:({})", user_text(author)));
         }
         if let Some(title) = query.field(Filter::Title) {
-            clauses.push(format!("titles.title:({})", escape_lucene(title)));
+            clauses.push(format!("titles.title:({})", user_text(title)));
         }
         // When the DOI was registered with DataCite (checked live
         // 2026-11-13).
@@ -332,6 +332,17 @@ impl Provider for Datacite {
     }
 }
 
+/// User text as query words: its syntax escaped, and `/` a space. DataCite
+/// reads `/`, even escaped (`\/`), as a regular expression's start: one is
+/// a bad request ("Class Professional Publishing / AACE", wild-4 #339),
+/// two a regular expression that finds nothing ("AHA/ACC/HRS Guideline",
+/// recorded 2026-11). Its analyser splits words at `/` anyway, so the words
+/// searched are the same.
+fn user_text(text: &str) -> String {
+    let spaced = text.replace('/', " ");
+    escape_lucene(&spaced.split_whitespace().collect::<Vec<_>>().join(" "))
+}
+
 /// A query tree in DataCite's query string (Elasticsearch, checked live
 /// 2026-11-13): `titles.title`, `creators.name`, abstracts as
 /// `descriptions.description` (and `descriptions.descriptionType:Abstract`
@@ -371,7 +382,8 @@ fn express(tree: &QueryNode, caps: &Capabilities) -> std::result::Result<String,
                 }
                 _ => return Err(format!("{NAME} can't search by {}", t.field.name())),
             };
-            Ok(lucene_term(prefix, &t.value, t.phrase))
+            // `/` as in user text (see `user_text`), in a phrase too.
+            Ok(lucene_term(prefix, &t.value.replace('/', " "), t.phrase))
         }
         QueryNode::Filter(f) => Ok(match f {
             FilterValue::Years(years) => lucene_years("publicationYear", *years),

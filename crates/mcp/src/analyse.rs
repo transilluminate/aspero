@@ -76,8 +76,42 @@ impl Tools {
             .await?;
         let mut doc = aspero_json::graph::analysis(&analysis, false);
         slim(&mut doc);
+        gather_stops(&mut doc);
         Ok((doc, analysis.usage))
     }
+}
+
+/// The analyses: their names in the result.
+const ANALYSES: [&str; 4] = [
+    "retracted_references",
+    "odd_one_out",
+    "probably_missing",
+    "related",
+];
+
+/// Every stop at the top level, each named by what it stopped: `seeds`
+/// (resolving them) or an analysis (`related`, …). An agent reading
+/// `complete: false` finds why there, not only inside each analysis.
+fn gather_stops(doc: &mut Value) {
+    let tagged = |stops: &Value, analysis: &str| -> Vec<Value> {
+        stops
+            .as_array()
+            .into_iter()
+            .flatten()
+            .map(|stop| {
+                let mut stop = stop.clone();
+                if let Some(map) = stop.as_object_mut() {
+                    map.insert("analysis".into(), Value::from(analysis));
+                }
+                stop
+            })
+            .collect()
+    };
+    let mut all = tagged(&doc["incomplete"], "seeds");
+    for name in ANALYSES {
+        all.extend(tagged(&doc[name]["incomplete"], name));
+    }
+    doc["incomplete"] = Value::Array(all);
 }
 
 /// Cuts every work in an analysis to `canonical_id`, `title`, `year` and
@@ -154,5 +188,31 @@ mod tests {
         assert_eq!(cap(&json!({"estimate_only": true, "budget": 1.0})), 0.0);
         assert_eq!(cap(&json!({"budget": 0.5})), 0.5);
         assert_eq!(cap(&json!({})), DEFAULT_ANALYSE_USD);
+    }
+}
+
+#[cfg(test)]
+mod stop_tests {
+    use super::*;
+
+    #[test]
+    fn every_stop_is_at_the_top_named_by_what_it_stopped() {
+        let mut doc = json!({
+            "complete": false,
+            "incomplete": [],
+            "related": {"complete": false, "incomplete": [
+                {"kind": "capped", "stage": "citing", "done": 600, "total": 4975}
+            ], "items": []},
+            "probably_missing": {"complete": true, "incomplete": [], "items": []}
+        });
+        gather_stops(&mut doc);
+        assert_eq!(
+            doc["incomplete"],
+            json!([{"kind": "capped", "stage": "citing", "done": 600, "total": 4975,
+                    "analysis": "related"}])
+        );
+        let said = crate::summary::of("analyse", &doc);
+        assert!(said.contains("Not complete (related)"), "{said}");
+        assert!(!said.contains("Resolving the seeds stopped"), "{said}");
     }
 }

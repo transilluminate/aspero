@@ -174,11 +174,33 @@ fn analysis(v: &Value) -> String {
             lines.push(format!("  Incomplete: {stops}."));
         }
     }
-    if let Some(stops) = stopped(&v["incomplete"]) {
+    let seeds_stopped: Vec<Value> = v["incomplete"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter(|s| s["analysis"] == "seeds" || s["analysis"].is_null())
+        .cloned()
+        .collect();
+    if let Some(stops) = stopped(&Value::Array(seeds_stopped)) {
         lines.push(format!("Resolving the seeds stopped: {stops}."));
     }
     if v["complete"] == false && !e.is_object() {
-        lines.push("Not complete: see each `incomplete`.".into());
+        let which: Vec<String> = v["incomplete"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(|s| s["analysis"].as_str())
+            .fold(Vec::new(), |mut names, n| {
+                if !names.iter().any(|m| m == n) {
+                    names.push(n.to_owned());
+                }
+                names
+            });
+        lines.push(if which.is_empty() {
+            "Not complete: see each `incomplete`.".into()
+        } else {
+            format!("Not complete ({}): see `incomplete`.", which.join(", "))
+        });
     }
     lines.join("\n")
 }

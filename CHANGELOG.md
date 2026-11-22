@@ -3,6 +3,16 @@
 Releases 0.10 to 0.19 are in [docs/changelog/0.1x.md](docs/changelog/0.1x.md),
 and 0.1 to 0.9 in [docs/changelog/0.0x.md](docs/changelog/0.0x.md).
 
+## Unreleased
+
+Fixed:
+
+- The MCP `analyse` tool's result lists every stop at its top level, each
+  named by what it stopped (`"analysis": "related"`, or `"seeds"` for
+  resolving them), and its summary names the analyses not complete. Before,
+  `complete` was false with the top-level `incomplete` empty, the reason
+  only inside the analysis (an embedder's agent saw no why).
+
 ## 0.42.0
 
 Added:

@@ -18,6 +18,12 @@ Fixed:
   chapter's record placed in its publisher's collection ("BRILL eBooks",
   OpenAlex's) is placed in its book when another record of it names the
   book, so the venue cited is checked whichever record is kept.
+- A retracted article cited by its title, matched as well by its
+  retraction notice titled the same (Taylor & Francis's are), verified as
+  the notice, without saying the work was retracted (holdout-1 #721). The
+  article itself is now the match, with its retraction; when only the
+  notice is found, it carries the retraction, naming itself as the
+  notice. A claim citing the notice ("Retraction of: …") is unchanged.
 
 ## 0.39.1
 

@@ -79,12 +79,7 @@ mod tests {
             assert_eq!(name(Verdict::from(*v)), v.as_str());
         }
         for f in engine::CitedField::ALL {
-            // A book's publisher reaches the app as its container.
-            let expected = match f {
-                engine::CitedField::Publisher => "journal",
-                _ => f.as_str(),
-            };
-            assert_eq!(name(CitedField::from(*f)), expected);
+            assert_eq!(name(CitedField::from(*f)), f.as_str());
         }
         for d in engine::Decision::ALL {
             assert_eq!(name(IdentifiedBy::from(*d)), d.as_str());

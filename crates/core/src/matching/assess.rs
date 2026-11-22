@@ -350,7 +350,19 @@ pub fn assess(claim: &Claim, record: &SourceRecord) -> Assessment {
     // every one.
     // A sister journal's name holds the record's ("JAMA Intern Med" for
     // JAMA) but is another journal.
-    let read = claim.container.is_none() && !bibtex;
+    // Not one read right after the work's title ("… trial. Hand Therapy.
+    // 2014;27(4)" for the Journal of Hand Therapy): whole, not cut short.
+    let read_from = |cited: &str| {
+        claim.container.is_none()
+            && !bibtex
+            && !title_span
+                .as_ref()
+                .zip(text.as_ref())
+                .is_some_and(|(span, t)| {
+                    let name = words(cited);
+                    !name.is_empty() && t.words[span.end..].starts_with(&name)
+                })
+    };
     // A journal's section numbered in its volumes ("The Astrophysical
     // Journal Letters, 195, L51" for The Astrophysical Journal's L51) is
     // the journal, at the record's own place.
@@ -364,7 +376,7 @@ pub fn assess(claim: &Claim, record: &SourceRecord) -> Assessment {
         Some(actual)
             if journals.iter().any(|cited| {
                 (same_journal(cited, actual) || journal_in(&words(cited), actual))
-                    && (!publication::sister_journal_as(cited, actual, read)
+                    && (!publication::sister_journal_as(cited, actual, read_from(cited))
                         || (at_its_place && publication::section_of(cited, actual)))
             }) =>
         {
@@ -377,7 +389,7 @@ pub fn assess(claim: &Claim, record: &SourceRecord) -> Assessment {
             if cites_journal
                 && (article || claim.container.is_some())
                 && journals.iter().all(|cited| {
-                    (if read {
+                    (if read_from(cited) {
                         publication::other_journal_read(cited, actual)
                     } else {
                         other_journal(cited, actual)

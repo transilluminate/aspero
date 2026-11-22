@@ -27,6 +27,13 @@ Fixed:
   text, an author, a title or a search tree's term now goes to DataCite as
   a space, which it splits words at anyway.
 
+- A journal read from a reference right after the work's title is taken
+  whole, not as the record's name cut short, so a sister journal named
+  there is another journal: "Hand Therapy" for the Journal of Hand Therapy,
+  "Healthcare" for the International Journal of Environmental Research and
+  Public Health (holdout-5 `w:sister-journal`). Plausible, the journal
+  named.
+
 ## 0.39.2
 
 Fixed:

@@ -8,8 +8,12 @@ and 0.1 to 0.9 in [docs/changelog/0.0x.md](docs/changelog/0.0x.md).
 Fixed:
 
 - Text read from a citation is searched for, never obeyed as query syntax
-  (#195). At OpenAlex, a `|` is a space (a table row's `… | 10.1136/… |`
-  was a bad request, "empty OR operand"), an upper-case `AND`, `OR` or
+  (#195). At OpenAlex, a keyword row's `|`-separated cells are searched
+  as alternatives with the empty ones dropped (a table row's `… |
+  10.1136/… | 27660368 |` was a bad request, "empty OR operand"; any cell
+  may name the work: "Nudge | Richard Thaler & Cass Sunstein | Yale
+  University Press | 2008" now finds the book), a filter's `|` is a
+  space, an upper-case `AND`, `OR` or
   `NOT` is a word ("NOT ALL SEPSIS IS THE SAME" found 25,701 works
   without the paper), and an unmatched quote or bracket is dropped: in
   keywords, titles, authors and journal names. At DataCite, Europe PMC

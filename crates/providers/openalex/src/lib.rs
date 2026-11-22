@@ -439,7 +439,7 @@ impl Provider for OpenAlex {
                 negated: false,
             });
             let text = query.text.trim();
-            let search = (!text.is_empty()).then(|| syntax::plain(text));
+            let search = (!text.is_empty()).then(|| syntax::keywords(text));
             (search, container.into_iter().collect())
         };
         let mut usage = None;

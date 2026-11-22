@@ -37,6 +37,27 @@ pub(crate) fn plain(text: &str) -> String {
     }
 }
 
+/// Keywords read from a citation (`search=`): each `|`-separated cell made
+/// [`plain`], empty cells dropped, the cells joined by `OR`. A table row's
+/// cells are alternatives, as OpenAlex read a bare `|` before (#195): any
+/// cell may name the work ("Scarcity | Mullainathan & Shafir | Times Books
+/// (Henry Holt) | 2013" finds the book by its title cell, which all of the
+/// row's words together, the publisher's among them, do not), but an empty
+/// cell is never an empty OR side (HTTP 400). Text without a `|` is
+/// [`plain`].
+pub(crate) fn keywords(text: &str) -> String {
+    if !text.contains('|') {
+        return plain(text);
+    }
+    let cells: Vec<String> = text
+        .split('|')
+        .map(plain)
+        .map(|c| c.trim().to_owned())
+        .filter(|c| !c.is_empty())
+        .collect();
+    cells.join(" OR ")
+}
+
 /// A word lower-cased when it is an operator (beside any quotes or
 /// brackets: `(NOT`, `"OR"`).
 fn plain_word(word: &str) -> String {
@@ -117,7 +138,7 @@ fn empty_between(chars: &[Option<char>], from: usize, to: usize) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::plain;
+    use super::{keywords, plain};
 
     #[test]
     fn operators_become_words() {
@@ -139,6 +160,20 @@ mod tests {
             plain("NOTCH signalling ANDROGEN"),
             "NOTCH signalling ANDROGEN"
         );
+    }
+
+    #[test]
+    fn a_table_rows_cells_are_alternatives_without_an_empty_one() {
+        assert_eq!(
+            keywords("Scarcity | Mullainathan & Shafir | Times Books (Henry Holt) | 2013"),
+            "Scarcity OR Mullainathan & Shafir OR Times Books (Henry Holt) OR 2013"
+        );
+        assert_eq!(
+            keywords("Exercise and knee pain | 10.1136/bjsports-2016-096130 | 27660368 |"),
+            "Exercise and knee pain OR 10.1136/bjsports-2016-096130 OR 27660368"
+        );
+        assert_eq!(keywords("a||b|"), "a OR b");
+        assert_eq!(keywords("RISK OR BENEFIT"), "RISK or BENEFIT");
     }
 
     #[test]

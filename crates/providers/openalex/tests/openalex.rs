@@ -511,8 +511,9 @@ fn field_values_lose_the_commas_and_pipes_that_split_filters() {
 }
 
 /// Text read from a citation is searched for, never obeyed (#195): its
-/// upper-case operators lower-cased, `|` a space, unmatched quotes and
-/// brackets dropped.
+/// upper-case operators lower-cased, a keyword row's `|`-separated cells
+/// alternatives (empty ones dropped), a filter's `|` a space, unmatched
+/// quotes and brackets dropped.
 #[test]
 fn citation_text_is_words_not_syntax() {
     let (oa, http) = provider([recorded("works_search_fields")]);
@@ -524,7 +525,7 @@ fn citation_text_is_words_not_syntax() {
     assert!(
         params.contains(&(
             "search".into(),
-            "RISK or BENEFIT OF ASPIRIN 10.1136/x 27660368".into()
+            "RISK or BENEFIT OF ASPIRIN OR 10.1136/x OR 27660368".into()
         )),
         "{params:?}"
     );

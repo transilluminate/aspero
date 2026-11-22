@@ -488,6 +488,24 @@ fn add_place(record: &mut SourceRecord, other: &SourceRecord) {
     if w.work_type == Some(WorkType::Preprint) {
         return;
     }
+    // OpenAlex puts a book's chapters in their publisher's collection
+    // ("BRILL eBooks", "Routledge eBooks"), not their book: a record of
+    // the same version naming the book places it (holdout-6 #89), so the
+    // venue cited is checked whichever record is kept.
+    let collection = |c: &Option<String>| {
+        c.as_deref().is_some_and(|c| {
+            c.len() > 7
+                && c.get(c.len() - 7..)
+                    .is_some_and(|end| end.eq_ignore_ascii_case(" ebooks"))
+        })
+    };
+    if same_version
+        && collection(&w.container_title)
+        && o.container_title.is_some()
+        && !collection(&o.container_title)
+    {
+        w.container_title.clone_from(&o.container_title);
+    }
     if w.container_title.is_none() && w.volume.is_none() && w.page.is_none() {
         w.container_title.clone_from(&o.container_title);
         w.volume.clone_from(&o.volume);
@@ -954,5 +972,34 @@ mod tests {
         moved.work.page = Some("101".into());
         add_place(&mut elsewhere, &moved);
         assert_eq!(elsewhere.work.container_title, None);
+    }
+
+    #[test]
+    fn a_chapter_in_its_publishers_collection_is_in_its_book() {
+        // holdout-6 #89: OpenAlex's record in "BRILL eBooks", Crossref's
+        // in the book; whichever is kept, the book is the place.
+        let title = "6 Life after Migration: Japanese Immigrants’ Experience of Migration";
+        let mut openalex = titled("10.1163/9789004283008_007", title, &[], 2014);
+        openalex.work.work_type = Some(WorkType::Chapter);
+        openalex.work.container_title = Some("BRILL eBooks".into());
+        openalex.work.page = Some("128-178".into());
+        let mut crossref = openalex.clone();
+        crossref.work.container_title = Some("Migration as Transnational Leisure".into());
+        let mut other_version = openalex.clone();
+        other_version.ids = vec!["doi:10.1163/9789004283008_008".parse().unwrap()];
+        add_place(&mut other_version, &crossref);
+        assert_eq!(
+            other_version.work.container_title.as_deref(),
+            Some("BRILL eBooks")
+        );
+        let mut kept = crossref.clone();
+        add_place(&mut kept, &openalex);
+        add_place(&mut openalex, &crossref);
+        for r in [&openalex, &kept] {
+            assert_eq!(
+                r.work.container_title.as_deref(),
+                Some("Migration as Transnational Leisure")
+            );
+        }
     }
 }

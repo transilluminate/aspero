@@ -90,6 +90,17 @@ pub(crate) fn cites_issue(text: &str) -> bool {
     bracketed || tokens.get(i + 1).is_some_and(|t| is_label(t, &["no"]))
 }
 
+/// Whether a free-text reference gives its volume as a journal's is
+/// given, unlabelled before its pages: APA's "Crop Physiology, 35, 1–14",
+/// Vancouver's "2015;35:1-14", Harvard's "34, pp. 65–82". A book series'
+/// volume is labelled ("Lecture Notes in Computer Science, vol. 9351, pp.
+/// 234–241"), as is a book's own ("Volume 58").
+pub(crate) fn cites_journal_place(text: &str) -> bool {
+    let compact = compact(text);
+    let tokens: Vec<&str> = compact.split_whitespace().collect();
+    !text.trim_start().starts_with('@') && styled(&tokens).is_some()
+}
+
 /// The reference with the spaces that styles put around their separators
 /// dropped, so each locator is one token: "2014; 370 : 1402" →
 /// "2014;370:1402", "376 (9734)" → "376(9734)".

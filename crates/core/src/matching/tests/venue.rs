@@ -403,6 +403,108 @@ fn a_chapter_cited_as_a_journals_article_is_plausible() {
 }
 
 #[test]
+fn a_chapter_cited_in_its_book_as_a_journals_volume_is_plausible() {
+    // holdout-6's `w:chapter-as-article`: the book named as the journal,
+    // a volume without an issue.
+    let migration = chapter(
+        "6 Life after Migration: Japanese Immigrants’ Experience of Migration",
+        &["Jun Nagatomo"],
+        2014,
+        "Migration as Transnational Leisure",
+    );
+    let crops = chapter(
+        "Crop physiology: applications for breeding and agronomy",
+        &["Victor O. Sadras", "Daniel F. Calderini"],
+        2015,
+        "Crop Physiology",
+    );
+    let africa = chapter(
+        "Structural Adjustment – by the World Bank",
+        &["Michael Barratt Brown"],
+        2019,
+        "Africa’s Choices",
+    );
+    for (n, claim, record) in [
+        (
+            "h6-89 (APA)",
+            "Nagatomo, J. (2014). 6 Life after Migration: Japanese Immigrants’ Experience of \
+             Migration. Migration as Transnational Leisure, 33, 128–178.",
+            &migration,
+        ),
+        (
+            "h6-583 (Vancouver)",
+            "Sadras VO, Calderini DF. Crop physiology: applications for breeding and agronomy. \
+             Crop Physiology. 2015;35:1-14.",
+            &crops,
+        ),
+        (
+            "h6-745 (Harvard)",
+            "Brown, M.B. (2019) 'Structural Adjustment – by the World Bank', Africa’s Choices, \
+             34, pp. 65–82.",
+            &africa,
+        ),
+    ] {
+        let a = assess(&Claim::from_text(claim), record);
+        assert_eq!(a.container.agreement, Agreement::Match, "{n}: {a:?}");
+        assert_eq!(a.volume.agreement, Agreement::Mismatch, "{n}: {a:?}");
+        assert!((PLAUSIBLE..VERIFIED).contains(&a.confidence), "{n}: {a:?}");
+    }
+    // A series' chapter at its volume, which its record lacks, verifies:
+    // labelled, named as a series, or named by its DOI.
+    let mut lncs = chapter(
+        "U-Net: Convolutional Networks for Biomedical Image Segmentation",
+        &["Olaf Ronneberger", "Philipp Fischer", "Thomas Brox"],
+        2015,
+        "Lecture Notes in Computer Science",
+    );
+    lncs.work.page = Some("234-241".into());
+    let mut aesp = chapter(
+        "The attachment behavioral system in adulthood: Activation, psychodynamics, and \
+         interpersonal processes",
+        &["Mario Mikulincer", "Phillip R. Shaver"],
+        2003,
+        "Advances in experimental social psychology",
+    );
+    aesp.ids = vec!["doi:10.1016/s0065-2601(03)01002-5".parse().unwrap()];
+    aesp.work.page = Some("53-152".into());
+    for (claim, record) in [
+        (
+            "Ronneberger, O., Fischer, P., & Brox, T. (2015). U-Net: Convolutional Networks for \
+             Biomedical Image Segmentation. Lecture Notes in Computer Science, 9351, 234–241.",
+            &lncs,
+        ),
+        (
+            "Mikulincer, M., & Shaver, P. R. (2003). The attachment behavioral system in \
+             adulthood: Activation, psychodynamics, and interpersonal processes. Advances in \
+             Experimental Social Psychology, 35, 53–152.",
+            &aesp,
+        ),
+        (
+            "Mikulincer, M., & Shaver, P. R. (2003). The attachment behavioral system in \
+             adulthood: Activation, psychodynamics, and interpersonal processes. Advances in \
+             Experimental Social Psychology, 35, 53–152. \
+             https://doi.org/10.1016/S0065-2601(03)01002-5",
+            &aesp,
+        ),
+        // Cited as a chapter, in its book.
+        (
+            "Nagatomo, J. (2014). 6 Life after Migration: Japanese Immigrants’ Experience of \
+             Migration. In: Migration as Transnational Leisure. Leiden: Brill, pp. 128–178.",
+            &migration,
+        ),
+    ] {
+        let a = assess(&Claim::from_text(claim), record);
+        assert!(a.confidence >= VERIFIED, "{claim}: {a:?}");
+    }
+    assert!(publication::cites_journal_place(
+        "Crop Physiology, 35, 1–14."
+    ));
+    assert!(!publication::cites_journal_place(
+        "Lecture Notes in Computer Science, vol. 9351, pp. 234–241."
+    ));
+}
+
+#[test]
 fn a_meeting_of_the_same_society_cited_is_another_venue() {
     // holdout-4's `w:conference-same-society`: another meeting of the
     // society holding the record's (AAAI's ICWSM for its AAAI conference),

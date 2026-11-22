@@ -3,6 +3,22 @@
 Releases 0.10 to 0.19 are in [docs/changelog/0.1x.md](docs/changelog/0.1x.md),
 and 0.1 to 0.9 in [docs/changelog/0.0x.md](docs/changelog/0.0x.md).
 
+## Unreleased
+
+Fixed:
+
+- A book's chapter cited as a journal's article, its book named as the
+  journal and an invented volume given as a journal's, without an issue
+  ("Nagatomo, J. (2014). Life after Migration. Migration as Transnational
+  Leisure, 33, 128–178."), is plausible, its volume named: a chapter is in
+  no volume of that shape (holdout-6 `w:chapter-as-article`). A series'
+  chapter at its real volume still verifies: labelled ("Lecture Notes in
+  Computer Science, vol. 9351"), named as a series ("Advances in
+  Experimental Social Psychology, 35, 53–152"), or named by its DOI. A
+  chapter's record placed in its publisher's collection ("BRILL eBooks",
+  OpenAlex's) is placed in its book when another record of it names the
+  book, so the venue cited is checked whichever record is kept.
+
 ## 0.39.1
 
 Fixed:

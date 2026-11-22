@@ -278,6 +278,8 @@ impl Tools {
         match name {
             // Works there are already cut to what an agent uses.
             "analyse" => {}
+            // Hits are many: authors by name alone, ids under `full`.
+            "search" | "citing_works" | "references" if !full => name_authors(&mut structured),
             _ if !full => trim_authors(&mut structured),
             _ => {}
         }
@@ -739,6 +741,33 @@ fn specs(sources: &[String]) -> Vec<ToolSpec> {
 /// Authors a lean record lists; the rest are counted in `authors_more`.
 const LEAN_AUTHORS: usize = 5;
 
+/// Authors a search hit names; the rest are counted in `authors_more`.
+const HIT_AUTHORS: usize = 3;
+
+/// Gives every hit's authors in `v` by name alone, the first
+/// [`HIT_AUTHORS`] of them: their ORCID iDs and OpenAlex ids were most of a
+/// hit, and `lookup` (or `full`) gives them.
+fn name_authors(v: &mut Value) {
+    let Some(hits) = v["hits"].as_array_mut() else {
+        return;
+    };
+    for work in hits.iter_mut().filter_map(|h| h["work"].as_object_mut()) {
+        let Some(Value::Array(authors)) = work.get_mut("authors") else {
+            continue;
+        };
+        let more = authors.len().saturating_sub(HIT_AUTHORS);
+        let names: Vec<Value> = authors
+            .iter()
+            .take(HIT_AUTHORS)
+            .map(|a| a.get("name").cloned().unwrap_or_else(|| a.clone()))
+            .collect();
+        *authors = names;
+        if more > 0 {
+            work.insert("authors_more".into(), json!(more));
+        }
+    }
+}
+
 /// Cuts every work's author list in `v` to [`LEAN_AUTHORS`]: a paper with
 /// hundreds of authors would otherwise fill an agent's context.
 fn trim_authors(v: &mut Value) {
@@ -781,5 +810,23 @@ mod tests {
         assert_eq!(v["hits"][0]["work"]["authors_more"], 3);
         // A claim's names as cited are left whole.
         assert_eq!(v["claim"]["authors"].as_array().unwrap().len(), 6);
+    }
+
+    #[test]
+    fn hits_name_three_authors_and_count_the_rest() {
+        let authors: Vec<Value> = (0..5)
+            .map(|i| json!({"name": format!("A{i}"), "orcid": "0000-0001", "openalex_id": "A1"}))
+            .collect();
+        let mut v = json!({"hits": [
+            {"work": {"title": "T", "authors": authors}},
+            {"work": {"title": "U", "authors": [{"name": "B", "orcid": "0000-0002"}]}},
+            {"work": {"title": "V"}},
+        ]});
+        name_authors(&mut v);
+        assert_eq!(v["hits"][0]["work"]["authors"], json!(["A0", "A1", "A2"]));
+        assert_eq!(v["hits"][0]["work"]["authors_more"], 2);
+        assert_eq!(v["hits"][1]["work"]["authors"], json!(["B"]));
+        assert!(v["hits"][1]["work"].get("authors_more").is_none());
+        assert!(v["hits"][2]["work"].get("authors").is_none());
     }
 }

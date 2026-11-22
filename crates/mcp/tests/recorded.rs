@@ -1,6 +1,6 @@
 //! The engine tools against OpenAlex itself, answering with recorded
-//! responses (the provider's fixtures): set analyses over real reference
-//! lists.
+//! responses (the provider's fixtures): what an agent's context pays for a
+//! real search's hits, and set analyses over real reference lists.
 
 mod common;
 
@@ -32,6 +32,52 @@ fn replaying(names: &[&str]) -> (Tools, Arc<ReplayClient>) {
         .provider(Arc::new(openalex), policy, 0)
         .build();
     (Tools::new(engine), http)
+}
+
+/// Characters per hit of a search page's compact JSON, and the page's
+/// hits.
+fn per_hit(structured: &Value) -> (usize, usize) {
+    let hits = structured["hits"].as_array().unwrap();
+    let chars: usize = hits
+        .iter()
+        .map(|h| serde_json::to_string(h).unwrap().len())
+        .sum();
+    (chars / hits.len(), hits.len())
+}
+
+#[tokio::test]
+async fn lean_hits_of_a_real_search_are_small() {
+    let searches = [
+        (
+            "works_search",
+            json!({"text": "attention is all you need", "limit": 5}),
+        ),
+        (
+            "works_search_filtered",
+            json!({"query": {"all": [{"keywords": "sepsis"}, {"years": {"from": 2020}}]}, "limit": 3}),
+        ),
+        (
+            "works_search_tree",
+            json!({"query": {"all": [{"title": "sepsis"}, {"title": "lactate"}]}, "limit": 3}),
+        ),
+    ];
+    for (name, args) in searches {
+        let (tools, _) = replaying(&[name]);
+        let session = session(1.0);
+        let out = tools.call(&session, "search", args).await.unwrap();
+        let (chars, hits) = per_hit(&out.structured);
+        eprintln!(
+            "{name}: {hits} hits, {chars} characters (~{} tokens) a hit",
+            chars / 4
+        );
+        // 0.41.0's were about 900 (~225 tokens), most of it authors' ids.
+        assert!(chars < 700, "{name}: {chars} characters a hit");
+        for hit in out.structured["hits"].as_array().unwrap() {
+            let authors = hit["work"]["authors"].as_array().unwrap();
+            assert!(authors.len() <= 3, "{name}: {authors:?}");
+            assert!(authors.iter().all(Value::is_string), "{name}: {authors:?}");
+        }
+    }
 }
 
 /// The analyse tool's answer for `args`, checked against its output

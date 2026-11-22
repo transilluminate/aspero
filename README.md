@@ -163,9 +163,10 @@ fields, or a batch), `identify` (a first page's text), `citing_works` and
 (a set of works' probably missing and related works, retracted references
 and odd ones out, as `aspero analyse` finds them, with an `estimate_only`
 first). Results are the JSON the commands print, as structured content
-with a short text summary. They're lean for an agent: an analysis gives
-each work's id, title, year and citation count. `full: true` gives every
-field.
+with a short text summary. They're lean for an agent: a search hit names
+its first three authors (their ids come with `lookup` or `full: true`),
+and an analysis gives each work's id, title, year and citation count.
+`full: true` gives every field.
 
 Each session may spend up to `--budget` dollars (default $0.25)
 on OpenAlex searches; once it has, tools that may spend are refused. Every

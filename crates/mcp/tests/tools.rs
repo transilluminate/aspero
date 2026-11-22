@@ -560,3 +560,41 @@ async fn unknown_tools_are_their_own_kind_of_error() {
     let e = err(&tools, &session(1.0), "searhc", json!({})).await;
     assert_eq!(e.kind, ToolErrorKind::UnknownTool);
 }
+
+#[tokio::test]
+async fn hits_name_their_first_authors_and_lookup_keeps_them_whole() {
+    let many = common::work(
+        &["10.1000/many", "W9"],
+        "Many hands",
+        &["A One", "B Two", "C Three", "D Four", "E Five"],
+        2020,
+    );
+    let source = std::sync::Arc::new(Scripted::new("openalex", vec![many]));
+    let tools = tools(vec![source]);
+    let session = session(10.0);
+    let search = json!({"query": {"title": "Many hands"}});
+    let out = ok(&tools, &session, "search", search.clone()).await;
+    let work = &out.structured["hits"][0]["work"];
+    assert_eq!(work["authors"], json!(["A One", "B Two", "C Three"]));
+    assert_eq!(work["authors_more"], 2);
+    assert!(
+        out.summary.contains("Many hands (2020), A One et al."),
+        "{}",
+        out.summary
+    );
+    // `full` gives every author, as objects.
+    let mut full = search;
+    full["full"] = json!(true);
+    let out = ok(&tools, &session, "search", full).await;
+    let authors = out.structured["hits"][0]["work"]["authors"]
+        .as_array()
+        .unwrap();
+    assert_eq!(authors.len(), 5);
+    assert_eq!(authors[0]["name"], "A One");
+    // A lookup's authors stay objects, five of them.
+    let out = ok(&tools, &session, "lookup", json!({"ids": ["10.1000/many"]})).await;
+    let work = &out.structured["results"][0]["work"];
+    assert_eq!(work["authors"][0], json!({"name": "A One"}));
+    assert_eq!(work["authors"].as_array().unwrap().len(), 5);
+    assert!(work.get("authors_more").is_none());
+}

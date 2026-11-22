@@ -27,13 +27,19 @@ fn nullable(kind: &str) -> Value {
 /// same shape recurs in nearly every tool, and agents read the keys off the
 /// result.
 fn work() -> Value {
+    work_with("[{name, orcid}]")
+}
+
+/// A work whose `authors` are as `authors` says: a hit's are names
+/// alone (`name_authors`).
+fn work_with(authors: &str) -> Value {
     json!({
         "type": "object",
-        "description": "a work: source (the provider), ids (doi:…, pmid:…, …), canonical_id \
-            (dedupe on it), title, authors [{name, orcid}], authors_more (left out of a lean \
-            list), issued, type (CSL), container (the journal, or the book for a chapter), \
-            cited_by_count, url, notices (retraction, correction, …), notice_for (for a \
-            notice, the works it updates), open_access",
+        "description": format!("a work: source (the provider), ids (doi:…, pmid:…, …), \
+            canonical_id (dedupe on it), title, authors {authors}, authors_more (left out of \
+            a lean list), issued, type (CSL), container (the journal, or the book for a \
+            chapter), cited_by_count, url, notices (retraction, correction, …), notice_for \
+            (for a notice, the works it updates), open_access"),
         "required": ["source", "ids"],
     })
 }
@@ -124,7 +130,8 @@ pub fn search() -> Map<String, Value> {
                     &json!({
                         "rank": {"type": "integer"},
                         "score": {"type": "number", "description": "the source's own, when it gives one; compare only within one search"},
-                        "work": work(),
+                        // Names: their ids are under `full`.
+                        "work": work_with("(names)"),
                     }),
                     &["rank", "work"],
                 ),

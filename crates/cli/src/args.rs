@@ -758,8 +758,9 @@ Tools: search (a query tree, as `search --query` takes, or keywords),
 search_supports, lookup, verify (one citation or a batch), identify (a
 first page's text), citing_works and references (works citing a work, and its
 references), analyse (a set of works, as `aspero analyse`). Each answers in
-the JSON shapes the other commands print, with a short text summary;
-`full` gives every field.
+the JSON shapes the other commands print, cut down for an agent (a hit's
+first three authors, by name), with a short text summary; `full` gives
+every field.
 
 Spending: OpenAlex searches cost $0.001 each, analyse's list calls $0.0001
 each within its own budget (lookups are free). Each

@@ -21,6 +21,12 @@ Changed (for an embedder: the MCP tool list):
   about 1,100 characters more, near the 28,000 a test holds the list to
   (#157). A host tool named `analyse` now fails the server's start
   (`ToolNameClash`).
+- A lean `search`, `citing_works` or `references` hit gives its authors by
+  name alone, the first three, with `authors_more` counting the rest
+  (before: the first five, each `{name, orcid, openalex_id}`). About 30%
+  smaller a hit on recorded OpenAlex searches. `lookup`, `verify`,
+  `identify` and `full: true` still give authors' ids. The CLI's JSON is
+  unchanged.
 
 ## 0.41.0
 

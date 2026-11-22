@@ -270,8 +270,8 @@ fn verdict_lines(item: &Value) -> String {
     lines.join("\n")
 }
 
-/// `Title (2015), First Author et al., doi:…`: the year from `issued`, or
-/// `year` (an analysis' works).
+/// `Title (2015), First Author et al., doi:…`: authors as objects or, in
+/// a hit, names; the year from `issued`, or `year` (an analysis' works).
 fn work_line(work: &Value) -> String {
     let title = work["title"].as_str().unwrap_or("(untitled)");
     let year = match (work["issued"].as_str(), work["year"].as_i64()) {
@@ -282,7 +282,9 @@ fn work_line(work: &Value) -> String {
         .as_array()
         .map(Vec::as_slice)
         .unwrap_or_default();
-    let author = authors.first().and_then(|a| a["name"].as_str());
+    let author = authors
+        .first()
+        .and_then(|a| a.as_str().or_else(|| a["name"].as_str()));
     let id = work["canonical_id"]
         .as_str()
         .or_else(|| work["ids"][0].as_str());
@@ -292,7 +294,7 @@ fn work_line(work: &Value) -> String {
     }
     if let Some(author) = author {
         let _ = write!(line, ", {author}");
-        if authors.len() > 1 {
+        if authors.len() > 1 || work["authors_more"].is_u64() {
             line.push_str(" et al.");
         }
     }

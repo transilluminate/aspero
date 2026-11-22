@@ -7,7 +7,7 @@ use std::time::Duration;
 
 use aspero_ffi::mcp::{
     HostTool, HostToolError, HostToolResult, McpActivity, McpCaller, McpError, McpErrorKind,
-    McpHost, McpKey, McpServer, McpServerConfig,
+    McpHoldings, McpHost, McpKey, McpServer, McpServerConfig,
 };
 use aspero_ffi::{Aspero, Config};
 use serde_json::{Value, json};
@@ -161,12 +161,18 @@ fn an_app_serves_its_tools_to_an_agent() {
             aspero.clone(),
             config(port, &["sources", "history.read"]),
             Some(app.clone() as Arc<dyn McpHost>),
+            None,
         ))
         .unwrap();
     assert_eq!(server.port(), port);
 
     // A second server can't take the port.
-    let taken = rt.block_on(McpServer::start(aspero.clone(), config(port, &[]), None));
+    let taken = rt.block_on(McpServer::start(
+        aspero.clone(),
+        config(port, &[]),
+        None,
+        None,
+    ));
     assert_eq!(taken.err(), Some(McpError::PortInUse { port }));
 
     let http = reqwest::Client::builder().no_proxy().build().unwrap();
@@ -331,4 +337,90 @@ fn an_app_serves_its_tools_to_an_agent() {
     drop(server);
     drop(aspero);
     let _ = std::fs::remove_dir_all(dir);
+}
+
+/// The app's library, apart from its `McpHost`, which is as it was before
+/// holdings were asked about.
+struct Shelf;
+
+#[async_trait::async_trait]
+impl McpHoldings for Shelf {
+    async fn held(&self, works: Vec<Vec<String>>) -> Vec<bool> {
+        works
+            .iter()
+            .map(|ids| ids.iter().any(|id| id == "doi:10.1038/nature14539"))
+            .collect()
+    }
+}
+
+#[test]
+fn activity_says_when_an_analysis_only_estimated() {
+    let aspero = Aspero::new(Config::default()).unwrap();
+    let app = Arc::new(App::default());
+    let port = free_port();
+    let rt = runtime();
+    let server = rt
+        .block_on(McpServer::start(
+            aspero.clone(),
+            config(port, &["sources"]),
+            Some(app.clone() as Arc<dyn McpHost>),
+            Some(Arc::new(Shelf) as Arc<dyn McpHoldings>),
+        ))
+        .unwrap();
+    let http = reqwest::Client::builder().no_proxy().build().unwrap();
+    let mut session = None;
+    rt.block_on(async {
+        let init = json!({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {
+            "protocolVersion": "2025-06-18", "capabilities": {},
+            "clientInfo": {"name": "test", "version": "1"}}});
+        let (_, answer) = rpc(&http, port, TOKEN, &mut session, init).await;
+        let said = answer.unwrap()["result"]["instructions"].clone();
+        assert!(said.as_str().unwrap().contains("`held: true`"), "{said}");
+        // Refused before anything is looked up (no network), and still
+        // an estimate, as asked.
+        for (id, estimate) in [(2, true), (3, false)] {
+            let call = json!({"jsonrpc": "2.0", "id": id, "method": "tools/call",
+                "params": {"name": "analyse", "arguments": {"ids": [], "estimate_only": estimate}}});
+            let (_, answer) = rpc(&http, port, TOKEN, &mut session, call).await;
+            assert_eq!(answer.unwrap()["result"]["isError"], true);
+        }
+    });
+    rt.block_on(server.stop());
+    for _ in 0..100 {
+        if app.activity.lock().unwrap().len() >= 2 {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    let activity = app.activity.lock().unwrap().clone();
+    let said: Vec<(&str, bool)> = activity
+        .iter()
+        .map(|a| (a.tool.as_str(), a.estimate_only))
+        .collect();
+    assert_eq!(said, [("analyse", true), ("analyse", false)]);
+
+    // Holdings without a host of tools: the engine's tools alone.
+    let port = free_port();
+    let server = rt
+        .block_on(McpServer::start(
+            aspero.clone(),
+            config(port, &["sources"]),
+            None,
+            Some(Arc::new(Shelf) as Arc<dyn McpHoldings>),
+        ))
+        .unwrap();
+    rt.block_on(async {
+        let mut session = None;
+        let init = json!({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {
+            "protocolVersion": "2025-06-18", "capabilities": {},
+            "clientInfo": {"name": "test", "version": "1"}}});
+        rpc(&http, port, TOKEN, &mut session, init).await;
+        let list = json!({"jsonrpc": "2.0", "id": 2, "method": "tools/list"});
+        let (_, answer) = rpc(&http, port, TOKEN, &mut session, list).await;
+        assert_eq!(
+            answer.unwrap()["result"]["tools"].as_array().unwrap().len(),
+            8
+        );
+    });
+    rt.block_on(server.stop());
 }

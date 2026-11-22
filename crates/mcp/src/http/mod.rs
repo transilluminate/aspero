@@ -79,6 +79,9 @@ pub const DEFAULT_PORT: u16 = 23130;
 pub const DEFAULT_DAILY_BUDGET_USD: f64 = 1.0;
 /// How long a host tool may take.
 pub const HOST_TIMEOUT: Duration = Duration::from_secs(30);
+/// How long the host may take to say which works it holds
+/// ([`Host::held`]) before results go unmarked.
+pub const HELD_TIMEOUT: Duration = Duration::from_secs(5);
 /// How long a session may take to take a notification before it's given
 /// up on.
 const NOTIFY_TIMEOUT: Duration = Duration::from_secs(10);

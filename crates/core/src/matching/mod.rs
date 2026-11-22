@@ -45,6 +45,7 @@ mod claim;
 mod derivative;
 mod edition;
 mod preprint;
+mod publisher;
 mod record_title;
 mod same_work;
 mod text;
@@ -65,6 +66,10 @@ pub use derivative::{
 };
 pub use edition::{first_year_cited, first_year_contradicted};
 pub use preprint::{preprint_server_of, preprint_version_claimed};
+pub use publisher::{
+    EDITIONS_ENOUGH, PublisherCheck, check_publisher, cited_publisher, known_publisher,
+    same_publisher,
+};
 pub use same_work::{conflicting_id, id_agreement, same_work, same_work_id};
 pub use text::normalise;
 pub use titles::{

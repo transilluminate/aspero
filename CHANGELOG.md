@@ -83,6 +83,27 @@ Fixed:
   earlier: first years within a few years (UK and US editions, a
   catalogue's slip) stand (holdout-6 `w:book-edition-year`). A reprint
   cited with its original's year still verifies.
+- A book cited with a publisher none of its editions names ("Yapko, M. D.
+  (2013). Treating Depression With Hypnosis. Palgrave Macmillan." for
+  Routledge's book) verified. When its record doesn't name the publisher,
+  the book's editions are read at Open Library (the book's work, found by
+  its title and first author: one or two requests, cached), and when
+  neither they nor the record name the publisher, it is plausible, its
+  publisher named: in JSON, a difference of the new field `publisher`
+  (through the FFI, `journal`: a book's container). Names compare by their
+  own words, initials ("OUP") and publishing groups (CRC Press and
+  Routledge, Clarendon Press and Oxford University Press). It takes an
+  edition of the year cited (or one off it), and at least three editions
+  naming a publisher, or one and the book's record naming another; a book
+  Open Library lacks, or a failed request, leaves the verdict as it was
+  (holdout-6 `w:book-wrong-publisher`). Only a publisher of a known
+  publishing group is held against a book of another known group (Palgrave
+  Macmillan cited for Routledge's book, Elsevier for Springer's): a smaller
+  press may be one a group bought or reissues, or its co-publisher, so
+  "Acumen" for the Taylor & Francis record of an Acumen book, or "UCL
+  Press" for Routledge's reissue, asks nothing and stays verified. A
+  subtitle the record lacks is no publisher as far as its end ("…in Kerala,
+  India (1999)").
 
 ## 0.39.2
 

@@ -220,10 +220,13 @@ pub enum CitedField {
     /// record carries (`actual`: the work's of that kind, `pmid:19623052`;
     /// `cited`: the one claimed).
     Identifier,
+    /// A book's publisher, which none of its editions names (`actual`:
+    /// the one most of them name; `cited`: the one the citation names).
+    Publisher,
 }
 
 impl CitedField {
-    every_variant!(CitedField: Title, Authors, Year, Journal, Volume, FirstPage, Kind, Identifier);
+    every_variant!(CitedField: Title, Authors, Year, Journal, Volume, FirstPage, Kind, Identifier, Publisher);
 
     pub fn as_str(self) -> &'static str {
         match self {
@@ -235,6 +238,7 @@ impl CitedField {
             CitedField::FirstPage => "first_page",
             CitedField::Kind => "kind",
             CitedField::Identifier => "identifier",
+            CitedField::Publisher => "publisher",
         }
     }
 }
@@ -243,7 +247,7 @@ impl std::fmt::Display for Difference {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(&self.field.as_str().replace('_', " "))?;
         match (&self.actual, self.field) {
-            (Some(v), CitedField::Journal) => write!(f, " (\"{v}\")"),
+            (Some(v), CitedField::Journal | CitedField::Publisher) => write!(f, " (\"{v}\")"),
             (Some(v), _) => write!(f, " ({v})"),
             (None, _) => Ok(()),
         }

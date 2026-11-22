@@ -15,6 +15,7 @@ mod authors;
 mod claim;
 mod editions;
 mod journal;
+mod publisher;
 mod redteam;
 mod redteam_holdouts;
 mod redteam_round6;

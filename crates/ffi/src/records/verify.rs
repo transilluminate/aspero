@@ -155,6 +155,8 @@ pub enum CitedField {
     Title,
     Authors,
     Year,
+    /// The journal; for a book, its publisher, which none of its editions
+    /// names (`actual` the one most of them name).
     Journal,
     Volume,
     FirstPage,
@@ -214,7 +216,9 @@ impl From<engine::CitedField> for CitedField {
             engine::CitedField::Title => CitedField::Title,
             engine::CitedField::Authors => CitedField::Authors,
             engine::CitedField::Year => CitedField::Year,
-            engine::CitedField::Journal => CitedField::Journal,
+            // A book's publisher is its container here, as a structured
+            // claim's `container` may give it: no case of its own yet.
+            engine::CitedField::Journal | engine::CitedField::Publisher => CitedField::Journal,
             engine::CitedField::Volume => CitedField::Volume,
             engine::CitedField::Kind => CitedField::Kind,
             engine::CitedField::Identifier => CitedField::Identifier,

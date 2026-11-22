@@ -252,7 +252,7 @@ gotchas and plans.
 
 Swift 6: the bindings UniFFI 0.32 generates (`aspero_ffi.swift`) don't yet
 compile in Swift 6 language mode: its support for async foreign traits
-(`McpHost`) passes non-`Sendable` closures to a `Task`. Compile that file's
+(`McpHost`, `McpHoldings`) passes non-`Sendable` closures to a `Task`. Compile that file's
 target in Swift 5 mode (in SwiftPM, `swiftSettings:
 [.swiftLanguageMode(.v5)]`); code using it can stay in Swift 6.
 

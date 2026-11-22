@@ -36,9 +36,9 @@ fn work_with(authors: &str) -> Value {
     json!({
         "type": "object",
         "description": format!("a work: source (the provider), ids (doi:…, pmid:…, …), \
-            canonical_id (dedupe on it), title, authors {authors}, authors_more (left out of \
-            a lean list), issued, type (CSL), container (the journal, or the book for a \
-            chapter), cited_by_count, url, notices (retraction, correction, …), notice_for \
+            canonical_id (dedupe on it), title, authors {authors}, authors_more (how many \
+            more), issued, type (CSL), container (the journal, or a chapter's book), \
+            cited_by_count, url, notices (retraction, correction, …), notice_for \
             (for a notice, the works it updates), open_access"),
         "required": ["source", "ids"],
     })
@@ -132,6 +132,8 @@ pub fn search() -> Map<String, Value> {
                         "score": {"type": "number", "description": "the source's own, when it gives one; compare only within one search"},
                         // Names: their ids are under `full`.
                         "work": work_with("(names)"),
+                        // Only with an app that says what it holds.
+                        "held": {"const": true},
                     }),
                     &["rank", "work"],
                 ),
@@ -215,7 +217,7 @@ pub fn analyse() -> Map<String, Value> {
         "description".into(),
         json!(
             "seeds, then per kind {complete, incomplete, items}; works {canonical_id, title, \
-            year, cited_by_count}"
+            year, cited_by_count}, held"
         ),
     );
     map

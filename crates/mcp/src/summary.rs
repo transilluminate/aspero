@@ -77,7 +77,7 @@ fn search(v: &Value) -> String {
     lines.extend(
         hits.iter()
             .take(SHOWN)
-            .map(|h| format!("{}. {}", h["rank"], work_line(&h["work"]))),
+            .map(|h| format!("{}. {}{}", h["rank"], work_line(&h["work"]), held(h))),
     );
     if hits.len() > SHOWN {
         lines.push(format!("… and {} more", hits.len() - SHOWN));
@@ -232,10 +232,16 @@ fn stopped(incomplete: &Value) -> Option<String> {
 
 /// A work an analysis found: its line, or its id when it wasn't looked up.
 fn found_line(item: &Value) -> String {
-    match &item["work"] {
+    let found = match &item["work"] {
         Value::Object(_) => work_line(&item["work"]),
         _ => str(&item["id"]).to_owned(),
-    }
+    };
+    format!("{found}{}", held(item))
+}
+
+/// " (held)" for a work the app already holds.
+fn held(item: &Value) -> &'static str {
+    if item["held"] == true { " (held)" } else { "" }
 }
 
 /// Numbers in a list, comma-separated.

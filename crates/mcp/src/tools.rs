@@ -17,7 +17,7 @@ use crate::args::{
     AnalyseArgs, Citation, IdentifyArgs, LookupArgs, RelationArgs, SearchArgs, SortBy,
     SupportsArgs, VerifyArgs,
 };
-use crate::{Session, schema, summary};
+use crate::{Holdings, Session, held, schema, summary};
 
 /// Search results per page unless the caller asks for more.
 pub(crate) const DEFAULT_LIMIT: u32 = 5;
@@ -241,6 +241,19 @@ impl Tools {
         name: &str,
         arguments: Value,
     ) -> Result<Output, ToolError> {
+        self.call_holding(session, name, arguments, None).await
+    }
+
+    /// [`call`](Self::call), its works that `holdings` holds marked
+    /// `held: true` (`search`, `citing_works` and `references` hits,
+    /// `analyse`'s probably missing and related works), asked once.
+    pub async fn call_holding(
+        &self,
+        session: &Session,
+        name: &str,
+        arguments: Value,
+        holdings: Option<&dyn Holdings>,
+    ) -> Result<Output, ToolError> {
         let spec = self.spec(name).ok_or_else(|| {
             ToolError::new(
                 ToolErrorKind::UnknownTool,
@@ -275,9 +288,14 @@ impl Tools {
                 return Err(error);
             }
         };
+        // Before works are cut down: asked by every id they carry.
+        let held = match holdings {
+            Some(h) => held::mark(name, &mut structured, h).await,
+            None => 0,
+        };
         match name {
-            // Works there are already cut to what an agent uses.
-            "analyse" => {}
+            // Works cut to what an agent uses.
+            "analyse" => crate::analyse::slim(&mut structured),
             // Hits are many: authors by name alone, ids under `full`.
             "search" | "citing_works" | "references" if !full => name_authors(&mut structured),
             _ if !full => trim_authors(&mut structured),
@@ -287,6 +305,9 @@ impl Tools {
         structured["usage"] = aspero_json::usage(&usage);
         structured["session"] = session.json();
         let mut summary = summary::of(name, &structured);
+        if held > 0 {
+            let _ = write!(summary, "\n{held} already in the app's library (held).");
+        }
         let _ = write!(summary, "\nThis call: ${cost:.4}. {}", session.line());
         Ok(Output {
             structured,
@@ -628,8 +649,8 @@ fn specs(sources: &[String]) -> Vec<ToolSpec> {
              OpenAlex ID, …), from the first source that indexes citations (OpenAlex). A \
              search: narrows by `type` (e.g. review) and `from_year`/`to_year`, pages with \
              `cursor`, sorts with `sort`; for anything more, use `search` with a `cites` or \
-             `cited_by` term. Totals are OpenAlex's own and can differ slightly from a \
-             record's `cited_by_count`. The work is looked up first \
+             `cited_by` term. Totals are OpenAlex's, and may differ slightly from \
+             `cited_by_count`. The work is looked up first \
              (free); the search costs as `search` does."
         )
     };

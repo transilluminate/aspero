@@ -74,8 +74,8 @@ impl Tools {
             .engine()
             .analyse(&a.ids, &kinds, Some(budget), a.estimate_only)
             .await?;
+        // Its works cut down by the caller (`slim`), once marked.
         let mut doc = aspero_json::graph::analysis(&analysis, false);
-        slim(&mut doc);
         gather_stops(&mut doc);
         Ok((doc, analysis.usage))
     }
@@ -117,7 +117,7 @@ fn gather_stops(doc: &mut Value) {
 /// Cuts every work in an analysis to `canonical_id`, `title`, `year` and
 /// `cited_by_count`: the findings say why each is there, and `lookup`
 /// gives the rest.
-fn slim(v: &mut Value) {
+pub(crate) fn slim(v: &mut Value) {
     match v {
         Value::Object(map) => {
             for key in ["work", "cites"] {

@@ -493,3 +493,121 @@ fn a_preprint_cited_with_its_journal_versions_longer_title_is_another_version() 
     let a = assess(&Claim::from_text(cited), &preprint);
     assert!(a.confidence >= VERIFIED, "{a:?}");
 }
+
+#[test]
+fn a_cochrane_reviews_versions_are_told_apart_by_year_and_byline() {
+    use crate::work::{Notice, NoticeFor, NoticeKind, PartialDate};
+    // holdout-6 #481: OpenAlex's record of the 2015 version, merged with
+    // the 2020 version's (its year among the record's), cited by the 2015
+    // version's DOI with the 2020 version's year.
+    let title = "Multi-professional simulation-based team training in obstetric emergencies \
+                 for improving patient outcomes and trainees' performance";
+    let mut old = record(
+        &[
+            "doi:10.1002/14651858.cd011545",
+            "doi:10.1002/14651858.cd011545.pub2",
+        ],
+        title,
+        &[
+            "Annemarie F. Fransen",
+            "Joost van de Ven",
+            "Franyke R. Banga",
+        ],
+        2015,
+    );
+    old.work.container_title = Some("Cochrane Database of Systematic Reviews".into());
+    old.work.other_years = vec![2020];
+    let mut superseded = Notice::new(NoticeKind::NewVersion);
+    superseded.notice = Some("doi:10.1002/14651858.cd011545.pub2".parse().unwrap());
+    superseded.date = Some("2020-12-16".parse::<PartialDate>().unwrap());
+    old.work.notices = vec![superseded];
+    let cited = |year: i16, doi: &str| {
+        format!(
+            "Fransen AF, van de Ven J, Banga FR. {title}. Cochrane Database Syst Rev. \
+             {year};12:CD011545. doi: {doi}"
+        )
+    };
+    let a = assess(
+        &Claim::from_text(cited(2020, "10.1002/14651858.cd011545")),
+        &old,
+    );
+    assert_eq!(a.year.agreement, Agreement::Mismatch, "{a:?}");
+    assert!(a.confidence < VERIFIED, "{a:?}");
+    // Its own year, or the newer version's DOI with its year, verify.
+    let a = assess(
+        &Claim::from_text(cited(2015, "10.1002/14651858.cd011545")),
+        &old,
+    );
+    assert!(a.confidence >= VERIFIED, "{a:?}");
+    let a = assess(
+        &Claim::from_text(cited(2020, "10.1002/14651858.cd011545.pub2")),
+        &old,
+    );
+    assert!(a.confidence >= VERIFIED, "{a:?}");
+
+    // The 2020 version's record, holding the 2015 version's DOI too (from
+    // OpenAlex's merged record) and naming it as the one before: cited by
+    // that DOI, another version is named.
+    let mut current = record(
+        &[
+            "doi:10.1002/14651858.cd011545.pub2",
+            "doi:10.1002/14651858.cd011545",
+        ],
+        title,
+        &[
+            "Annemarie F. Fransen",
+            "Joost van de Ven",
+            "Franyke R. Banga",
+        ],
+        2020,
+    );
+    current.work.container_title = Some("Cochrane Database of Systematic Reviews".into());
+    current.work.notice_for = vec![NoticeFor::new(
+        NoticeKind::NewVersion,
+        "doi:10.1002/14651858.cd011545".parse().unwrap(),
+    )];
+    let claim = Claim::from_text(cited(2020, "10.1002/14651858.cd011545"));
+    assert!(crate::matching::earlier_id_claimed(&claim, &current));
+    let a = assess(&claim, &current);
+    assert_eq!(a.ids, Agreement::Partial, "{a:?}");
+    assert!((PLAUSIBLE..VERIFIED).contains(&a.confidence), "{a:?}");
+    let a = assess(
+        &Claim::from_text(cited(2020, "10.1002/14651858.cd011545.pub2")),
+        &current,
+    );
+    assert!(a.confidence >= VERIFIED, "{a:?}");
+
+    // holdout-5 #866: the 2021 version, whose record names the 2019
+    // version it supersedes, cited with the earlier version's first author.
+    let mut newer = record(
+        &["doi:10.1002/14651858.cd013367.pub2"],
+        "Humour-based interventions for people with schizophrenia",
+        &[
+            "Yasushi Tsujimoto",
+            "Yuri Nakamura",
+            "Masahiro Banno",
+            "Kunihiro Kohmura",
+            "Hiraku Tsujimoto",
+            "Yuki Kataoka",
+        ],
+        2021,
+    );
+    newer.work.container_title = Some("Cochrane Database of Systematic Reviews".into());
+    newer.work.notice_for = vec![NoticeFor::new(
+        NoticeKind::NewVersion,
+        "doi:10.1002/14651858.cd013367".parse().unwrap(),
+    )];
+    let earlier = "Kohmura K, Banno M, Tsujimoto H, Tsujimoto Y, Kataoka Y. Humour-based \
+                   interventions for people with schizophrenia. Cochrane Database Syst Rev. \
+                   2021;CD013367.";
+    let a = assess(&Claim::from_text(earlier), &newer);
+    assert!((PLAUSIBLE..VERIFIED).contains(&a.confidence), "{a:?}");
+    // Its own byline verifies; so does any work's byline in another order
+    // without an earlier version.
+    let own = "Tsujimoto Y, Nakamura Y, Banno M, Kohmura K, Tsujimoto H, Kataoka Y. \
+               Humour-based interventions for people with schizophrenia. Cochrane Database \
+               Syst Rev. 2021;CD013367.";
+    assert!(assess(&Claim::from_text(own), &newer).confidence >= VERIFIED);
+    newer.work.notice_for.clear();
+    assert!(assess(&Claim::from_text(earlier), &newer).confidence >= VERIFIED);
+}

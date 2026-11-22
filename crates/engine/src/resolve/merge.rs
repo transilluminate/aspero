@@ -3,8 +3,8 @@
 
 use aspero_core::matching::{self, id_agreement, same_work_id};
 use aspero_core::{
-    Agreement, Claim, IdKind, Notice, OpenAccess, PartialDate, Person, ProviderId, SourceRecord,
-    Usage, WorkId, WorkType,
+    Agreement, Claim, IdKind, Notice, NoticeKind, OpenAccess, PartialDate, Person, ProviderId,
+    SourceRecord, Usage, WorkId, WorkType,
 };
 
 use super::rank::rank;
@@ -27,10 +27,21 @@ fn from_counts(record: &SourceRecord) -> bool {
 /// Scores a record against the claim with every identifier known for its
 /// work (`ids`, merged from its other records), so a claimed identifier
 /// counts whichever record of the work is kept: arXiv's DataCite record of
-/// a paper cited by its journal DOI.
-pub(super) fn assess(claim: &Claim, record: &SourceRecord, ids: &[WorkId]) -> matching::Assessment {
+/// a paper cited by its journal DOI. And with every newer version its
+/// records name (`notices`): OpenAlex's record of a Cochrane review's
+/// version says nothing of the version superseding it, Crossref's does.
+pub(super) fn assess(
+    claim: &Claim,
+    record: &SourceRecord,
+    ids: &[WorkId],
+    notices: &[Notice],
+) -> matching::Assessment {
     let known = |id: &WorkId| record.ids.iter().any(|r| same_work_id(r, id));
-    if ids.iter().all(known) {
+    let newer: Vec<&Notice> = notices
+        .iter()
+        .filter(|n| n.kind == NoticeKind::NewVersion && !record.work.notices.contains(n))
+        .collect();
+    if ids.iter().all(known) && newer.is_empty() {
         return matching::assess(claim, record);
     }
     let mut record = record.clone();
@@ -39,7 +50,42 @@ pub(super) fn assess(claim: &Claim, record: &SourceRecord, ids: &[WorkId]) -> ma
             record.ids.push(id.clone());
         }
     }
+    record.work.notices.extend(newer.into_iter().cloned());
     matching::assess(claim, &record)
+}
+
+/// The claimed identifiers against every identifier known for a work
+/// (`ids`): partly agreeing when one is an earlier version's, which its
+/// record names ([`matching::earlier_id_claimed`]).
+pub(super) fn judge_ids(claim: &Claim, ids: &[WorkId], record: &SourceRecord) -> Agreement {
+    match id_agreement(&claim.ids, ids) {
+        Agreement::Match if matching::earlier_id_claimed(claim, record) => Agreement::Partial,
+        agreement => agreement,
+    }
+}
+
+/// Shares between two records of one version (sharing a DOI or PMID) the
+/// earlier versions each says it supersedes: Crossref's record of a
+/// Cochrane review's version names the one before, Europe PMC's doesn't.
+fn share_earlier_versions(a: &mut SourceRecord, b: &mut SourceRecord) {
+    let shared = a.ids.iter().any(|x| {
+        matches!(x.kind(), IdKind::Doi | IdKind::Pmid) && b.ids.iter().any(|y| same_work_id(x, y))
+    });
+    if !shared {
+        return;
+    }
+    let give = |from: &SourceRecord, to: &mut SourceRecord| {
+        for n in &from.work.notice_for {
+            if n.kind == NoticeKind::NewVersion
+                && !to.work.notice_for.contains(n)
+                && !to.ids.iter().any(|id| same_work_id(id, &n.work))
+            {
+                to.work.notice_for.push(n.clone());
+            }
+        }
+    };
+    give(a, b);
+    give(b, a);
 }
 
 /// Merges another record of the same work (found in `sightings`) into a
@@ -74,8 +120,9 @@ fn absorb(
     add_years(&mut record, &pooled);
     add_place(&mut c.record, &record);
     add_place(&mut record, &c.record);
-    c.assessment = assess(claim, &c.record, &c.ids);
-    let assessment = assess(claim, &record, &c.ids);
+    share_earlier_versions(&mut c.record, &mut record);
+    c.assessment = assess(claim, &c.record, &c.ids, &c.notices);
+    let assessment = assess(claim, &record, &c.ids, &c.notices);
     if assessment.confidence > c.assessment.confidence {
         c.record = record;
         c.assessment = assessment;
@@ -310,7 +357,7 @@ impl Accumulator<'_> {
         }
         // Judge claimed identifiers against everything known about the work.
         let candidate = &mut candidates[at];
-        candidate.assessment.ids = id_agreement(&claim.ids, &candidate.ids);
+        candidate.assessment.ids = judge_ids(claim, &candidate.ids, &candidate.record);
     }
 
     /// The registry's record of a DOI wins for that DOI (#183): the
@@ -335,8 +382,8 @@ impl Accumulator<'_> {
             if carries_doi(&c.ids, record) && overrules(record, &c.record) {
                 drop_foreign(&mut c.ids, record);
                 drop_foreign(&mut c.record.ids, record);
-                c.assessment = assess(claim, &c.record, &c.ids);
-                c.assessment.ids = id_agreement(&claim.ids, &c.ids);
+                c.assessment = assess(claim, &c.record, &c.ids, &c.notices);
+                c.assessment.ids = judge_ids(claim, &c.ids, &c.record);
             }
         }
         if !self.registered.iter().any(|r| carries_doi(&r.ids, record)) {
@@ -428,7 +475,7 @@ pub fn compare(claim: &Claim, records: Vec<SourceRecord>) -> Vec<Candidate> {
             let mut notices = Vec::new();
             merge_notices(&mut notices, &record.work.notices);
             let mut assessment = matching::assess(claim, &record);
-            assessment.ids = id_agreement(&claim.ids, &record.ids);
+            assessment.ids = judge_ids(claim, &record.ids, &record);
             Candidate {
                 ids: record.ids.clone(),
                 notices,

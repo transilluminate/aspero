@@ -59,6 +59,16 @@ Fixed:
   letter, and SIGCOMM and IMC are now told by name: plausible, the venue
   named. A proceedings' own record, its title the venue a reference names
   and cited at a page, is no longer offered as the paper.
+- A Cochrane review's versions are told apart by what a citation gives
+  (holdout-5 and holdout-6 `w:cochrane-old-version`). A superseded
+  version's record merged with its newer version's (OpenAlex's) no longer
+  takes the newer version's year as its own when its own DOI is cited, and
+  a newer version's record, which names the version it supersedes, cited
+  with another of its authors first (the earlier version's byline) is
+  plausible, and so is one cited by the identifier of the version it
+  supersedes, though a merged record carries both (its identifier named).
+  What the records of one version say of the versions before and after
+  it is weighed whichever record is kept.
 
 ## 0.39.2
 

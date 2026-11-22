@@ -20,6 +20,7 @@ use super::same_work::{id_agreement, same_work_id};
 use super::text::{Normalised, content_words, words};
 use super::titles::{self, title_similarity, unmarked};
 use super::venue;
+use super::version;
 use super::written;
 use super::{Agreement, Assessment, Claim, FieldCheck};
 use crate::id::{IdKind, is_digits, starts_with_ci};
@@ -72,7 +73,12 @@ pub fn assess(claim: &Claim, record: &SourceRecord) -> Assessment {
     });
     // A claimed identifier names the work, even beside another (a PMID)
     // that is another's: identified, though not confirmed (#148).
-    let ids = id_agreement(&claim.ids, &record.ids);
+    // An earlier version's identifier, named by a newer version's record
+    // (a Cochrane review's), names that version, not this one.
+    let ids = match id_agreement(&claim.ids, &record.ids) {
+        Agreement::Match if version::earlier_id_claimed(claim, record) => Agreement::Partial,
+        agreement => agreement,
+    };
     let named = matches!(ids, Agreement::Match | Agreement::Partial);
 
     let families: Vec<String> = work.authors.iter().filter_map(family_name).collect();
@@ -162,8 +168,18 @@ pub fn assess(claim: &Claim, record: &SourceRecord) -> Assessment {
         } else {
             claimed_strangers(&claim.authors, &work.authors)
         };
+    // Or names an earlier version's first author.
+    let earlier = authors.agreement != Agreement::Unknown
+        && version::earlier_byline(
+            claim,
+            record,
+            text.as_ref()
+                .and_then(|t| byline(t, work_title.as_deref(), title_span.as_ref()))
+                .as_deref(),
+            &families,
+        );
     let authors = match authors.score {
-        Some(s) if strangers => FieldCheck::scored(s.min(CORROBORATING_AUTHORS)),
+        Some(s) if strangers || earlier => FieldCheck::scored(s.min(CORROBORATING_AUTHORS)),
         _ => authors,
     };
     // The record's title with words added: another work's title that
@@ -242,11 +258,18 @@ pub fn assess(claim: &Claim, record: &SourceRecord) -> Assessment {
         _ => title,
     };
 
+    // Not a newer version's year, merged in, for this version claimed.
+    let newer = version::newer_years(claim, record);
     let actual_years: Vec<i16> = work
         .issued
         .map(|d| d.year())
         .into_iter()
-        .chain(work.other_years.iter().copied())
+        .chain(
+            work.other_years
+                .iter()
+                .copied()
+                .filter(|y| !newer.contains(y)),
+        )
         .collect();
     // A year inside the title ("Cancer statistics, 2020") is not the year
     // cited.
@@ -842,8 +865,9 @@ pub fn assess(claim: &Claim, record: &SourceRecord) -> Assessment {
         confidence = confidence.max(VERSION);
     }
     // Authors the work doesn't have are an error in the citation, and a
-    // tell of invented references, whatever else agrees.
-    if strangers {
+    // tell of invented references, whatever else agrees. An earlier
+    // version's byline is another version's.
+    if strangers || earlier {
         confidence = confidence.min(STRANGERS_CAP);
     }
     // Nor can a record without a byline confirm the people a citation

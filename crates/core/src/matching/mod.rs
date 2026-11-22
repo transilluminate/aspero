@@ -33,6 +33,8 @@
 //! - `venue.rs`: the venue cited against a record's: a chapter cited as an
 //!   article or the reverse, another conference or meeting, a preprint at
 //!   one.
+//! - `version.rs`: versions of one work told apart: a Cochrane review's
+//!   earlier version's byline, or a newer version's year merged in.
 //! - `written.rs`: a free-text reference's title and authors as written,
 //!   for the claim as read.
 
@@ -47,6 +49,7 @@ mod same_work;
 mod text;
 mod titles;
 mod venue;
+mod version;
 mod written;
 
 use serde::{Deserialize, Serialize};
@@ -66,6 +69,7 @@ pub use titles::{
     given_title, probable_title, search_terms, shared_title, title_similarity, unmarked,
     whole_title_similarity,
 };
+pub use version::earlier_id_claimed;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]

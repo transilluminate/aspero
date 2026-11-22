@@ -28,7 +28,6 @@
 //!
 //! [`matching::shared_title`]: aspero_core::matching::shared_title
 
-use aspero_core::matching::id_agreement;
 use aspero_core::{
     Assessment, Claim, FieldSet, IdKind, Notice, ProviderId, SourceRecord, Usage, WorkId,
 };
@@ -312,8 +311,8 @@ fn settle_alternatives(claim: &Claim, report: &mut ResolveReport) -> Claim {
     }
     report.lookups.retain(|l| claim.ids.contains(&l.id));
     for c in &mut report.candidates {
-        c.assessment = assess(&claim, &c.record, &c.ids);
-        c.assessment.ids = id_agreement(&claim.ids, &c.ids);
+        c.assessment = assess(&claim, &c.record, &c.ids, &c.notices);
+        c.assessment.ids = merge::judge_ids(&claim, &c.ids, &c.record);
     }
     report.chosen_by_site = rank(&mut report.candidates, &claim);
     claim

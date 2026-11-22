@@ -34,6 +34,7 @@ aspero-datacite = { path = "crates/providers/datacite", version = "0.41.0" }
 aspero-doi = { path = "crates/providers/doi", version = "0.41.0" }
 aspero-europepmc = { path = "crates/providers/europepmc", version = "0.41.0" }
 aspero-openlibrary = { path = "crates/providers/openlibrary", version = "0.41.0" }
+aspero-pmc = { path = "crates/providers/pmc", version = "0.41.0" }
 
 async-trait = "0.1.92"
 biblatex = "0.12.0"

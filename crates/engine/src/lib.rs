@@ -59,6 +59,7 @@ mod check;
 mod detach;
 mod editions;
 mod enrich;
+mod free_copy;
 mod graph;
 mod health;
 mod identify;
@@ -85,6 +86,7 @@ pub use check::{
     BibliographyReport, CheckReport, CheckSummary, Checked, CheckedEntry, Finding, Severity,
     bare_doi, duplicates, findings,
 };
+pub use free_copy::FreeCopy;
 pub use graph::{
     Analysis, AnalysisKind, Coverage, Estimate, Incomplete, IncompleteKind, LIST_PRICE, Missing,
     OddOne, OddReason, ReferencesPage, RelatedWork, RetractedReference, Section, Seed, SeedProblem,
@@ -221,6 +223,9 @@ impl Served {
 pub struct Engine {
     /// In priority order.
     entries: Vec<Entry>,
+    /// Asked only for a work's free copy ([`Engine::free_copy`]), never in
+    /// the lookup chain (PMC's open data).
+    free_copies: Option<Entry>,
     jitter: Jitter,
     cache: Option<Arc<dyn Cache>>,
     cache_policy: CachePolicy,
@@ -254,6 +259,7 @@ struct Entry {
 
 pub struct EngineBuilder {
     entries: Vec<(i32, Entry)>,
+    free_copies: Option<Entry>,
     jitter: Jitter,
     cache: Option<Arc<dyn Cache>>,
     cache_policy: CachePolicy,
@@ -275,6 +281,14 @@ impl EngineBuilder {
         priority: i32,
     ) -> Self {
         self.entries.push((priority, Entry { provider, policy }));
+        self
+    }
+
+    /// Registers the provider asked for works' fetchable free copies
+    /// ([`Engine::free_copy`]) and nothing else: it never takes part in
+    /// lookups, verifies or searches. One at most; a second replaces it.
+    pub fn free_copies(mut self, provider: Arc<dyn Provider>, policy: ResiliencePolicy) -> Self {
+        self.free_copies = Some(Entry { provider, policy });
         self
     }
 
@@ -361,6 +375,7 @@ impl EngineBuilder {
         self.entries.sort_by_key(|(priority, _)| *priority);
         Engine {
             entries: self.entries.into_iter().map(|(_, e)| e).collect(),
+            free_copies: self.free_copies,
             jitter: self.jitter,
             cache: self.cache,
             cache_policy: self.cache_policy,
@@ -461,6 +476,7 @@ impl Engine {
     pub fn builder() -> EngineBuilder {
         EngineBuilder {
             entries: Vec::new(),
+            free_copies: None,
             jitter: random_jitter,
             cache: None,
             cache_policy: CachePolicy::default(),
@@ -544,6 +560,12 @@ impl Engine {
     /// Registered providers, in priority order.
     pub fn providers(&self) -> impl Iterator<Item = &Arc<dyn Provider>> {
         self.entries.iter().map(|e| &e.provider)
+    }
+
+    /// The provider asked for works' free copies, if any
+    /// ([`EngineBuilder::free_copies`]).
+    pub fn free_copy_source(&self) -> Option<&Arc<dyn Provider>> {
+        self.free_copies.as_ref().map(|e| &e.provider)
     }
 }
 

@@ -350,13 +350,21 @@ JSON works:
                \"work\", \"date\", \"source\"}]
   open_access  whether a free, legal copy exists: {\"is_oa\": true,
                \"status\": gold|diamond|hybrid|bronze|green|closed, \"pdf_url\",
-               \"url\", \"license\", \"version\", \"source\"}; absent if unknown.
-               \"closed\" means no free copy is known to the source (OpenAlex
-               carries Unpaywall's data), not that none exists. Without
-               `pdf_url` only a page is known (`url`): a repository's record
-               may hold no file, and publishers' pages often turn scripts away
+               \"url\", \"license\", \"version\", \"source\", \"free_copy\"};
+               absent if unknown. \"closed\" means no free copy is known to
+               the source (OpenAlex carries Unpaywall's data), not that none
+               exists. Without `pdf_url` only a page is known (`url`): a
+               repository's record may hold no file, and publishers' pages
+               often turn scripts away. `free_copy` says which: \"pdf\" (a
+               `pdf_url` a program can fetch, as far as is known),
+               \"browser_only\" (free, but only a page, or a PDF link that
+               turns programs away: PubMed Central's and Europe PMC's), or
+               \"none\"
   `lookup --full` also asks Crossref for notices in both directions, and
-  other providers for open access when the first didn't say. A superseded
+  other providers for open access when the first didn't say. A free copy
+  on PubMed Central without a fetchable PDF is asked about at PMC's open
+  data on AWS (pmc-oa-opendata.s3.amazonaws.com; only the PMCID is sent),
+  which has the PDFs of PMC's open-access articles. A superseded
   work's result gains `latest`: the newest version, following the chain
   (Cochrane .pub5 → .pub6 → .pub7). A record that contradicts the DOI's
   registry (Crossref) on year, volume, page or title gains `disagreements`:

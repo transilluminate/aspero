@@ -16,6 +16,11 @@ pub struct Extras {
     /// latest version of superseded works.
     pub full: bool,
     pub abstracts: bool,
+    /// A fetchable PDF for free copies found only as an article page
+    /// ([`Engine::free_copy`]): asks PMC's open data about works with a
+    /// PMCID. Off unless asked, even with `full`: only a caller that will
+    /// fetch the copy should send the request.
+    pub free_copies: bool,
 }
 
 impl Extras {
@@ -23,6 +28,7 @@ impl Extras {
         Extras {
             full: true,
             abstracts: false,
+            free_copies: false,
         }
     }
 }
@@ -97,6 +103,9 @@ impl Engine {
             disagreements = self.cross_check(&mut report).await;
             self.add_notices(&mut report).await;
             self.add_open_access(&mut report).await;
+            if extras.free_copies {
+                self.add_free_copies(&mut report).await;
+            }
             let found: Vec<(usize, &SourceRecord)> =
                 found_records(&report.results, |_| true).collect();
             let records: Vec<&SourceRecord> = found.iter().map(|(_, r)| *r).collect();

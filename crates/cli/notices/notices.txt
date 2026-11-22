@@ -1,7 +1,7 @@
 Third-party software and data in aspero 0.41.0
 
 The aspero command-line tool, built for aarch64-apple-darwin, is made from
-the 179 Rust crates below, aspero's own among them. It also bundles the
+the 180 Rust crates below, aspero's own among them. It also bundles the
 citation style data at the end. Each licence or notice text appears once,
 after the crates under it and their copyright notices.
 
@@ -242,6 +242,7 @@ Used by:
   aspero-mcp 0.41.0 (Copyright (c) 2026 Adrian Robinson)
   aspero-openalex 0.41.0 (Copyright (c) 2026 Adrian Robinson)
   aspero-openlibrary 0.41.0 (Copyright (c) 2026 Adrian Robinson)
+  aspero-pmc 0.41.0 (Copyright (c) 2026 Adrian Robinson)
   aspero-store 0.41.0 (Copyright (c) 2026 Adrian Robinson)
   constant_time_eq 0.6.1 (authors: Cesar Eduardo Barros)
   dyn-clone 1.0.20 (authors: David Tolnay)
@@ -3115,6 +3116,7 @@ Used by:
   aspero-mcp 0.41.0 (Copyright (c) 2026 Adrian Robinson)
   aspero-openalex 0.41.0 (Copyright (c) 2026 Adrian Robinson)
   aspero-openlibrary 0.41.0 (Copyright (c) 2026 Adrian Robinson)
+  aspero-pmc 0.41.0 (Copyright (c) 2026 Adrian Robinson)
   aspero-store 0.41.0 (Copyright (c) 2026 Adrian Robinson)
   comfy-table 8.0.1 (Copyright (c) 2019 Arne Beer)
   crc32fast 1.5.5 (Copyright (c) 2018 Sam Rijs, Alex Crichton and contributors)

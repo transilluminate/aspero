@@ -223,6 +223,7 @@ dependencies = [
  "aspero-europepmc",
  "aspero-openalex",
  "aspero-openlibrary",
+ "aspero-pmc",
  "aspero-store",
  "async-trait",
  "fastrand",
@@ -261,6 +262,7 @@ dependencies = [
  "aspero-engine",
  "aspero-json",
  "aspero-mcp",
+ "aspero-pmc",
  "async-trait",
  "cc",
  "futures",
@@ -340,6 +342,17 @@ dependencies = [
  "serde_json",
  "tracing",
  "url",
+]
+
+[[package]]
+name = "aspero-pmc"
+version = "0.41.0"
+dependencies = [
+ "aspero-core",
+ "async-trait",
+ "jiff",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

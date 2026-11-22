@@ -73,7 +73,7 @@ impl Handler {
         let said = engine_summary(name, &arguments);
         let query = engine_query(name, &arguments);
         let arguments = Value::Object(arguments);
-        let spends = self.shared.tools.spec(name).is_some_and(|s| s.spends);
+        let spends = (self.shared.tools.spec(name)).is_some_and(|s| tools::spends(s, &arguments));
         // The key's sessions' paid calls in flight hold their estimates, as
         // a session's do.
         let paid = self.shared.paid(&k.id);
@@ -483,6 +483,13 @@ pub(crate) fn engine_summary(name: &str, arguments: &Map<String, Value>) -> Stri
         "identify" => "identified a document".into(),
         "citing_works" => format!("found works citing {}", id()),
         "references" => format!("listed the references of {}", id()),
+        "analyse" => {
+            let works = plural(count("ids").unwrap_or(0), "work", "works");
+            match arguments.get("estimate_only") {
+                Some(Value::Bool(true)) => format!("estimated an analysis of {works}"),
+                _ => format!("analysed {works}"),
+            }
+        }
         _ => format!("called {name}"),
     }
 }
@@ -503,7 +510,7 @@ fn engine_query(name: &str, arguments: &Map<String, Value>) -> Option<String> {
     let query = match name {
         "search" => text("text").or_else(tree),
         "search_supports" => tree(),
-        "lookup" => joined(arguments.get("ids"), as_given),
+        "lookup" | "analyse" => joined(arguments.get("ids"), as_given),
         "verify" => arguments
             .get("citation")
             .map(citation_line)
@@ -534,6 +541,7 @@ fn engine_count(name: &str, structured: &Value) -> Option<u64> {
     match name {
         "search" | "citing_works" | "references" => len("hits"),
         "lookup" | "verify" => len("results"),
+        "analyse" => len("seeds"),
         "identify" => Some(1),
         _ => None,
     }
@@ -681,6 +689,14 @@ mod tests {
             "found works citing ‘10.1/x’"
         );
         assert_eq!(
+            say("analyse", json!({"ids": ["a", "b"]})),
+            "analysed 2 works"
+        );
+        assert_eq!(
+            say("analyse", json!({"ids": ["a"], "estimate_only": true})),
+            "estimated an analysis of a work"
+        );
+        assert_eq!(
             error_summary(&format!("{}\nmore", "x".repeat(100))),
             format!("error: {}…", "x".repeat(80))
         );
@@ -762,6 +778,10 @@ mod tests {
         assert_eq!(engine_count("references", &hits), Some(2));
         assert_eq!(engine_count("verify", &hits), Some(1));
         assert_eq!(engine_count("identify", &json!({})), Some(1));
+        assert_eq!(
+            engine_count("analyse", &json!({"seeds": [{}, {}, {}]})),
+            Some(3)
+        );
         assert_eq!(engine_count("search_supports", &hits), None);
     }
 }

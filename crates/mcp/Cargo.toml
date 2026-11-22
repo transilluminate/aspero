@@ -60,6 +60,7 @@ tokio-util = { version = "0.7.20", optional = true }
 
 [dev-dependencies]
 aspero-core = { workspace = true, features = ["testing"] }
+aspero-openalex.workspace = true
 async-trait.workspace = true
 jiff.workspace = true
 reqwest.workspace = true

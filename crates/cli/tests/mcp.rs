@@ -43,7 +43,7 @@ fn stdout_carries_the_protocol_and_eof_ends_it() {
     assert!(replies.iter().all(|r| r["jsonrpc"] == "2.0"));
     assert_eq!(replies[0]["result"]["serverInfo"]["name"], "aspero");
     let tools = replies[1]["result"]["tools"].as_array().unwrap();
-    assert_eq!(tools.len(), 7);
+    assert_eq!(tools.len(), 8);
     assert!(tools.iter().all(|t| t["outputSchema"].is_object()));
 }
 

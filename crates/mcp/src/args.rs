@@ -7,6 +7,7 @@ use schemars::JsonSchema;
 use serde::Deserialize;
 use serde_json::{Map, Value};
 
+use crate::analyse::{DEFAULT_ANALYSE_LIMIT, DEFAULT_ANALYSE_USD};
 use crate::tools::{DEFAULT_LIMIT, MAX_CITATIONS, MAX_IDS, MAX_LIMIT};
 
 fn default_limit() -> u32 {
@@ -150,4 +151,49 @@ pub struct RelationArgs {
     /// Every known field of each work, not just the lean set.
     #[serde(default)]
     pub full: bool,
+}
+
+// An analysis of a set of works. No doc comments: each is a description
+// in the schema, and every session pays for the list.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+#[schemars(inline)]
+pub enum Kind {
+    RetractedReferences,
+    OddOneOut,
+    ProbablyMissing,
+    Related,
+}
+
+fn default_kinds() -> Vec<Kind> {
+    vec![
+        Kind::RetractedReferences,
+        Kind::OddOneOut,
+        Kind::ProbablyMissing,
+    ]
+}
+
+fn default_analyse_limit() -> u32 {
+    DEFAULT_ANALYSE_LIMIT
+}
+
+fn default_budget() -> f64 {
+    DEFAULT_ANALYSE_USD
+}
+
+// Described in the tool's description (with an example), not field by
+// field: every session pays for the list.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct AnalyseArgs {
+    pub ids: Vec<String>,
+    #[serde(default = "default_kinds")]
+    pub kinds: Vec<Kind>,
+    #[serde(default = "default_analyse_limit")]
+    #[schemars(range(min = 1, max = MAX_LIMIT))]
+    pub limit: u32,
+    #[serde(default = "default_budget")]
+    pub budget: f64,
+    #[serde(default)]
+    pub estimate_only: bool,
 }

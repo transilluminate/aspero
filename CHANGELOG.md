@@ -3,6 +3,25 @@
 Releases 0.10 to 0.19 are in [docs/changelog/0.1x.md](docs/changelog/0.1x.md),
 and 0.1 to 0.9 in [docs/changelog/0.0x.md](docs/changelog/0.0x.md).
 
+## Unreleased
+
+Added:
+
+- An MCP tool, `analyse` (#60): the analyses `aspero analyse` runs, for a
+  set of works given by identifier: probably missing works, related works
+  (by co-citation and coupling), retracted references and odd ones out.
+  `estimate_only` says what a run would cost, free; a run spends within
+  its `budget` (default $0.02) and what's left of the session's, and says
+  when it stopped early (`complete`, `incomplete`). Works come lean: id,
+  title, year and citation count, and which seeds cite them.
+
+Changed (for an embedder: the MCP tool list):
+
+- The tool list has an eighth engine tool, `analyse`, after `references`:
+  about 1,100 characters more, near the 28,000 a test holds the list to
+  (#157). A host tool named `analyse` now fails the server's start
+  (`ToolNameClash`).
+
 ## 0.41.0
 
 Changed (the diagnostics contract: an embedder's log parser needs

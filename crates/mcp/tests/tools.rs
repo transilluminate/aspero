@@ -52,7 +52,8 @@ fn every_tool_is_listed_with_its_schemas() {
             "verify",
             "identify",
             "citing_works",
-            "references"
+            "references",
+            "analyse"
         ]
     );
     for spec in tools.specs() {

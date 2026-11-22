@@ -30,6 +30,7 @@ pub fn of(tool: &str, v: &Value) -> String {
             }
             text
         }
+        "analyse" => analysis(v),
         "identify" => format!(
             "IDENTIFIED {}\n{}",
             decided(str(&v["decided_by"])),
@@ -90,6 +91,141 @@ fn search(v: &Value) -> String {
     lines.join("\n")
 }
 
+/// What resolved, the estimate or each analysis' findings, and what
+/// stopped any of it.
+fn analysis(v: &Value) -> String {
+    let seeds = v["seeds"].as_array().map(Vec::as_slice).unwrap_or_default();
+    let resolved = seeds.iter().filter(|s| s["status"] == "resolved").count();
+    let mut lines = vec![format!(
+        "{resolved} of {} works resolved, {} with known references.",
+        seeds.len(),
+        v["with_references"]
+    )];
+    let unresolved: Vec<&Value> = seeds.iter().filter(|s| s["status"] != "resolved").collect();
+    lines.extend(unresolved.iter().take(SHOWN).map(|s| {
+        format!(
+            "  seed {} {}: {}",
+            s["index"],
+            str(&s["input"]),
+            str(&s["reason"])
+        )
+    }));
+    if unresolved.len() > SHOWN {
+        lines.push(format!("  … and {} more", unresolved.len() - SHOWN));
+    }
+    let e = &v["estimate"];
+    if e.is_object() {
+        let exact = if e["exact"] == true {
+            "exact"
+        } else {
+            "approximate"
+        };
+        lines.push(format!(
+            "Estimate ({exact}): {} paid requests, ${:.4}. Nothing was run.",
+            e["requests"],
+            e["cost_usd"].as_f64().unwrap_or(0.0)
+        ));
+    }
+    let sections: [(&str, &str, Line); 4] = [
+        ("retracted_references", "Retracted references", |i| {
+            format!("seed {} cites {}", i["seed"], work_line(&i["cites"]))
+        }),
+        ("odd_one_out", "Odd ones out", |i| {
+            format!(
+                "seed {}: {}",
+                i["seed"],
+                str(&i["reason"]).replace('_', " ")
+            )
+        }),
+        ("probably_missing", "Probably missing", |i| {
+            format!(
+                "{}, cited by seeds {}",
+                found_line(i),
+                joined(&i["cited_by"])
+            )
+        }),
+        ("related", "Related", |i| {
+            format!(
+                "{}, score {}, via seeds {}",
+                found_line(i),
+                i["score"],
+                joined(&i["seeds"])
+            )
+        }),
+    ];
+    for (key, name, line) in sections {
+        let found = &v[key];
+        if !found.is_object() {
+            continue;
+        }
+        let items = found["items"]
+            .as_array()
+            .map(Vec::as_slice)
+            .unwrap_or_default();
+        lines.push(match items.len() {
+            0 => format!("{name}: none."),
+            n => format!("{name} ({n}):"),
+        });
+        lines.extend(items.iter().take(SHOWN).map(|i| format!("  {}", line(i))));
+        if items.len() > SHOWN {
+            lines.push(format!("  … and {} more", items.len() - SHOWN));
+        }
+        if let Some(stops) = stopped(&found["incomplete"]) {
+            lines.push(format!("  Incomplete: {stops}."));
+        }
+    }
+    if let Some(stops) = stopped(&v["incomplete"]) {
+        lines.push(format!("Resolving the seeds stopped: {stops}."));
+    }
+    if v["complete"] == false && !e.is_object() {
+        lines.push("Not complete: see each `incomplete`.".into());
+    }
+    lines.join("\n")
+}
+
+/// An item's line.
+type Line = fn(&Value) -> String;
+
+/// "budget, 1200 of 4300; capped at citing, 200 of 900", or `None` when
+/// nothing stopped.
+fn stopped(incomplete: &Value) -> Option<String> {
+    let stops = incomplete.as_array().filter(|s| !s.is_empty())?;
+    let said: Vec<String> = stops
+        .iter()
+        .map(|s| {
+            let stage = s["stage"]
+                .as_str()
+                .map(|st| format!(" at {st}"))
+                .unwrap_or_default();
+            format!(
+                "{}{stage}, {} of {}",
+                str(&s["kind"]),
+                s["done"],
+                s["total"]
+            )
+        })
+        .collect();
+    Some(said.join("; "))
+}
+
+/// A work an analysis found: its line, or its id when it wasn't looked up.
+fn found_line(item: &Value) -> String {
+    match &item["work"] {
+        Value::Object(_) => work_line(&item["work"]),
+        _ => str(&item["id"]).to_owned(),
+    }
+}
+
+/// Numbers in a list, comma-separated.
+fn joined(items: &Value) -> String {
+    let items = items.as_array().map(Vec::as_slice).unwrap_or_default();
+    items
+        .iter()
+        .map(ToString::to_string)
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
 /// Each item's lines, the first [`SHOWN`] of them.
 fn list(items: &Value, line: fn(&Value) -> String) -> String {
     let items = items.as_array().map(Vec::as_slice).unwrap_or_default();
@@ -134,10 +270,14 @@ fn verdict_lines(item: &Value) -> String {
     lines.join("\n")
 }
 
-/// `Title (2015), First Author et al., doi:…`
+/// `Title (2015), First Author et al., doi:…`: the year from `issued`, or
+/// `year` (an analysis' works).
 fn work_line(work: &Value) -> String {
     let title = work["title"].as_str().unwrap_or("(untitled)");
-    let year = work["issued"].as_str().map(|d| &d[..d.len().min(4)]);
+    let year = match (work["issued"].as_str(), work["year"].as_i64()) {
+        (Some(d), _) => Some(d[..d.len().min(4)].to_owned()),
+        (None, year) => year.map(|y| y.to_string()),
+    };
     let authors = work["authors"]
         .as_array()
         .map(Vec::as_slice)

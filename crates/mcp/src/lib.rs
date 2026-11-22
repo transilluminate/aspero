@@ -22,6 +22,7 @@
 //! server; over HTTP, an `initialize` and the requests after it. It carries
 //! the [`Caller`] and the spend cap.
 
+mod analyse;
 mod args;
 #[cfg(feature = "http")]
 pub mod http;
@@ -32,6 +33,7 @@ mod session;
 mod summary;
 mod tools;
 
+pub use analyse::MAX_SEEDS;
 pub use server::{serve, serve_stdio};
 pub use session::{Caller, DEFAULT_BUDGET_USD, Session};
 pub use tools::{

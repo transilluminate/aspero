@@ -197,3 +197,19 @@ pub fn identify() -> Map<String, Value> {
         ],
     )
 }
+
+/// `aspero analyse`'s shape, its works cut down (`analyse.rs`), named in
+/// a description: a schema per section would be most of the tool's share
+/// of the list. Usage and the session are as every tool's.
+pub fn analyse() -> Map<String, Value> {
+    let mut map = Map::new();
+    map.insert("type".into(), json!("object"));
+    map.insert(
+        "description".into(),
+        json!(
+            "seeds, then per kind {complete, incomplete, items}; works {canonical_id, title, \
+            year, cited_by_count}"
+        ),
+    );
+    map
+}

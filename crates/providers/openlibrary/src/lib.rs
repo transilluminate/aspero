@@ -11,6 +11,11 @@
 //!   authors and titles as `author=` and `title=` (which take any text:
 //!   Open Library escapes them), newest first with `sort=new`.
 //!
+//! - Editions of a work: `/works/{key}/editions.json` (the `editions`
+//!   parameter of a search, the work's key its value), each edition with its
+//!   publishers, date and ISBNs; the page's `size` counts them all, paged
+//!   by `offset`.
+//!
 //! Data quality varies: some ISBNs carry unrelated records, so scoring (not
 //! the identifier alone) decides matches.
 
@@ -157,6 +162,33 @@ struct Named {
 #[derive(Debug, Default, Deserialize)]
 #[serde(default)]
 struct Identifiers {
+    #[serde(deserialize_with = "null_default")]
+    isbn_13: Vec<String>,
+    #[serde(deserialize_with = "null_default")]
+    isbn_10: Vec<String>,
+}
+
+/// `/works/{key}/editions.json`: a page of a work's editions.
+#[derive(Debug, Default, Deserialize)]
+#[serde(default)]
+struct EditionsPage {
+    /// Every edition the work has, not only this page's.
+    size: Option<u64>,
+    #[serde(deserialize_with = "null_default")]
+    entries: Vec<serde_json::Value>,
+}
+
+/// One edition of a work's `editions.json`: publishers by name, its
+/// authors only by key.
+#[derive(Debug, Default, Deserialize)]
+#[serde(default)]
+struct WorkEdition {
+    key: Option<String>,
+    title: Option<String>,
+    subtitle: Option<String>,
+    publish_date: Option<String>,
+    #[serde(deserialize_with = "null_default")]
+    publishers: Vec<String>,
     #[serde(deserialize_with = "null_default")]
     isbn_13: Vec<String>,
     #[serde(deserialize_with = "null_default")]
@@ -313,6 +345,92 @@ fn search_record(
     ))
 }
 
+/// An edition's record: its publishers joined by "; " (an edition may
+/// name two: "G. Allen & Unwin; E. Munksgaard").
+fn work_edition_record(
+    base: &str,
+    value: &serde_json::Value,
+    at: Timestamp,
+) -> serde_json::Result<SourceRecord> {
+    let e = WorkEdition::deserialize(value)?;
+    let ids = isbns(e.isbn_13.iter().chain(&e.isbn_10));
+    let publishers: Vec<&str> = e
+        .publishers
+        .iter()
+        .map(|p| p.trim())
+        .filter(|p| !p.is_empty())
+        .collect();
+    let work = book(
+        full_title(e.title, e.subtitle),
+        Vec::new(),
+        e.publish_date.as_deref().and_then(year_in),
+        (!publishers.is_empty()).then(|| publishers.join("; ")),
+        e.key.map(|k| format!("{base}{k}")),
+    );
+    Ok(SourceRecord::new(
+        ID,
+        ids,
+        work,
+        FieldSet::ALL,
+        Raw::json(value),
+        at,
+    ))
+}
+
+/// A work's key as `editions` takes it: `OL…W`, bare or as its path or
+/// URL (`/works/OL45804W`, `https://openlibrary.org/works/OL45804W`).
+fn work_key(value: &str) -> Option<&str> {
+    let key = value.trim().trim_end_matches('/');
+    let key = key.rsplit('/').next().unwrap_or(key);
+    let digits = key.strip_prefix("OL")?.strip_suffix('W')?;
+    (!digits.is_empty() && digits.bytes().all(|b| b.is_ascii_digit())).then_some(key)
+}
+
+impl OpenLibrary {
+    /// A page of a work's editions: `/works/{key}/editions.json`, at most
+    /// [`MAX_PAGE`] a page, the cursor its offset.
+    async fn editions(&self, value: &str, query: &SearchQuery) -> Result<Response<Page>> {
+        if !query.text.trim().is_empty() || query.tree.is_some() || !query.filters().is_empty() {
+            return Err(Error::BadRequest(
+                "Open Library editions takes a work's key alone, no terms or filters".into(),
+            ));
+        }
+        let key = work_key(value).ok_or_else(|| {
+            Error::BadRequest(format!(
+                "Open Library editions takes a work's key (OL45804W), not {value:?}"
+            ))
+        })?;
+        let offset: u64 = match &query.page.cursor {
+            None => 0,
+            Some(c) => c
+                .0
+                .parse()
+                .map_err(|_| Error::BadRequest(format!("invalid Open Library cursor {:?}", c.0)))?,
+        };
+        let limit = query.page.limit.clamp(1, MAX_PAGE);
+        let mut params = vec![("limit", limit.to_string())];
+        if offset > 0 {
+            params.push(("offset", offset.to_string()));
+        }
+        let resp = self
+            .get(&format!("/works/{key}/editions.json"), &params)
+            .await?;
+        let page: EditionsPage = serde_json::from_slice(&resp.body).map_err(Error::decode)?;
+        let base = self.config.base_url.trim_end_matches('/');
+        let read = page.entries.len() as u64;
+        let hits: Vec<Hit> = page
+            .entries
+            .iter()
+            .filter_map(|v| or_skip(work_edition_record(base, v, resp.received_at)))
+            .map(|r| Hit::new(r, None))
+            .collect();
+        let seen = offset + read;
+        let next =
+            (read > 0 && page.size.is_some_and(|n| n > seen)).then(|| Cursor(seen.to_string()));
+        Ok(Response::new(Page::new(hits, page.size, next)))
+    }
+}
+
 #[async_trait]
 impl Provider for OpenLibrary {
     fn id(&self) -> ProviderId {
@@ -364,9 +482,12 @@ impl Provider for OpenLibrary {
         if query.since.is_some() {
             return Err(Error::UnsupportedQuery(self.since_unsupported()));
         }
-        if let Some((key, _)) = query.extra.iter().next() {
+        if let Some((key, value)) = query.extra.iter().next() {
+            if key == "editions" && query.extra.len() == 1 {
+                return self.editions(value, query).await;
+            }
             return Err(Error::BadRequest(format!(
-                "unknown Open Library parameter {key:?}"
+                "unknown Open Library parameter {key:?} (supported: editions, alone)"
             )));
         }
         let tree = query

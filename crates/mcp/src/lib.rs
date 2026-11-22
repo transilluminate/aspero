@@ -24,6 +24,7 @@
 
 mod analyse;
 mod args;
+mod held;
 #[cfg(feature = "http")]
 pub mod http;
 mod schema;
@@ -34,6 +35,7 @@ mod summary;
 mod tools;
 
 pub use analyse::MAX_SEEDS;
+pub use held::Holdings;
 pub use server::{serve, serve_stdio};
 pub use session::{Caller, DEFAULT_BUDGET_USD, Session};
 pub use tools::{

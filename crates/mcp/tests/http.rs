@@ -1720,6 +1720,138 @@ async fn each_tool_call_is_logged_with_the_keys_name_and_no_query() {
     }
 }
 
+/// The app with a library: its tools and activity are `app`'s, and it
+/// holds works by these identifiers, after `delay`.
+struct Library {
+    app: Arc<FakeHost>,
+    ids: Vec<&'static str>,
+    delay: Duration,
+    asked: Mutex<Vec<Vec<Vec<String>>>>,
+}
+
+#[async_trait]
+impl Host for Library {
+    fn tools(&self) -> Vec<HostTool> {
+        Host::tools(&*self.app)
+    }
+
+    async fn call(
+        &self,
+        name: String,
+        arguments: String,
+        caller: Caller,
+    ) -> Result<HostOutput, HostError> {
+        Host::call(&*self.app, name, arguments, caller).await
+    }
+
+    fn activity(&self, activity: Activity) {
+        Host::activity(&*self.app, activity);
+    }
+
+    async fn held(&self, works: Vec<Vec<String>>) -> Option<Vec<bool>> {
+        let held = works
+            .iter()
+            .map(|ids| ids.iter().any(|id| self.ids.contains(&id.as_str())))
+            .collect();
+        self.asked.lock().unwrap().push(works);
+        tokio::time::sleep(self.delay).await;
+        Some(held)
+    }
+}
+
+async fn start_library(library: &Arc<Library>) -> HttpServer {
+    let tools: Arc<Tools> = Arc::new(tools(vec![source()]));
+    let host = library.clone() as Arc<dyn Host>;
+    let ledger = Arc::new(MemoryLedger::default());
+    HttpServer::start(tools, config(free_port()), Some(host), ledger)
+        .await
+        .unwrap()
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn engine_results_mark_the_works_the_app_holds() {
+    // "Deep learning" by its OpenAlex id: its hit lists it by DOI first.
+    let library = Arc::new(Library {
+        app: FakeHost::new(),
+        ids: vec!["openalex:W1"],
+        delay: Duration::ZERO,
+        asked: Mutex::default(),
+    });
+    let server = start_library(&library).await;
+    let mut agent = Agent::new(server.port(), FULL);
+    let info = agent.initialize().await;
+    let said = info["instructions"].as_str().unwrap();
+    assert!(said.ends_with("are marked `held: true` in search, citing_works and references hits and analyse's works: don't add or fetch them again."), "{said}");
+    let result = agent.call("search", json!({"text": "Deep learning"})).await;
+    assert_eq!(result["structuredContent"]["hits"][0]["held"], true);
+    assert!(
+        text(&result).contains("Yann LeCun et al., doi:10.1038/nature14539 (held)\n"),
+        "{result}"
+    );
+    assert!(text(&result).contains("\n1 already in the app's library (held).\n"));
+    let result = agent
+        .call("citing_works", json!({"id": "10.1038/nature14539"}))
+        .await;
+    assert!(result["structuredContent"]["hits"][0].get("held").is_none());
+    assert!(!text(&result).contains("held"), "{result}");
+    assert_eq!(
+        *library.asked.lock().unwrap(),
+        [
+            vec![vec!["doi:10.1038/nature14539", "openalex:W1"]],
+            vec![vec!["arxiv:1706.03762", "openalex:W2"]],
+        ]
+    );
+    server.stop().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_host_that_doesnt_say_what_it_holds_changes_nothing() {
+    // `FakeHost` leaves `held` to its default.
+    let host = FakeHost::new();
+    let server = start(&host).await;
+    let mut agent = Agent::new(server.port(), FULL);
+    agent.initialize().await;
+    let with_host = agent.call("search", json!({"text": "Deep learning"})).await;
+
+    // As served with no host at all.
+    let bare = start_with(config(free_port()), None, Arc::new(MemoryLedger::default()))
+        .await
+        .unwrap();
+    let mut agent = Agent::new(bare.port(), FULL);
+    let info = agent.initialize().await;
+    // Not said where nothing could be marked.
+    assert!(!info["instructions"].as_str().unwrap().contains("held"));
+    let without = agent.call("search", json!({"text": "Deep learning"})).await;
+    assert!(
+        with_host["structuredContent"]["hits"][0]
+            .get("held")
+            .is_none()
+    );
+    assert_eq!(with_host, without);
+    server.stop().await;
+    bare.stop().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_host_too_slow_to_say_leaves_results_unmarked() {
+    let library = Arc::new(Library {
+        app: FakeHost::new(),
+        ids: vec!["openalex:W1"],
+        delay: aspero_mcp::http::HELD_TIMEOUT + Duration::from_secs(1),
+        asked: Mutex::default(),
+    });
+    let server = start_library(&library).await;
+    let mut agent = Agent::new(server.port(), FULL);
+    agent.initialize().await;
+    let started = tokio::time::Instant::now();
+    let result = agent.call("search", json!({"text": "Deep learning"})).await;
+    assert!(!is_error(&result), "{result}");
+    assert!(result["structuredContent"]["hits"][0].get("held").is_none());
+    assert!(started.elapsed() < aspero_mcp::http::HELD_TIMEOUT + Duration::from_secs(1));
+    assert_eq!(library.asked.lock().unwrap().len(), 1);
+    server.stop().await;
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn activity_says_when_an_analysis_only_estimated() {
     let host = FakeHost::new();

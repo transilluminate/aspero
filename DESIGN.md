@@ -612,6 +612,19 @@ idempotent), and a read-only tool is never listed as destructive. A key
 whose scopes change hears `tools/list_changed`, as after a change of the
 host's tools.
 
+**Held works** (#210). The host may say which works it already holds
+(`Host::held`; over FFI, the optional `McpHoldings` given to `start`,
+since a UniFFI foreign trait can't give a new method a default). Once per
+`search`, `citing_works` or `references` page and per `analyse` result
+(its probably missing and related works), before works are cut down,
+aspero asks with every identifier each work carries (its canonical id,
+its record's `ids`, an analysis' OpenAlex `id` and merged `ids`), so the
+host matches a work under whichever id it keeps. Held works get `held:
+true` (absent otherwise), " (held)" in the text and a count line. Local,
+so free; abandoned after 5 s, when nothing is marked. A host that doesn't
+say (the default), stdio and the CLI change nothing. Activity's
+`estimate_only` (#211) says an `analyse` call only estimated.
+
 **Threat model.** For agents on the same machine, acting for the user.
 Loopback only: nothing off the machine connects. Every request needs a key
 the app minted and can revoke; aspero holds only hashes (the app keeps

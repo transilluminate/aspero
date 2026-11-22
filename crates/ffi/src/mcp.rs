@@ -209,6 +209,24 @@ pub trait McpHost: Send + Sync {
     fn activity(&self, activity: McpActivity);
 }
 
+/// What the app already holds (a reference manager's library), so the
+/// engine tools' results can mark it and an agent doesn't propose, add or
+/// fetch what the user has. Optional: pass it to `McpServer.start` as
+/// `holdings` (it may be the same object as the `McpHost`).
+#[uniffi::export(with_foreign)]
+#[async_trait::async_trait]
+pub trait McpHoldings: Send + Sync {
+    /// For each work, given by every identifier its result carries
+    /// (`doi:10.1097/…`, lowercase; `pmid:…`, `pmcid:…`, `arxiv:…`,
+    /// `openalex:W…`; the canonical first), whether the app holds it under
+    /// any of them: one answer per work, in order. Asked once per `search`,
+    /// `citing_works` or `references` page and `analyse` result (its
+    /// probably missing and related works), which mark each held work
+    /// `held: true`. Local: answer from the app's own data. Abandoned
+    /// after 5 seconds, when nothing is marked.
+    async fn held(&self, works: Vec<Vec<String>>) -> Vec<bool>;
+}
+
 /// A bearer key the app minted: aspero sees only its token's hash.
 #[derive(Debug, Clone, uniffi::Record)]
 pub struct McpKey {
@@ -317,14 +335,20 @@ impl From<StartError> for McpError {
     }
 }
 
-/// The app's [`McpHost`] as the server's host.
-struct ForeignHost(Arc<dyn McpHost>);
+/// The app's [`McpHost`] and [`McpHoldings`], either or both, as the
+/// server's host.
+struct ForeignHost {
+    host: Option<Arc<dyn McpHost>>,
+    holdings: Option<Arc<dyn McpHoldings>>,
+}
 
 #[async_trait::async_trait]
 impl http::Host for ForeignHost {
     fn tools(&self) -> Vec<http::HostTool> {
-        self.0
-            .tools()
+        let Some(host) = &self.host else {
+            return Vec::new();
+        };
+        host.tools()
             .into_iter()
             .map(|t| http::HostTool {
                 name: t.name,
@@ -346,12 +370,16 @@ impl http::Host for ForeignHost {
         arguments: String,
         caller: Caller,
     ) -> Result<http::HostOutput, http::HostError> {
+        // Only listed tools are called, and only a host lists any.
+        let Some(host) = &self.host else {
+            return Err(http::HostError::Failed(format!("no tool named {name:?}")));
+        };
         let caller = McpCaller {
             key_id: caller.key_id.unwrap_or_default(),
             key_name: caller.key_name.unwrap_or_default(),
             scopes: caller.scopes,
         };
-        match self.0.call(name, arguments, caller).await {
+        match host.call(name, arguments, caller).await {
             Ok(r) => Ok(http::HostOutput {
                 structured: r.structured,
                 summary: r.summary,
@@ -368,7 +396,10 @@ impl http::Host for ForeignHost {
     }
 
     fn activity(&self, a: http::Activity) {
-        self.0.activity(McpActivity {
+        let Some(host) = &self.host else {
+            return;
+        };
+        host.activity(McpActivity {
             key_name: a.key_name,
             tool: a.tool,
             summary: a.summary,
@@ -380,6 +411,10 @@ impl http::Host for ForeignHost {
             count: a.count,
             estimate_only: a.estimate_only,
         });
+    }
+
+    async fn held(&self, works: Vec<Vec<String>>) -> Option<Vec<bool>> {
+        Some(self.holdings.as_ref()?.held(works).await)
     }
 }
 
@@ -397,19 +432,22 @@ pub struct McpServer {
 impl McpServer {
     /// Starts serving `aspero`'s engine tools (unless `engine_tools` is
     /// off) and `host`'s, through `aspero`'s engine: its key, cap,
-    /// disabled sources and cache, where per-key spend is kept.
-    #[uniffi::constructor(default(host = None))]
+    /// disabled sources and cache, where per-key spend is kept. With
+    /// `holdings`, the engine tools' results mark the works it holds.
+    #[uniffi::constructor(default(host = None, holdings = None))]
     pub async fn start(
         aspero: Arc<Aspero>,
         config: McpServerConfig,
         host: Option<Arc<dyn McpHost>>,
+        holdings: Option<Arc<dyn McpHoldings>>,
     ) -> Result<Arc<Self>, McpError> {
         let tools = Arc::new(Tools::new(aspero.engine.clone()));
         let ledger: Arc<dyn Ledger> = match &aspero.cache {
             Some(cache) => cache.clone(),
             None => Arc::new(MemoryLedger::default()),
         };
-        let host = host.map(|h| Arc::new(ForeignHost(h)) as Arc<dyn http::Host>);
+        let host = (host.is_some() || holdings.is_some())
+            .then(|| Arc::new(ForeignHost { host, holdings }) as Arc<dyn http::Host>);
         let mut http_config = HttpConfig::default();
         http_config.port = config.port;
         http_config.keys = config.keys.into_iter().map(Into::into).collect();
@@ -514,6 +552,11 @@ mod tests {
         }
         let limit = format!("at most {} ASCII letters", aspero_mcp::scope::MAX_LEN);
         assert!(source.contains(&limit), "{limit}");
+        let held = format!(
+            "after {} seconds, when nothing is marked",
+            http::HELD_TIMEOUT.as_secs()
+        );
+        assert!(source.contains(&held), "{held}");
     }
 
     /// An activity says it only estimated unless set: an app's existing
@@ -523,6 +566,42 @@ mod tests {
         let source = include_str!("mcp.rs");
         let attribute = "#[uniffi(default = false)]\n    pub estimate_only: bool,\n}";
         assert!(source.contains(attribute), "{attribute}");
+    }
+
+    struct Shelf;
+
+    #[async_trait::async_trait]
+    impl McpHoldings for Shelf {
+        async fn held(&self, works: Vec<Vec<String>>) -> Vec<bool> {
+            works
+                .iter()
+                .map(|ids| ids.iter().any(|id| id == "pmid:11"))
+                .collect()
+        }
+    }
+
+    /// The app's holdings answer for the host; without them, the host
+    /// says nothing and nothing is marked.
+    #[tokio::test]
+    async fn holdings_answer_for_the_host_only_when_given() {
+        use http::Host as _;
+        let works = || {
+            vec![
+                vec!["doi:10.1/a".into(), "pmid:11".into()],
+                vec!["doi:10.1/b".into()],
+            ]
+        };
+        let given = ForeignHost {
+            host: None,
+            holdings: Some(Arc::new(Shelf)),
+        };
+        assert_eq!(given.held(works()).await, Some(vec![true, false]));
+        assert!(given.tools().is_empty());
+        let none = ForeignHost {
+            host: None,
+            holdings: None,
+        };
+        assert_eq!(none.held(works()).await, None);
     }
 
     /// Hints left unset are MCP's own defaults: a tool that says nothing

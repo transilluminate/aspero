@@ -143,6 +143,17 @@ pub trait Host: Send + Sync {
     /// After every tool call, engine or host, success or error: from a
     /// background thread, in order, never holding up a request.
     fn activity(&self, activity: Activity);
+
+    /// Which works the app already holds (a reference manager's library),
+    /// as [`Holdings::held`](crate::Holdings::held) says: asked once per
+    /// `search`, `citing_works` or `references` page and `analyse` result,
+    /// which mark them `held: true`; abandoned after
+    /// [`HELD_TIMEOUT`](super::HELD_TIMEOUT), when nothing is marked.
+    /// `None`, unless the app overrides it: nothing is marked.
+    async fn held(&self, works: Vec<Vec<String>>) -> Option<Vec<bool>> {
+        let _ = works;
+        None
+    }
 }
 
 /// A host tool, checked and ready to list.

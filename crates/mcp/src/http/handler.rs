@@ -4,6 +4,7 @@
 use std::borrow::Cow;
 use std::sync::{Arc, OnceLock};
 
+use futures::future::BoxFuture;
 use rmcp::model::{
     CallToolRequestParams, CallToolResponse, CallToolResult, ContentBlock, InitializeRequestParams,
     InitializeResult, ListToolsResult, PaginatedRequestParams, ProtocolVersion, ServerConfig, Tool,
@@ -12,17 +13,22 @@ use rmcp::service::RequestContext;
 use rmcp::{ErrorData, RoleServer, ServerHandler};
 use serde_json::{Map, Value};
 
-use super::Shared;
 use super::auth::Credential;
-use super::host::{Activity, HostError};
+use super::host::{Activity, Host, HostError};
+use super::{HELD_TIMEOUT, Shared};
 use crate::scope::SOURCES;
 use crate::server::{
     INSTRUCTIONS, engine_result, error_text, server_info, tool_event, tool_input, with_call_id,
 };
 use crate::session::usd;
-use crate::{Caller, Session, ToolError, ToolErrorKind, tools};
+use crate::{Caller, Holdings, Session, ToolError, ToolErrorKind, tools};
 
 const HOST_INSTRUCTIONS: &str = "Tools provided by the app that embeds aspero.";
+
+/// Said after [`INSTRUCTIONS`] when an app serves the engine tools.
+const HELD_INSTRUCTIONS: &str = "Works the app already holds are marked `held: true` in \
+    search, citing_works and references hits and analyse's works: don't add or fetch them \
+    again.";
 
 /// The key a request came with, put in its HTTP extensions once
 /// authenticated.
@@ -90,7 +96,10 @@ impl Handler {
         let (result, cost) = match held {
             Err(e) => (Err(e), 0.0),
             Ok(held) => {
-                let result = self.shared.tools.call(session, name, arguments).await;
+                let holdings = self.shared.host.as_deref().map(HostHoldings);
+                let result = (self.shared.tools)
+                    .call_holding(session, name, arguments, holdings.as_ref().map(|h| h as _))
+                    .await;
                 // Spent all the same when the call failed after spending.
                 let cost = match &result {
                     Ok(output) => output.cost_usd,
@@ -216,11 +225,11 @@ impl Handler {
 
 impl ServerHandler for Handler {
     fn get_info(&self) -> ServerConfig {
-        server_info(if self.shared.engine_tools {
-            INSTRUCTIONS
-        } else {
-            HOST_INSTRUCTIONS
-        })
+        match (self.shared.engine_tools, self.shared.host.is_some()) {
+            (true, true) => server_info(&format!("{INSTRUCTIONS} {HELD_INSTRUCTIONS}")),
+            (true, false) => server_info(INSTRUCTIONS),
+            (false, _) => server_info(HOST_INSTRUCTIONS),
+        }
     }
 
     /// The revisions with sessions (`initialize`): budgets attach to them.
@@ -432,6 +441,22 @@ fn activity(
         query,
         count,
         estimate_only: false,
+    }
+}
+
+/// The host, asked which works it holds within [`HELD_TIMEOUT`].
+struct HostHoldings<'a>(&'a dyn Host);
+
+impl Holdings for HostHoldings<'_> {
+    fn held(&self, works: Vec<Vec<String>>) -> BoxFuture<'_, Option<Vec<bool>>> {
+        Box::pin(async move {
+            let asked = works.len();
+            let answer = tokio::time::timeout(HELD_TIMEOUT, self.0.held(works)).await;
+            if answer.is_err() {
+                tracing::debug!(target: "aspero::mcp", works = asked, "the app didn't say in time which works it holds");
+            }
+            answer.ok().flatten()
+        })
     }
 }
 

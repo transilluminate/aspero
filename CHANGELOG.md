@@ -7,6 +7,33 @@ and 0.1 to 0.9 in [docs/changelog/0.0x.md](docs/changelog/0.0x.md).
 
 Added:
 
+- An app serving the MCP tools can say which works it already holds (#210,
+  an embedder's), so agents don't propose, add or fetch what the user has.
+  `search`, `citing_works` and `references` hits, and `analyse`'s probably
+  missing and related works, carry `held: true` when the app holds them
+  (absent otherwise); their text marks each "(held)" and ends with a
+  count ("2 already in the app's library (held)."), and the server's
+  instructions say what it means. aspero asks once per result, with every
+  identifier each work carries (`doi:…`, `pmid:…`, `openalex:W…`, the
+  canonical first), so a work the app keeps under another of its ids still
+  matches; the app answers from its own data, so it costs nothing. If the
+  app doesn't answer within 5 seconds, nothing is marked. An app that
+  doesn't say, stdio and the CLI change nothing.
+  In Swift, a new protocol, passed to `start` (a UniFFI callback interface
+  can't give a new method a default, so it isn't a method on `McpHost`;
+  one object may conform to both):
+  ```swift
+  // Before
+  McpServer.start(aspero: Aspero, config: McpServerConfig, host: McpHost? = nil)
+  // After: existing calls and McpHost conformances compile unchanged
+  McpServer.start(aspero: Aspero, config: McpServerConfig, host: McpHost? = nil,
+                  holdings: McpHoldings? = nil)
+  public protocol McpHoldings: AnyObject, Sendable {
+      func held(works: [[String]]) async -> [Bool]
+  }
+  ```
+  Rust: `http::Host::held` (default: `None`), `aspero_mcp::Holdings`,
+  `Tools::call_holding` and `http::HELD_TIMEOUT`.
 - `McpActivity.estimateOnly` (#211): an `analyse` call with
   `estimate_only` only estimated what a run would cost, so an app can say
   "estimated an analysis of 3 works" rather than "analysed 3 works"
@@ -19,6 +46,13 @@ Added:
               estimateOnly: Bool = false)
   ```
   Rust: `http::Activity::estimate_only`.
+
+Changed (for an embedder: the MCP tool list):
+
+- The search output schema (`search`, `citing_works`, `references`) names
+  `held`, and `analyse`'s says its works may carry it. Wording trimmed
+  elsewhere to pay for it: the list is 27,907 characters (27,959 before),
+  under the 28,000 a test holds it to (#157).
 
 ## 0.42.1
 

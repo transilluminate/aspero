@@ -72,6 +72,8 @@ impl Handler {
         let k = &key.key;
         let said = engine_summary(name, &arguments);
         let query = engine_query(name, &arguments);
+        let estimate_only =
+            name == "analyse" && arguments.get("estimate_only") == Some(&true.into());
         let arguments = Value::Object(arguments);
         let spends = (self.shared.tools.spec(name)).is_some_and(|s| tools::spends(s, &arguments));
         // The key's sessions' paid calls in flight hold their estimates, as
@@ -106,7 +108,8 @@ impl Handler {
             Ok(output) => Ok((said, engine_count(name, &output.structured))),
             Err(e) => Err(e),
         };
-        let activity = activity(k, name, query, outcome, cost);
+        let mut activity = activity(k, name, query, outcome, cost);
+        activity.estimate_only = estimate_only;
         (engine_result(session, result), activity)
     }
 
@@ -428,6 +431,7 @@ fn activity(
         error_message: error.map(|e| e.message.trim().to_owned()),
         query,
         count,
+        estimate_only: false,
     }
 }
 

@@ -332,3 +332,47 @@ fn an_app_serves_its_tools_to_an_agent() {
     drop(aspero);
     let _ = std::fs::remove_dir_all(dir);
 }
+
+#[test]
+fn activity_says_when_an_analysis_only_estimated() {
+    let aspero = Aspero::new(Config::default()).unwrap();
+    let app = Arc::new(App::default());
+    let port = free_port();
+    let rt = runtime();
+    let server = rt
+        .block_on(McpServer::start(
+            aspero.clone(),
+            config(port, &["sources"]),
+            Some(app.clone() as Arc<dyn McpHost>),
+        ))
+        .unwrap();
+    let http = reqwest::Client::builder().no_proxy().build().unwrap();
+    let mut session = None;
+    rt.block_on(async {
+        let init = json!({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {
+            "protocolVersion": "2025-06-18", "capabilities": {},
+            "clientInfo": {"name": "test", "version": "1"}}});
+        rpc(&http, port, TOKEN, &mut session, init).await;
+        // Refused before anything is looked up (no network), and still
+        // an estimate, as asked.
+        for (id, estimate) in [(2, true), (3, false)] {
+            let call = json!({"jsonrpc": "2.0", "id": id, "method": "tools/call",
+                "params": {"name": "analyse", "arguments": {"ids": [], "estimate_only": estimate}}});
+            let (_, answer) = rpc(&http, port, TOKEN, &mut session, call).await;
+            assert_eq!(answer.unwrap()["result"]["isError"], true);
+        }
+    });
+    rt.block_on(server.stop());
+    for _ in 0..100 {
+        if app.activity.lock().unwrap().len() >= 2 {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    let activity = app.activity.lock().unwrap().clone();
+    let said: Vec<(&str, bool)> = activity
+        .iter()
+        .map(|a| (a.tool.as_str(), a.estimate_only))
+        .collect();
+    assert_eq!(said, [("analyse", true), ("analyse", false)]);
+}

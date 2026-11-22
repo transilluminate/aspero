@@ -117,6 +117,10 @@ pub struct Activity {
     /// verified, or the one work identified. `None` for errors, host tools
     /// and `search_supports`.
     pub count: Option<u64>,
+    /// Whether the call only estimated: `analyse` with `estimate_only`,
+    /// which ran nothing and spent nothing (its `count` is the works it
+    /// was given). False for every other call.
+    pub estimate_only: bool,
 }
 
 /// The embedding app: its tools, served through aspero's protocol, auth and

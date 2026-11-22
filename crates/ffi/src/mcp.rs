@@ -180,6 +180,11 @@ pub struct McpActivity {
     /// app's tools and `search_supports`.
     #[uniffi(default = None)]
     pub count: Option<u64>,
+    /// The call only estimated: `analyse` with `estimate_only`, which ran
+    /// nothing and spent nothing (its `count` is the works it was given).
+    /// False for every other call.
+    #[uniffi(default = false)]
+    pub estimate_only: bool,
 }
 
 /// The app, to the MCP server: its tools, and what agents did.
@@ -373,6 +378,7 @@ impl http::Host for ForeignHost {
             error_message: a.error_message,
             query: a.query,
             count: a.count,
+            estimate_only: a.estimate_only,
         });
     }
 }
@@ -508,6 +514,15 @@ mod tests {
         }
         let limit = format!("at most {} ASCII letters", aspero_mcp::scope::MAX_LEN);
         assert!(source.contains(&limit), "{limit}");
+    }
+
+    /// An activity says it only estimated unless set: an app's existing
+    /// `McpActivity(…)` calls are unchanged.
+    #[test]
+    fn estimate_only_is_last_and_off_unless_set() {
+        let source = include_str!("mcp.rs");
+        let attribute = "#[uniffi(default = false)]\n    pub estimate_only: bool,\n}";
+        assert!(source.contains(attribute), "{attribute}");
     }
 
     /// Hints left unset are MCP's own defaults: a tool that says nothing

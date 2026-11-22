@@ -3,6 +3,23 @@
 Releases 0.10 to 0.19 are in [docs/changelog/0.1x.md](docs/changelog/0.1x.md),
 and 0.1 to 0.9 in [docs/changelog/0.0x.md](docs/changelog/0.0x.md).
 
+## Unreleased
+
+Added:
+
+- `McpActivity.estimateOnly` (#211): an `analyse` call with
+  `estimate_only` only estimated what a run would cost, so an app can say
+  "estimated an analysis of 3 works" rather than "analysed 3 works"
+  without reading the summary. False for every other call.
+  ```swift
+  // Before
+  McpActivity(keyName:tool:summary:isError:costUsd:error:errorMessage:query:count:)
+  // After: last, defaulting to false, so existing code compiles
+  McpActivity(keyName:tool:summary:isError:costUsd:error:errorMessage:query:count:
+              estimateOnly: Bool = false)
+  ```
+  Rust: `http::Activity::estimate_only`.
+
 ## 0.42.1
 
 Fixed:

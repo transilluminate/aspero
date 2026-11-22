@@ -1719,3 +1719,49 @@ async fn each_tool_call_is_logged_with_the_keys_name_and_no_query() {
         assert!(debug.iter().any(|e| says(e, text)), "{text} not at debug");
     }
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn activity_says_when_an_analysis_only_estimated() {
+    let host = FakeHost::new();
+    let server = start(&host).await;
+    let mut agent = Agent::new(server.port(), FULL);
+    agent.initialize().await;
+    for args in [
+        json!({"ids": ["W1"], "estimate_only": true}),
+        json!({"ids": ["W1"], "estimate_only": false, "kinds": ["odd_one_out"]}),
+        // Refused, but asked as an estimate all the same.
+        json!({"ids": [], "estimate_only": true}),
+    ] {
+        agent.call("analyse", args).await;
+    }
+    agent.call("search", json!({"text": "Deep learning"})).await;
+    agent.call("history_search", json!({"q": "sepsis"})).await;
+    let activity = host.activity(5).await;
+    let said: Vec<(&str, &str, bool, bool)> = activity
+        .iter()
+        .map(|a| {
+            (
+                a.tool.as_str(),
+                a.summary.as_str(),
+                a.is_error,
+                a.estimate_only,
+            )
+        })
+        .collect();
+    assert_eq!(
+        said,
+        [
+            ("analyse", "estimated an analysis of a work", false, true),
+            ("analyse", "analysed a work", false, false),
+            (
+                "analyse",
+                "error: `ids` takes 1 to 200 identifiers, not 0",
+                true,
+                true
+            ),
+            ("search", "searched ‘Deep learning’", false, false),
+            ("history_search", "found 2 works in history", false, false),
+        ]
+    );
+    server.stop().await;
+}

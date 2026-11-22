@@ -48,7 +48,8 @@ crates/
   core/        identifiers, Work, Claim scoring, Provider trait, query trees,
                page reading, HTTP seam. No I/O.
   providers/   a crate per source (openalex, crossref, datacite, doi,
-               europepmc, openlibrary), each behind an engine feature
+               europepmc, openlibrary; pmc for free copies only), each
+               behind an engine feature
   store/       disposable SQLite answer cache; the benchmarks' HTTP tape
   bib/         BibTeX, RIS, CSL-JSON, .docx ↔ claims and works; CSL styles
   engine/      routing, caching, retries, pacing, spend caps,
@@ -165,6 +166,13 @@ ids (`CallId`), cache hits and each request's op and attempt in
   concurrency overlaps different providers' waits.
 - **Sources off** (`StandardConfig::disable`, CLI `--without`) are never
   built or asked. Any one source alone can verify.
+- **Free copies are asked for, not looked up** (#204). PMC's open data
+  (`aspero-pmc`) sits outside the chain (`EngineBuilder::free_copies`,
+  not one of `SOURCES`): only `Engine::free_copy`, the FFI's `freeCopy`
+  and lookups with `Extras::free_copies` (the CLI's `lookup --full`) ask
+  it, never a lookup, verify, search or another full lookup (the FFI's,
+  MCP's), whatever their `FieldSet`. Only a caller about to fetch the
+  copy should send the request.
 - **Search goes to one provider** (rankings aren't comparable): the one
   named, else the first that can search the whole query. Filters it can't
   apply are stripped and reported; fields and sorts it can't apply fail,
@@ -521,11 +529,34 @@ has its API's quirks; these shape the design:
   (`crates/engine/src/editions.rs`): one search by title and first
   author unless the work is among the candidates, then one page of
   editions, both cached as searches are.
+- **PMC open data** (`pmc-oa-opendata` on AWS S3, #204). PMC's site and
+  Europe PMC's PDF links turn scripts away (a challenge, 403, or 404
+  without the file's name; 2026-11-22); this public bucket, which takes
+  no key, doesn't. One prefix per article version (`PMC8114386.1/`), so
+  a work costs two requests, the listing (`?list-type=2&prefix=PMC….&
+  delimiter=/`, the only way to the latest version: an author
+  manuscript's `.1` may precede the published `.2`) and that version's
+  JSON; one when PMC hasn't it (most articles outside its reusable
+  subsets). A `pdf_url` (`s3://` read as the bucket's HTTPS address,
+  without its `?md5=`) counts only with `is_pmc_openaccess`; author
+  manuscripts (`TDM`) have none. A retracted article (`is_retracted`)
+  keeps its PDF: retractions are told by notices, not by hiding the
+  copy. A record whose DOI differs from PMC's for the PMCID lends no copy.
+  The copy's `source` is then `pmc`; status and licence stay the
+  record's (a `closed` status, disproved, is dropped). Requests send
+  only the PMCID: no key, and no contact address in the user agent.
 - **DBLP.** REST API and mirrors sit behind a proof-of-work bot challenge;
   we don't solve it. SPARQL has no text index (title search a 2–9 s scan
   of ~7M titles), so DBLP is no search provider; key lookups take ~0.1 s.
 - **Semantic Scholar** (not built; key pending). Keyless requests mostly
   429 from an AWS gateway with no `Retry-After`; a fake key gets 403.
+
+**Hosts aspero contacts**, and only these: `api.openalex.org`,
+`api.crossref.org`, `api.datacite.org`, `doi.org` (and the registration
+agency it redirects a DOI to), `www.ebi.ac.uk` (Europe PMC),
+`openlibrary.org`, and, for a free copy only (above),
+`pmc-oa-opendata.s3.amazonaws.com` (without the contact address the
+others get in the user agent).
 
 ## Agents (MCP)
 
@@ -631,6 +662,17 @@ know, or for broken JSON, never an error, so a stored reason always
 loads. `id_elsewhere`'s candidate is stored in full, its confidence
 unrounded, so a round trip is exact (a test per case).
 
+**Free copies** (#204). `OpenAccess.freeCopy` says what kind of copy a
+work has (`FreeCopyKind`: `pdf`, a `pdfUrl` a program can fetch as far
+as is known; `browserOnly`, free but only as a page or a PDF link that
+turns programs away, PMC's and Europe PMC's; `noneKnown`), derived from
+the record (`OpenAccess::free_copy`, `pdf_is_fetchable`), so it costs no
+request. It is optional, defaulting to `nil`, only so Swift that builds
+an `OpenAccess` still compiles (UniFFI gives no enum default); aspero
+always sets it. The JSON has it as `open_access.free_copy` (`pdf`,
+`browser_only`, `none`). `freeCopy(work:)` is the one call that asks
+PMC's open data: for an app about to fetch the copy, not each lookup.
+
 Not until needed: priority lanes in the pacer, a daemon, a SQLite
 connection pool, and CLI keys anywhere but the environment (agents run
 headless, where a Keychain prompt after an upgrade would hang them). The
@@ -677,7 +719,8 @@ and which had no `error`.
 **`request`**: a provider request as it completes (target `aspero::net`;
 unified-log category `net.<provider>`).
 
-- `v`; `provider`; `op`: `lookup`, `search`, `citing` (a page of the
+- `v`; `provider` (a source's name, or `pmc` for PMC's open data,
+  asked for free copies); `op`: `lookup` (a free copy's too), `search`, `citing` (a page of the
   works citing others), `budget` (OpenAlex's free `/rate-limit`), `other`
   (outside an engine call: a key check).
 - `status`, `error`, as above.

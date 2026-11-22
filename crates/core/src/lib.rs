@@ -20,6 +20,7 @@
 pub mod csl;
 pub mod error;
 mod fold;
+pub mod free_copy;
 pub mod http;
 pub mod id;
 pub mod matching;
@@ -38,6 +39,7 @@ pub mod work;
 pub mod testing;
 
 pub use error::{CapKind, Error, ErrorCategory, ErrorKind, Result};
+pub use free_copy::{FreeCopyKind, pdf_is_fetchable};
 pub use http::{HttpClient, HttpRequest, HttpResponse};
 pub use id::{
     ArxivId, CorpusId, Doi, IdError, IdKind, Isbn, Nbk, OpenAlexId, Pii, Pmcid, Pmid, S2PaperId,

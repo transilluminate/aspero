@@ -38,6 +38,31 @@ Changed (for an embedder: the MCP tool list):
   `identify` and `full: true` still give authors' ids. The CLI's JSON is
   unchanged.
 
+Added:
+
+- A fetchable PDF for free copies on PubMed Central (#204). `lookup
+  --full` now contacts one new host, PMC's open data on AWS
+  (`pmc-oa-opendata.s3.amazonaws.com`), for a work with a PMCID whose free
+  copy is only a PMC or Europe PMC page: one request for a work PMC's open
+  data hasn't, two for one it has. The request carries only the PMCID, no
+  key and no contact address. Where PMC counts the article open access,
+  `open_access.pdf_url` becomes the PDF there and `source` becomes `pmc`;
+  status and licence stay as they were. Author manuscripts have no PDF
+  there. A retracted article keeps its PDF; its retraction notices say so.
+  Plain `lookup`, `verify`, `check`, `search` and MCP's `lookup` never
+  contact it.
+- `open_access.free_copy` in the JSON: `pdf` (a `pdf_url` a program can
+  fetch, as far as is known), `browser_only` (free to read, but only as a
+  page or through a PDF link that turns programs away, as PubMed
+  Central's and Europe PMC's do) or `none`. The terminal's "Free copy"
+  line and table column follow it.
+- FFI: `OpenAccess.freeCopy` (a `FreeCopyKind`: `pdf`, `browserOnly`,
+  `noneKnown`; optional and last, so existing Swift compiles), and
+  `Aspero.freeCopy(work:patience:cancel:)`, the one FFI call that asks
+  PMC's open data, for an app about to fetch the copy. `lookup` with
+  `full` doesn't ask. Rust: `Engine::free_copy`, `Extras::free_copies`,
+  `EngineBuilder::free_copies` and the new `aspero-pmc` crate.
+
 ## 0.41.0
 
 Changed (the diagnostics contract: an embedder's log parser needs

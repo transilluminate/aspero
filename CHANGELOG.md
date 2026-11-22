@@ -3,6 +3,28 @@
 Releases 0.10 to 0.19 are in [docs/changelog/0.1x.md](docs/changelog/0.1x.md),
 and 0.1 to 0.9 in [docs/changelog/0.0x.md](docs/changelog/0.0x.md).
 
+## Unreleased
+
+Changed (the diagnostics contract: an embedder's log parser needs
+updating):
+
+- The contract events (`request`, from the network and from the cache,
+  `call`, `tool` and `retry`) carry a schema version first: `v=2` (#202).
+  A line without `v` is the earlier form. Within a version fields are
+  still only added at the end; a change in meaning bumps `v`.
+- `status` is only ever an HTTP code, absent where no response came. Why
+  a request failed or has no code is a new field, `error`, right after
+  `status`: `timeout`, `dns`, `refused`, `reset`, `connect`, `body`,
+  `network`, `cancelled` (with its `why`, as before), or an error's kind
+  (`not_cached`, …). An HTTP error response has both: `status=503
+  error=server` (404 `not_found`, 429 `rate_limited`, any other code
+  `server`). Before: `status=timeout`, `status=cancelled`.
+- Answers from the cache have no `status`: `cache=hit`, or `cache=stale`
+  with `error=<kind>` or `error=offline` (before: `status=none`,
+  `status=<kind>`). `retry` says `status` (a server error's code) and
+  `error` the same way, and the warnings and the two daily-cap notes that
+  put a kind in `status` put it in `error`.
+
 ## 0.40.0
 
 Changed:

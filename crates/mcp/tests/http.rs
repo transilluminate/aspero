@@ -1686,13 +1686,14 @@ async fn each_tool_call_is_logged_with_the_keys_name_and_no_query() {
             ("unknown", "unknown_tool", "0.000000"),
         ]
     );
-    let fields = ["tool", "key", "outcome", "ms", "cost_usd"];
+    let fields = ["v", "tool", "key", "outcome", "ms", "cost_usd"];
     assert_eq!(logged[0].names(), [&fields[..], &["call"]].concat());
     for e in &logged[1..] {
         assert_eq!(e.names(), fields);
     }
     for e in &logged {
         assert_eq!(e.level, tracing::Level::INFO);
+        assert_eq!(e.field("v"), Some("2"), "v=2 first");
     }
     // The search tool's engine call, by its id.
     let call = logged[0].field("call").unwrap();

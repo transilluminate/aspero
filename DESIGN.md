@@ -630,21 +630,42 @@ container, and different schema versions would rebuild each other's).
 
 aspero's events go through `tracing`, to the CLI's stderr (`-v` info,
 `-vv` debug) and, for an embedder, to Apple's unified log
-(`enable_system_log`). Three are a **contract**, parsed by an embedder's
-summariser to tune pacing and patience: their names, fields and values
-don't change; fields may be added at the end. Each is one line: its name,
-then `key=value` fields in this order (a value with spaces or quotes
-quoted). All three are at info.
+(`enable_system_log`). Four are a **contract**, parsed by an embedder's
+summariser to tune pacing and patience: `request` (both kinds), `call`,
+`tool` and `retry`. Each is one line: its name, then `key=value` fields
+in the order given here (a value with spaces or quotes quoted). All are
+at info.
+
+**The schema version** is the first field, `v=2` (`EVENTS_VERSION`).
+Within a version, names, fields and values don't change, and fields are
+only added at the end; a change in any field's meaning bumps `v`. A line
+without `v` is the form before 0.41 (v1), whose `status` held an HTTP
+code, a failure's kind or `none`, and had no `error`.
+
+**One meaning per field**, on every contract event:
+
+- `status`: an HTTP code, only where a response came; absent otherwise.
+- `error`: why it failed or there's no code, absent on success. For a
+  request that got no answer, the network's reason: `timeout`, `dns`,
+  `refused`, `reset`, `connect`, `body` (the answer broke off), `network`
+  (another); `cancelled` (dropped once sent; `why` says why). Else an
+  error's kind (`ErrorKind`: `server`, `rate_limited`, `not_found`,
+  `not_cached`, `budget_capped`, …), and `offline` for a stale answer the
+  cache served because aspero was offline. `error` follows `status`.
+- **An HTTP error response has both**: `status=503 error=server`. On a
+  `request`, a code outside 2xx takes the kind core gives a code a
+  provider doesn't map itself (`status_error`): 404 `not_found`, 429
+  `rate_limited`, any other `server`. A provider's own reading of it (a
+  401 as `key_rejected`, OpenAlex's spent budget as `budget_spent`, a 404
+  as an empty answer) is on the `retry` and `call` it leads to.
 
 **`request`**: a provider request as it completes (target `aspero::net`;
 unified-log category `net.<provider>`).
 
-- `provider`; `op`: `lookup`, `search`, `citing` (a page of the works
-  citing others), `budget` (OpenAlex's free `/rate-limit`), `other`
+- `v`; `provider`; `op`: `lookup`, `search`, `citing` (a page of the
+  works citing others), `budget` (OpenAlex's free `/rate-limit`), `other`
   (outside an engine call: a key check).
-- `status`: the HTTP code; or why there's none: `timeout`, `dns`,
-  `refused`, `reset`, `connect`, `body`, `network`, `cancelled` (dropped
-  once sent; `why` says why), or the error's kind (`not_cached`, …).
+- `status`, `error`, as above.
 - `ms` (sending to answer), `waited_ms` (for a pacing slot or an
   in-flight limit), `attempt` (from 1 within its retries; 0 outside an
   engine call).
@@ -659,7 +680,7 @@ unified-log category `net.<provider>`).
   made for a call's part (a verify's lookups, a check's verifies) is
   the call's. One shared by callers who joined it in flight is the
   sender's.
-- `why`, only with `status=cancelled` (#156): `deadline` (its attempt's
+- `why`, only with `error=cancelled` (#156): `deadline` (its attempt's
   deadline passed), `done` (its call no longer needed it: a verify found
   its verdict with other searches still out), or `caller` (its caller
   stopped waiting: a token cancelled, a client gone, a caller's own
@@ -667,19 +688,19 @@ unified-log category `net.<provider>`).
 
 Answers from the answer cache never reach the transport, so they are a
 **`request`** too (target `aspero::cache`, category `cache`), one per
-cache read and provider: the same fields with `status=none` for
-`cache=hit`, or, for `cache=stale` (served because the provider failed),
-the failure's kind or `offline`; `ms`, `waited_ms` and `attempt` 0, no
-`cost_usd`, `items`, the answers served (IDs, pages), then `call`.
-Lookups of a work's references from the cache are `op=references`. A
-caller that joins another's lookup already in flight shares its answer
-without a `request` of its own, and doesn't count its provider as
-asked.
+cache read and provider: the same fields, with no `status` (no response
+came); `cache=hit`, no `error`; or `cache=stale` (served because the
+provider failed), `error` the failure's kind or `offline`. `ms`,
+`waited_ms` and `attempt` 0, no `cost_usd`, `items`, the answers served
+(IDs, pages), then `call`. Lookups of a work's references from the cache
+are `op=references`. A caller that joins another's lookup already in
+flight shares its answer without a `request` of its own, and doesn't
+count its provider as asked.
 
 **`call`**: an engine call as it completes, or is dropped (target
 `aspero::engine`, category `engine`).
 
-- `op`: `lookup` (identifiers or inputs), `resolve`, `verify`, `search`,
+- `v`; `op`: `lookup` (identifiers or inputs), `resolve`, `verify`, `search`,
   `identify`, `references`, `analyse`, `check`. Calls made within one
   (verify's lookups, check's verifies) are its parts, not counted again;
   each claim of a `verify_batch` is a call, and a batch of more than one
@@ -704,18 +725,24 @@ asked.
   have neither event nor id: their requests carry the check's.
 
 **`tool`**: an MCP tool call, engine or host tool, as the server sees it
-(target `aspero::mcp`, category `mcp`): `tool`, `key` (the key's *name*,
-as `Caller.key_name` has it; absent over stdio), `outcome` (`ok` or the
-error's kind: `refused`, `timeout`, `unknown_tool`, …), `ms`, `cost_usd`,
-`call`: the id of the engine call the tool made, absent where it made
-none (host tools, a refused or invalid call). A name no tool has is the
-client's text: `tool=unknown`, the name only in `tool_input`.
+(target `aspero::mcp`, category `mcp`): `v`, `tool`, `key` (the key's
+*name*, as `Caller.key_name` has it; absent over stdio), `outcome` (`ok`
+or the error's kind: `refused`, `timeout`, `unknown_tool`, …), `ms`,
+`cost_usd`, `call`: the id of the engine call the tool made, absent where
+it made none (host tools, a refused or invalid call). A name no tool has
+is the client's text: `tool=unknown`, the name only in `tool_input`.
 
-Also at info: `retry` (target `aspero::net`: `provider`, `op`, `attempt`,
-the one that failed, `status`, its kind, `delay_ms`, `call`), and
-warnings (a record that doesn't decode, a budget unread, an analysis
-step failed, paced alone, a store or ledger unwritten), all with kinds,
-never text: an error's text is in a `*_detail` debug companion.
+**`retry`** (target `aspero::net`): a failed attempt about to be retried:
+`v`, `provider`, `op`, `attempt` (the one that failed), `status` (where
+the failure came with a code: a server error's), `error` (as its
+`request` says it for a network failure, else the provider's kind:
+`server`, `rate_limited`, …), `delay_ms`, `call`.
+
+Also at info and above: warnings (a record that doesn't decode, a budget
+unread, an analysis step failed, paced alone, a store or ledger
+unwritten) and two notes that the daily cap stopped a step (citing
+works, the retraction check), all with kinds in `error`, never text: an
+error's text is in a `*_detail` debug companion.
 
 **Privacy.** Info and above hold counts, codes, kinds and times, never
 what was asked: no query text, titles, identifiers or URLs. Those are

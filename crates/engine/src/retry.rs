@@ -67,15 +67,23 @@ where
         let (provider, op) = crate::observe::retrying().unzip();
         tracing::info!(
             target: "aspero::net",
-            provider = provider.as_ref().map(tracing::field::display),
+            v = crate::EVENTS_VERSION, provider = provider.as_ref().map(tracing::field::display),
             op = op.map(tracing::field::display), attempt = retry + 1,
-            status = %error.kind().as_str(),
+            status = http_status(&error), error = %crate::transport::failure(&error),
             delay_ms = u64::try_from(delay.as_millis()).unwrap_or(u64::MAX),
             call = crate::observe::call_id(), "retry"
         );
         tracing::debug!(target: "aspero::net", error = %error, "retry_error");
         tokio::time::sleep(delay).await;
         retry += 1;
+    }
+}
+
+/// A failure's HTTP code, where it came with one: a `retry`'s `status`.
+fn http_status(error: &Error) -> Option<u16> {
+    match error {
+        Error::Server { status, .. } => Some(*status),
+        _ => None,
     }
 }
 

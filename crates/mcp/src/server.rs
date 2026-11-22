@@ -100,7 +100,7 @@ pub(crate) fn tool_event(
 ) {
     tracing::info!(
         target: "aspero::mcp",
-        tool = %tool.unwrap_or("unknown"), key = key.map(tracing::field::display),
+        v = aspero_engine::EVENTS_VERSION, tool = %tool.unwrap_or("unknown"), key = key.map(tracing::field::display),
         outcome = %outcome,
         ms = u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX),
         cost_usd = %format_args!("{cost_usd:.6}"), call, "tool"

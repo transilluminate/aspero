@@ -516,7 +516,8 @@ has its API's quirks; these shape the design:
   its editions at `/works/{key}/editions.json` (publishers, dates, ISBNs;
   `size` counts them, paged by `offset`; checked live 2026-11-22), the
   `editions` parameter of its search. A verified book cited with a
-  publisher its record doesn't name is checked against them
+  publisher of a known group (`crates/core/src/matching/publisher.rs`)
+  that its record doesn't name is checked against them
   (`crates/engine/src/editions.rs`): one search by title and first
   author unless the work is among the candidates, then one page of
   editions, both cached as searches are.

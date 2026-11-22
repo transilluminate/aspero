@@ -181,6 +181,21 @@ async fn a_book_cited_with_its_publisher_asks_nothing_more() {
 }
 
 #[tokio::test]
+async fn a_press_of_no_known_group_asks_nothing() {
+    // A small press a group may have bought or reissues (wild-2 #873's
+    // Acumen, wild-3 #505's UCL Press), or a word read where a publisher
+    // would stand: nothing tells a reissue from a mistake.
+    for cited in ["Acumen", "UCL Press", "Verify"] {
+        let http = Routes::new(YAPKO_ROUTES);
+        let engine = engine(yapko(Some("Routledge eBooks")), http.clone());
+        let text = format!("Yapko, M. D. (2013). Treating Depression With Hypnosis. {cited}.");
+        let v = engine.verify(&Claim::from_text(text), 5).await;
+        assert_eq!(v.verdict, Verdict::Verified, "{cited}: {}", v.reason_text);
+        assert!(http.urls().is_empty(), "{cited}: {:?}", http.urls());
+    }
+}
+
+#[tokio::test]
 async fn a_publisher_an_edition_names_verifies() {
     // No publisher in the record: the editions name Taylor & Francis.
     let http = Routes::new(YAPKO_ROUTES);

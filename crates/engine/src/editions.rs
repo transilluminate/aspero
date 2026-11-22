@@ -13,11 +13,13 @@
 //!   author (one search), then one page of its editions (one request).
 //!   Both are searches, so they are paced and cached as any search is.
 //!   When none of the editions, nor the record, names the publisher or
-//!   its group, an edition of the year cited is among them, and enough
-//!   editions are known to tell
+//!   its group, an edition of the year cited is among them, enough
+//!   editions are known to tell, and the publisher cited and the book's
+//!   are of known groups, different ones
 //!   ([`matching::check_publisher`]), the claim is plausible, the
-//!   publisher a difference. When Open Library lacks the work, or fails,
-//!   the verdict stands.
+//!   publisher a difference. A publisher cited of no known group
+//!   ([`matching::known_publisher`]) asks nothing. When Open Library
+//!   lacks the work, or fails, the verdict stands.
 
 use aspero_core::matching::{self, PublisherCheck};
 use aspero_core::{Agreement, Claim, ProviderId, SearchQuery, SourceRecord, Work, WorkType};
@@ -61,7 +63,10 @@ impl Engine {
         if record.work.work_type != Some(WorkType::Book) {
             return None;
         }
-        let cited = matching::cited_publisher(claim, &record)?;
+        // A press of no known group may be one a group bought, reissues or
+        // co-publishes with: nothing to ask.
+        let cited = matching::cited_publisher(claim, &record)
+            .filter(|cited| matching::known_publisher(cited))?;
         let text = claim.text.as_deref();
         let years = claim.cited_years_beside(record.work.title.as_deref());
         if matching::check_publisher(&cited, text, &years, &record.work, &[])

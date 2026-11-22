@@ -96,7 +96,14 @@ Fixed:
   edition of the year cited (or one off it), and at least three editions
   naming a publisher, or one and the book's record naming another; a book
   Open Library lacks, or a failed request, leaves the verdict as it was
-  (holdout-6 `w:book-wrong-publisher`).
+  (holdout-6 `w:book-wrong-publisher`). Only a publisher of a known
+  publishing group is held against a book of another known group (Palgrave
+  Macmillan cited for Routledge's book, Elsevier for Springer's): a smaller
+  press may be one a group bought or reissues, or its co-publisher, so
+  "Acumen" for the Taylor & Francis record of an Acumen book, or "UCL
+  Press" for Routledge's reissue, asks nothing and stays verified. A
+  subtitle the record lacks is no publisher as far as its end ("…in Kerala,
+  India (1999)").
 
 ## 0.39.2
 

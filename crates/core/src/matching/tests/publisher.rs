@@ -226,6 +226,27 @@ fn a_subtitle_an_author_or_an_edition_is_no_publisher() {
         ),
         None
     );
+    // wild-3 #948: a subtitle's last part, before the year, is the
+    // subtitle's; after its end, a publisher is read (wild-3 #1017).
+    let record = book("The Labor of Development");
+    assert_eq!(
+        cited(
+            "Heller, P. The Labor of Development: Workers and the Transformation of Capitalism \
+             in Kerala, India (1999).",
+            &record
+        ),
+        None
+    );
+    let record = book("Signs and Cities");
+    assert_eq!(
+        cited(
+            "Dubey, Madhu. Signs and Cities: Black Literary Postmodernism. Indiana University \
+             Press, 2003.",
+            &record
+        )
+        .as_deref(),
+        Some("Indiana University Press")
+    );
     // wild-4 #327: authors and an edition in a table's cells.
     let mut record = book("Medical Pharmacology and Therapeutics");
     record.work.authors = vec![
@@ -239,5 +260,81 @@ fn a_subtitle_an_author_or_an_edition_is_no_publisher() {
             &record
         ),
         None
+    );
+}
+
+#[test]
+fn only_publishers_of_known_groups_differ() {
+    for known in [
+        "Routledge",
+        "Palgrave Macmillan UK",
+        "Taylor & Francis Group",
+        "Elsevier",
+        "Springer International Publishing AG",
+        "Prentice-Hall",
+    ] {
+        assert!(known_publisher(known), "{known}");
+    }
+    // Small presses a group bought or reissues, university presses, words
+    // read from elsewhere.
+    for unknown in [
+        "Acumen",
+        "UCL Press",
+        "Roberts & Company",
+        "Indiana University Press",
+        "Verify",
+    ] {
+        assert!(!known_publisher(unknown), "{unknown}");
+    }
+    let edition = |publisher: &str, year: i16| Work {
+        publisher: Some(publisher.into()),
+        issued: Some(PartialDate::from_year(year)),
+        ..Work::default()
+    };
+    // wild-3 #505: UCL Press's book, Routledge's reissue, and Rutgers's
+    // US edition.
+    let routledge = Work {
+        publisher: Some("Routledge".into()),
+        ..Work::default()
+    };
+    let editions = [
+        edition("Taylor & Francis Group Plc", 2004),
+        edition("Taylor & Francis Inc", 2004),
+        edition("Rutgers University Press", 1999),
+    ];
+    assert_eq!(
+        check_publisher("UCL Press", None, &[1999], &routledge, &editions),
+        PublisherCheck::Unknown
+    );
+    // A known group cited against the record's: as before.
+    assert_eq!(
+        check_publisher("Palgrave Macmillan", None, &[1999], &routledge, &editions),
+        PublisherCheck::Unnamed("Taylor & Francis Group Plc".into())
+    );
+    // wild-2 #873: a record of no known group (OpenAlex's McGill-Queen's,
+    // Acumen's co-publisher), against a known group cited.
+    let mqup = Work {
+        container_title: Some("McGill-Queen's University Press eBooks".into()),
+        ..Work::default()
+    };
+    let editions = [
+        edition("McGill-Queen's University Press", 2002),
+        edition("Taylor & Francis Group", 2014),
+        edition("Taylor & Francis Group", 2014),
+        edition("Taylor & Francis Group", 2002),
+    ];
+    assert_eq!(
+        check_publisher("Palgrave Macmillan", None, &[2002], &mqup, &editions),
+        PublisherCheck::Unknown
+    );
+    // Editions mostly of no known group, the record naming none.
+    let editions = [
+        edition("University of Chicago Press", 2003),
+        edition("University of Chicago Press", 2007),
+        edition("University of Chicago Press", 2010),
+    ];
+    assert_eq!(
+        check_publisher("Routledge", None, &[2003], &Work::default(), &editions),
+        PublisherCheck::Unknown
     );
 }

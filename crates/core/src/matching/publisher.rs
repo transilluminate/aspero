@@ -9,6 +9,15 @@
 //! furniture aside ("Palgrave Macmillan UK" is Palgrave Macmillan, "OUP"
 //! Oxford University Press), and imprints with their groups
 //! ([`IMPRINTS`]): only names sharing nothing differ.
+//!
+//! Only two publishers of known groups, of different groups, are held to
+//! differ: the one cited, and the one the book's own record (else most of
+//! its editions) names. A press no group lists may be one a group bought
+//! or reissues (Acumen's books are Routledge's now, UCL Press's Taylor &
+//! Francis's, Roberts & Company's W. H. Freeman's), or another's
+//! co-publisher or distributor (McGill-Queen's for Acumen, Rutgers for
+//! UCL Press), and catalogues often lack its edition: wild-2 #873, wild-3
+//! #505 and wild-4 #1081 cite theirs correctly.
 
 use std::collections::BTreeMap;
 
@@ -109,7 +118,9 @@ const FURNITURE: &[&str] = &[
 /// Publishing groups whose imprints share no word with each other: a
 /// book of one is cited, correctly, as of another (Erlbaum's books are
 /// Psychology Press's, Taylor & Francis's and Routledge's). Each name's
-/// own words, as [`significant`] reads them.
+/// own words, as [`significant`] reads them. They are also the publishers
+/// whose lineage is known well enough to hold one against another
+/// ([`known_publisher`]).
 const IMPRINTS: &[&[&str]] = &[
     &[
         "routledge",
@@ -318,6 +329,13 @@ fn group(words: &[String]) -> Option<usize> {
     })
 }
 
+/// Whether a publisher's name is of a publishing group this module lists:
+/// one whose lineage is known well enough to tell a book of another group
+/// from a reissue of its own. Only such names are held against a book's.
+pub fn known_publisher(name: &str) -> bool {
+    group(&words(name)).is_some()
+}
+
 /// Whether two publishers' names are one publisher's, or its group's: a
 /// word of their own shared, one the other's initials, or imprints of one
 /// group. Names without words of their own ("University Press") are
@@ -426,17 +444,19 @@ fn parts_after_title(tail: &str) -> Vec<Part> {
         .filter(|t| !linked(t))
         .collect::<Vec<_>>()
         .join(" ");
-    // A subtitle the book's record lacks, after its title, is none.
-    let subtitled = tail.trim_start().starts_with([':', '–', '—']);
+    // A subtitle the book's record lacks, after its title, is none, as
+    // far as its end: a full stop, or a bracket ("…in Kerala, India
+    // (1999)", wild-3 #948).
+    let tail = match tail.trim_start().strip_prefix([':', '–', '—']) {
+        Some(rest) => rest.find(['.', '(', '[']).map_or("", |at| &rest[at..]),
+        None => &tail,
+    };
     let pieces: Vec<&str> = tail
         .split([
             '.', ',', ';', '(', ')', '[', ']', '*', '"', '“', '”', '_', '|',
         ])
         .map(str::trim)
         .collect();
-    let first = pieces
-        .iter()
-        .position(|p| p.chars().any(char::is_alphabetic));
     let year = |s: &str| {
         let digits: String = s.chars().take_while(char::is_ascii_digit).collect();
         digits.len() == 4
@@ -462,8 +482,7 @@ fn parts_after_title(tail: &str) -> Vec<Part> {
                 && (1..=8).contains(&named.len())
                 && !named
                     .iter()
-                    .any(|w| NOT_PUBLISHER.contains(&w.as_str()) || ordinal(w))
-                && !(subtitled && Some(i) == first);
+                    .any(|w| NOT_PUBLISHER.contains(&w.as_str()) || ordinal(w));
             nameable.then(|| Part {
                 name: name.to_owned(),
                 placed,
@@ -506,6 +525,10 @@ pub enum PublisherCheck {
     Unnamed(String),
     /// None does, but too few editions are known to tell.
     TooFew,
+    /// None does, but the publisher cited, or the book's, is of no known
+    /// group ([`known_publisher`]): a reissue, an acquisition or a
+    /// co-publisher can't be told from a mistake.
+    Unknown,
 }
 
 /// Checks `cited`, the publisher a book's citation (`text`, citing
@@ -514,7 +537,11 @@ pub enum PublisherCheck {
 /// is of a year cited (or one off it), and at least [`EDITIONS_ENOUGH`]
 /// editions name a publisher, or at least one does and the record names
 /// another too: two catalogues agreeing. Without an edition of the year
-/// cited, the catalogue lacks the one cited: too few to tell.
+/// cited, the catalogue lacks the one cited: too few to tell. Both the
+/// publisher cited and the book's (its record's own, when it names one,
+/// else the one most editions name) must be of known groups
+/// ([`known_publisher`]), different ones; else it is
+/// [`Unknown`](PublisherCheck::Unknown).
 pub fn check_publisher(
     cited: &str,
     text: Option<&str>,
@@ -573,8 +600,19 @@ pub fn check_publisher(
             .find(|name| counts.get(name.as_str()) == Some(&top))
             .cloned()
     });
-    match most.or_else(|| own.first().cloned()) {
-        Some(name) => PublisherCheck::Unnamed(name),
-        None => PublisherCheck::TooFew,
+    let Some(actual) = most.or_else(|| own.first().cloned()) else {
+        return PublisherCheck::TooFew;
+    };
+    let books = if own.is_empty() {
+        std::slice::from_ref(&actual)
+    } else {
+        &own[..]
+    };
+    if !known_publisher(cited)
+        || !books.iter().any(|b| known_publisher(b))
+        || !known_publisher(&actual)
+    {
+        return PublisherCheck::Unknown;
     }
+    PublisherCheck::Unnamed(actual)
 }

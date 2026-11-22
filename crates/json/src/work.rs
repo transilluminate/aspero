@@ -1,6 +1,6 @@
 //! Works, candidates, search pages and usage.
 
-use aspero_core::{Person, ProviderId, SourceRecord, Usage};
+use aspero_core::{OpenAccess, Person, ProviderId, SourceRecord, Usage};
 use aspero_engine::{Abstract, Candidate, SearchReport};
 use serde_json::{Map, Value, json};
 
@@ -37,7 +37,7 @@ pub fn work(record: &SourceRecord, full: bool) -> Value {
         (!w.notice_for.is_empty()).then(|| json!(w.notice_for)),
     );
     // Whether a free copy can be fetched instead of asking a human.
-    put("open_access", w.open_access.as_ref().map(|oa| json!(oa)));
+    put("open_access", w.open_access.as_ref().map(open_access));
     if full {
         // Everything else, in the core `Work` shape (structured authors).
         if let Ok(Value::Object(mut all)) = serde_json::to_value(w) {
@@ -52,6 +52,16 @@ pub fn work(record: &SourceRecord, full: bool) -> Value {
         out.insert("fetched_at".into(), json!(record.fetched_at.to_string()));
     }
     Value::Object(out)
+}
+
+/// Where a work can be read free: the core shape, then `free_copy`, what
+/// kind of copy that is (`pdf`, `browser_only` or `none`; #204).
+fn open_access(oa: &OpenAccess) -> Value {
+    let mut value = json!(oa);
+    if let Value::Object(map) = &mut value {
+        map.insert("free_copy".into(), json!(oa.free_copy()));
+    }
+    value
 }
 
 /// One author, the same shape lean or full: always a `name`, then the ORCID
@@ -288,6 +298,24 @@ mod tests {
                 "hits": [{"rank": 1, "score": 12.5, "work": work(&record(), false)}],
             })
         );
+    }
+
+    #[test]
+    fn open_access_says_what_kind_of_copy_it_is() {
+        let mut r = record();
+        let mut oa = OpenAccess::default();
+        oa.is_oa = true;
+        oa.url = Some("https://pmc.ncbi.nlm.nih.gov/articles/PMC2918907/".into());
+        oa.pdf_url = Some("https://europepmc.org/articles/PMC2918907?pdf=render".into());
+        r.work.open_access = Some(oa);
+        for full in [false, true] {
+            let oa = &work(&r, full)["open_access"];
+            assert_eq!(oa["free_copy"], "browser_only", "full: {full}");
+            assert_eq!(oa["is_oa"], true);
+        }
+        let mut closed = OpenAccess::default();
+        closed.status = Some("closed".into());
+        assert_eq!(open_access(&closed)["free_copy"], "none");
     }
 
     #[test]

@@ -3,7 +3,8 @@
 
 use aspero_core::matching::{PLAUSIBLE, VERIFIED};
 use aspero_core::{
-    Agreement, Hit, IdKind, NoticeKind, ProviderId, SourceRecord, Usage, Work, WorkId,
+    Agreement, FreeCopyKind, Hit, IdKind, NoticeKind, OpenAccess, ProviderId, SourceRecord, Usage,
+    Work, WorkId,
 };
 use aspero_engine::{Abstract, Candidate, describe_notice};
 pub use aspero_json::{candidate, set_abstract, usage};
@@ -161,7 +162,15 @@ pub fn work_text(record: &SourceRecord, indent: &str) -> String {
             .into_iter()
             .flatten()
             .collect();
-        let link = oa.pdf_url.as_deref().or(oa.url.as_deref()).unwrap_or("");
+        // A PDF link that turns programs away (PMC's, Europe PMC's
+        // renders) is no better than the page.
+        let fetchable = oa.free_copy() == FreeCopyKind::Pdf;
+        let link = if fetchable {
+            oa.pdf_url.as_deref()
+        } else {
+            oa.url.as_deref().or(oa.pdf_url.as_deref())
+        }
+        .unwrap_or("");
         let terms = if terms.is_empty() {
             String::new()
         } else {
@@ -169,22 +178,24 @@ pub fn work_text(record: &SourceRecord, indent: &str) -> String {
         };
         // Without a PDF, the copy's page only: a repository's record may
         // hold no file.
-        let page_only = if oa.pdf_url.is_none() && !link.is_empty() {
+        let page_only = if fetchable || link.is_empty() {
+            ""
+        } else if oa.pdf_url.is_none() {
             " (a page; no file link known)"
         } else {
-            ""
+            " (in a browser only)"
         };
         lines.push(format!("{indent}Free copy{terms}: {link}{page_only}"));
     }
     lines.join("\n")
 }
 
-/// "PDF" when a free PDF is known, "yes" for a free copy without one,
-/// "no" when known to be closed, "" when unknown.
+/// "PDF" when a free PDF a program can fetch is known, "yes" for a free
+/// copy without one, "no" when known to be closed, "" when unknown.
 pub fn free_copy(w: &Work) -> &'static str {
-    match &w.open_access {
-        Some(oa) if oa.pdf_url.is_some() => "PDF",
-        Some(oa) if oa.is_oa => "yes",
+    match w.open_access.as_ref().map(OpenAccess::free_copy) {
+        Some(FreeCopyKind::Pdf) => "PDF",
+        Some(FreeCopyKind::BrowserOnly) => "yes",
         Some(_) => "no",
         None => "",
     }
@@ -481,11 +492,18 @@ mod tests {
             "Free copy (green): https://repository.example/record/1 (a page; no file link known)"
         ));
         oa.pdf_url = Some("https://repository.example/record/1.pdf".into());
-        r.work.open_access = Some(oa);
+        r.work.open_access = Some(oa.clone());
         assert!(
             work_text(&r, "")
                 .ends_with("Free copy (green): https://repository.example/record/1.pdf")
         );
+        assert_eq!(free_copy(&r.work), "PDF");
+        oa.pdf_url = Some("https://europepmc.org/articles/PMC1?pdf=render".into());
+        r.work.open_access = Some(oa);
+        assert!(work_text(&r, "").ends_with(
+            "Free copy (green): https://repository.example/record/1 (in a browser only)"
+        ));
+        assert_eq!(free_copy(&r.work), "yes");
     }
 
     #[test]

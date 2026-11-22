@@ -274,7 +274,7 @@ fn or_skip(record: serde_json::Result<SourceRecord>) -> Option<SourceRecord> {
         .inspect_err(|e| {
             tracing::warn!(
                 target: "aspero::net",
-                provider = %ID, "skipped a record that doesn't decode"
+                provider = %ID, "record_undecodable"
             );
             tracing::debug!(target: "aspero::net", provider = %ID, error = %e, "decode_error");
         })

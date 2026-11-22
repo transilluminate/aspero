@@ -46,7 +46,7 @@ impl Engine {
             .collect();
 
         let looked = self
-            .look_up(entry, &ids, spend, "probably missing works' lookup failed")
+            .look_up(entry, &ids, spend, "missing_lookup_failed")
             .await;
 
         // Merge: works that are a seed leave (one work, or sharing any

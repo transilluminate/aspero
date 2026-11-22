@@ -743,11 +743,20 @@ the failure came with a code: a server error's), `error` (as its
 `request` says it for a network failure, else the provider's kind:
 `server`, `rate_limited`, …), `delay_ms`, `call`.
 
-Also at info and above: warnings (a record that doesn't decode, a budget
-unread, an analysis step failed, paced alone, a store or ledger
-unwritten) and two notes that the daily cap stopped a step (citing
-works, the retraction check), all with kinds in `error`, never text: an
-error's text is in a `*_detail` debug companion.
+Also at info and above: warnings (`record_undecodable`, `budget_unread`,
+`prepaid_unshared`, `credit_unshared`, `pacing_alone`,
+`paid_calls_unfinished`, `citing_failed`, `retraction_check_failed`,
+`related_lookup_failed`, `missing_lookup_failed`, the MCP server's
+`key_spend_unread`, `key_spend_unrecorded`, `key_ignored`,
+`activity_thread_missing`, `accept_failed`, a store or ledger unwritten),
+notes that a daily cap stopped a step (`daily_cap_stop`,
+`citing_capped`, `retraction_check_capped`), and the MCP server's
+`mcp_listening` (`host`, `port`) and `mcp_stopped`. All have kinds in
+`error`, never text: an error's text is in a `*_detail` debug companion.
+**Every event, contract or not, is its name and then fields**: the
+message is a snake_case name, never a sentence, so a log reader takes the
+first word as the name (`scripts/event-names.py` checks it in CI; the
+HTTP tape's developer warnings, read by the CLI alone, are left out).
 
 **Privacy.** Info and above hold counts, codes, kinds and times, never
 what was asked: no query text, titles, identifiers or URLs. Those are

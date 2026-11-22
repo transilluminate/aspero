@@ -247,7 +247,7 @@ impl Budgets {
                     tracing::warn!(
                         target: "aspero::budget",
                         provider = %provider,
-                        "couldn't share the day's prepaid balance; keeping it in this process"
+                        "prepaid_unshared"
                     );
                     tracing::debug!(target: "aspero::budget", provider = %provider, error = %e, "prepaid_detail");
                 }
@@ -317,7 +317,7 @@ impl Budgets {
                     tracing::warn!(
                         target: "aspero::budget",
                         provider = %provider,
-                        "couldn't share the credit spent here; keeping it in this process"
+                        "credit_unshared"
                     );
                     tracing::debug!(target: "aspero::budget", provider = %provider, error = %e, "credit_detail");
                 }
@@ -373,7 +373,7 @@ impl Engine {
         if let Err(e) = asked {
             tracing::warn!(
                 target: "aspero::budget",
-                provider = %entry.provider.id(), error = %e.kind().as_str(), "couldn't ask the budget"
+                provider = %entry.provider.id(), error = %e.kind().as_str(), "budget_unread"
             );
             tracing::debug!(target: "aspero::budget", error = %e, "budget_detail");
         }

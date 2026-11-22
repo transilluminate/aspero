@@ -8,6 +8,7 @@ default:
 check:
     cargo fmt --all --check
     scripts/file-sizes.py
+    scripts/event-names.py
     scripts/doc-paths.py
     cargo clippy --workspace --all-targets --all-features -- -D warnings
     cargo test --workspace --all-features

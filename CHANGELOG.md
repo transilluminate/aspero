@@ -3,6 +3,18 @@
 Releases 0.10 to 0.19 are in [docs/changelog/0.1x.md](docs/changelog/0.1x.md),
 and 0.1 to 0.9 in [docs/changelog/0.0x.md](docs/changelog/0.0x.md).
 
+## Unreleased
+
+Changed:
+
+- Every diagnostics event is now its name and then `key=value` fields,
+  as DESIGN's "Diagnostics events" describes; before, about twenty
+  warnings and notes had a sentence as their message ("MCP server
+  listening on 127.0.0.1 port=23130" is now `mcp_listening
+  host=127.0.0.1 port=23130`; "skipped a record that doesn't decode" is
+  `record_undecodable`). An embedder's log reader takes the first word as
+  the event's name. A new CI gate, `scripts/event-names.py`, keeps it so.
+
 ## 0.41.0
 
 Changed (the diagnostics contract: an embedder's log parser needs

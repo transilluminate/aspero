@@ -517,7 +517,7 @@ impl Engine {
         ranked.truncate(fetch);
         let ids: Vec<WorkId> = ranked.iter().map(|(w, _, _)| (*w).clone()).collect();
         let looked = self
-            .look_up(entry, &ids, spend, "related works' lookup failed")
+            .look_up(entry, &ids, spend, "related_lookup_failed")
             .await;
         for stop in &looked.stops {
             stops.lookup.failed |= stop.kind == IncompleteKind::ProviderFailed;
@@ -626,13 +626,13 @@ impl Engine {
                     }
                 }
                 Err(e) if e.kind() == ErrorKind::BudgetCapped => {
-                    tracing::info!(target: "aspero::engine", error = %e.kind().as_str(), "citing works stopped at the daily cap");
+                    tracing::info!(target: "aspero::engine", error = %e.kind().as_str(), "citing_capped");
                     tracing::debug!(target: "aspero::engine", error = %e, %filter, "citing_detail");
                     read.budget = true;
                     break;
                 }
                 Err(e) => {
-                    tracing::warn!(target: "aspero::engine", error = %e.kind().as_str(), "citing works failed");
+                    tracing::warn!(target: "aspero::engine", error = %e.kind().as_str(), "citing_failed");
                     tracing::debug!(target: "aspero::engine", error = %e, %filter, "citing_detail");
                     read.failed = true;
                     break;

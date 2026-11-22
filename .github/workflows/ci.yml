@@ -28,6 +28,7 @@ jobs:
       # isn't there (agents find their way by them).
       - run: |
           scripts/file-sizes.py
+          scripts/event-names.py
           scripts/doc-paths.py
       - run: cargo clippy --workspace --all-targets --all-features -- -D warnings
       # Provider tests replay recorded fixtures: no network or API keys needed.

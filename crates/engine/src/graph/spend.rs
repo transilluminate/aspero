@@ -95,7 +95,7 @@ impl Purse {
 }
 
 /// How many lookups failed, each failure logged (a warning, once per
-/// distinct error) with `what` failed.
+/// distinct error) as the event `what` (a snake_case name).
 pub(super) fn failed_lookups(
     answers: &[(crate::Attempt, Option<SourceRecord>)],
     what: &str,
@@ -160,7 +160,8 @@ pub(super) struct Looked {
 impl Engine {
     /// Looks the candidates `ids` up at `entry` in whole batches, if the
     /// budget allows every batch (else none is asked); a failure is logged
-    /// as `what`. Estimating, counts the paid batches instead.
+    /// as the event `what` (a snake_case name). Estimating, counts the
+    /// paid batches instead.
     pub(super) async fn look_up(
         &self,
         entry: &Entry,

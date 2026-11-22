@@ -258,7 +258,7 @@ impl Engine {
             tracing::warn!(
                 target: "aspero::net",
                 running = *running.borrow(),
-                "paid calls still finishing after their callers stopped waiting; exiting cancels them"
+                "paid_calls_unfinished"
             );
         }
         std::mem::take(&mut *lock(&self.background.usage))

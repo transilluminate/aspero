@@ -16,6 +16,7 @@
 
 mod http;
 mod merged;
+mod syntax;
 mod tree;
 mod wire;
 
@@ -145,7 +146,7 @@ impl OpenAlex {
         let params = [
             (
                 "filter",
-                format!("display_name.search:{}", filter_value(name)),
+                format!("display_name.search:{}", search_value(name)),
             ),
             ("select", "id,display_name".to_owned()),
             ("per-page", MAX_PAGE.to_string()),
@@ -294,6 +295,13 @@ fn filter_value(s: &str) -> String {
     s.replace([',', '|'], "")
 }
 
+/// A `.search` filter's value from citation text: its syntax made plain
+/// ([`syntax::plain`]), and the commas that would split the filter
+/// removed.
+fn search_value(s: &str) -> String {
+    syntax::plain(s).replace(',', "")
+}
+
 fn respond<T>(value: T, usage: Option<Usage>) -> Response<T> {
     match usage {
         Some(u) => Response::with_usage(value, u),
@@ -431,7 +439,7 @@ impl Provider for OpenAlex {
                 negated: false,
             });
             let text = query.text.trim();
-            let search = (!text.is_empty()).then(|| text.to_owned());
+            let search = (!text.is_empty()).then(|| syntax::plain(text));
             (search, container.into_iter().collect())
         };
         let mut usage = None;
@@ -570,10 +578,10 @@ fn flat_filters(query: &SearchQuery, filters: &mut Vec<String>) -> Result<()> {
         ));
     }
     if let Some(author) = query.field(Filter::Author) {
-        filters.push(format!("raw_author_name.search:{}", filter_value(author)));
+        filters.push(format!("raw_author_name.search:{}", search_value(author)));
     }
     if let Some(title) = query.field(Filter::Title) {
-        filters.push(format!("title.search:{}", filter_value(title)));
+        filters.push(format!("title.search:{}", search_value(title)));
     }
     Ok(())
 }

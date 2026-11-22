@@ -2,7 +2,8 @@
 
 `wild-4.jsonl` holds 1,135 references copied from 100 chatbot answers,
 each one checked by hand against free bibliographic sources. It is test
-data, held out: no fix has seen it. **The wrong entries are what a model
+data. It was held out until aspero 0.38.3, and 0.39's fixes were tuned on
+it (see [aspero's results](#asperos-results)). **The wrong entries are what a model
 wrote.** They pair real titles, real researchers and real identifiers in
 combinations that don't exist. Don't cite, index or attribute them.
 
@@ -215,6 +216,112 @@ arXiv ID 2.3% (4/177) and books 2.6% (9/346).
    DOIs and years of 2023–24 papers drift.
 8. **Books and arXiv IDs remain the safe ground.** Books were wrong 2.6% of
    the time (eight of nine haiku's), arXiv-led references 2.3%.
+
+## aspero's results
+
+**These measure the hard tail on purpose.** Every reference is a model's
+own, often in a table cell or beside a trial label or a note, and every
+wrong one is a near-miss of a real work. They are not typical input.
+
+Both runs were live, on 2026-11-22, through `scripts/redteam.py`. 0.38.3 is
+the release wild-4 was held out from: round 7 (#148) and the releases
+after it. No fix had seen the corpus. 0.39's fixes were then tuned on it,
+so **0.39.1's column is not held out**. A first run on 0.38.2 stopped at a
+panic on one claim, which 0.38.3 fixed.
+
+| Criterion | 0.38.3, held out | 0.39.1, tuned on wild-4 | Target |
+|---|---|---|---|
+| Wrong → `verified` | 2/75 (2.7%) | 1/75 (1.3%) | ≤ 2% |
+| Real → `mismatch` or `not_found` | 72/1,060 (6.8%) | 11/1,060 (1.0%) | ≤ 3% |
+| Real → `verified` | 875/1,060 (82.5%) | 956/1,060 (90.2%) | ≥ 85% |
+| Real → `verified` or `plausible` | 979/1,060 (92.4%) | 1,031/1,060 (97.3%) | ≥ 95% |
+| Wrong → `plausible` naming the field that differs | 20/21 (95.2%) | 26/28 (92.9%) | ≥ 80% |
+| … medicine/nursing/allied health: wrong → `verified` | 0/41 | 0/41 | |
+| … medicine/nursing/allied health: real → `verified` | 262/315 (83.2%) | 283/315 (89.8%) | |
+
+On 0.38.3, every criterion but the last failed its target. The corpus has
+no invented works, no nonexistent identifiers and no retracted works, so
+those criteria have nothing to measure. With 75 wrong references, one
+wrong `verified` is 1.3 points.
+
+- **Wrong and verified on 0.38.3:**
+  - #475, an arXiv paper cited at ICLR 2023 that was published at NeurIPS
+    2022. Only the arXiv record was found, and it can't say which meeting.
+  - #723, a journal article cited as an NBER working paper whose number
+    is another paper's.
+
+  Six more wrong references verified within the policy: four with an issue
+  or a last page off, two with a year off by one.
+- **0.39.1.** #723 is a mismatch now, naming the other paper; #475 still
+  verifies. The 11 real references missed:
+  - four `not_found`: two WHO guides, Nightingale's 1858 *Notes*, and a
+    book series cited as one work (#316, probably mislabelled);
+  - five textbooks in table rows, `mismatch`, now that a bare ISBN-13 is
+    read. In two (#322, #325) the ISBN's own record agrees but another
+    edition outranks it. In three (#1065, #1076, #1078) the cited ISBN is
+    another edition's, or by its record another book's;
+  - two books, `mismatch`, matched with "authors differs": a byline
+    written "———" (#811), and #998.
+
+  18 real and 11 wrong references came back `unverifiable` on this run (9
+  and 2 on 0.38.3): the sources failed. They count against the real
+  figures above.
+
+### What the triage found
+
+Four triage passes studied an offline replay of 0.38.3. They left out the
+250 claims whose requests weren't on the replay tape, and each pass took
+one group.
+
+- **Real, called `mismatch` (27, all aspero's):**
+  - 20 judged an identified work's title against the text where the model
+    wrote a trial label, a description or a short form in its place;
+  - 3 had the identifier and the exact place outvoted by a lookalike (a
+    talk on the same result);
+  - 3 counted a one-word main title ("Iceland", "13th") as the whole
+    title;
+  - titles cut short with "…", and record titles carrying markup.
+- **Real, `not_found` (28, all books or reports).** 27 are aspero's and
+  one is a mislabelled series. Searching failed, not matching:
+  - the reference's own title was never searched beside a matcher hit's
+    fragment (10);
+  - the title guessed for the search kept a byline, a year, a bracketed
+    note, a table's other cells or a series (21);
+  - bare ISBN-13s weren't read (7);
+  - an apostrophe ("World's") was sent as a lone "s", which Open Library's
+    search requires, so it found nothing.
+- **Real, held at `plausible` (80, all allowed).** 56 were held back by
+  aspero:
+  - a title cited with its own identifier was capped as a single field
+    (21), though the identifier alone verified;
+  - a list's furniture was read as fields: commentary cells, trial labels,
+    lead-ins (11);
+  - journals named short ("PRD", "TREE", "ACL 2022", "AER: Papers &
+    Proceedings");
+  - a series letter ("Physics Letters B") was read as an initial;
+  - record titles carried an edition or a series.
+
+  Of the other 24, 12 were limited by the sources' records, 10 were
+  justified and 2 were labelled wrong.
+- **Accepted as another work (22).** 16 were the same work under an
+  identifier the label lacks: a second DOI, an ISBN record or a duplicate.
+  6 were aspero's:
+  - the two wrong verifieds;
+  - a chapter taken for its book (2);
+  - a book review taken for its book;
+  - an unread ISBN cell.
+
+0.39.0 took up most of these; its changelog names the rows. Still open:
+- finding the published version of an arXiv paper cited at a meeting
+  (#475);
+- reviews taken for their books;
+- an author in Open Library's title search.
+
+No record, tape response or corpus row the triage read held
+instruction-like text.
+
+**wild-4 is now a tuning corpus.** The next held-out measurement needs a
+fresh corpus, wild-5, built the same way with new prompts.
 
 ## Notes
 

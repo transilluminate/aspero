@@ -563,6 +563,38 @@ The wild-2 replay leaves 104 claims whose new requests aren't on the tape
 earlier corpora weren't re-run (their tape was gone and re-recording them
 would cost credit); the offline tests stand in.
 
+## Round 7: measured on held-out wild-4 (2026-11-22, aspero 0.38.3)
+
+Round 7 (#148, 0.33.0) and the releases after it up to 0.38.3 were run
+live on `wild-4.jsonl`: 1,135 references from 100 fresh model sessions,
+each checked by hand (see [wild-4.md](wild-4.md)). No fix had seen it.
+0.39's fixes were then tuned on it, so the 0.39.1 column is **not held
+out**.
+
+```
+wild-4 (held out on 0.38.3, live)            0.38.3           0.39.1
+wrong -> verified                          2/75 (2.7%)     1/75 (1.3%)     <= 2%
+real -> mismatch or not_found             72/1060 (6.8%)  11/1060 (1.0%)   <= 3%
+real -> verified                         875/1060 (82.5%) 956/1060 (90.2%) >= 85%
+real -> verified or plausible            979/1060 (92.4%) 1031/1060 (97.3%) >= 95%
+wrong -> plausible names a differing field 20/21 (95.2%)  26/28 (92.9%)    >= 80%
+```
+
+wild-4 has no invented works, nonexistent identifiers or retracted works.
+On 0.38.3, two wrong references verified:
+- #475, an arXiv paper cited at another meeting than its own. Only the
+  arXiv record was found, which can't say which meeting.
+- #723, a journal article cited as an NBER working paper whose number is
+  another paper's.
+
+0.39.1 makes #723 a mismatch, and #475 still verifies. Triage of an offline
+replay found most of the real misses in reading model-written lists (trial
+labels, commentary cells, bare ISBN-13s, short journal names) and in the
+title searched for books ([wild-4.md](wild-4.md#what-the-triage-found)).
+0.39.0's changelog lists the rules. wild-4 is now a tuning corpus: the
+next held-out measurement needs a fresh one (wild-5). No corpus file or
+API response seen in this round contained instruction-like text.
+
 ## Failures (`failures.jsonl`)
 
 Every false VERIFIED from the corpus (31) and the adversarial round (48),

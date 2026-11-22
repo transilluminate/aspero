@@ -41,6 +41,7 @@ mod authors;
 mod caps;
 mod claim;
 mod derivative;
+mod edition;
 mod preprint;
 mod record_title;
 mod same_work;
@@ -58,6 +59,7 @@ pub use derivative::{
     WorkKind, claim_mentions_derivative, derivative_kind, derivative_work_kind, is_derivative,
     record_derivative_kind,
 };
+pub use edition::{first_year_cited, first_year_contradicted};
 pub use preprint::{preprint_server_of, preprint_version_claimed};
 pub use same_work::{conflicting_id, id_agreement, same_work, same_work_id};
 pub use text::normalise;

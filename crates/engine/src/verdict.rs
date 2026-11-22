@@ -415,6 +415,30 @@ pub(crate) fn judge(claim: &Claim, report: ResolveReport) -> Verification {
     }
 }
 
+/// A verified claim made plausible by what the verdict's work's other
+/// records or editions say (`differs`, never empty): its candidate's
+/// confidence capped below verified, the reason rewritten.
+pub(crate) fn demote(claim: &Claim, v: &mut Verification, differs: Vec<Difference>) {
+    let Some(best) = v.best_match else { return };
+    if differs.is_empty() {
+        return;
+    }
+    let c = &mut v.report.candidates[best];
+    c.assessment.confidence = c.assessment.confidence.min(EDITION_CHECKED_CAP);
+    v.verdict = Verdict::Plausible;
+    v.reason = Reason::PartlyMatches { differs };
+    let mut reason = explain(claim, &v.report, &v.reason, v.best_match);
+    if !v.notices.is_empty() {
+        let described: Vec<String> = v.notices.iter().map(describe_notice).collect();
+        reason = format!("{reason}; notice: {}", described.join("; "));
+    }
+    v.reason_text = reason;
+}
+
+/// Confidence ceiling for a book its other records or editions contradict
+/// ([`demote`]): plausible.
+const EDITION_CHECKED_CAP: f64 = 0.8;
+
 /// [`weigh`], settled: a reason that lists differences always lists
 /// one. Agreeing without them is [`Reason::Unconfirmed`]; a closest work
 /// that differs in nothing named isn't a mismatch to report.

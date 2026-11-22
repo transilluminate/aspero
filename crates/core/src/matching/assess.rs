@@ -7,13 +7,14 @@ use super::authors::{
 };
 use super::caps::{
     CORROBORATING_AUTHORS, DERIVATIVE_CITED_CAP, DERIVATIVE_PENALTY, EDITION, EXTENDED_TITLE,
-    EXTENDED_TITLE_CAP, ID_CONFLICT_CAP, JOURNAL_MISMATCH_CAP, JOURNAL_MISMATCH_PENALTY,
-    LOCATION_MISMATCH_CAP, NO_EVIDENCE_CAP, OTHER_IN_SERIES, PLACED, PLACED_YEAR_OFF,
-    PLACED_YEAR_WRONG, PLAUSIBLE, SHORT_TITLE_WORDS, STRANGERS_CAP, UNCORROBORATED_CAP,
-    UNPLACED_CAP, VERSION, combine,
+    EXTENDED_TITLE_CAP, FIRST_EDITION_CAP, ID_CONFLICT_CAP, JOURNAL_MISMATCH_CAP,
+    JOURNAL_MISMATCH_PENALTY, LOCATION_MISMATCH_CAP, NO_EVIDENCE_CAP, OTHER_IN_SERIES, PLACED,
+    PLACED_YEAR_OFF, PLACED_YEAR_WRONG, PLAUSIBLE, SHORT_TITLE_WORDS, STRANGERS_CAP,
+    UNCORROBORATED_CAP, UNPLACED_CAP, VERSION, combine,
 };
 use super::claim::{byline, cites_chapter, cites_edited_book, title_region};
 use super::derivative::{self, WorkKind, record_derivative_kind};
+use super::edition;
 use super::preprint::{names_preprint, preprint_server, preprint_version_claimed};
 use super::record_title::record_title;
 use super::same_work::{id_agreement, same_work_id};
@@ -766,6 +767,26 @@ pub fn assess(claim: &Claim, record: &SourceRecord) -> Assessment {
     {
         confidence = confidence.max(EDITION);
     }
+    // A book cited as first appearing in a year ("(Original work
+    // published 1969)", "(1st ed.)") of an edition it has, with one more
+    // than three years earlier: a later edition's year given as the
+    // original's.
+    // The edition cited may exist; the year is still wrong. Plausible,
+    // the year a difference (the work's is its first edition's).
+    let first_cited = text
+        .as_ref()
+        .and_then(|t| edition::claimed_first_year(t, title_span.as_ref(), &claimed_years));
+    let year = match first_cited
+        .and_then(|first| Some((first, edition::earlier_edition(first, &actual_years)?)))
+    {
+        Some((first, earliest))
+            if work.work_type == Some(WorkType::Book) && title.agreement == Agreement::Match =>
+        {
+            confidence = confidence.min(FIRST_EDITION_CAP);
+            FieldCheck::scored(0.5f64.powi(i32::from(first.abs_diff(earliest).min(30))))
+        }
+        _ => year,
+    };
     // A chapter whose book is the title cited ("Orri Vésteinsson, The
     // Christianization of Iceland: Priests, Power, and Social Change"
     // for its chapter "The Priests"), cited as the book (no "In:", no

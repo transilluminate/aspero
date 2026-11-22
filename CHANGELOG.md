@@ -7,6 +7,14 @@ and 0.1 to 0.9 in [docs/changelog/0.0x.md](docs/changelog/0.0x.md).
 
 Fixed:
 
+- A book cited by its ISBN, its title and year the ISBN's record's, was a
+  mismatch when another edition of it matched the byline better ("Rang &
+  Dale's Pharmacology | Ritter, Flower, Henderson, et al. | 9th (2019) |
+  978-0702074486", wild-4 #322 and #325): the verdict named the other
+  edition. Another edition of the same book, with an author in common, is
+  no reason to call the cited ISBN another work's; it is plausible or
+  verified on its own record. An ISBN of another author's book, or of a
+  book with another title, is still a mismatch.
 - Names printed with degrees and honours after them, as Open Library
   prints some ("James M. Ritter DPhil FRCP FBPharmacolS FMedSci",
   "Arthur J. Atkinson Jr."), were read with the last degree as the family

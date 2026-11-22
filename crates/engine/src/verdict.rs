@@ -260,6 +260,25 @@ fn near_miss(c: &Candidate) -> bool {
         && (a.authors.agreement == Agreement::Match || a.year.agreement == Agreement::Match)
 }
 
+/// Titles alike enough to be one book's.
+const SAME_TITLE: f64 = 0.9;
+
+/// Whether `other` is `cited`'s book in another edition, or another record
+/// of it: the same title (not a review or correction of it), and an author
+/// in common, or none on `cited`'s record to tell them apart. Not another
+/// author's book of a common title ("Organic Chemistry").
+fn another_edition(cited: &Candidate, other: &Candidate) -> bool {
+    let (a, b) = (&cited.record.work, &other.record.work);
+    let same_title = match (&a.title, &b.title) {
+        (Some(x), Some(y)) => {
+            matching::title_similarity(x, y) >= SAME_TITLE
+                && matching::derivative_work_kind(x) == matching::derivative_work_kind(y)
+        }
+        _ => false,
+    };
+    same_title && (a.authors.is_empty() || matching::share_an_author(&a.authors, &b.authors))
+}
+
 /// The fields that don't fully agree. With `known_only`, only fields both
 /// sides gave and that disagree; otherwise also those the citation doesn't
 /// confirm.
@@ -473,7 +492,14 @@ fn weigh(claim: &Claim, report: &ResolveReport) -> (Verdict, Reason, Option<usiz
     // identifiers or page disagree: the identifier and the place both name
     // the work. (Another paper's title and authors, cited at this one's
     // place, are still that paper's.)
+    // `skip`'s own book in another edition (#322) is no reason to call its
+    // identifier another work's: not when the identifier's record has the
+    // title and year cited.
     let elsewhere = |skip: Option<usize>| {
+        let own = skip.map(|i| &report.candidates[i]).filter(|c| {
+            c.assessment.title.agreement == Agreement::Match
+                && c.assessment.year.agreement == Agreement::Match
+        });
         let placed = skip.is_some_and(|i| {
             let a = &report.candidates[i].assessment;
             [a.container, a.volume, a.page]
@@ -486,6 +512,7 @@ fn weigh(claim: &Claim, report: &ResolveReport) -> (Verdict, Reason, Option<usiz
             let a = &c.assessment;
             Some(i) != skip
                 && a.confidence >= PLAUSIBLE
+                && !own.is_some_and(|own| another_edition(own, c))
                 && !(placed
                     && (a.ids == Agreement::Mismatch || a.page.agreement == Agreement::Mismatch))
         })

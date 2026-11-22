@@ -315,6 +315,15 @@ pub(super) fn family_name(p: &Person) -> Option<String> {
     (!last.is_empty()).then_some(last)
 }
 
+/// Whether two bylines name a person in common, by family name: two
+/// editions of one book, whose records list its authors differently.
+pub fn share_an_author(a: &[Person], b: &[Person]) -> bool {
+    let theirs: Vec<String> = b.iter().filter_map(family_name).collect();
+    a.iter()
+        .filter_map(family_name)
+        .any(|f| theirs.iter().any(|g| same_family(&f, g)))
+}
+
 /// The family name in a claimed author string: "Vaswani, A." → "vaswani",
 /// "Ashish Vaswani" → "vaswani", "A. Vaswani" → "vaswani", "Daum RS" →
 /// "daum", "A. van der Berg" → "van der berg".

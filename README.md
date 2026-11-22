@@ -200,6 +200,16 @@ own budget. The app hears of every tool call as it happens.
   it was "not found") and caches the new answers; where a source fails,
   the cached answer is served, marked stale. `--no-cache` neither reads
   nor writes the cache.
+- **Free copies a script can fetch**: `open_access.free_copy` says whether
+  a work's free copy is a PDF a program can fetch (`pdf`), readable only
+  in a browser (`browser_only`: PubMed Central's and Europe PMC's PDF links
+  turn scripts away), or unknown (`none`). `lookup --full` asks PMC's open
+  data on AWS (`pmc-oa-opendata.s3.amazonaws.com`, sending only the PMCID)
+  for the PDF of a free PMC copy that has only a page; nothing else does.
+- **Hosts**: the six sources' APIs (`api.openalex.org`, `api.crossref.org`,
+  `api.datacite.org`, `doi.org` and the agency it redirects a DOI to,
+  `www.ebi.ac.uk`, `openlibrary.org`), and PMC's open data only for
+  `lookup --full` and an app's `freeCopy` call.
 
 ## Settings
 

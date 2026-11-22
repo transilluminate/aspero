@@ -297,7 +297,13 @@ pub(super) fn byline_strangers(byline: &str, authors: &[Person], journal: Option
 /// A person's family name, normalised: the `family` field, or the last
 /// word of a literal name.
 pub(super) fn family_name(p: &Person) -> Option<String> {
-    let name = p.family.as_deref().or(p.literal.as_deref())?;
+    let name = match (&p.family, &p.literal) {
+        (Some(family), _) => family.as_str(),
+        // Its suffixes and degrees aside: "James M. Ritter DPhil FRCP" is
+        // Ritter.
+        (None, Some(literal)) => crate::work::without_post_nominals(literal),
+        (None, None) => return None,
+    };
     let last = if p.family.is_some() {
         normalise(name)
     } else if let Some((family, _)) = crate::work::inverted(name) {

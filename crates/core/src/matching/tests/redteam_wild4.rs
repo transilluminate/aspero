@@ -315,3 +315,29 @@ fn a_chapter_cited_by_its_title_then_its_book_is_the_chapter() {
     );
     assert!(assess(&claim, &r).confidence >= VERIFIED);
 }
+
+/// wild-4 #322: Open Library prints its authors' degrees and honours after
+/// their names; the citation's authors are still the record's, and its
+/// ISBN, title and year confirm it.
+#[test]
+fn authors_with_degrees_after_their_names_are_found() {
+    let mut r = record(
+        &["isbn:9780702074486"],
+        "Rang & Dale's Pharmacology",
+        &[
+            "James M. Ritter DPhil FRCP FBPharmacolS FMedSci",
+            "Rod J. Flower PhD DSc FBPharmacolS FMedSci FRS",
+            "Graeme Henderson BSc PhD FBPharmacolS FSB",
+            "Yoon Kong Loke MB  BS  MRCP  MD",
+        ],
+        2019,
+    );
+    r.work.work_type = Some(crate::work::WorkType::Book);
+    let claim = Claim::from_text(
+        "Rang & Dale's Pharmacology | Ritter, Flower, Henderson, et al. | 9th (2019) | \
+         978-0702074486",
+    );
+    let a = assess(&claim, &r);
+    assert_eq!(a.authors.agreement, Agreement::Match, "{a:?}");
+    assert!(a.confidence >= VERIFIED, "{a:?}");
+}

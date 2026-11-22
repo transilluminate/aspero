@@ -3,6 +3,16 @@
 Releases 0.10 to 0.19 are in [docs/changelog/0.1x.md](docs/changelog/0.1x.md),
 and 0.1 to 0.9 in [docs/changelog/0.0x.md](docs/changelog/0.0x.md).
 
+## Unreleased
+
+Fixed:
+
+- Names printed with degrees and honours after them, as Open Library
+  prints some ("James M. Ritter DPhil FRCP FBPharmacolS FMedSci",
+  "Arthur J. Atkinson Jr."), were read with the last degree as the family
+  name, so the authors cited didn't match. The family name is now the one
+  before them.
+
 ## 0.39.2
 
 Fixed:

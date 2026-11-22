@@ -264,7 +264,9 @@ wrong `verified` is 1.3 points.
     written "———" (#811), and #998.
 
   18 real and 11 wrong references came back `unverifiable` on this run (9
-  and 2 on 0.38.3): the sources failed. They count against the real
+  and 2 on 0.38.3): Europe PMC answered HTTP 503 during the run, and
+  after repeated failures aspero stopped asking it (its circuit breaker),
+  an outage rather than a change in 0.39. They count against the real
   figures above.
 
 ### What the triage found

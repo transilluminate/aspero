@@ -2,7 +2,7 @@
 //! site's publisher's when it matches about as well.
 
 use aspero_core::matching::{self, PLAUSIBLE, VERIFIED};
-use aspero_core::{Agreement, Claim, WorkId, site};
+use aspero_core::{Agreement, Claim, IdKind, Notice, WorkId, site};
 
 use super::Candidate;
 
@@ -18,8 +18,10 @@ const SITE_MARGIN: f64 = 0.05;
 /// volume and page the claim cites (the article over a copy that can't
 /// check them), then the earliest-published (an original precedes its
 /// reprints, abstracts and corrections), then the one more providers agree
-/// on. Then the first may give way to a candidate from the claim's site's
-/// publisher ([`prefer_site`]); returns whether it did.
+/// on. A notice first, for a claim citing the work it's about, gives way
+/// to that work ([`prefer_original`]). Then the first may give way to a
+/// candidate from the claim's site's publisher ([`prefer_site`]); returns
+/// whether it did.
 pub(super) fn rank(candidates: &mut [Candidate], claim: &Claim) -> bool {
     let issued = |c: &Candidate| {
         c.record.work.issued.map_or(i64::MAX, |d| {
@@ -43,7 +45,82 @@ pub(super) fn rank(candidates: &mut [Candidate], claim: &Claim) -> bool {
             .then(issued(a).cmp(&issued(b)))
             .then(b.sightings.len().cmp(&a.sightings.len()))
     });
+    prefer_original(candidates, claim);
     prefer_site(candidates, claim)
+}
+
+/// The band of verdicts a candidate's confidence is in: verified (2),
+/// plausible (1) or neither (0).
+fn band(c: &Candidate) -> u8 {
+    match c.assessment.confidence {
+        x if x >= VERIFIED => 2,
+        x if x >= PLAUSIBLE => 1,
+        _ => 0,
+    }
+}
+
+/// A notice first that is titled as the work it's about (Taylor &
+/// Francis's retraction notices are: holdout-1 #721), for a claim citing
+/// that work, not a notice: the work itself goes first, when it's among
+/// the candidates in the same band (verified or plausible). Else the
+/// notice of a retraction or withdrawal carries it, naming itself, so the
+/// verdict on the work cited says it's retracted.
+fn prefer_original(candidates: &mut [Candidate], claim: &Claim) {
+    let Some(first) = candidates.first() else {
+        return;
+    };
+    let about = &first.record.work.notice_for;
+    // Titled as a notice ("Retraction: …", "Notice of Retraction"), it is
+    // the notice the claim cites.
+    let titled_as_notice = first.record.work.title.as_deref().is_some_and(|t| {
+        let head = t.trim_start().split([' ', ':']).next().unwrap_or("");
+        [
+            "retraction",
+            "retracted",
+            "withdrawal",
+            "withdrawn",
+            "notice",
+        ]
+        .iter()
+        .any(|w| head.eq_ignore_ascii_case(w))
+    });
+    if about.is_empty()
+        || band(first) == 0
+        || titled_as_notice
+        || matching::claim_mentions_derivative(claim)
+    {
+        return;
+    }
+    let original = candidates.iter().position(|c| {
+        band(c) == band(first)
+            && about
+                .iter()
+                .any(|t| c.ids.iter().any(|id| matching::same_work_id(id, &t.work)))
+    });
+    if let Some(i) = original {
+        candidates[..=i].rotate_right(1);
+        return;
+    }
+    let first = &mut candidates[0];
+    let own = first
+        .ids
+        .iter()
+        .find(|id| id.kind() == IdKind::Doi)
+        .cloned();
+    if first.retraction().is_none()
+        && let Some(target) = first
+            .record
+            .work
+            .notice_for
+            .iter()
+            .find(|t| t.kind.is_retraction())
+    {
+        let mut notice = Notice::new(target.kind.clone());
+        notice.notice = own;
+        notice.date = target.date;
+        notice.source.clone_from(&target.source);
+        first.notices.push(notice);
+    }
 }
 
 /// Whether a candidate's DOI is under one of a site's prefixes.
@@ -70,11 +147,6 @@ fn prefer_site(candidates: &mut [Candidate], claim: &Claim) -> bool {
     let prefixes = claim.site_prefixes();
     let Some(first) = candidates.first() else {
         return false;
-    };
-    let band = |c: &Candidate| match c.assessment.confidence {
-        x if x >= VERIFIED => 2,
-        x if x >= PLAUSIBLE => 1,
-        _ => 0,
     };
     if prefixes.is_empty() || band(first) == 0 {
         return false;
@@ -241,6 +313,69 @@ mod tests {
         let (dois, chosen) = ranked(&claim(STROKE, &[], None, Some("jamanetwork.com")), &records);
         assert_eq!(dois[0], "doi:10.1001/jama.2026.19482");
         assert!(chosen);
+    }
+
+    #[test]
+    fn a_retraction_notice_titled_as_its_original_gives_way_to_it() {
+        // holdout-1 #721: Taylor & Francis's notice is titled as the
+        // article it retracts, and matches its citation as well.
+        let title = "Further Evidence of Critical Thinking and Final Examination Performance in \
+                     Advanced Financial Accounting";
+        let original_doi: WorkId = "doi:10.1080/09639280903180774".parse().unwrap();
+        let mut notice = titled(
+            "10.1080/09639284.2011.560642",
+            title,
+            &["Indra Abeysekera"],
+            2011,
+        );
+        notice.work.notice_for.push(aspero_core::NoticeFor::new(
+            aspero_core::NoticeKind::Retraction,
+            original_doi.clone(),
+        ));
+        notice.work.type_as_notice();
+        let original = titled(
+            "10.1080/09639280903180774",
+            &format!("RETRACTED ARTICLE: {title}"),
+            &["Indra Abeysekera"],
+            2011,
+        );
+        let claim = Claim::from_text(format!(
+            "Abeysekera I. {title}. Accounting Education. 2011;20(1):i-xviii."
+        ));
+        let (dois, _) = ranked(&claim, &[notice.clone(), original]);
+        assert_eq!(dois[0], original_doi.to_string());
+
+        // Without the original among the candidates, the notice says what
+        // it notifies: a retraction, by itself.
+        let mut candidates = vec![Candidate {
+            record: notice.clone(),
+            ids: notice.ids.clone(),
+            sightings: Vec::new(),
+            assessment: matching::assess(&claim, &notice),
+            notices: Vec::new(),
+        }];
+        rank(&mut candidates, &claim);
+        let flag = candidates[0].retraction().expect("a retraction notice");
+        assert_eq!(flag.notice.as_ref(), Some(&notice.ids[0]));
+        // Once only, however often ranked.
+        rank(&mut candidates, &claim);
+        assert_eq!(candidates[0].notices.len(), 1);
+
+        // A claim citing the notice cites no retracted work.
+        let cited = Claim::from_text(format!(
+            "Retraction of: {title}. Accounting Education. 2011;20(1):1."
+        ));
+        candidates[0].notices.clear();
+        rank(&mut candidates, &cited);
+        assert!(candidates[0].notices.is_empty());
+        // Nor does one matching a notice titled as one.
+        let notice_title = format!("Retraction: {title}");
+        candidates[0].record.work.title = Some(notice_title.clone());
+        let cited = Claim::from_text(format!(
+            "Abeysekera I. {notice_title}. Accounting Education. 2011;20(1):1."
+        ));
+        rank(&mut candidates, &cited);
+        assert!(candidates[0].notices.is_empty());
     }
 
     #[test]

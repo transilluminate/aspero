@@ -48,6 +48,49 @@ pub(super) struct VenueChecks {
     pub(super) preprint_at_conference: bool,
 }
 
+/// Whether a container is named as a book series or a serial, whose
+/// volumes are real ("Lecture Notes in Computer Science", "Advances in
+/// Experimental Social Psychology", "Methods in Enzymology", "Geophysical
+/// Monograph Series"), not one book. Generous: it only keeps a series'
+/// chapter, cited at its volume, from reading as an article.
+fn series_name(container: &str) -> bool {
+    const LEADING: &[&str] = &[
+        "advances in",
+        "progress in",
+        "methods in",
+        "current topics in",
+        "topics in",
+        "developments in",
+        "contributions to",
+        "frontiers in",
+        "frontiers of",
+        "studies in",
+        "annual review",
+        "annals of",
+        "handbook of experimental",
+        "international review of",
+        "recent results in",
+        "results and problems in",
+    ];
+    const ANYWHERE: &[&str] = &[
+        "lecture notes",
+        "series",
+        "monograph",
+        "monographs",
+        "yearbook",
+        "proceedings",
+        "symposium",
+        "symposia",
+        "reviews",
+        "library",
+        "studies",
+    ];
+    let words = format!(" {} ", super::text::normalise(container));
+    let lead = words.trim_start_matches(" the ").trim_start();
+    LEADING.iter().any(|s| lead.starts_with(&format!("{s} ")))
+        || ANYWHERE.iter().any(|s| words.contains(&format!(" {s} ")))
+}
+
 /// Holds the venue cited against the record's, in order, each check
 /// reading the container the ones before left.
 #[allow(clippy::too_many_lines)]
@@ -75,13 +118,28 @@ pub(super) fn venue_checks(input: &VenueInputs<'_>) -> VenueChecks {
     // 9351", has no issue; a chapter cited as one, "In: …", is none.)
     // So is a conference paper in a series ("Lecture Notes in Computer
     // Science"), no more a journal's.
+    // So is the book named as the journal, its volume given as a
+    // journal's, without an issue ("Nagatomo J. (2014). Life after
+    // Migration. Migration as Transnational Leisure, 33, 128–178."; "Crop
+    // Physiology. 2015;35:1-14."): a book has no volume of that shape. Not
+    // a series' volume ("Advances in Experimental Social Psychology, 35,
+    // 53–152"), which its record may lack: a container named as a series
+    // is one, and so is a chapter its identifier names.
     let issue_cited = claim.text.as_deref().is_some_and(publication::cites_issue);
+    let book_as_journal = container.agreement == Agreement::Match
+        && !named
+        && claim
+            .text
+            .as_deref()
+            .is_some_and(|t| publication::cites_journal_place(t) && !cites_edited_book(t))
+        && !work.container_title.as_deref().is_some_and(series_name);
     let chapter_as_article = work.volume.is_none()
         && cited_place.volume.is_some()
         && !claim.text.as_deref().is_some_and(cites_chapter)
         && match work.work_type {
             Some(WorkType::Chapter) => {
                 issue_cited
+                    || book_as_journal
                     || (claim.container.is_some() && container.agreement != Agreement::Match)
             }
             Some(WorkType::ConferencePaper) => issue_cited,

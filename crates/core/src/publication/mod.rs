@@ -34,4 +34,4 @@ pub(crate) use journal::{
     journal_in, journal_word, names_journal, other_journal_read, section_of, significant,
     sister_journal_as,
 };
-pub(crate) use locator::{Locator, cites_issue, is_month, locator};
+pub(crate) use locator::{Locator, cites_issue, cites_journal_place, is_month, locator};

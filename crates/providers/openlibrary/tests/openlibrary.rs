@@ -299,3 +299,88 @@ fn since_is_refused_without_asking() {
     }
     assert!(http.requests().is_empty());
 }
+
+fn editions_of(key: &str, limit: u32) -> SearchQuery {
+    let mut q = SearchQuery::new("");
+    q.extra.insert("editions".into(), key.into());
+    q.page.limit = limit;
+    q
+}
+
+#[test]
+fn a_works_editions_are_paged_by_offset() {
+    let (ol, http) = provider([recorded("editions"), recorded("editions_page2")]);
+    let mut q = editions_of("/works/OL21285529W", 3);
+    let first = block_on(ol.search(&q)).unwrap().value;
+    let url = url::Url::parse(&http.requests()[0].url).unwrap();
+    assert_eq!(url.path(), "/works/OL21285529W/editions.json");
+    assert_eq!(query(&http, 0), [pair("limit", "3")]);
+    // `size` counts every edition, not this page's.
+    assert_eq!(first.total, Some(6));
+    assert_eq!(first.hits.len(), 3);
+    let e = &first.hits[0].record;
+    assert_eq!(e.ids, [id("9781299288317")]);
+    assert_eq!(e.work.publisher.as_deref(), Some("Routledge"));
+    assert_eq!(e.work.issued.unwrap().year(), 2013);
+    assert_eq!(e.work.work_type, Some(WorkType::Book));
+    assert_eq!(
+        e.work.title.as_deref(),
+        Some(
+            "Treating Depression with Hypnosis: Integrating Cognitive-Behavioral and \
+             Strategic Approaches"
+        )
+    );
+    assert_eq!(
+        e.work.url.as_deref(),
+        Some("https://openlibrary.org/books/OL46021615M")
+    );
+
+    q.page.cursor = first.next;
+    let second = block_on(ol.search(&q)).unwrap().value;
+    assert_eq!(query(&http, 1), [pair("limit", "3"), pair("offset", "3")]);
+    assert_eq!(second.next, None, "the last page");
+    let years: Vec<i16> = second
+        .hits
+        .iter()
+        .filter_map(|h| Some(h.record.work.issued?.year()))
+        .collect();
+    assert_eq!(years, [2013, 2013, 2015]);
+}
+
+#[test]
+fn an_editions_publishers_are_joined() {
+    let body = r#"{"size": 1, "entries": [{"key": "/books/OL1M", "title": "Grammar",
+        "publish_date": "June 1946", "publishers": ["G. Allen & Unwin", "E. Munksgaard"]}]}"#;
+    let (ol, _) = provider([response(200, &[], body)]);
+    let page = block_on(ol.search(&editions_of("OL1239689W", 100)))
+        .unwrap()
+        .value;
+    let w = &page.hits[0].record.work;
+    assert_eq!(
+        w.publisher.as_deref(),
+        Some("G. Allen & Unwin; E. Munksgaard")
+    );
+    assert_eq!(w.issued.unwrap().year(), 1946);
+}
+
+#[test]
+fn editions_take_a_works_key_alone() {
+    for key in ["OL123M", "works", "OLW", "OL12x3W"] {
+        let (ol, http) = provider([]);
+        assert!(
+            matches!(
+                block_on(ol.search(&editions_of(key, 10))),
+                Err(Error::BadRequest(_))
+            ),
+            "{key}"
+        );
+        assert!(http.requests().is_empty());
+    }
+    let (ol, _) = provider([]);
+    let mut q = editions_of("OL1W", 10);
+    q.text = "grammar".into();
+    assert!(matches!(block_on(ol.search(&q)), Err(Error::BadRequest(_))));
+    q.text.clear();
+    q.extra.insert("sort".into(), "new".into());
+    assert!(matches!(block_on(ol.search(&q)), Err(Error::BadRequest(_))));
+}

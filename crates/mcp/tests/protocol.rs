@@ -52,7 +52,8 @@ async fn a_client_lists_and_calls_the_tools() {
             "verify",
             "identify",
             "citing_works",
-            "references"
+            "references",
+            "analyse"
         ]
     );
     for tool in &listed {

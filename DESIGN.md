@@ -539,6 +539,17 @@ A **`Session`** (`session.rs`) has a spend cap (`--budget`, $0.25): tools
 that may spend are refused once it's spent, and calls in flight hold an
 estimate so calls at once overshoot no more than one call can.
 
+Results are cut for an agent's context where the CLI's aren't, after
+`aspero-json` has built them, so the CLI's JSON stays as it is: a search
+hit's authors are its first three names and `authors_more` (ids are what
+a lean hit spent most on; `lookup` and `full` keep them), and other works
+their first five authors. `analyse` is `Engine::analyse` (`related` one of
+its kinds, not a tool of its own: the list is short on purpose, #157),
+its works only `canonical_id`, title, year and `cited_by_count`. It holds
+its `budget` (default $0.02) against the session's, and runs within the
+smaller of that and what's left; `estimate_only` is free, so never
+refused.
+
 ### Streamable HTTP and host tools (P1, P2)
 
 For apps that embed aspero: `aspero_mcp::http` and, over it, the FFI's

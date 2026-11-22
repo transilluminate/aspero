@@ -294,6 +294,7 @@ dependencies = [
  "aspero-core",
  "aspero-engine",
  "aspero-json",
+ "aspero-openalex",
  "async-trait",
  "bytes",
  "futures",

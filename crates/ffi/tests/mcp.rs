@@ -184,7 +184,8 @@ fn an_app_serves_its_tools_to_an_agent() {
         let answer = answer.unwrap();
         let tools = answer["result"]["tools"].as_array().unwrap();
         let names: Vec<&str> = tools.iter().map(|t| t["name"].as_str().unwrap()).collect();
-        assert_eq!(names.len(), 8);
+        // The eight engine tools, then the app's.
+        assert_eq!(names.len(), 9);
         assert_eq!(names.last().unwrap(), &"history_recent");
         // Annotated as the app declared it.
         let hints = &tools.last().unwrap()["annotations"];

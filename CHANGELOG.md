@@ -15,6 +15,29 @@ Changed:
   `record_undecodable`). An embedder's log reader takes the first word as
   the event's name. A new CI gate, `scripts/event-names.py`, keeps it so.
 
+Added:
+
+- An MCP tool, `analyse` (#60): the analyses `aspero analyse` runs, for a
+  set of works given by identifier: probably missing works, related works
+  (by co-citation and coupling), retracted references and odd ones out.
+  `estimate_only` says what a run would cost, free; a run spends within
+  its `budget` (default $0.02) and what's left of the session's, and says
+  when it stopped early (`complete`, `incomplete`). Works come lean: id,
+  title, year and citation count, and which seeds cite them.
+
+Changed (for an embedder: the MCP tool list):
+
+- The tool list has an eighth engine tool, `analyse`, after `references`:
+  about 1,100 characters more, near the 28,000 a test holds the list to
+  (#157). A host tool named `analyse` now fails the server's start
+  (`ToolNameClash`).
+- A lean `search`, `citing_works` or `references` hit gives its authors by
+  name alone, the first three, with `authors_more` counting the rest
+  (before: the first five, each `{name, orcid, openalex_id}`). About 30%
+  smaller a hit on recorded OpenAlex searches. `lookup`, `verify`,
+  `identify` and `full: true` still give authors' ids. The CLI's JSON is
+  unchanged.
+
 ## 0.41.0
 
 Changed (the diagnostics contract: an embedder's log parser needs

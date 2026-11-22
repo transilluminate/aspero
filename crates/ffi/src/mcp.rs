@@ -16,7 +16,8 @@ use crate::Aspero;
 #[derive(Debug, Clone, uniffi::Record)]
 pub struct HostTool {
     /// Unique, and unlike the engine tools' (`search`, `search_supports`,
-    /// `lookup`, `verify`, `identify`, `citing_works`, `references`).
+    /// `lookup`, `verify`, `identify`, `citing_works`, `references`,
+    /// `analyse`).
     pub name: String,
     pub title: String,
     pub description: String,

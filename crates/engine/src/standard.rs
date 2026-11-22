@@ -19,6 +19,8 @@ pub use aspero_europepmc::EuropePmcConfig;
 pub use aspero_openalex::OpenAlexConfig;
 #[cfg(feature = "openlibrary")]
 pub use aspero_openlibrary::OpenLibraryConfig;
+#[cfg(feature = "pmc")]
+pub use aspero_pmc::PmcConfig;
 
 /// The built-in sources, in lookup priority order: each one's name (as
 /// results' `provider` gives it) and what it's called.
@@ -107,6 +109,11 @@ pub struct StandardConfig {
     pub europepmc: Option<EuropePmcConfig>,
     #[cfg(feature = "openlibrary")]
     pub openlibrary: Option<OpenLibraryConfig>,
+    /// PubMed Central's open data, asked only for works' free copies
+    /// ([`Engine::free_copy`]), never in lookups, verifies or searches;
+    /// not one of [`SOURCES`].
+    #[cfg(feature = "pmc")]
+    pub pmc: Option<PmcConfig>,
     /// Sources turned off with [`disable`](Self::disable): a search naming
     /// one fails saying so ([`EngineError::Disabled`](crate::EngineError::Disabled)).
     pub disabled: Vec<ProviderId>,
@@ -135,6 +142,8 @@ impl StandardConfig {
             europepmc: Some(EuropePmcConfig::default()),
             #[cfg(feature = "openlibrary")]
             openlibrary: Some(OpenLibraryConfig::default()),
+            #[cfg(feature = "pmc")]
+            pmc: Some(PmcConfig::default()),
             ..StandardConfig::default()
         }
     }
@@ -236,16 +245,21 @@ impl StandardConfig {
 /// DataCite (arXiv, Zenodo, data and software; batched), then doi.org (any
 /// registration agency, one DOI per request; its "not found" is
 /// authoritative), then Europe PMC (PMIDs, PMCIDs, biomedical abstracts).
-/// Open Library answers ISBNs (books) and adds book search.
+/// Open Library answers ISBNs (books) and adds book search. PMC's open
+/// data is asked only for free copies ([`Engine::free_copy`]).
 pub fn standard(config: StandardConfig) -> Result<Engine, Error> {
+    let anonymous = format!("aspero/{}", env!("CARGO_PKG_VERSION"));
     let user_agent = match &config.mailto {
         Some(mailto) => format!("aspero/{} (mailto:{mailto})", env!("CARGO_PKG_VERSION")),
-        None => format!("aspero/{}", env!("CARGO_PKG_VERSION")),
+        None => anonymous.clone(),
     };
     // Unused only when every provider feature is off.
     #[allow(unused_variables)]
-    let client = |label: &str, policy: &ResiliencePolicy| -> Result<Arc<dyn HttpClient>, Error> {
-        let inner = Arc::new(ReqwestClient::new(&user_agent, policy.attempt_timeout)?);
+    let client_as = |user_agent: &str,
+                     label: &str,
+                     policy: &ResiliencePolicy|
+     -> Result<Arc<dyn HttpClient>, Error> {
+        let inner = Arc::new(ReqwestClient::new(user_agent, policy.attempt_timeout)?);
         let paced =
             Paced::new(label, inner, policy.min_interval).max_in_flight(policy.max_in_flight);
         let paced: Arc<dyn HttpClient> = Arc::new(match &config.pacing {
@@ -260,6 +274,8 @@ pub fn standard(config: StandardConfig) -> Result<Engine, Error> {
             None => paced,
         })
     };
+    #[allow(unused_variables)]
+    let client = |label: &str, policy: &ResiliencePolicy| client_as(&user_agent, label, policy);
 
     let mut builder: EngineBuilder = Engine::builder();
     if let Some(cache) = config.cache {
@@ -337,6 +353,16 @@ pub fn standard(config: StandardConfig) -> Result<Engine, Error> {
         let policy = OpenLibrary::default_policy();
         let provider = OpenLibrary::new(ol, client("openlibrary", &policy)?);
         builder = builder.provider(Arc::new(provider), policy, 40);
+    }
+
+    #[cfg(feature = "pmc")]
+    if let Some(pmc) = config.pmc {
+        use aspero_pmc::Pmc;
+        let policy = Pmc::default_policy();
+        // No contact address: S3 has no polite pool, and the request is
+        // to carry only the PMCID.
+        let provider = Pmc::new(pmc, client_as(&anonymous, "pmc", &policy)?);
+        builder = builder.free_copies(Arc::new(provider), policy);
     }
 
     Ok(builder.build())

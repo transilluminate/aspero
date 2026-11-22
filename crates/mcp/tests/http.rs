@@ -362,7 +362,7 @@ fn is_error(result: &Value) -> bool {
     result["isError"] == true
 }
 
-const ENGINE: [&str; 7] = [
+const ENGINE: [&str; 8] = [
     "search",
     "search_supports",
     "lookup",
@@ -370,6 +370,7 @@ const ENGINE: [&str; 7] = [
     "identify",
     "citing_works",
     "references",
+    "analyse",
 ];
 
 #[tokio::test(flavor = "multi_thread")]

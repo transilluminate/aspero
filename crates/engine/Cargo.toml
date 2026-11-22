@@ -21,6 +21,7 @@ aspero-datacite = { workspace = true, optional = true }
 aspero-doi = { workspace = true, optional = true }
 aspero-europepmc = { workspace = true, optional = true }
 aspero-openlibrary = { workspace = true, optional = true }
+aspero-pmc = { workspace = true, optional = true }
 async-trait.workspace = true
 fastrand.workspace = true
 jiff.workspace = true
@@ -32,13 +33,14 @@ futures.workspace = true
 tracing.workspace = true
 
 [features]
-default = ["openalex", "crossref", "datacite", "doi", "europepmc", "openlibrary"]
+default = ["openalex", "crossref", "datacite", "doi", "europepmc", "openlibrary", "pmc"]
 openalex = ["dep:aspero-openalex"]
 crossref = ["dep:aspero-crossref"]
 datacite = ["dep:aspero-datacite"]
 doi = ["dep:aspero-doi"]
 europepmc = ["dep:aspero-europepmc"]
 openlibrary = ["dep:aspero-openlibrary"]
+pmc = ["dep:aspero-pmc"]
 
 [dev-dependencies]
 aspero-core = { workspace = true, features = ["testing"] }

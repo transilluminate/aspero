@@ -158,9 +158,14 @@ claude mcp add aspero -- aspero mcp
 
 The tools: `search` (a query tree, the JSON that `search --query` takes, or
 keywords), `search_supports`, `lookup`, `verify` (one citation, text or
-fields, or a batch), `identify` (a first page's text), and `citing_works` and
-`references` (the works citing a work, and its references). Results are the
-JSON the commands print, as structured content with a short text summary;
+fields, or a batch), `identify` (a first page's text), `citing_works` and
+`references` (the works citing a work, and its references), and `analyse`
+(a set of works' probably missing and related works, retracted references
+and odd ones out, as `aspero analyse` finds them, with an `estimate_only`
+first). Results are the JSON the commands print, as structured content
+with a short text summary. They're lean for an agent: a search hit names
+its first three authors (their ids come with `lookup` or `full: true`),
+and an analysis gives each work's id, title, year and citation count.
 `full: true` gives every field.
 
 Each session may spend up to `--budget` dollars (default $0.25)
@@ -200,6 +205,16 @@ own budget. The app hears of every tool call as it happens.
   it was "not found") and caches the new answers; where a source fails,
   the cached answer is served, marked stale. `--no-cache` neither reads
   nor writes the cache.
+- **Free copies a script can fetch**: `open_access.free_copy` says whether
+  a work's free copy is a PDF a program can fetch (`pdf`), readable only
+  in a browser (`browser_only`: PubMed Central's and Europe PMC's PDF links
+  turn scripts away), or unknown (`none`). `lookup --full` asks PMC's open
+  data on AWS (`pmc-oa-opendata.s3.amazonaws.com`, sending only the PMCID)
+  for the PDF of a free PMC copy that has only a page; nothing else does.
+- **Hosts**: the six sources' APIs (`api.openalex.org`, `api.crossref.org`,
+  `api.datacite.org`, `doi.org` and the agency it redirects a DOI to,
+  `www.ebi.ac.uk`, `openlibrary.org`), and PMC's open data only for
+  `lookup --full` and an app's `freeCopy` call.
 
 ## Settings
 

@@ -346,7 +346,7 @@ impl Shared {
             .copied()
             .unwrap_or(0.0);
         let recorded = self.ledger.spent(key_id, day).unwrap_or_else(|e| {
-            tracing::warn!(target: "aspero::mcp", key = key_id, "could not read a key's spend");
+            tracing::warn!(target: "aspero::mcp", key = key_id, "key_spend_unread");
             tracing::debug!(target: "aspero::mcp", key = key_id, error = %e, "ledger_detail");
             0.0
         });
@@ -363,7 +363,7 @@ impl Shared {
             match self.ledger.add(key, day, *usd) {
                 Ok(()) => false,
                 Err(e) => {
-                    tracing::warn!(target: "aspero::mcp", key = key_id, "could not record a key's spend; kept to try again");
+                    tracing::warn!(target: "aspero::mcp", key = key_id, "key_spend_unrecorded");
                     tracing::debug!(target: "aspero::mcp", key = key_id, error = %e, "ledger_detail");
                     true
                 }
@@ -698,7 +698,7 @@ impl HttpServer {
                     }
                 });
             if let Err(e) = spawned {
-                tracing::warn!(target: "aspero::mcp", error = %e.kind(), "no activity thread");
+                tracing::warn!(target: "aspero::mcp", error = %e.kind(), "activity_thread_missing");
             }
             tx
         });
@@ -742,7 +742,7 @@ impl HttpServer {
             opening: Mutex::default(),
         });
         let task = tokio::spawn(accept(listener, state.clone(), cancel.clone()));
-        tracing::info!(target: "aspero::mcp", port, "MCP server listening on 127.0.0.1");
+        tracing::info!(target: "aspero::mcp", host = "127.0.0.1", port, "mcp_listening");
         Ok(HttpServer {
             state,
             cancel,
@@ -767,7 +767,7 @@ impl HttpServer {
                 match Credential::new(k) {
                     Ok(c) => Some(Arc::new(c)),
                     Err(e) => {
-                        tracing::warn!(target: "aspero::mcp", key = %id, "key ignored: its hash, budget or a scope is invalid");
+                        tracing::warn!(target: "aspero::mcp", key = %id, "key_ignored");
                         tracing::debug!(target: "aspero::mcp", key = %id, error = %e, "key_detail");
                         None
                     }
@@ -922,7 +922,7 @@ impl HttpServer {
             .unwrap_or_else(PoisonError::into_inner)
             .take();
         if self.running.swap(false, Ordering::Relaxed) {
-            tracing::info!(target: "aspero::mcp", port = self.state.port, "MCP server stopped");
+            tracing::info!(target: "aspero::mcp", port = self.state.port, "mcp_stopped");
         }
     }
 }
@@ -962,7 +962,7 @@ async fn accept(listener: TcpListener, state: Arc<State>, cancel: CancellationTo
                 }
                 Err(e) => {
                     // Out of file descriptors, say: wait, then go on.
-                    tracing::warn!(target: "aspero::mcp", error = %e.kind(), "accept failed");
+                    tracing::warn!(target: "aspero::mcp", error = %e.kind(), "accept_failed");
                     tokio::time::sleep(Duration::from_millis(50)).await;
                 }
             }

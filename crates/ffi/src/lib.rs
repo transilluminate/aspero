@@ -174,6 +174,23 @@ impl Aspero {
 }
 
 impl Aspero {
+    /// A handle over `engine`, without a cache: for tests that script the
+    /// providers.
+    #[cfg(test)]
+    pub(crate) fn over(engine: Engine) -> Arc<Self> {
+        let runtime = tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(1)
+            .enable_all()
+            .build()
+            .unwrap();
+        Arc::new(Aspero {
+            engine,
+            runtime,
+            cache: None,
+            mailto: None,
+        })
+    }
+
     fn engine(&self, patience: Patience) -> Engine {
         self.engine.with_options(patience.options())
     }

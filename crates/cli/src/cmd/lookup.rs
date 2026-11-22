@@ -18,6 +18,9 @@ pub async fn run(engine: &Engine, ids: Vec<String>, out: Out) -> Result<Exit, Fa
     let mut extras = Extras::default();
     extras.full = out.full;
     extras.abstracts = out.abstracts;
+    // A person asking for full detail wants a copy they can fetch (#204):
+    // the one place PMC's open data is asked unprompted.
+    extras.free_copies = out.full;
     let report = engine.lookup_inputs(&inputs, extras).await;
 
     // Every input gets an item, in input order, including ones that didn't

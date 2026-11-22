@@ -14,7 +14,8 @@ use serde::de::DeserializeOwned;
 use serde_json::{Map, Value, json};
 
 use crate::args::{
-    Citation, IdentifyArgs, LookupArgs, RelationArgs, SearchArgs, SortBy, SupportsArgs, VerifyArgs,
+    AnalyseArgs, Citation, IdentifyArgs, LookupArgs, RelationArgs, SearchArgs, SortBy,
+    SupportsArgs, VerifyArgs,
 };
 use crate::{Session, schema, summary};
 
@@ -139,7 +140,7 @@ impl ToolError {
         }
     }
 
-    fn invalid(message: impl Into<String>) -> Self {
+    pub(crate) fn invalid(message: impl Into<String>) -> Self {
         ToolError::new(ToolErrorKind::InvalidArguments, message)
     }
 }
@@ -179,10 +180,10 @@ impl From<EngineError> for ToolError {
 }
 
 /// A tool's JSON and usage, or why it failed and what it spent first.
-type Answer = Result<(Value, Vec<(ProviderId, Usage)>), Failed>;
+pub(crate) type Answer = Result<(Value, Vec<(ProviderId, Usage)>), Failed>;
 
 /// A tool that failed, and the usage of what it did before.
-struct Failed {
+pub(crate) struct Failed {
     error: ToolError,
     usage: Vec<(ProviderId, Usage)>,
 }
@@ -227,6 +228,10 @@ impl Tools {
         self.specs.iter().find(|s| s.name == name)
     }
 
+    pub(crate) fn engine(&self) -> &Engine {
+        &self.engine
+    }
+
     /// Calls the tool `name` with `arguments` (a JSON object) for
     /// `session`: refused if it may spend and the session's budget is
     /// spent; its usage is added to the session's, failed or not.
@@ -243,7 +248,7 @@ impl Tools {
             )
         })?;
         // Held until the call's charged, at the end of this.
-        let _held = if spec.spends {
+        let _held = if spends(spec, &arguments) {
             Some(session.admit(estimate(name, &arguments)).await?)
         } else {
             None
@@ -260,6 +265,7 @@ impl Tools {
                 self.related(Relation::CitedBy, parse(name, arguments)?)
                     .await
             }
+            "analyse" => self.analyse(session, parse(name, arguments)?).await,
             _ => unreachable!("every spec has a tool"),
         };
         let (mut structured, usage) = match answer {
@@ -269,8 +275,13 @@ impl Tools {
                 return Err(error);
             }
         };
-        if !full {
-            trim_authors(&mut structured);
+        match name {
+            // Works there are already cut to what an agent uses.
+            "analyse" => {}
+            // Hits are many: authors by name alone, ids under `full`.
+            "search" | "citing_works" | "references" if !full => name_authors(&mut structured),
+            _ if !full => trim_authors(&mut structured),
+            _ => {}
         }
         let cost = session.charge(&usage);
         structured["usage"] = aspero_json::usage(&usage);
@@ -497,8 +508,15 @@ pub(crate) fn estimate(name: &str, arguments: &Value) -> f64 {
         }
         "identify" => LOOKUP_USD + CLAIM_USD,
         "citing_works" | "references" => SEARCH_USD,
+        "analyse" => crate::analyse::cap(arguments),
         _ => 0.0,
     }
+}
+
+/// Whether a call to `spec`'s tool with `arguments` may spend, so is
+/// refused once a budget is spent: an analysis' estimate is free.
+pub(crate) fn spends(spec: &ToolSpec, arguments: &Value) -> bool {
+    spec.spends && !(spec.name == "analyse" && arguments["estimate_only"] == true)
 }
 
 /// How many journal terms a query tree has.
@@ -705,11 +723,50 @@ fn specs(sources: &[String]) -> Vec<ToolSpec> {
             schema::search(),
             true,
         ),
+        spec(
+            "analyse",
+            "Analyse a set",
+            "Check and extend a set of works (a reference list): probably_missing (works \
+             several cite that it lacks), related (by co-citation and coupling), \
+             retracted_references, odd_one_out. Paid (OpenAlex), within `budget` (USD): try \
+             `estimate_only` (free) first. Example: {\"ids\": [\"10.1056/nejmoa1703058\", \
+             \"W2626778328\"], \"kinds\": [\"related\"]}",
+            input_schema::<AnalyseArgs>(),
+            schema::analyse(),
+            true,
+        ),
     ]
 }
 
 /// Authors a lean record lists; the rest are counted in `authors_more`.
 const LEAN_AUTHORS: usize = 5;
+
+/// Authors a search hit names; the rest are counted in `authors_more`.
+const HIT_AUTHORS: usize = 3;
+
+/// Gives every hit's authors in `v` by name alone, the first
+/// [`HIT_AUTHORS`] of them: their ORCID iDs and OpenAlex ids were most of a
+/// hit, and `lookup` (or `full`) gives them.
+fn name_authors(v: &mut Value) {
+    let Some(hits) = v["hits"].as_array_mut() else {
+        return;
+    };
+    for work in hits.iter_mut().filter_map(|h| h["work"].as_object_mut()) {
+        let Some(Value::Array(authors)) = work.get_mut("authors") else {
+            continue;
+        };
+        let more = authors.len().saturating_sub(HIT_AUTHORS);
+        let names: Vec<Value> = authors
+            .iter()
+            .take(HIT_AUTHORS)
+            .map(|a| a.get("name").cloned().unwrap_or_else(|| a.clone()))
+            .collect();
+        *authors = names;
+        if more > 0 {
+            work.insert("authors_more".into(), json!(more));
+        }
+    }
+}
 
 /// Cuts every work's author list in `v` to [`LEAN_AUTHORS`]: a paper with
 /// hundreds of authors would otherwise fill an agent's context.
@@ -753,5 +810,23 @@ mod tests {
         assert_eq!(v["hits"][0]["work"]["authors_more"], 3);
         // A claim's names as cited are left whole.
         assert_eq!(v["claim"]["authors"].as_array().unwrap().len(), 6);
+    }
+
+    #[test]
+    fn hits_name_three_authors_and_count_the_rest() {
+        let authors: Vec<Value> = (0..5)
+            .map(|i| json!({"name": format!("A{i}"), "orcid": "0000-0001", "openalex_id": "A1"}))
+            .collect();
+        let mut v = json!({"hits": [
+            {"work": {"title": "T", "authors": authors}},
+            {"work": {"title": "U", "authors": [{"name": "B", "orcid": "0000-0002"}]}},
+            {"work": {"title": "V"}},
+        ]});
+        name_authors(&mut v);
+        assert_eq!(v["hits"][0]["work"]["authors"], json!(["A0", "A1", "A2"]));
+        assert_eq!(v["hits"][0]["work"]["authors_more"], 2);
+        assert_eq!(v["hits"][1]["work"]["authors"], json!(["B"]));
+        assert!(v["hits"][1]["work"].get("authors_more").is_none());
+        assert!(v["hits"][2]["work"].get("authors").is_none());
     }
 }

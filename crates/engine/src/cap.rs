@@ -186,7 +186,7 @@ impl Engine {
                 tracing::info!(
                     target: "aspero::budget",
                     provider = %provider, cap, used, which = which.as_str(),
-                    "paid call stopped at a daily cap"
+                    "daily_cap_stop"
                 );
                 Err(Error::BudgetCapped {
                     cap,

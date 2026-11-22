@@ -152,7 +152,7 @@ impl Paced {
                 Err(e) => {
                     tracing::warn!(
                         target: "aspero::net",
-                        provider = %self.label, "shared pacing failed; pacing this process alone"
+                        provider = %self.label, "pacing_alone"
                     );
                     tracing::debug!(target: "aspero::net", provider = %self.label, error = %e, "pacing_detail");
                 }

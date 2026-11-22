@@ -5,16 +5,6 @@ and 0.1 to 0.9 in [docs/changelog/0.0x.md](docs/changelog/0.0x.md).
 
 ## Unreleased
 
-Changed:
-
-- Every diagnostics event is now its name and then `key=value` fields,
-  as DESIGN's "Diagnostics events" describes; before, about twenty
-  warnings and notes had a sentence as their message ("MCP server
-  listening on 127.0.0.1 port=23130" is now `mcp_listening
-  host=127.0.0.1 port=23130`; "skipped a record that doesn't decode" is
-  `record_undecodable`). An embedder's log reader takes the first word as
-  the event's name. A new CI gate, `scripts/event-names.py`, keeps it so.
-
 Added:
 
 - An MCP tool, `analyse` (#60): the analyses `aspero analyse` runs, for a
@@ -26,7 +16,6 @@ Added:
   title, year and citation count, and which seeds cite them.
 
 Changed (for an embedder: the MCP tool list):
-
 - The tool list has an eighth engine tool, `analyse`, after `references`:
   about 1,100 characters more, near the 28,000 a test holds the list to
   (#157). A host tool named `analyse` now fails the server's start
@@ -37,9 +26,6 @@ Changed (for an embedder: the MCP tool list):
   smaller a hit on recorded OpenAlex searches. `lookup`, `verify`,
   `identify` and `full: true` still give authors' ids. The CLI's JSON is
   unchanged.
-
-Added:
-
 - A fetchable PDF for free copies on PubMed Central (#204). `lookup
   --full` now contacts one new host, PMC's open data on AWS
   (`pmc-oa-opendata.s3.amazonaws.com`), for a work with a PMCID whose free
@@ -62,6 +48,16 @@ Added:
   PMC's open data, for an app about to fetch the copy. `lookup` with
   `full` doesn't ask. Rust: `Engine::free_copy`, `Extras::free_copies`,
   `EngineBuilder::free_copies` and the new `aspero-pmc` crate.
+
+Changed:
+
+- Every diagnostics event is now its name and then `key=value` fields,
+  as DESIGN's "Diagnostics events" describes; before, about twenty
+  warnings and notes had a sentence as their message ("MCP server
+  listening on 127.0.0.1 port=23130" is now `mcp_listening
+  host=127.0.0.1 port=23130`; "skipped a record that doesn't decode" is
+  `record_undecodable`). An embedder's log reader takes the first word as
+  the event's name. A new CI gate, `scripts/event-names.py`, keeps it so.
 
 ## 0.41.0
 

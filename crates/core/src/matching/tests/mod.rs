@@ -13,6 +13,7 @@ use crate::work::{PartialDate, Person, Work};
 
 mod authors;
 mod claim;
+mod editions;
 mod journal;
 mod redteam;
 mod redteam_holdouts;

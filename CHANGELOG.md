@@ -70,6 +70,20 @@ Fixed:
   What the records of one version say of the versions before and after
   it is weighed whichever record is kept.
 
+- A book cited as first appearing in the year of a later edition
+  ("Firth, J. R. (1969). Papers in
+  linguistics, 1934-1951. Oxford University Press. (Original work
+  published 1969)" for a book out since 1957, or a 1945 printing labelled
+  "(1st ed.)" of a 1929 book) verified, because the edition cited exists.
+  It is now plausible, its year named, the first edition's given. The
+  year is read from "(Original work published …)", "originally
+  published", "first published" or, beside "1st ed." or "first edition",
+  the year cited. It takes a record of the book (any found, same title
+  and authors) holding the edition cited and one more than three years
+  earlier: first years within a few years (UK and US editions, a
+  catalogue's slip) stand (holdout-6 `w:book-edition-year`). A reprint
+  cited with its original's year still verifies.
+
 ## 0.39.2
 
 Fixed:

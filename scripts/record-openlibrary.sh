@@ -38,6 +38,19 @@ record search_tree /search.json \
 record search_tree_ids /search.json \
   'q=(isbn:9780262035613 OR isbn:9780131103627) AND author_name:(goodfellow)' \
   "fields=$fields" 'limit=3' 'page=1'
+# A work's editions, paged; and what verifying a book's publisher asks
+# (the book by title and first author, then its work's editions).
+record editions /works/OL21285529W/editions.json 'limit=3'
+record editions_page2 /works/OL21285529W/editions.json 'limit=3' 'offset=3'
+record search_yapko /search.json 'q=' 'author=Yapko' 'title=Treating Depression With Hypnosis' \
+  "fields=$fields" 'limit=5' 'page=1'
+record editions_yapko /works/OL21285529W/editions.json 'limit=100'
+record search_jespersen /search.json 'q=' 'author=Jespersen' \
+  'title=A Modern English Grammar on Historical Principles' "fields=$fields" 'limit=5' 'page=1'
+record editions_jespersen /works/OL34016458W/editions.json 'limit=100'
+record search_cronin /search.json 'q=' 'author=Cronin' \
+  'title=Colour and Experience in Nineteenth-Century Poetry' "fields=$fields" 'limit=5' 'page=1'
+record editions_cronin /works/OL11943094W/editions.json 'limit=100'
 
 if grep -rqiF "$ASPERO_MAILTO" "$out"; then
   echo "mailto address found in fixtures; deleting them" >&2

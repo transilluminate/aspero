@@ -52,6 +52,30 @@ record search_cronin /search.json 'q=' 'author=Cronin' \
   'title=Colour and Experience in Nineteenth-Century Poetry' "fields=$fields" 'limit=5' 'page=1'
 record editions_cronin /works/OL11943094W/editions.json 'limit=100'
 
+# The rest of holdout-6's wrong-publisher books, by their records' titles.
+record search_barker /search.json 'q=' 'author=Barker' \
+  "title=Early Modern Tragedy, Gender and Performance, 1984–2000" "fields=$fields" 'limit=5' 'page=1'
+record search_scolnicov /search.json 'q=' 'author=Scolnicov' \
+  "title=Plato 's Metaphysics of Education (RLE: Plato)" "fields=$fields" 'limit=5' 'page=1'
+record search_anjum /search.json 'q=' 'author=Anjum' \
+  "title=Philosophy of Science" "fields=$fields" 'limit=5' 'page=1'
+record search_kolkowicz /search.json 'q=' 'author=Kolkowicz' \
+  "title=The Soviet Military and the Communist Party" "fields=$fields" 'limit=5' 'page=1'
+record search_oakley /search.json 'q=' 'author=Oakley' \
+  "title=Helpers In Childbirth: Midwifery Today" "fields=$fields" 'limit=5' 'page=1'
+record search_laughland /search.json 'q=' 'author=Laughland' \
+  "title=A History of Political Trials" "fields=$fields" 'limit=5' 'page=1'
+record search_ghosal /search.json 'q=' 'author=Ghosal' \
+  "title=Engineering Aspects of Howrah Bridge at Kolkata (1943)" "fields=$fields" 'limit=5' 'page=1'
+record search_rayees /search.json 'q=' 'author=Rayees' \
+  "title=Asthma: Pathophysiology, Herbal and Modern Therapeutic Interventions" "fields=$fields" 'limit=5' 'page=1'
+
+record editions_barker /works/OL8008683W/editions.json 'limit=100'
+record editions_scolnicov /works/OL21269086W/editions.json 'limit=100'
+record editions_anjum /works/OL37926341W/editions.json 'limit=100'
+record editions_kolkowicz /works/OL18401623W/editions.json 'limit=100'
+record editions_laughland /works/OL17526122W/editions.json 'limit=100'
+
 if grep -rqiF "$ASPERO_MAILTO" "$out"; then
   echo "mailto address found in fixtures; deleting them" >&2
   rm -rf "$out"

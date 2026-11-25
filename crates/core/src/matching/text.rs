@@ -8,8 +8,8 @@ use unicode_normalization::UnicodeNormalization;
 
 use super::caps::{EXTENDED_TITLE, SHORT_TITLE_WORDS};
 use super::titles::{
-    first_sentence, main_title, probable_title, replaced, significant_word, significant_words,
-    unmarked,
+    first_sentence, main_title, opposite, probable_title, replaced, significant_word,
+    significant_words, unmarked,
 };
 use crate::work::PLAUSIBLE_YEARS;
 
@@ -286,7 +286,8 @@ impl Normalised {
     /// built on this one's, as an invented reference's often is.
     /// `Some(true)` when a year was put in place of the title's own
     /// ("Cancer statistics, 2020" for "Cancer statistics, 2018"): another
-    /// title of a series.
+    /// title of a series. A word put in place by its opposite counts,
+    /// however near its spelling ("Southern" for "Northern").
     pub(super) fn substitutes_in(&self, title: &str) -> Option<bool> {
         let title = words(unmarked(title));
         let n = title.len();
@@ -309,7 +310,7 @@ impl Normalised {
                 && placed
                 && differ.len() * 4 <= n.max(4)
                 && differ.iter().all(|(a, b)| {
-                    !super::authors::near(a, b)
+                    (opposite(a, b) || !super::authors::near(a, b))
                         && !STOPWORDS.contains(&a.as_str())
                         && !STOPWORDS.contains(&b.as_str())
                 });

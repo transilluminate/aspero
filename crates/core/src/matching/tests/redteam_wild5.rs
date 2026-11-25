@@ -199,3 +199,39 @@ fn a_loosely_read_journal_that_is_another_is_plausible() {
     assert_eq!(a.container.agreement, Agreement::Mismatch, "{a:?}");
     assert!(plausible(&a), "{a:?}");
 }
+
+/// A word put in place by its opposite rewords the title, however near
+/// its spelling: "Southern" for "Northern" (holdout-6 #863), at the work's
+/// place, is no misspelling; plausible, the title to check.
+#[test]
+fn a_title_with_a_word_replaced_by_its_opposite_is_reworded() {
+    let mut r = placed(
+        &[],
+        "Maritime Archaeology in Britain and Northern Ireland 1997 & 1998",
+        &["Joe Flatman", "Lucy Blue"],
+        1999,
+        (
+            "The International Journal of Nautical Archaeology",
+            "28",
+            "174-199",
+        ),
+    );
+    r.work.work_type = Some(crate::work::WorkType::JournalArticle);
+    let claim = Claim::from_text(
+        "FLATMAN, J. and BLUE, L. (1999) 'Maritime Archaeology in Britain and Southern Ireland \
+         1997 & 1998', The International Journal of Nautical Archaeology, 28(2), pp. 174–199.",
+    );
+    let a = assess(&claim, &r);
+    assert!(plausible(&a), "{a:?}");
+    // Given apart, the same.
+    let given = Claim {
+        title: Some("Maritime Archaeology in Britain and Southern Ireland 1997 & 1998".into()),
+        authors: vec!["Flatman J".into(), "Blue L".into()],
+        year: Some(1999),
+        container: Some("International Journal of Nautical Archaeology".into()),
+        volume: Some("28".into()),
+        page: Some("174".into()),
+        ..Claim::default()
+    };
+    assert!(plausible(&assess(&given, &r)), "{:?}", assess(&given, &r));
+}

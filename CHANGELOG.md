@@ -28,6 +28,10 @@ Fixed:
   not verified. Publishers, conferences and a book's "In …" aren't read
   so.
 
+- A title with a word put in place by its opposite ("Southern Ireland" for
+  "Northern Ireland", "Lose" for "Save") is reworded, not misspelt, however
+  close the spelling: plausible, never verified.
+
 ## 0.43.0
 
 Added:

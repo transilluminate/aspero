@@ -275,3 +275,29 @@ fn an_umlaut_written_out_is_the_same_name() {
     }];
     assert_eq!(assess(&given, &m).authors.agreement, Agreement::Match);
 }
+
+/// wild-5 #645: a chapter quoted, then its book with editors (MLA): the
+/// book's record holds the work cited, plausible at most.
+#[test]
+fn a_books_record_for_a_chapter_quoted_in_it_is_plausible() {
+    let mut book = record(
+        &["isbn:9780520030107"],
+        "First images of America",
+        &["Fredi Chiappelli", "Michael J. B. Allen"],
+        1976,
+    );
+    book.work.work_type = Some(crate::work::WorkType::Book);
+    let claim = Claim::from_text(
+        "Greenblatt, Stephen. \"Learning to Curse: Aspects of Linguistic Colonialism in the \
+         Sixteenth Century.\" First Images of America: The Impact of the New World on the Old, \
+         edited by Fredi Chiappelli, vol. 2, U of California P, 1976, pp. 561–80.",
+    );
+    let a = assess(&claim, &book);
+    assert!(a.confidence < VERIFIED, "{a:?}");
+    // The book itself, cited with its editors, is the book.
+    let claim = Claim::from_text(
+        "Chiappelli, Fredi, editor. First Images of America: The Impact of the New World on the \
+         Old. U of California P, 1976.",
+    );
+    assert!(assess(&claim, &book).confidence >= VERIFIED);
+}

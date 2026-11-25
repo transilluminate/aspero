@@ -12,7 +12,7 @@ use super::caps::{
     PLACED_YEAR_OFF, PLACED_YEAR_WRONG, PLAUSIBLE, SHORT_TITLE_WORDS, STRANGERS_CAP,
     UNCORROBORATED_CAP, UNPLACED_CAP, VENUE_RECORD_CAP, VERSION, combine,
 };
-use super::claim::{byline, cites_chapter, cites_edited_book, title_region};
+use super::claim::{byline, cites_chapter, cites_chapter_of, cites_edited_book, title_region};
 use super::derivative::{self, WorkKind, record_derivative_kind};
 use super::edition;
 use super::preprint::{names_preprint, preprint_server, preprint_version_claimed};
@@ -865,7 +865,12 @@ pub fn assess(claim: &Claim, record: &SourceRecord) -> Assessment {
             .text
             .as_deref()
             .is_some_and(|t| cites_chapter(t) || cites_edited_book(t));
-    if chapter_for_book {
+    // And a book's record, a chapter of it quoted: the book holds the work.
+    let book_for_chapter = work.work_type == Some(WorkType::Book)
+        && !named
+        && matches!((&text, &work_title, &title_span), (Some(t), Some(book), Some(span))
+            if cites_chapter_of(t, book, span));
+    if chapter_for_book || book_for_chapter {
         confidence = confidence.min(LOCATION_MISMATCH_CAP);
     }
     // A proceedings' own record (the volume: "2014 IEEE International

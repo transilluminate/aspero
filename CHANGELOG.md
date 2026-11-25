@@ -36,6 +36,11 @@ Fixed:
   ("Zanetti-Dällenbach", "Müller") is the same name, for names of five
   letters or more.
 
+- A book's record, where the citation quotes a chapter's title before the
+  book's and names its editors (MLA's "“Learning to Curse.” First Images
+  of America, edited by …"), is the book holding the work cited, not it:
+  plausible at most, so the chapter's own record ranks first.
+
 ## 0.43.0
 
 Added:

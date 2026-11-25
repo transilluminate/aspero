@@ -264,15 +264,77 @@ books never (0/185), and chapters, conference papers and reports once
 
 ## aspero's results
 
-**Not yet run.** This file is the held-out corpus only; aspero was not
-run on it while it was built. The live score will come from the nightly
-recorder, and the results belong in this section when they do.
+**These measure the hard tail on purpose.** Every reference is a model's
+own, often terse, in a table row or beside a trial label or a note, and
+every wrong one is a near-miss of a real work but one. They are not
+typical input.
 
-When they are read: **these will measure the hard tail on purpose.** Every
-reference is a model's own, often terse, in a table row or beside a trial
-label or a note, and every wrong one is a near-miss of a real work but
-one. They are not typical input. With 37 wrong references, one wrong
-`verified` is 2.7 points.
+The run was live, through `scripts/redteam.py` on 0.43.0, the release
+wild-5 was held out from. No fix had seen the corpus. It took two nights
+of the recorder: on 2026-11-24 the free OpenAlex allowance ran out with
+342 claims capped, and on 2026-11-25 the run resumed from the tape and
+finished with none capped. No claim panicked or failed internally.
+
+| Criterion | 0.43.0, held out | Target |
+|---|---|---|
+| Wrong → `verified` | 5/37 (13.5%) | ≤ 2% |
+| Invented work → `verified` | 0/1 | 0 |
+| Real → `mismatch` or `not_found` | 44/827 (5.3%) | ≤ 3% |
+| Real → `verified` | 693/827 (83.8%) | ≥ 85% |
+| Real → `verified` or `plausible` | 783/827 (94.7%) | ≥ 95% |
+| Wrong → `plausible` naming the field that differs | 15/15 (100%) | ≥ 80% |
+| … medicine/nursing/allied health: wrong → `verified` | 3/21 | |
+| … medicine/nursing/allied health: real → `verified` | 347/395 (87.8%) | |
+| … other fields: real → `verified` | 346/432 (80.1%) | |
+
+Four criteria fail their targets. With 37 wrong references, one wrong
+`verified` is 2.7 points, so the wrong → `verified` rate is coarse. On the
+real side, every figure is better than wild-4's held-out run on 0.38.3
+(6.8%, 82.5% and 92.4%). The corpus has no nonexistent identifiers and no
+retracted works.
+
+By writer, wrong → `verified` was haiku 3/20, sonnet 2/11 and opus 0/6;
+real → `verified` was haiku 111/137 (81.0%), sonnet 229/291 (78.7%) and
+opus 353/399 (88.5%).
+
+- **Wrong and verified (5).** Each matched the work the model meant;
+  one field of it was wrong:
+  - three titles cut or rewritten, with everything else right: #353
+    (Twenge et al. 2018, cited without the last eight words that carry
+    its finding), #762 (Bialy and Loeb 2018, "… Explain 'Oumuamua?"
+    without "'s Peculiar Acceleration") and #194 (the Apple Heart Study's
+    design paper, an RIS record with its title rewritten but its DOI,
+    authors, journal and pages right);
+  - two in the wrong journal, with the title right and no volume or
+    pages: #375 (cited in Population, Space and Place, published in
+    Economics and Human Biology) and #560 (cited in BSERT, published in
+    Building Research & Information).
+- **Real and missed (44: 37 `not_found`, 7 `mismatch`).** A first look;
+  the fix round's triage will go further.
+  - **Books, 27.** 23 not found and 4 called `mismatch`. Nine are Italian
+    titles from one answer on the mafia (#789–#806), so Italian real
+    references verified only 7/20. Others are books cited by their main
+    title alone: *The Innovator's Dilemma* (#525) isn't found, though the
+    same book cited with its subtitle verifies.
+  - **Journal references with no title, 9.** Eight are chemistry
+    references from one answer, written "Authors. Journal Year, Vol,
+    Pages" (#579–#589), and one is a midwifery trial (#7). The policy says
+    these verify on journal, volume and first page; they weren't read.
+  - **Other, 8.** A NICE guideline and a position statement (#29, #389),
+    a review described in French in place of its title (#400), a law
+    review article by its short title (#433), one paper not found (#146),
+    and three found but outranked or called `mismatch` (#378, #460,
+    #488).
+- **Accepted as another work (41).** Real references accepted
+  (`verified` or `plausible`) whose matched record doesn't carry the
+  cited DOI or PMID. Most are the same work under another identifier: a
+  book's record without its DOI, another version of a Cochrane review, an
+  SSRN copy of a journal article. A few are other works accepted as
+  `plausible`, such as #521 ("How to Lose a Constitutional Democracy"
+  matched to "How to Save …").
+
+wild-5's misses are the next round's tuning data, so from that round on
+wild-5 no longer counts as held out.
 
 ## Notes
 

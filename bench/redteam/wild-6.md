@@ -16,7 +16,7 @@ wild-5 round on model output that no fix was tuned on.
 **This corpus is weighted toward error-prone requests and toward haiku on
 purpose, so that wrong references are numerous enough to measure. It is
 harder than typical use.** wild-5 held 37 wrong references, so one wrong
-`verified` moved its headline rate by 2.7 points; wild-6 holds 80.
+`verified` moved its headline rate by 2.7 points; wild-6 holds 83.
 
 - **Independence.** The 120 prompts were written by a naive subagent that
   knew nothing about aspero: it was asked for realistic requests for
@@ -99,9 +99,27 @@ As [wild-5's](wild-5.md#method), with these differences:
    re-grounded six: five "label | arXiv ID" rows the comparison had matched
    to encyclopedia entries of the same name, and a book matched to a
    review of it. Three issue-only differences the comparison flagged were
-   read and kept. One reviewer judged all 120 sessions. Every hand decision
-   is recorded with its evidence in `target/wild-6/parts/`, and the `why`
-   of each line carries it.
+   read and kept. One reviewer judged all 120 sessions.
+
+   A second reviewer then audited the passes, since the random sample had
+   found a one-word substitution (#464) that the title score let through.
+   Every real-correct line (668) was checked strictly against its record:
+   any cited title word the record lacks or replaces, and any year,
+   journal, volume, issue, first page or identifier that disagrees, with
+   the lines re-grounded by hand checked against the records their ids
+   name. That flagged 78 lines and 25 re-grounded ones, all read by hand
+   with the 44 books re-grounded on Open Library works (read with their
+   editions); three were wrong: a rewritten subtitle Crossref
+   doesn't carry (#466, Hirth's "effect of solar and wind power
+   variability on their relative price" as "effect of wind and solar power
+   on prices"), *ApJL* for a paper in *ApJ* (#587; its arXiv record has no
+   journal), and Serianni's "lingua letteraria" as "lingua d'uso" (#673;
+   Open Library's editions carry the subtitle). The rest were
+   abbreviations, label rows, preprint matches and the like. A random 100
+   of the 352 passes no one had read (seed 20261126), read in full,
+   overturned none. Every hand decision is recorded with its evidence in
+   `target/wild-6/parts/` (the audit in its p15 file), and the `why` of each
+   line carries it.
 
    The automatic comparison was weak in the same places as in wild-5, and
    in two new ones:
@@ -148,8 +166,8 @@ corpus raised new cases:
 
 | Class | Category, `expect` | n |
 |---|---|---|
-| real-correct | `w:real-correct`, real: true. Expect verified or plausible. | 668 |
-| real-flawed:fields | `w:real-flawed:<fields>`, real: false. Expect per the policy table. | 78 |
+| real-correct | `w:real-correct`, real: true. Expect verified or plausible. | 665 |
+| real-flawed:fields | `w:real-flawed:<fields>`, real: false. Expect per the policy table. | 81 |
 | chimera | `w:chimera`, real: false. Expect plausible, mismatch or not_found. | 2 |
 | fabricated | `a:wild-fabricated`. **None found.** | 0 |
 | unclear | Excluded: 64 citations with no title or locator (authors, venue and year with a description; a trial or collaboration label; a prose mention); 33 grey literature (government, agency, inquiry, think-tank and engineering reports, NICE-style guidance not in the NCBI Bookshelf); 16 court judgments (UK, CJEU, ECtHR); 9 pieces of legislation; 9 newspaper, magazine, blog and encyclopedia pieces; 9 articles and chapters that no free source indexes; 6 law review articles; 4 editions or originals that no free source confirms; 3 standards and engineering bulletins; 2 theses; 1 database. | 156 |
@@ -161,16 +179,16 @@ corpus raised new cases:
 | references extracted | 292 | 418 | 194 | 904 |
 | unclear (excluded) | 40 | 82 | 34 | 156 |
 | judged | 252 | 336 | 160 | 748 |
-| real-correct | 201 (79.8%) | 313 (93.2%) | 154 (96.3%) | 668 (89.3%) |
-| real-flawed | 49 (19.4%) | 23 (6.8%) | 6 (3.8%) | 78 (10.4%) |
+| real-correct | 198 (78.6%) | 313 (93.2%) | 154 (96.3%) | 665 (88.9%) |
+| real-flawed | 52 (20.6%) | 23 (6.8%) | 6 (3.8%) | 81 (10.8%) |
 | chimera | 2 (0.8%) | 0 | 0 | 2 (0.3%) |
 | fabricated | 0 | 0 | 0 | 0 |
-| wrong beyond a soft field (not only an issue or last page) | 47 (18.7%) | 23 (6.8%) | 6 (3.8%) | 76 (10.2%) |
+| wrong beyond a soft field (not only an issue or last page) | 50 (19.8%) | 23 (6.8%) | 6 (3.8%) | 79 (10.6%) |
 
-Every writer was wrong more often than in wild-5 (haiku 20.2% against
+Every writer was wrong more often than in wild-5 (haiku 21.4% against
 12.7%, sonnet 6.8% against 3.6%, opus 3.8% against 1.5%), which is what
-the weighting toward error-prone requests was for. With 80 wrong
-references, one wrong `verified` is 1.25 points.
+the weighting toward error-prone requests was for. With 83 wrong
+references, one wrong `verified` is 1.2 points.
 
 Wrong rate (flawed, chimera or fabricated, as a share of judged
 references) by slice. Each session has one request kind; the language and
@@ -179,26 +197,26 @@ domain slices cut across them.
 | Slice | haiku | sonnet | opus |
 |---|---|---|---|
 | medicine/nursing/allied health | 28.4% (31/109) | 9.5% (11/116) | 3.0% (2/67) |
-| other fields | 14.0% (20/143) | 5.5% (12/220) | 4.3% (4/93) |
+| other fields | 16.1% (23/143) | 5.5% (12/220) | 4.3% (4/93) |
 | identifiers asked | 24.3% (17/70) | 9.8% (14/143) | 2.4% (1/41) |
-| named style | 32.4% (22/68) | 5.8% (5/86) | 4.8% (2/42) |
-| recent work | 22.2% (2/9) | 0.0% (0/42) | 0.0% (0/7) |
+| named style | 33.8% (23/68) | 5.8% (5/86) | 4.8% (2/42) |
+| recent work | 33.3% (3/9) | 0.0% (0/42) | 0.0% (0/7) |
 | grey literature asked | 0.0% (0/4) | 0.0% (0/9) | 0.0% (0/8) |
 | critiques or debate | 11.4% (4/35) | 33.3% (1/3) | 7.1% (3/42) |
 | confirm or trace one work | 16.7% (1/6) | 0.0% (0/1) | 0.0% (0/5) |
-| reading lists | 4.8% (2/42) | 7.1% (3/42) | — |
+| reading lists | 7.1% (3/42) | 7.1% (3/42) | — |
 | other requests | 16.7% (3/18) | 0.0% (0/10) | 0.0% (0/15) |
-| non-English prompt | 15.6% (5/32) | 18.8% (3/16) | 8.3% (1/12) |
+| non-English prompt | 21.9% (7/32) | 18.8% (3/16) | 8.3% (1/12) |
 
 The fields wrong among flawed references. A reference can have several.
 
 | Field | haiku | sonnet | opus |
 |---|---|---|---|
 | doi | 11 | 2 | 1 |
-| title | 16 | 6 | 0 |
+| title | 18 | 6 | 0 |
 | authors | 7 | 9 | 2 |
 | year | 5 | 5 | 2 |
-| journal | 10 | 0 | 1 |
+| journal | 11 | 0 | 1 |
 | volume | 5 | 0 | 0 |
 | issue | 8 | 0 | 0 |
 | pages (first) | 6 | 0 | 0 |
@@ -212,18 +230,18 @@ references that carry a DOI, 17.2% of haiku's (11/64) give a wrong one,
 sonnet's 1.7% (2/118) and opus's 1.8% (1/56). Eight cited DOIs don't
 exist; the other six belong to other papers, five of them in the same
 journal and year. Two PMIDs are other papers' (2/10), and three arXiv IDs
-(3/88), all haiku's. By type, journal articles were wrong 14.4% of the
-time (69/479), books 4.2% (6/143), conference papers 5 times in 26, and
+(3/88), all haiku's. By type, journal articles were wrong 14.8% of the
+time (71/479), books 4.9% (7/143), conference papers 5 times in 26, and
 preprints (0/72) and reports (0/22) never.
 
 Haiku's hedges meant something: 39% of the references it marked as
-uncertain were wrong (26/66), against 13% of those it didn't (25/186).
+uncertain were wrong (26/66), against 15% of those it didn't (28/186).
 
 ## Hallucination patterns
 
 1. **Haiku is wrong one time in five, and most when asked for a style or
    for identifiers.** A third of its references in named-style answers
-   were wrong (22/68). Its RIS answer for Zotero (session 87) gave three
+   were wrong (23/68). Its RIS answer for Zotero (session 87) gave three
    DOIs that are other papers in the same journal and year (#540); its
    APA 7 answer on mirror therapy (session 17) gave one paper the wrong
    co-authors, journal and locator (#107) and another a later year and a
@@ -254,13 +272,15 @@ uncertain were wrong (26/66), against 13% of those it didn't (25/186).
    bowel ischaemia" "rapid onset intestinal obstruction" (#91), "can
    Ayurveda show the way forward?" "can Ayurvedomics change the game?"
    (#222), "5-year results" "2-year results" (#143), "in Poland" "in
-   Germany" (#464). Haiku gave Senkov's *Refractory high-entropy alloys*
+   Germany" (#464), "variability on their relative price" "on prices"
+   (#466), "lingua letteraria" "lingua d'uso" (#673). Haiku gave
+   Senkov's *Refractory high-entropy alloys*
    a title from his later papers (#299).
 7. **Venues moved to a sibling journal.** *Sci Adv* to *PNAS* (#592),
    *Ann Emerg Med* to *Ann Surg* (opus, #234), *JOSPT* to *Arch Phys Med
    Rehabil*, *J Dent Res* to *Caries Res*, *Eur J Clin Pharmacol* to *Br J
    Clin Pharmacol*, *Behav Res Ther* to *Community Dent Oral Epidemiol*,
-   all haiku's. Some moved with a volume and pages of their own: *Otol
+   all haiku's, and *ApJ* to *ApJL* (#587). Some moved with a volume and pages of their own: *Otol
    Neurotol* 32(5):812 is an unrelated paper (#17); others gave *Invest
    Radiol* 55(8):544–555 (#186) and *Eur J Pain* 24(2):262–276 (#108).
 8. **Opus errs least, and not in titles.** Its six wrong references are
@@ -272,9 +292,10 @@ uncertain were wrong (26/66), against 13% of those it didn't (25/186).
 10. **Identifiers asked of arXiv papers come back right.** Sonnet's two
     answers listing 73 papers by label and arXiv ID got every ID right;
     two cite the v1 titles of papers since retitled.
-11. **Books remain the safe ground.** Six of 143 judged books were wrong:
-    five a year after the only edition free sources hold, and one with a
-    co-author who isn't on it (#267).
+11. **Books remain the safe ground.** Seven of 143 judged books were
+    wrong: five a year after the only edition free sources hold, one with a
+    co-author who isn't on it (#267) and one with its subtitle rewritten
+    (#673).
 
 ## aspero's results
 
@@ -283,11 +304,12 @@ Not yet run.
 ## Notes
 
 - **Instruction-like text.** No generated answer and no API response read
-  in the review contained instruction-like text.
+  in the review or the audit of passes contained instruction-like text.
 - **Independence.** The prompts came from a naive subagent with no
   knowledge of aspero. The judging read only wild-3.md, wild-4.md,
   wild-5.md and wild-5's build scripts, and public sources: Crossref,
-  Europe PMC, DataCite, arXiv, Open Library and doi.org. Nobody involved
+  Europe PMC, DataCite, arXiv, Open Library and doi.org (and, in the
+  audit of passes, Semantic Scholar for one full title). Nobody involved
   read aspero's code or ran it, and OpenAlex wasn't used.
 - **Line format.** As wild-5: each line carries `n`, `category`, `real`,
   `claim`, `expect`, `why`, `ids` (left out when there are none), `model`

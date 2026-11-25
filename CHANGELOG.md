@@ -20,6 +20,14 @@ Fixed:
   modifier letter apostrophe some records print ("womenʼs") now reads as an
   apostrophe, so those titles match as cited.
 
+- A journal is read in two more places, as one possible reading: named
+  without a stop before the year ending the reference ("… in India. Popul
+  Space Place 2018."), and after a quoted title, ended by a comma, before a
+  note in lowercase ("\"…,\" BSERT, a follow-up on remedies."). A journal
+  article cited so in another journal is plausible, the journal to check,
+  not verified. Publishers, conferences and a book's "In …" aren't read
+  so.
+
 ## 0.43.0
 
 Added:

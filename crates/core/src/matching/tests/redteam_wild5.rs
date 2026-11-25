@@ -146,3 +146,56 @@ fn a_modifier_letter_apostrophe_is_an_apostrophe() {
         normalise("women's perceptions")
     );
 }
+
+/// wild-5 #375 and #560: a journal read loosely (no stop before the
+/// closing year; after a quoted title, before a note) and clearly another:
+/// plausible, the journal to check.
+#[test]
+fn a_loosely_read_journal_that_is_another_is_plausible() {
+    let mut ehb = record(
+        &["10.1016/j.ehb.2018.08.007"],
+        "How much do conditional cash transfers increase the utilization of maternal and child \
+         health care services? New evidence from Janani Suraksha Yojana in India",
+        &["Mohammad Mahbubur Rahman", "Saseendran Pallikadavath"],
+        2018,
+    );
+    ehb.work.container_title = Some("Economics & Human Biology".into());
+    ehb.work.work_type = Some(crate::work::WorkType::JournalArticle);
+    let claim = Claim::from_text(
+        "Rahman MM, Pallikadavath S. How much do conditional cash transfers increase the \
+         utilization of maternal and child health care services? New evidence from Janani \
+         Suraksha Yojana in India. Popul Space Place 2018.",
+    );
+    let a = assess(&claim, &ehb);
+    assert_eq!(a.container.agreement, Agreement::Mismatch, "{a:?}");
+    assert!(plausible(&a), "{a:?}");
+    // Its own journal so cited verifies.
+    let claim = Claim::from_text(
+        "Rahman MM, Pallikadavath S. How much do conditional cash transfers increase the \
+         utilization of maternal and child health care services? New evidence from Janani \
+         Suraksha Yojana in India. Econ Hum Biol 2018.",
+    );
+    assert!(assess(&claim, &ehb).confidence >= VERIFIED);
+
+    let mut bri = record(
+        &["10.1080/09613218.2014.979093"],
+        "Bridging the domestic building fabric performance gap",
+        &[
+            "David Johnston",
+            "David Farmer",
+            "Malcolm Brooke-Peat",
+            "David Miles-Shenton",
+        ],
+        2014,
+    );
+    bri.work.container_title = Some("Building Research & Information".into());
+    bri.work.work_type = Some(crate::work::WorkType::JournalArticle);
+    bri.work.other_years = vec![2016];
+    let claim = Claim::from_text(
+        "Johnston, Farmer, Brooke-Peat & Miles-Shenton (2016), \"Bridging the domestic building \
+         fabric performance gap,\" BSERT, a follow-up on remedies.",
+    );
+    let a = assess(&claim, &bri);
+    assert_eq!(a.container.agreement, Agreement::Mismatch, "{a:?}");
+    assert!(plausible(&a), "{a:?}");
+}

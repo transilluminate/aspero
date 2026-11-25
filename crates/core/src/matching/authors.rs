@@ -438,8 +438,12 @@ pub(super) fn names_given(text: &str) -> bool {
         let capitals = !family.chars().any(char::is_lowercase);
         let series =
             initials.chars().count() == 1 && SERIES_STEMS.contains(&family.to_lowercase().as_str());
+        // A university press ("Oxford UP, 2002", "Kent State UP"), not a
+        // name and its initials.
+        let press = initials == "UP";
         !w[0].ends_with('.')
             && !series
+            && !press
             && family.chars().count() >= 2
             && family.chars().next().is_some_and(char::is_uppercase)
             && family

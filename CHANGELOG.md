@@ -3,6 +3,14 @@
 Releases 0.10 to 0.19 are in [docs/changelog/0.1x.md](docs/changelog/0.1x.md),
 and 0.1 to 0.9 in [docs/changelog/0.0x.md](docs/changelog/0.0x.md).
 
+## Unreleased
+
+Fixed:
+
+- A university press ("Oxford UP, 2002") is no longer read as a person
+  the book's record lacks: such a book cited without its author was a
+  mismatch.
+
 ## 0.43.0
 
 Added:

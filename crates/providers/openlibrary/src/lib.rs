@@ -499,10 +499,11 @@ impl Provider for OpenLibrary {
             .transpose()
             .map_err(Error::UnsupportedQuery)?;
         let mut clauses = Vec::new();
-        if !query.text.trim().is_empty() {
+        let text = without_possessive_s(query.text.trim());
+        if !text.is_empty() {
             // Words, never operators: an upper-case AND, OR or NOT in a
             // citation is searched for (#195).
-            clauses.push(format!("({})", lucene_words(query.text.trim())));
+            clauses.push(format!("({})", lucene_words(&text)));
         }
         clauses.extend(query.years.map(|y| lucene_years("first_publish_year", y)));
         let page_number: u32 = match &query.page.cursor {
@@ -560,6 +561,24 @@ impl Provider for OpenLibrary {
 }
 
 const NAME: &str = "Open Library";
+
+/// Search text without the lone "s" a possessive leaves where its
+/// apostrophe was taken out ("the innovator s dilemma"): Open Library
+/// wants every word of `q` found, and indexes "Innovator's" as
+/// "innovator", so the "s" matches only records holding an "S" of their
+/// own, an initial (wild-5 #525). An apostrophe kept ("Innovator's") is
+/// searched as it stands.
+fn without_possessive_s(text: &str) -> std::borrow::Cow<'_, str> {
+    if !text.split_whitespace().any(|w| w == "s") {
+        return std::borrow::Cow::Borrowed(text);
+    }
+    std::borrow::Cow::Owned(
+        text.split_whitespace()
+            .filter(|w| *w != "s")
+            .collect::<Vec<_>>()
+            .join(" "),
+    )
+}
 
 /// A query tree as Open Library's `q` (Solr, checked live 2026-11-13):
 /// `title`, `author_name`, `first_publish_year` and `language` (MARC's

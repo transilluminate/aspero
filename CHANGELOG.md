@@ -10,6 +10,9 @@ Fixed:
 - A university press ("Oxford UP, 2002") is no longer read as a person
   the book's record lacks: such a book cited without its author was a
   mismatch.
+- Open Library searches leave out the lone "s" a possessive leaves when
+  its apostrophe is taken out ("the innovator s dilemma"): Open Library
+  wants every word found, so it found only records with an initial "S".
 
 ## 0.43.0
 

@@ -197,6 +197,19 @@ fn user_text_is_escaped_and_extras_rejected() {
     ));
 }
 
+#[test]
+fn a_possessives_lone_s_is_left_out() {
+    // wild-5 #525: every word of `q` must be found, and Open Library
+    // indexes "Innovator's" as "innovator": a lone "s" finds initials.
+    let (ol, http) = provider([recorded("search")]);
+    block_on(ol.search(&SearchQuery::new("the innovator s dilemma"))).unwrap();
+    assert!(query(&http, 0).contains(&pair("q", "(the innovator dilemma)")));
+    // An apostrophe kept is searched as it stands.
+    let (ol, http) = provider([recorded("search")]);
+    block_on(ol.search(&SearchQuery::new("The Innovator's Dilemma"))).unwrap();
+    assert!(query(&http, 0).contains(&pair("q", "(The Innovator's Dilemma)")));
+}
+
 fn tree_query(tree: QueryNode) -> SearchQuery {
     let mut q = SearchQuery::new("");
     q.tree = Some(tree);

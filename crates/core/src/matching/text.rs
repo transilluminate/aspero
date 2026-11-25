@@ -135,6 +135,30 @@ pub(super) fn dedup(mut v: Vec<String>) -> Vec<String> {
     v
 }
 
+/// Whether `title`, cut after its first `k` words, is cut where it has a
+/// separator: a subtitle's colon or dash, a question's or sentence's end,
+/// a bracket, a semicolon or a comma ("Does Money Matter?" of "Does Money
+/// Matter? A Meta-Analysis …"): a part of it cited, as a subtitle dropped
+/// is.
+fn cut_at_separator(title: &str, k: usize) -> bool {
+    let spans = spanned_words(title);
+    let Some((_, span)) = spans.get(k.wrapping_sub(1)) else {
+        return false;
+    };
+    let rest = title[span.end..].trim_start();
+    rest.starts_with([':', '?', '!', '.', ',', ';', '(', '[', '—', '–']) || rest.starts_with("- ")
+}
+
+/// Whether the title cited (`claimed`, given apart, else found in `text`)
+/// is `actual` cut off ([`Normalised::cut_off`]).
+pub(super) fn title_cut(claimed: Option<&str>, text: Option<&Normalised>, actual: &str) -> bool {
+    match (claimed, text) {
+        (Some(claimed), _) => Normalised::new(claimed).cut_off(actual, true),
+        (None, Some(text)) => text.cut_off(actual, false),
+        _ => false,
+    }
+}
+
 /// A reference string prepared for "is X mentioned?" questions.
 pub(super) struct Normalised {
     /// The reference as written.
@@ -548,6 +572,65 @@ impl Normalised {
                     rest.starts_with('…') || rest.starts_with("...")
                 }
         })
+    }
+
+    /// Whether the reference gives `title` cut off: its opening words, at
+    /// least [`SHORT_TITLE_WORDS`] of them content words, then nothing
+    /// more of it, the words dropped neither found elsewhere in the
+    /// reference nor marked dropped ("…"), and the cut not where the title
+    /// has a subtitle, a question's or a sentence's end, a bracket or a
+    /// comma ([`cut_at_separator`]). "Increases in Depressive Symptoms, …
+    /// Among U.S. Adolescents After 2010" for "… After 2010 and Links to
+    /// Increased New Media Screen Time": the words dropped may carry the
+    /// finding, so the title isn't the work's as cited. A word misspelt
+    /// where the run ends ("Scepticism" for "Scepticism1") isn't a cut.
+    /// `whole`: the reference is the title cited, all of it the run.
+    pub(super) fn cut_off(&self, title: &str, whole: bool) -> bool {
+        let title = unmarked(title);
+        let t = words(title);
+        if t.is_empty() || self.title_span(title).is_some() {
+            return false;
+        }
+        let Some((i, k)) = (0..self.words.len())
+            .map(|i| {
+                let k = t
+                    .iter()
+                    .zip(&self.words[i..])
+                    .take_while(|(a, b)| a == b)
+                    .count();
+                (i, k)
+            })
+            .max_by(|a, b| a.1.cmp(&b.1).then(b.0.cmp(&a.0)))
+        else {
+            return false;
+        };
+        if k == 0
+            || k >= t.len()
+            || content_words(&t[..k].join(" ")).len() < SHORT_TITLE_WORDS
+            || (whole && (i != 0 || k != self.words.len()))
+            || self
+                .words
+                .get(i + k)
+                .is_some_and(|w| super::authors::near(w, &t[k]))
+            || cut_at_separator(title, k)
+        {
+            return false;
+        }
+        // The cited title ends there (a stop, a quote, the field's end):
+        // not one reworded at its end ("… stem cell transplant recipients"
+        // for "… stem cell transplantation: a randomized …").
+        let rest = self.raw[self.spans[i + k - 1].end..].trim_start();
+        if rest.starts_with('…')
+            || rest.starts_with("...")
+            || rest.starts_with(char::is_alphanumeric)
+        {
+            return false;
+        }
+        let dropped = significant_words(&t[k..]);
+        dropped
+            .iter()
+            .any(|w| w.chars().filter(|c| c.is_alphabetic()).count() >= 3)
+            && dropped.iter().all(|w| !self.words.contains(w))
     }
 
     /// Whether `title` is found as a phrase only in a short form: its main

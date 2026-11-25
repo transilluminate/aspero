@@ -18,7 +18,7 @@ use super::edition;
 use super::preprint::{names_preprint, preprint_server, preprint_version_claimed};
 use super::record_title::record_title;
 use super::same_work::{id_agreement, same_work_id};
-use super::text::{Normalised, content_words, words};
+use super::text::{self, Normalised, content_words, words};
 use super::titles::{self, title_similarity, unmarked};
 use super::venue;
 use super::version;
@@ -256,6 +256,15 @@ pub fn assess(claim: &Claim, record: &SourceRecord) -> Assessment {
     let title = match (title.score, reworded) {
         (Some(s), Some(true)) => FieldCheck::scored(s.min(OTHER_IN_SERIES)),
         (Some(s), Some(false)) => FieldCheck::scored(s.min(EXTENDED_TITLE)),
+        _ => title,
+    };
+    // Or cut off, not at a subtitle (`Normalised::cut_off`, wild-5 #353,
+    // #762): the words dropped may be what the work found.
+    let cut = work_title
+        .as_deref()
+        .is_some_and(|actual| text::title_cut(claimed_title.as_deref(), text.as_ref(), actual));
+    let title = match title.score {
+        Some(s) if cut => FieldCheck::scored(s.min(EXTENDED_TITLE)),
         _ => title,
     };
 
@@ -922,7 +931,9 @@ pub fn assess(claim: &Claim, record: &SourceRecord) -> Assessment {
         (None, Some(actual), Some(text)) => titles::misspelt_only(&text.words, actual, false),
         _ => true,
     };
-    if title.agreement == Agreement::Partial && !misspelt && !named && !located {
+    // The identifier or place doesn't make up for a title cut off:
+    // plausible, the title to check.
+    if cut || (title.agreement == Agreement::Partial && !misspelt && !named && !located) {
         confidence = confidence.min(EXTENDED_TITLE_CAP);
     }
     // A claimed PMID or PMCID that isn't the work's, beside an identifier

@@ -3,6 +3,17 @@
 Releases 0.10 to 0.19 are in [docs/changelog/0.1x.md](docs/changelog/0.1x.md),
 and 0.1 to 0.9 in [docs/changelog/0.0x.md](docs/changelog/0.0x.md).
 
+## Unreleased
+
+Fixed:
+
+- A title cut off at its end, the rest dropped without "…" and not at a
+  subtitle ("… Suicide Rates Among U.S. Adolescents After 2010" for "…
+  After 2010 and Links to Increased New Media Screen Time"), is no longer
+  verified, even beside the work's DOI or its journal, volume and page:
+  plausible, its title to check. The words dropped may carry what the work
+  found. A subtitle dropped, or a cut marked "…", still verifies.
+
 ## 0.43.0
 
 Added:

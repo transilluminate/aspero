@@ -931,9 +931,17 @@ pub fn assess(claim: &Claim, record: &SourceRecord) -> Assessment {
         (None, Some(actual), Some(text)) => titles::misspelt_only(&text.words, actual, false),
         _ => true,
     };
-    // The identifier or place doesn't make up for a title cut off:
-    // plausible, the title to check.
-    if cut || (title.agreement == Agreement::Partial && !misspelt && !named && !located) {
+    // The identifier or place doesn't make up for a title cut off, nor
+    // for one given apart (a structured claim's, BibTeX's or RIS's
+    // title, read whole, not found among other words) that is reworded:
+    // an RIS record's TI rewritten beside the work's DOI and place
+    // (wild-5 #194). Plausible, the title to check.
+    let given_apart = claimed_title.is_some();
+    if cut
+        || (title.agreement == Agreement::Partial
+            && !misspelt
+            && ((!named && !located) || given_apart))
+    {
         confidence = confidence.min(EXTENDED_TITLE_CAP);
     }
     // A claimed PMID or PMCID that isn't the work's, beside an identifier

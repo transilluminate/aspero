@@ -22,9 +22,16 @@ pub fn normalise(s: &str) -> String {
         .nfkd()
         .filter(|c| !unicode_normalization::char::is_combining_mark(*c))
         .flat_map(char::to_lowercase)
-        .map(|c| if c.is_alphanumeric() { c } else { ' ' })
+        .map(|c| if word_char(c) { c } else { ' ' })
         .collect();
     folded.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+/// A character of a word: a letter or digit, but not the modifier letter
+/// apostrophe some records print for an apostrophe ("womenʼs", holdout-5
+/// #1074).
+fn word_char(c: char) -> bool {
+    c.is_alphanumeric() && c != '\u{2bc}'
 }
 
 /// [`normalise`]'s words, each with where it stands in `s` (a byte
@@ -42,7 +49,7 @@ pub(super) fn spanned_words(s: &str) -> Vec<(String, Range<usize>)> {
         let end = at + c.len_utf8();
         for f in folded.chars() {
             match found.last_mut() {
-                _ if !f.is_alphanumeric() => open = false,
+                _ if !word_char(f) => open = false,
                 Some((word, span)) if open => {
                     word.push(f);
                     span.end = end;

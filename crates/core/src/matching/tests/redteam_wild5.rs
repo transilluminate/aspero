@@ -111,3 +111,38 @@ fn a_title_reworded_at_its_end_is_no_cut() {
         false
     ));
 }
+
+/// wild-5 #194: an RIS record's title rewritten beside the work's DOI,
+/// authors, journal and pages: plausible, the title to check.
+#[test]
+fn a_title_given_apart_and_rewritten_beside_the_doi_is_plausible() {
+    let mut r = placed(
+        &["10.1016/j.ahj.2018.09.002"],
+        "Rationale and design of a large-scale, app-based study to identify cardiac \
+         arrhythmias using a smartwatch: The Apple Heart Study",
+        &["Mintu P. Turakhia", "Manisha Desai", "Haley Hedlin"],
+        2018,
+        ("American Heart Journal", "207", "66-75"),
+    );
+    r.work.work_type = Some(crate::work::WorkType::JournalArticle);
+    let claim = Claim::from_input(
+        "TY  - JOUR\nTI  - Rationale and design of the Apple Heart Study: A prospective, \
+         single-arm, pragmatic study to evaluate the ability of a smartwatch to identify atrial \
+         fibrillation\nAU  - Turakhia, Mintu P.\nAU  - Desai, Manisha\nT2  - American Heart \
+         Journal\nPY  - 2019\nVL  - 207\nSP  - 66\nEP  - 75\nDO  - 10.1016/j.ahj.2018.09.002\nER  -",
+    );
+    assert!(claim.title.is_some());
+    let a = assess(&claim, &r);
+    assert_eq!(a.ids, Agreement::Match);
+    assert!(plausible(&a), "{a:?}");
+}
+
+/// The modifier letter apostrophe some records print ("womenʼs",
+/// holdout-5 #1074) is an apostrophe, not a letter.
+#[test]
+fn a_modifier_letter_apostrophe_is_an_apostrophe() {
+    assert_eq!(
+        normalise("women\u{2bc}s perceptions"),
+        normalise("women's perceptions")
+    );
+}

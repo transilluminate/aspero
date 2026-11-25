@@ -14,6 +14,12 @@ Fixed:
   plausible, its title to check. The words dropped may carry what the work
   found. A subtitle dropped, or a cut marked "…", still verifies.
 
+- A title given in its own field (a structured claim's, BibTeX's or RIS's)
+  that is reworded, not misspelt, is plausible even beside the work's DOI
+  or its journal, volume and page (an RIS record's `TI` rewritten). The
+  modifier letter apostrophe some records print ("womenʼs") now reads as an
+  apostrophe, so those titles match as cited.
+
 ## 0.43.0
 
 Added:

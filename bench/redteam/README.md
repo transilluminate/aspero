@@ -595,6 +595,37 @@ title searched for books ([wild-4.md](wild-4.md#what-the-triage-found)).
 next held-out measurement needs a fresh one (wild-5). No corpus file or
 API response seen in this round contained instruction-like text.
 
+## Round 8: measured on held-out wild-5 (2026-11-25, aspero 0.43.0)
+
+0.39.0 to 0.43.0 (the wild-4 round and the releases after it) were run
+live on `wild-5.jsonl`: 864 references from 100 model sessions whose
+prompts a naive writer chose, each checked by hand without aspero (see
+[wild-5.md](wild-5.md)). No fix had seen it. The recorder took two nights:
+the first stopped at the allowance with 342 claims capped, and the second
+resumed from the tape with none capped. No claim panicked.
+
+```
+wild-5 (held out on 0.43.0, live)            0.43.0
+wrong -> verified                          5/37 (13.5%)     <= 2%
+invented, fake ID, DOI swap -> verified     0/1 (0.0%)      <= 0%
+real -> mismatch or not_found             44/827 (5.3%)     <= 3%
+real -> verified                         693/827 (83.8%)    >= 85%
+real -> verified or plausible            783/827 (94.7%)    >= 95%
+wrong -> plausible names a differing field 15/15 (100.0%)   >= 80%
+```
+
+With 37 wrong references, one wrong verified is 2.7 points. The five each
+matched the work meant, with one field wrong: three titles cut or
+rewritten (#194, #353, #762) and two in the wrong journal with no volume
+or pages (#375, #560). The real side is better than wild-4's held-out run
+on every figure. Of the 44 real misses, 27 are books (9 Italian titles
+from one answer, and books cited by their main title alone), 9 are
+journal references with no title (8 chemistry references from one
+answer), and 8 are other kinds
+([wild-5.md](wild-5.md#asperos-results)). wild-5 becomes the next
+round's tuning corpus. No corpus file or API response seen in this round
+contained instruction-like text.
+
 ## Failures (`failures.jsonl`)
 
 Every false VERIFIED from the corpus (31) and the adversarial round (48),

@@ -152,6 +152,35 @@ recorded fixture), so it stays fixed without the network.
 These are the hardest cases (see the note at the top), not typical
 input.
 
+**Round 8 (0.43.0), real model output, held out** —
+`bench/redteam/wild-5.jsonl`. Like wild-4, it measures the hard tail on
+purpose: references as models write them, whose wrong ones are near-misses
+of real works. This time the prompts came from a writer who knew nothing
+of aspero, and the references were judged without it. The corpus holds 864
+references from 100 model sessions, each checked by hand (see
+[wild-5.md](../bench/redteam/wild-5.md)). Only 37 are wrong, so one wrong
+`verified` is 2.7 points. It was run live on 2026-11-24 and 2026-11-25, on
+the release it was held out from:
+
+| Criterion | 0.43.0 | Target |
+|---|---|---|
+| Wrong → `verified` | 5/37 (13.5%) | ≤ 2% — not yet met |
+| Correct → `verified` | 693/827 (83.8%) | ≥ 85% — not yet met |
+| Correct → `verified` or `plausible` | 783/827 (94.7%) | ≥ 95% — not yet met |
+| Correct → `mismatch` or `not_found` | 44/827 (5.3%) | ≤ 3% — not yet met |
+| Wrong → `plausible` naming the field that differs | 15/15 (100%) | ≥ 80% |
+
+The one invented work was not verified. Each of the five wrong verifieds
+matched the work the model meant, with one field wrong: three titles cut
+or rewritten, and two in the wrong journal with no volume or pages to
+check it against. In medicine and allied health, 3 of 21 wrong references
+verified and 87.8% of correct ones did.
+
+The correct citations missed are mostly books (27 of 44), among them
+nine Italian titles and books cited by their main title alone, and
+journal references written without a title (9). Every real-citation
+figure is better than wild-4's held-out run on 0.38.3.
+
 **Round 7 (0.38.3), real model output, held out** —
 `bench/redteam/wild-4.jsonl`. Like every red-team corpus, it measures the
 hard tail on purpose: references as models write them, in table cells and
@@ -188,7 +217,7 @@ On 0.39.1, wild-4 gives:
 - correct → `verified` or `plausible` 1031/1060 (97.3%);
 - correct → `mismatch` or `not_found` 11/1060 (1.0%).
 
-The next held-out measurement needs a fresh corpus (wild-5).
+wild-5 (round 8, above) was the next held-out measurement.
 
 **Every corpus on 0.39.1.** These corpora have all been tuned on, so they
 check that the fixes hold. They aren't held-out scores. All were run live
@@ -312,6 +341,7 @@ measured on a corpus it had never seen:
 | 6 (0.32.0 candidate) | holdout-6 (unseen, books and reprints) | 38/516 (7.4%) | 98.0% |
 | 6 (0.32.0 candidate) | wild-3 (unseen model output) | 25/122 (20.5%) | 95.9% |
 | 7 (0.38.3) | wild-4 (unseen model output) | 2/75 (2.7%) | 92.4% |
+| 8 (0.43.0) | wild-5 (unseen model output, naive prompts) | 5/37 (13.5%) | 94.7% |
 
 Each held-out corpus was built to be harder than the last, so the rates
 aren't a smooth series; what they show is that invented works and other

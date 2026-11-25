@@ -52,6 +52,12 @@ const NOT_NAMES: &[&str] = &[
     "others",
 ];
 
+/// Pronouns opening prose ("He later returned to the topic in 1899 with
+/// …"): no name, unless initials follow ("He K, Zhang X" names He).
+const PRONOUNS: &[&str] = &[
+    "he", "she", "they", "we", "it", "his", "her", "their", "our",
+];
+
 /// People a byline naming an organisation too must list to be taken as
 /// complete: "Meyer G, Vicaut E, …, PEITHO Investigators" is cited by its
 /// people; "RECOVERY Collaborative Group" alone may be cited by its
@@ -274,6 +280,10 @@ pub(super) fn byline_strangers(byline: &str, authors: &[Person], journal: Option
             || STOPWORDS.contains(&word.as_str())
             || BYLINE_WORDS.contains(&word.as_str())
             || NOT_NAMES.contains(&word.as_str())
+            || (PRONOUNS.contains(&word.as_str())
+                && !tokens.get(i + 1).is_some_and(|(_, next)| {
+                    next.chars().count() <= 3 && next.chars().all(char::is_uppercase)
+                }))
             || is_particle(word)
             || is_month(word)
             || journal

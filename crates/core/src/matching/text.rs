@@ -835,3 +835,12 @@ impl Normalised {
         }
     }
 }
+
+/// A title that is a URL.
+pub(super) fn is_url(title: &str) -> bool {
+    let t = title.trim();
+    ["http://", "https://", "www."]
+        .iter()
+        .any(|p| crate::id::starts_with_ci(t, p))
+        || t.contains("://")
+}

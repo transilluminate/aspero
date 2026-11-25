@@ -55,6 +55,23 @@ Fixed:
   book's and names its editors (MLA's "“Learning to Curse.” First Images
   of America, edited by …"), is the book holding the work cited, not it:
   plausible at most, so the chapter's own record ranks first.
+- Journal references without a title, written as chemistry's ACS style
+  writes them ("Mahal, Yarema & Bertozzi. Science 1997, 276, 1125-1128.",
+  "Blackman, Royzen & Fox, JACS 2008, 130, 13518"), are now read and
+  verified by their journal, volume and first page; before, only their
+  year was read and they weren't found.
+- A journal with a possessive, abbreviated without its apostrophe ("J
+  Midwifery Womens Health"), is now the journal ("Journal of Midwifery &
+  Women's Health"), so such references verify at their place.
+- A reference without a title that names an author the work lacks
+  ("Laughlin, Baskin, Agard & Bertozzi. Science 2008, 320, 664") is now
+  plausible, not verified, as one with a title already was.
+- A work cited by a quoted part of its title, its opening words or its
+  subtitle ("Death by a thousand cuts" for "Insect decline in the
+  Anthropocene: Death by a thousand cuts"), beside its authors, year and
+  journal, is now plausible, not not found or another work of that name.
+- Prose opening with a pronoun ("He later returned to the topic …") no
+  longer reads it as an author's name.
 
 ## 0.43.0
 

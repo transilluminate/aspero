@@ -12,7 +12,7 @@ use super::caps::{
     PLACED_YEAR_OFF, PLACED_YEAR_WRONG, PLAUSIBLE, SHORT_TITLE_WORDS, STRANGERS_CAP,
     UNCORROBORATED_CAP, UNPLACED_CAP, VENUE_RECORD_CAP, VERSION, combine,
 };
-use super::claim::{byline, cites_chapter, cites_edited_book, title_region};
+use super::claim::{byline, cites_chapter, cites_edited_book, title_region, untitled_byline};
 use super::derivative::{self, WorkKind, record_derivative_kind};
 use super::edition;
 use super::preprint::{names_preprint, preprint_server, preprint_version_claimed};
@@ -157,12 +157,19 @@ pub fn assess(claim: &Claim, record: &SourceRecord) -> Assessment {
     // co-authors beside a real first author. Not a match, whoever is first.
     // Not for books, whose records often list only the first author (Open
     // Library's Sutton without Barto).
+    let journal = work
+        .container_title
+        .as_deref()
+        .map(publication::significant);
     let strangers = authors.agreement != Agreement::Unknown
         && work.work_type != Some(crate::work::WorkType::Book)
         && complete_byline(&work.authors)
         && if claim.authors.is_empty() {
             text.as_ref()
-                .and_then(|text| byline(text, work_title.as_deref(), title_span.as_ref()))
+                .and_then(|text| {
+                    byline(text, work_title.as_deref(), title_span.as_ref())
+                        .or_else(|| untitled_byline(text, journal.as_deref()))
+                })
                 .is_some_and(|b| {
                     byline_strangers(&b, &work.authors, work.container_title.as_deref())
                 })

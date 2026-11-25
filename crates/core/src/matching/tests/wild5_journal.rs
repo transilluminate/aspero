@@ -128,3 +128,78 @@ fn acs_references_at_another_place_or_by_others_do_not_verify() {
         assert!(a.confidence < VERIFIED, "{text}: {a:?}");
     }
 }
+
+/// Laughlin et al. 2008, in Science.
+fn laughlin() -> SourceRecord {
+    article(
+        "In Vivo Imaging of Membrane-Associated Glycans in Developing Zebrafish",
+        &[
+            "Scott T. Laughlin",
+            "Jeremy M. Baskin",
+            "Sharon L. Amacher",
+            "Carolyn R. Bertozzi",
+        ],
+        2008,
+        ("Science", "320", "664-667"),
+    )
+}
+
+/// wild-5 #586: a reference without a title naming an author the work
+/// lacks ("Agard" for Amacher) is no verified citation at its place.
+#[test]
+fn a_stranger_in_a_titleless_byline_is_not_verified_at_the_place() {
+    for text in [
+        "Laughlin, Baskin, Agard & Bertozzi. Science 2008, 320, 664-667.",
+        "Laughlin ST, Baskin JM, Agard NJ, Bertozzi CR. Science 2008;320:664-667.",
+    ] {
+        let a = assess(&Claim::from_text(text), &laughlin());
+        assert!(
+            (PLAUSIBLE..VERIFIED).contains(&a.confidence),
+            "{text}: {a:?}"
+        );
+    }
+    for text in [
+        "Laughlin, Baskin, Amacher & Bertozzi. Science 2008, 320, 664-667.",
+        "Laughlin ST, Baskin JM, Amacher SL, Bertozzi CR. Science 2008;320:664-667.",
+        // A running header opening with its journal names no one.
+        "Science 320 (2008) 664-667",
+    ] {
+        let a = assess(&Claim::from_text(text), &laughlin());
+        assert!(a.confidence >= VERIFIED, "{text}: {a:?}");
+    }
+    // The byline ends at "et al." and at the journal: a label after it
+    // ("CATIE Phase 2E"), or the journal's words ("Am"), are no names
+    // (wild-5 #91, #196).
+    let mcevoy = article(
+        "Effectiveness of Clozapine Versus Olanzapine, Quetiapine, and Risperidone in \
+         Patients With Chronic Schizophrenia Who Did Not Respond to Prior Atypical \
+         Antipsychotic Treatment",
+        &[
+            "Joseph P. McEvoy",
+            "Jeffrey A. Lieberman",
+            "T. Scott Stroup",
+        ],
+        2006,
+        ("American Journal of Psychiatry", "163", "600-610"),
+    );
+    let text = "McEvoy et al., CATIE Phase 2E, Am J Psychiatry 2006;163(4):600–610";
+    let a = assess(&Claim::from_text(text), &mcevoy);
+    assert!(a.confidence >= VERIFIED, "{text}: {a:?}");
+    let guo = article(
+        "Cardiovascular disease risk in patients with heart failure",
+        &["Ying Guo", "Gregory Y.H. Lip"],
+        2020,
+        (
+            "Journal of the American College of Cardiology",
+            "75",
+            "1523-1534",
+        ),
+    );
+    for text in [
+        "Guo et al., J Am Coll Cardiol 2020;75:1523–34",
+        "Guo Y, Lip GYH. J Am Coll Cardiol 2020;75:1523–34",
+    ] {
+        let a = assess(&Claim::from_text(text), &guo);
+        assert!(a.confidence >= VERIFIED, "{text}: {a:?}");
+    }
+}

@@ -373,6 +373,31 @@ pub(super) fn byline(
     Some(unlabelled(byline).to_owned())
 }
 
+/// The byline of a reference that gives no title ("Laughlin, Baskin, Agard
+/// & Bertozzi. Science 2008, 320, 664"): its text up to the first
+/// sentence's end (not an initial's), "et al.", the first word of the
+/// `journal`'s (its significant words: "Am" of "J Am Coll Cardiol") or its
+/// first number.
+pub(super) fn untitled_byline(text: &Normalised, journal: Option<&[String]>) -> Option<String> {
+    let end = (0..text.words.len()).find_map(|i| {
+        let raw = &text.raw[text.spans[i].clone()];
+        let journal_word = raw.chars().count() >= 2
+            && raw.starts_with(char::is_uppercase)
+            && journal.is_some_and(|j| publication::journal_word(&text.words[i], j));
+        if raw.starts_with(|c: char| c.is_ascii_digit()) || journal_word {
+            return Some(i);
+        }
+        if text.words[i] == "al" && i > 0 && text.words[i - 1] == "et" {
+            return Some(i + 1);
+        }
+        let initial = raw.chars().count() <= 3 && raw.chars().all(char::is_uppercase);
+        let after = &text.raw[text.spans[i].end..];
+        (!initial && after.starts_with(". ")).then_some(i + 1)
+    })?;
+    let byline = &text.raw[..text.spans.get(end).map_or(text.raw.len(), |s| s.start)];
+    Some(unlabelled(byline).to_owned())
+}
+
 /// A byline without the label a reference may open with, a trial's or a
 /// guideline's ("EMPEROR-Reduced (empagliflozin, n=3,730): Packer M, …",
 /// "HOPE-3: Yusuf S, …", "`BaSICS` (Finfer S et al. …", "Aktueller

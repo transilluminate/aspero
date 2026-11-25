@@ -15,6 +15,9 @@ Fixed:
 - A journal with a possessive, abbreviated without its apostrophe ("J
   Midwifery Womens Health"), is now the journal ("Journal of Midwifery &
   Women's Health"), so such references verify at their place.
+- A reference without a title that names an author the work lacks
+  ("Laughlin, Baskin, Agard & Bertozzi. Science 2008, 320, 664") is now
+  plausible, not verified, as one with a title already was.
 
 ## 0.43.0
 

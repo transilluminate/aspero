@@ -2,6 +2,7 @@
 //! replaced or spelt otherwise; and reading the title a reference gives.
 
 use super::text::{STOPWORDS, content_words, dedup, words};
+use super::title_layout as layout;
 
 /// A title without a leading status marker publishers add to retracted or
 /// withdrawn works ("RETRACTED: Ileal-lymphoid…", "RETRACTED ARTICLE: …",
@@ -452,6 +453,10 @@ fn first_cell(text: &str) -> Option<&str> {
 /// The title a reference's layout suggests ([`probable_title`]'s, but for
 /// a marked one).
 fn guessed_title(text: &str) -> Option<String> {
+    // Notes of an editor or translator in brackets would split the
+    // title's sentence at their full stops ("… Processes (ed. G. S.
+    // Koby). Kent State UP.").
+    let text = &*layout::without_role_notes(text);
     if let Some(title) = after_comma_byline(text) {
         return Some(title);
     }
@@ -464,7 +469,12 @@ fn guessed_title(text: &str) -> Option<String> {
     // (1945)"). Nor editors' names ("Ragep, eds"), a note in brackets
     // ending it ("… Human Anatomy & Physiology (Pearson)"), a place and
     // publisher ("Atlanta: Scholars Press, 1998"), nor, rather than
-    // another, a series' volume ("Writings from the Ancient World 2").
+    // another, a series' volume ("Writings from the Ancient World 2") or a
+    // publisher's name ("The Innovator's Dilemma. Harvard Business School
+    // Press.") or an identifier ("ISBN-13: 978-…", a link). A byline's family name and initials ("Christensen, C")
+    // and a given name after them ("Connor, W. Robert.") are no title;
+    // a publisher after a comma ("…, Columbia UP") or a count of volumes
+    // ("…, 4 vols") is left out of one.
     let editors = |s: &str| {
         s.split_whitespace().last().is_some_and(|w| {
             matches!(
@@ -475,7 +485,9 @@ fn guessed_title(text: &str) -> Option<String> {
             )
         })
     };
-    text.split(". ")
+    let sentences: Vec<&str> = text.split(". ").collect();
+    sentences
+        .iter()
         .map(|s| without_trailing_note(without_name_byline(s)))
         .enumerate()
         .filter(|(i, s)| {
@@ -483,9 +495,13 @@ fn guessed_title(text: &str) -> Option<String> {
                 || super::authors::names_given(s)
                 || editors(s)
                 || published_by(s)
-                || (*i == 0 && family_given(s)))
+                || (*i == 0 && (family_given(s) || layout::family_initials(s)))
+                || (*i == 1 && layout::given_after_initial(sentences[0], s)))
         })
-        .map(|(_, s)| without_byline_year(without_leading_year(s)))
+        .map(|(_, s)| {
+            let s = without_byline_year(without_leading_year(s));
+            layout::without_volumes(layout::without_trailing_publisher(s))
+        })
         .filter_map(title_like)
         .enumerate()
         // Of sentences alike, the first: a title precedes its place.
@@ -501,7 +517,14 @@ fn guessed_title(text: &str) -> Option<String> {
             // Writings from the Ancient World 2"), not a title ending in
             // a number ("Fast gapped-read alignment with Bowtie 2").
             let series = *i > 0 && numbered(s);
-            (!series, lower, words.len(), std::cmp::Reverse(*i))
+            let furniture = layout::publisher_name(s) || layout::identifiers(s);
+            (
+                !series,
+                !furniture,
+                lower,
+                words.len(),
+                std::cmp::Reverse(*i),
+            )
         })
         .map(|(_, s)| s)
 }
@@ -511,7 +534,7 @@ fn guessed_title(text: &str) -> Option<String> {
 /// Sampson)", "(2004, in Icelandic)"), when words are left before it. Not
 /// one in capitals, an acronym the title may spell out ("… Respiratory
 /// Syndrome (MERS)", "… Joint National Committee (JNC 8)").
-fn without_trailing_note(s: &str) -> &str {
+pub(super) fn without_trailing_note(s: &str) -> &str {
     let t = s.trim_end().trim_end_matches('.');
     let Some(inner) = t.strip_suffix(')') else {
         return s;
@@ -745,7 +768,7 @@ fn after_comma_byline(text: &str) -> Option<String> {
 
 /// A span of a reference that may be a title: words, one of three letters
 /// or more, not "In: …".
-fn title_like(s: &str) -> Option<String> {
+pub(super) fn title_like(s: &str) -> Option<String> {
     let s = s
         .trim()
         .trim_matches(|c: char| c.is_whitespace() || ",.;:'\"“”‘’*".contains(c));

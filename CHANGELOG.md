@@ -7,6 +7,14 @@ and 0.1 to 0.9 in [docs/changelog/0.0x.md](docs/changelog/0.0x.md).
 
 Fixed:
 
+- Books cited without an identifier are searched by their title more
+  often (wild-5's missed books). The title read from a reference's layout
+  no longer is its publisher ("Christensen, C. M. (1997). The Innovator's
+  Dilemma. Harvard Business School Press." searched for the press), an
+  identifier ("ISBN-13: …", "doi: …"), a byline's initials and given name
+  ("Connor, W. Robert."), or a note naming an editor or translator ("(ed.
+  G. S. Koby)"); a publisher after a comma ("…, Columbia UP") and a count
+  of volumes ("…, 4 vols") are left out of it.
 - The title read from a reference's layout is searched beside the
   citation matcher's runs unless one of the runs searched is the title; a
   run past the two searched no longer keeps it out.

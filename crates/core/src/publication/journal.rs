@@ -493,19 +493,36 @@ pub(crate) fn journal_word(word: &str, full: &[String]) -> bool {
 /// The article "A" inside a name ("CA: A Cancer Journal for Clinicians",
 /// abbreviated "CA Cancer J Clin") is left out too; a series letter
 /// ("Physical Review A", "Acta Crystallographica Section A: …") isn't.
+/// A possessive's "s", split off by its apostrophe ("Women's", or
+/// "Women s" as a record may lose it), is its word's: "womens", as an
+/// abbreviation writes it ("J Midwifery Womens Health").
 pub(crate) fn significant(name: &str) -> Vec<String> {
     let norm = normalise(name);
-    let words: Vec<&str> = norm.split(' ').filter(|w| !w.is_empty()).collect();
+    let mut words: Vec<String> = Vec::new();
+    for w in norm.split(' ').filter(|w| !w.is_empty()) {
+        match words.last_mut() {
+            Some(last)
+                if w == "s"
+                    && last.chars().count() > 1
+                    && last.chars().all(char::is_alphabetic)
+                    && !STRUCTURAL_WORDS.contains(&last.as_str())
+                    && !JOURNAL_STOPWORDS.contains(&last.as_str()) =>
+            {
+                last.push('s');
+            }
+            _ => words.push(w.to_owned()),
+        }
+    }
     let article = |i: usize| {
         words[i] == "a"
             && i + 1 < words.len()
-            && !(i > 0 && STRUCTURAL_WORDS.contains(&words[i - 1]))
+            && !(i > 0 && STRUCTURAL_WORDS.contains(&words[i - 1].as_str()))
     };
     words
         .iter()
         .enumerate()
-        .filter(|&(i, w)| !JOURNAL_STOPWORDS.contains(w) && !article(i))
-        .map(|(_, w)| (*w).to_owned())
+        .filter(|&(i, w)| !JOURNAL_STOPWORDS.contains(&w.as_str()) && !article(i))
+        .map(|(_, w)| w.clone())
         .collect()
 }
 
@@ -590,6 +607,16 @@ mod tests {
             ("CA Cancer J Clin", "CA: A Cancer Journal for Clinicians"),
             ("CA Cancer J Clin", "CA A Cancer Journal for Clinicians"),
             ("Phys Rev A", "Physical Review A"),
+            // A possessive, its apostrophe dropped or split off (wild-5 #7).
+            (
+                "J Midwifery Womens Health",
+                "Journal of Midwifery & Women's Health",
+            ),
+            (
+                "J Midwifery Womens Health",
+                "Journal of Midwifery & Women s Health",
+            ),
+            ("J Midwifery Womens Health", "J. Midwifery Women's Health"),
         ] {
             assert!(same_journal(a, b), "{a} ↔ {b}");
         }

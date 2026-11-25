@@ -3,6 +3,76 @@
 Releases 0.10 to 0.19 are in [docs/changelog/0.1x.md](docs/changelog/0.1x.md),
 and 0.1 to 0.9 in [docs/changelog/0.0x.md](docs/changelog/0.0x.md).
 
+## Unreleased
+
+Fixed:
+
+- Books cited without an identifier are searched by their title more
+  often (wild-5's missed books). The title read from a reference's layout
+  no longer is its publisher ("Christensen, C. M. (1997). The Innovator's
+  Dilemma. Harvard Business School Press." searched for the press), an
+  identifier ("ISBN-13: …", "doi: …"), a byline's initials and given name
+  ("Connor, W. Robert."), or a note naming an editor or translator ("(ed.
+  G. S. Koby)"); a publisher after a comma ("…, Columbia UP") and a count
+  of volumes ("…, 4 vols") are left out of it.
+- A reference listed as "Name, Title, Publisher, City Year", as Italian,
+  Spanish and French ones are ("Cesare Mori, Con la mafia ai ferri corti,
+  Mondadori, 1932"), is searched by its title, not the whole reference.
+- The title read from a reference's layout is searched beside the
+  citation matcher's runs unless one of the runs searched is the title; a
+  run past the two searched no longer keeps it out.
+- A university press ("Oxford UP, 2002") is no longer read as a person
+  the book's record lacks: such a book cited without its author was a
+  mismatch.
+- Open Library searches leave out the lone "s" a possessive leaves when
+  its apostrophe is taken out ("the innovator s dilemma"): Open Library
+  wants every word found, so it found only records with an initial "S".
+- A title cut off at its end, the rest dropped without "…" and not at a
+  subtitle ("… Suicide Rates Among U.S. Adolescents After 2010" for "…
+  After 2010 and Links to Increased New Media Screen Time"), is no longer
+  verified, even beside the work's DOI or its journal, volume and page:
+  plausible, its title to check. The words dropped may carry what the work
+  found. A subtitle dropped, or a cut marked "…", still verifies.
+- A title given in its own field (a structured claim's, BibTeX's or RIS's)
+  that is reworded, not misspelt, is plausible even beside the work's DOI
+  or its journal, volume and page (an RIS record's `TI` rewritten). The
+  modifier letter apostrophe some records print ("womenʼs") now reads as an
+  apostrophe, so those titles match as cited.
+- A journal is read in two more places, as one possible reading: named
+  without a stop before the year ending the reference ("… in India. Popul
+  Space Place 2018."), and after a quoted title, ended by a comma, before a
+  note in lowercase ("\"…,\" BSERT, a follow-up on remedies."). A journal
+  article cited so in another journal is plausible, the journal to check,
+  not verified. Publishers, conferences and a book's "In …" aren't read
+  so.
+- A title with a word put in place by its opposite ("Southern Ireland" for
+  "Northern Ireland", "Lose" for "Save") is reworded, not misspelt, however
+  close the spelling: plausible, never verified.
+- An author's umlaut written out ("Zanetti-Daellenbach", "Mueller") or not
+  ("Zanetti-Dällenbach", "Müller") is the same name, for names of five
+  letters or more.
+- A book's record, where the citation quotes a chapter's title before the
+  book's and names its editors (MLA's "“Learning to Curse.” First Images
+  of America, edited by …"), is the book holding the work cited, not it:
+  plausible at most, so the chapter's own record ranks first.
+- Journal references without a title, written as chemistry's ACS style
+  writes them ("Mahal, Yarema & Bertozzi. Science 1997, 276, 1125-1128.",
+  "Blackman, Royzen & Fox, JACS 2008, 130, 13518"), are now read and
+  verified by their journal, volume and first page; before, only their
+  year was read and they weren't found.
+- A journal with a possessive, abbreviated without its apostrophe ("J
+  Midwifery Womens Health"), is now the journal ("Journal of Midwifery &
+  Women's Health"), so such references verify at their place.
+- A reference without a title that names an author the work lacks
+  ("Laughlin, Baskin, Agard & Bertozzi. Science 2008, 320, 664") is now
+  plausible, not verified, as one with a title already was.
+- A work cited by a quoted part of its title, its opening words or its
+  subtitle ("Death by a thousand cuts" for "Insect decline in the
+  Anthropocene: Death by a thousand cuts"), beside its authors, year and
+  journal, is now plausible, not not found or another work of that name.
+- Prose opening with a pronoun ("He later returned to the topic …") no
+  longer reads it as an author's name.
+
 ## 0.43.0
 
 Added:

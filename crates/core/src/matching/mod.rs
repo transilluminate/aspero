@@ -30,6 +30,9 @@
 //! - `derivative.rs`: replies, corrections and notices about a work.
 //! - `same_work.rs`: identifier agreement, and whether two records are one
 //!   work.
+//! - `title_layout.rs`: a book's reference around its title: a
+//!   publisher's name, notes of an editor or translator, a byline's
+//!   initials; and "Name, Title, Publisher, City Year" references.
 //! - `venue.rs`: the venue cited against a record's: a chapter cited as an
 //!   article or the reverse, another conference or meeting, a preprint at
 //!   one.
@@ -49,6 +52,7 @@ mod publisher;
 mod record_title;
 mod same_work;
 mod text;
+mod title_layout;
 mod titles;
 mod venue;
 mod version;

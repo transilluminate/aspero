@@ -309,6 +309,28 @@ pub(super) fn cites_chapter(text: &str) -> bool {
     })
 }
 
+/// Whether a free-text reference cites a chapter of the book whose title
+/// stands at `span`: another title quoted before the book's, and editors
+/// named ("“Learning to Curse: …” First Images of America: …, edited by
+/// Fredi Chiappelli", MLA's and Chicago's way; wild-5 #645). The book's
+/// record holds the work cited; it isn't it.
+pub(super) fn cites_chapter_of(text: &Normalised, book: &str, span: &Range<usize>) -> bool {
+    let Some(quoted) = super::titles::given_title(&text.raw) else {
+        return false;
+    };
+    let book_at = text.spans[span.start].start;
+    let after = text.raw[book_at..].to_lowercase();
+    super::titles::title_similarity(&quoted, book) < 0.5
+        && text
+            .raw
+            .find(quoted.as_str())
+            .is_some_and(|at| at + quoted.len() <= book_at)
+        && (cites_edited_book(&text.raw)
+            || ["edited by", " ed.", " eds.", "(ed.", "(eds."]
+                .iter()
+                .any(|m| after.contains(m)))
+}
+
 /// Whether a reference cites its work in an edited book: "In" (or "in"
 /// after a comma or quote, Harvard's) and then its editors ("In: Jones K,
 /// Smith P, editors. …", "in Jones, K. (eds) …", "In K. Jones (Ed.), …",
@@ -370,6 +392,31 @@ pub(super) fn byline(
         ended.map_or(titled, |i| i + 1)
     };
     let byline = &text.raw[..text.spans.get(start).map_or(text.raw.len(), |s| s.start)];
+    Some(unlabelled(byline).to_owned())
+}
+
+/// The byline of a reference that gives no title ("Laughlin, Baskin, Agard
+/// & Bertozzi. Science 2008, 320, 664"): its text up to the first
+/// sentence's end (not an initial's), "et al.", the first word of the
+/// `journal`'s (its significant words: "Am" of "J Am Coll Cardiol") or its
+/// first number.
+pub(super) fn untitled_byline(text: &Normalised, journal: Option<&[String]>) -> Option<String> {
+    let end = (0..text.words.len()).find_map(|i| {
+        let raw = &text.raw[text.spans[i].clone()];
+        let journal_word = raw.chars().count() >= 2
+            && raw.starts_with(char::is_uppercase)
+            && journal.is_some_and(|j| publication::journal_word(&text.words[i], j));
+        if raw.starts_with(|c: char| c.is_ascii_digit()) || journal_word {
+            return Some(i);
+        }
+        if text.words[i] == "al" && i > 0 && text.words[i - 1] == "et" {
+            return Some(i + 1);
+        }
+        let initial = raw.chars().count() <= 3 && raw.chars().all(char::is_uppercase);
+        let after = &text.raw[text.spans[i].end..];
+        (!initial && after.starts_with(". ")).then_some(i + 1)
+    })?;
+    let byline = &text.raw[..text.spans.get(end).map_or(text.raw.len(), |s| s.start)];
     Some(unlabelled(byline).to_owned())
 }
 

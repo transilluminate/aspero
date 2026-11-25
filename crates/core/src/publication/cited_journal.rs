@@ -5,6 +5,7 @@ use crate::id::{is_digits, starts_with_ci};
 use crate::matching::normalise;
 
 use super::bibtex::bibtex_field;
+use super::conference::proceedings;
 use super::journal::JOURNAL_STOPWORDS;
 use super::locator::{
     bracketed_year, compact, dated_end, is_label, is_month, is_year, page_number, ranged, styled,
@@ -77,10 +78,21 @@ fn read_cited_journal(text: &str) -> Option<Reading> {
     }
     let compact = compact(text);
     let tokens: Vec<&str> = compact.split_whitespace().collect();
-    if let Some(journal) = prose_journal(&tokens) {
+    told(&tokens).or_else(|| {
+        styled(&tokens)
+            .is_none()
+            .then(|| unstopped_journal(&tokens).or_else(|| named_after_quote(&tokens)))
+            .flatten()
+            .map(|journal| Reading::Maybe(vec![journal]))
+    })
+}
+
+/// [`read_cited_journal`]'s reading where a style tells the journal.
+fn told(tokens: &[&str]) -> Option<Reading> {
+    if let Some(journal) = prose_journal(tokens) {
         return Some(Reading::Sure(journal));
     }
-    let (at, after) = match styled(&tokens) {
+    let (at, after) = match styled(tokens) {
         Some((at, found)) => {
             // "Springer;2010:12-30": a publisher, not a year, before the
             // volume; "Proceedings of X. 2016:770-778": a year, not a volume.
@@ -93,14 +105,14 @@ fn read_cited_journal(text: &str) -> Option<Reading> {
             }
             (at, After::Anything)
         }
-        None => unstyled_end(&tokens)?,
+        None => unstyled_end(tokens)?,
     };
     // The date between journal and locator: "N Engl J Med. 2017 Jun 29;376…".
     let mut end = at;
     while end > 0 && is_date_word(tokens[end - 1]) {
         end -= 1;
     }
-    if let Some(journal) = quoted_journal(&tokens, end) {
+    if let Some(journal) = quoted_journal(tokens, end) {
         return Some(Reading::Sure(journal));
     }
     let last = without_comma_after_stop(tokens[..end].last()?);
@@ -126,7 +138,7 @@ fn read_cited_journal(text: &str) -> Option<Reading> {
     // Undotted, a short abbreviation after another ("… Creation. Psychol.
     // Sci. 5, 14"; not initials, "JAMA"): the title may have ended
     // before either.
-    let undotted = read_journal(&tokens, end, false, after).filter(|j| {
+    let undotted = read_journal(tokens, end, false, after).filter(|j| {
         let short = !j.contains(' ')
             && last.ends_with('.')
             && j.chars().count() <= 4
@@ -134,11 +146,83 @@ fn read_cited_journal(text: &str) -> Option<Reading> {
         !(dotted && short)
     });
     dotted
-        .then(|| read_journal(&tokens, end, true, after))
+        .then(|| read_journal(tokens, end, true, after))
         .flatten()
         .or(undotted)
         .map(Reading::Sure)
-        .or_else(|| readings(&tokens, end, after))
+        .or_else(|| readings(tokens, end, after))
+}
+
+/// Words that make a name a publisher's, not a journal's.
+const PUBLISHER_WORDS: &[&str] = &[
+    "press",
+    "publishing",
+    "publisher",
+    "publishers",
+    "publications",
+    "verlag",
+    "books",
+    "edition",
+    "editions",
+];
+
+/// A journal named without the stop that ends it, the year closing the
+/// reference after it: "… Janani Suraksha Yojana in India. Popul Space
+/// Place 2018." (wild-5 #375). One reading, not a sure one: back to the
+/// title's stop, every word a name's, and no publisher ("Oxford
+/// University Press 2018").
+fn unstopped_journal(tokens: &[&str]) -> Option<String> {
+    let (end, After::Title) = unstyled_end(tokens)? else {
+        return None;
+    };
+    let last = *tokens[..end].last()?;
+    if end == tokens.len()
+        || !is_date_word(tokens[end])
+        || last.ends_with(['.', ','])
+        || !name_word(last)
+        || is_stopword(last)
+    {
+        return None;
+    }
+    read_journal(tokens, end, false, After::Title).filter(|j| !publisher(j) && !proceedings(j))
+}
+
+/// The name right after a quoted title, ended by a comma, before a note
+/// in lowercase: "\"Bridging the domestic building fabric performance
+/// gap,\" BSERT, a follow-up on remedies." (wild-5 #560). One reading, not
+/// a sure one. Not a dotted abbreviation ("Invent. math., vol. 154"), a
+/// book's "In …", a publisher, or a conference.
+fn named_after_quote(tokens: &[&str]) -> Option<String> {
+    let quote = tokens.iter().rposition(|t| closes_quote(t))?;
+    let mut words: Vec<&str> = Vec::new();
+    for (at, t) in tokens.iter().enumerate().skip(quote + 1) {
+        let listed = t.strip_suffix(',');
+        let word = listed.unwrap_or(t);
+        if !name_word(word) || words.len() >= JOURNAL_WORDS {
+            return None;
+        }
+        words.push(word);
+        if listed.is_some() {
+            let note = tokens
+                .get(at + 1)
+                .is_some_and(|n| n.starts_with(char::is_lowercase) && !n.contains('.'));
+            let first = words[0];
+            let name = words.join(" ");
+            return (note
+                && capitalised(first)
+                && !is_stopword(&first.to_lowercase())
+                && !publisher(&name)
+                && !proceedings(&name))
+            .then_some(name);
+        }
+    }
+    None
+}
+
+fn publisher(name: &str) -> bool {
+    normalise(name)
+        .split(' ')
+        .any(|w| PUBLISHER_WORDS.contains(&w))
 }
 
 /// The journal between a quoted title and `end`, as written, in sentence
@@ -867,6 +951,47 @@ mod tests {
             "———. Essence of Decision: Explaining the Cuban Missile Crisis. Boston: Little, Brown, 1971.",
         ] {
             assert_eq!(cited_journal(text), None, "{text}");
+        }
+    }
+
+    #[test]
+    fn a_journal_without_its_stop_or_after_a_quoted_title_is_one_reading() {
+        // No stop before the closing year (wild-5 #375); after a quoted
+        // title, before a note (#560): one reading, not a sure one.
+        for (text, journal) in [
+            (
+                "Rahman MM, Pallikadavath S. How much do transfers help? New evidence from India. Popul Space Place 2018.",
+                "Popul Space Place",
+            ),
+            (
+                "Johnston, Farmer (2016), \"Bridging the building fabric performance gap,\" BSERT, a follow-up on remedies.",
+                "BSERT",
+            ),
+        ] {
+            assert_eq!(cited_journals(text), vec![journal.to_owned()], "{text}");
+            assert_eq!(cited_journal(text), None, "{text}");
+        }
+        // Not a publisher, a book's "in", or a name before more names.
+        for text in [
+            "Smith J. Some title. Oxford University Press 2018.",
+            "Smith J (2010), \"A chapter,\" in Handbook of Things, edited by K Jones.",
+            "Smith J (2010), \"A chapter,\" Harvard University Press, a classic.",
+            "Smith J (2010), \"A title,\" Nature, 2010.",
+            "Ren S. Faster R-CNN: towards real-time object detection. NeurIPS 2015.",
+            "A. Iovita, \"Derivatives of p-adic L-functions,\" Invent. math., vol. 154, 2003.",
+            "Cameron A. \"The Language of Images.\" In The Church and the Arts, edited by D Wood.",
+        ] {
+            assert!(
+                cited_journals(text)
+                    .iter()
+                    .all(|j| j != "Oxford University Press"
+                        && !j.starts_with("In ")
+                        && j != "Invent"
+                        && j != "NeurIPS"
+                        && j != "Harvard University Press"),
+                "{text}: {:?}",
+                cited_journals(text)
+            );
         }
     }
 }

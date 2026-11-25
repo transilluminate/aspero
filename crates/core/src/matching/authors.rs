@@ -52,6 +52,12 @@ const NOT_NAMES: &[&str] = &[
     "others",
 ];
 
+/// Pronouns opening prose ("He later returned to the topic in 1899 with
+/// …"): no name, unless initials follow ("He K, Zhang X" names He).
+const PRONOUNS: &[&str] = &[
+    "he", "she", "they", "we", "it", "his", "her", "their", "our",
+];
+
 /// People a byline naming an organisation too must list to be taken as
 /// complete: "Meyer G, Vicaut E, …, PEITHO Investigators" is cited by its
 /// people; "RECOVERY Collaborative Group" alone may be cited by its
@@ -274,6 +280,10 @@ pub(super) fn byline_strangers(byline: &str, authors: &[Person], journal: Option
             || STOPWORDS.contains(&word.as_str())
             || BYLINE_WORDS.contains(&word.as_str())
             || NOT_NAMES.contains(&word.as_str())
+            || (PRONOUNS.contains(&word.as_str())
+                && !tokens.get(i + 1).is_some_and(|(_, next)| {
+                    next.chars().count() <= 3 && next.chars().all(char::is_uppercase)
+                }))
             || is_particle(word)
             || is_month(word)
             || journal
@@ -366,7 +376,17 @@ pub(super) fn same_family(a: &str, b: &str) -> bool {
         long.strip_suffix(short)
             .is_some_and(|rest| rest.ends_with(' '))
     };
-    a == b || ends(a, b) || ends(b, a)
+    a == b || ends(a, b) || ends(b, a) || umlaut_spelling(a, b)
+}
+
+/// Whether two family names (normalised) are one German name, its umlaut
+/// written out on one side: "Zanetti-Daellenbach" and "Zanetti-Dällenbach"
+/// (read "dallenbach", accents dropped; wild-5 #410), "Mueller" and
+/// "Müller". Names of five letters or more, so short ones ("Hue", "Hu")
+/// stay apart.
+pub(super) fn umlaut_spelling(a: &str, b: &str) -> bool {
+    let fold = |s: &str| s.replace("ae", "a").replace("oe", "o").replace("ue", "u");
+    a != b && a.len().min(b.len()) >= 5 && fold(a) == fold(b)
 }
 
 /// Claimed authors vs the record's family names: half for the first author
@@ -438,8 +458,12 @@ pub(super) fn names_given(text: &str) -> bool {
         let capitals = !family.chars().any(char::is_lowercase);
         let series =
             initials.chars().count() == 1 && SERIES_STEMS.contains(&family.to_lowercase().as_str());
+        // A university press ("Oxford UP, 2002", "Kent State UP"), not a
+        // name and its initials.
+        let press = initials == "UP";
         !w[0].ends_with('.')
             && !series
+            && !press
             && family.chars().count() >= 2
             && family.chars().next().is_some_and(char::is_uppercase)
             && family

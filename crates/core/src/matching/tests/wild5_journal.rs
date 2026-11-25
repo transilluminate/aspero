@@ -203,3 +203,57 @@ fn a_stranger_in_a_titleless_byline_is_not_verified_at_the_place() {
         assert!(a.confidence >= VERIFIED, "{text}: {a:?}");
     }
 }
+
+/// wild-5 #400, #488: a work cited by its title's opening words or its
+/// subtitle, quoted, beside its authors, year and journal: plausible.
+#[test]
+fn a_work_cited_by_a_quoted_part_of_its_title_is_plausible() {
+    let hayden = article(
+        "Some types of exercise are more effective than others in people with chronic low \
+         back pain: a network meta-analysis",
+        &["Jill A. Hayden", "Jenny Ellis", "Rachel Ogilvie"],
+        2021,
+        ("Journal of Physiotherapy", "67", "252-262"),
+    );
+    let wagner = article(
+        "Insect decline in the Anthropocene: Death by a thousand cuts",
+        &["David L. Wagner", "Eliza M. Grames", "Matthew L. Forister"],
+        2021,
+        (
+            "Proceedings of the National Academy of Sciences",
+            "118",
+            "e2023989118",
+        ),
+    );
+    let mut book = record(
+        &["10.1515/9783110713329"],
+        "Death by a Thousand Cuts",
+        &["Matt Qvortrup"],
+        2021,
+    );
+    book.work.work_type = Some(crate::work::WorkType::Book);
+    let hayden_text = "Hayden et al. (2021), J Physiother : méta-analyse en réseau comparant \
+                       les types d'exercice (« Some types of exercise are more effective than \
+                       others »).";
+    let wagner_text = "Wagner et al. 2021, PNAS special feature, \"Death by a thousand cuts\":";
+    for (text, record) in [(hayden_text, &hayden), (wagner_text, &wagner)] {
+        let a = assess(&Claim::from_text(text), record);
+        assert!(
+            (PLAUSIBLE..VERIFIED).contains(&a.confidence),
+            "{text}: {a:?}"
+        );
+    }
+    // Over the namesake by another author.
+    let namesake = assess(&Claim::from_text(wagner_text), &book);
+    assert!(namesake.confidence < PLAUSIBLE, "{namesake:?}");
+    // Not beside another year, nor other authors, nor words of the title
+    // from its middle.
+    for text in [
+        "Wagner et al. 2019, PNAS special feature, \"Death by a thousand cuts\":",
+        "Kessler et al. 2021, PNAS special feature, \"Death by a thousand cuts\":",
+        "Wagner et al. 2021, PNAS, \"decline in the Anthropocene\":",
+    ] {
+        let a = assess(&Claim::from_text(text), &wagner);
+        assert!(a.confidence < PLAUSIBLE, "{text}: {a:?}");
+    }
+}

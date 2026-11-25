@@ -669,6 +669,21 @@ pub fn assess(claim: &Claim, record: &SourceRecord) -> Assessment {
     {
         confidence = confidence.max(PLAUSIBLE);
     }
+    // A quoted part of the work's title, its opening words or its subtitle,
+    // beside its own authors, year and journal: the work, cited by part of
+    // its title (wild-5 #400, #488). Plausible, the title to check.
+    if claimed_title.is_none()
+        && title.agreement == Agreement::Mismatch
+        && authors.score.is_some_and(|s| s >= CORROBORATING_AUTHORS)
+        && !(strangers || earlier)
+        && [year, container]
+            .iter()
+            .all(|c| c.agreement == Agreement::Match)
+        && (text.as_ref().zip(work_title.as_deref()))
+            .is_some_and(|(t, w)| titles::quotes_part_of(&t.raw, w))
+    {
+        confidence = confidence.max(PLAUSIBLE);
+    }
     // A claimed identifier and the exact place (journal, volume, first
     // page) name the same work twice: a title or a byline that differs
     // there is the citation's error ("Observation of ttH production" for

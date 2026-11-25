@@ -157,6 +157,33 @@ pub fn expand_acronyms(text: &str, title: &str) -> Option<String> {
     changed.then_some(out)
 }
 
+/// Whether `text` quotes a part of `title` that stands for it: its opening
+/// words or its subtitle, three content words or more ("« Some types of
+/// exercise are more effective than others »", "\"Death by a thousand
+/// cuts\"" of "Insect decline in the Anthropocene: Death by a thousand
+/// cuts").
+pub(super) fn quotes_part_of(text: &str, title: &str) -> bool {
+    let own = words(title);
+    let subtitle = title.split_once(':').map(|(_, s)| words(s));
+    [('"', '"'), ('“', '”'), ('«', '»'), ('‘', '’')]
+        .iter()
+        .flat_map(|&(open, close)| {
+            let mut rest = text;
+            std::iter::from_fn(move || {
+                let (_, after) = rest.split_once(open)?;
+                let (quoted, next) = after.split_once(close)?;
+                rest = next;
+                Some(quoted)
+            })
+        })
+        .any(|quoted| {
+            let quoted = words(quoted);
+            content_words(&quoted.join(" ")).len() >= 3
+                && quoted.len() < own.len()
+                && (own.starts_with(&quoted) || subtitle.as_ref() == Some(&quoted))
+        })
+}
+
 /// Whether `cited` (a reference's words, or a title cited apart) has
 /// every content word of `title`, but for misspellings ("Ailgnment",
 /// "colour"); with `both`, and no content words of its own either.

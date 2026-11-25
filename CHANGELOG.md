@@ -18,6 +18,10 @@ Fixed:
 - A reference without a title that names an author the work lacks
   ("Laughlin, Baskin, Agard & Bertozzi. Science 2008, 320, 664") is now
   plausible, not verified, as one with a title already was.
+- A work cited by a quoted part of its title, its opening words or its
+  subtitle ("Death by a thousand cuts" for "Insect decline in the
+  Anthropocene: Death by a thousand cuts"), beside its authors, year and
+  journal, is now plausible, not not found or another work of that name.
 
 ## 0.43.0
 

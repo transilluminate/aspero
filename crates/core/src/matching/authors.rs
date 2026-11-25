@@ -366,7 +366,17 @@ pub(super) fn same_family(a: &str, b: &str) -> bool {
         long.strip_suffix(short)
             .is_some_and(|rest| rest.ends_with(' '))
     };
-    a == b || ends(a, b) || ends(b, a)
+    a == b || ends(a, b) || ends(b, a) || umlaut_spelling(a, b)
+}
+
+/// Whether two family names (normalised) are one German name, its umlaut
+/// written out on one side: "Zanetti-Daellenbach" and "Zanetti-Dällenbach"
+/// (read "dallenbach", accents dropped; wild-5 #410), "Mueller" and
+/// "Müller". Names of five letters or more, so short ones ("Hue", "Hu")
+/// stay apart.
+pub(super) fn umlaut_spelling(a: &str, b: &str) -> bool {
+    let fold = |s: &str| s.replace("ae", "a").replace("oe", "o").replace("ue", "u");
+    a != b && a.len().min(b.len()) >= 5 && fold(a) == fold(b)
 }
 
 /// Claimed authors vs the record's family names: half for the first author

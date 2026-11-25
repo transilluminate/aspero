@@ -193,6 +193,64 @@ pub(super) fn first_sentence(title: &str) -> &str {
         .map_or(title, |i| title[..i].trim())
 }
 
+/// Words of a title and their opposites: one put in place of the other
+/// rewords the title, however near their spelling ("Southern Ireland"
+/// isn't "Northern Ireland" misspelt, holdout-6 #863; "How to Lose …"
+/// isn't "How to Save …").
+const OPPOSITES: &[(&str, &str)] = &[
+    ("increase", "decrease"),
+    ("increases", "decreases"),
+    ("increased", "decreased"),
+    ("increasing", "decreasing"),
+    ("high", "low"),
+    ("higher", "lower"),
+    ("positive", "negative"),
+    ("benefit", "harm"),
+    ("benefits", "harms"),
+    ("gain", "loss"),
+    ("gains", "losses"),
+    ("win", "lose"),
+    ("lose", "save"),
+    ("losing", "saving"),
+    ("more", "less"),
+    ("early", "late"),
+    ("earlier", "later"),
+    ("success", "failure"),
+    ("acute", "chronic"),
+    ("male", "female"),
+    ("men", "women"),
+    ("presence", "absence"),
+    ("present", "absent"),
+    ("activation", "inhibition"),
+    ("upregulation", "downregulation"),
+    ("northern", "southern"),
+    ("eastern", "western"),
+    ("north", "south"),
+    ("east", "west"),
+    ("before", "after"),
+    ("rich", "poor"),
+    ("urban", "rural"),
+    ("small", "large"),
+    ("short", "long"),
+    ("strong", "weak"),
+    ("major", "minor"),
+    ("internal", "external"),
+    ("inclusion", "exclusion"),
+    ("agonist", "antagonist"),
+    ("agonists", "antagonists"),
+    ("overestimation", "underestimation"),
+    ("hypertension", "hypotension"),
+    ("hyperglycemia", "hypoglycemia"),
+    ("hyperthyroidism", "hypothyroidism"),
+];
+
+/// Whether two words of titles are opposites ([`OPPOSITES`]).
+pub(super) fn opposite(a: &str, b: &str) -> bool {
+    OPPOSITES
+        .iter()
+        .any(|&(x, y)| (a == x && b == y) || (a == y && b == x))
+}
+
 /// Whether a claimed title, given apart (a structured claim's), is the
 /// record's with significant words of its own put in place of the
 /// title's ("A Controlled Study of …" for "A Randomized Trial of …"):
@@ -247,8 +305,12 @@ pub(super) fn replaced(
         return false;
     }
     // Numbers alike only when the same: "2004" is not "2006".
+    // Nor a word and its opposite, however near ("Southern", "Northern").
     let same = |a: &str, b: &str| {
-        a == b || (!a.chars().any(|c| c.is_ascii_digit()) && super::authors::near(a, b))
+        a == b
+            || (!a.chars().any(|c| c.is_ascii_digit())
+                && super::authors::near(a, b)
+                && !opposite(a, b))
     };
     // Longest common subsequence, words alike as `same` says.
     let mut table = vec![vec![0usize; m + 1]; n + 1];

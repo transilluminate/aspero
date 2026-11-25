@@ -12,13 +12,13 @@ use super::caps::{
     PLACED_YEAR_OFF, PLACED_YEAR_WRONG, PLAUSIBLE, SHORT_TITLE_WORDS, STRANGERS_CAP,
     UNCORROBORATED_CAP, UNPLACED_CAP, VENUE_RECORD_CAP, VERSION, combine,
 };
-use super::claim::{byline, cites_chapter, cites_edited_book, title_region};
+use super::claim::{byline, cites_chapter, cites_chapter_of, cites_edited_book, title_region};
 use super::derivative::{self, WorkKind, record_derivative_kind};
 use super::edition;
 use super::preprint::{names_preprint, preprint_server, preprint_version_claimed};
 use super::record_title::record_title;
 use super::same_work::{id_agreement, same_work_id};
-use super::text::{Normalised, content_words, words};
+use super::text::{self, Normalised, content_words, words};
 use super::titles::{self, title_similarity, unmarked};
 use super::venue;
 use super::version;
@@ -256,6 +256,15 @@ pub fn assess(claim: &Claim, record: &SourceRecord) -> Assessment {
     let title = match (title.score, reworded) {
         (Some(s), Some(true)) => FieldCheck::scored(s.min(OTHER_IN_SERIES)),
         (Some(s), Some(false)) => FieldCheck::scored(s.min(EXTENDED_TITLE)),
+        _ => title,
+    };
+    // Or cut off, not at a subtitle (`Normalised::cut_off`, wild-5 #353,
+    // #762): the words dropped may be what the work found.
+    let cut = work_title
+        .as_deref()
+        .is_some_and(|actual| text::title_cut(claimed_title.as_deref(), text.as_ref(), actual));
+    let title = match title.score {
+        Some(s) if cut => FieldCheck::scored(s.min(EXTENDED_TITLE)),
         _ => title,
     };
 
@@ -856,7 +865,12 @@ pub fn assess(claim: &Claim, record: &SourceRecord) -> Assessment {
             .text
             .as_deref()
             .is_some_and(|t| cites_chapter(t) || cites_edited_book(t));
-    if chapter_for_book {
+    // And a book's record, a chapter of it quoted: the book holds the work.
+    let book_for_chapter = work.work_type == Some(WorkType::Book)
+        && !named
+        && matches!((&text, &work_title, &title_span), (Some(t), Some(book), Some(span))
+            if cites_chapter_of(t, book, span));
+    if chapter_for_book || book_for_chapter {
         confidence = confidence.min(LOCATION_MISMATCH_CAP);
     }
     // A proceedings' own record (the volume: "2014 IEEE International
@@ -922,7 +936,17 @@ pub fn assess(claim: &Claim, record: &SourceRecord) -> Assessment {
         (None, Some(actual), Some(text)) => titles::misspelt_only(&text.words, actual, false),
         _ => true,
     };
-    if title.agreement == Agreement::Partial && !misspelt && !named && !located {
+    // The identifier or place doesn't make up for a title cut off, nor
+    // for one given apart (a structured claim's, BibTeX's or RIS's
+    // title, read whole, not found among other words) that is reworded:
+    // an RIS record's TI rewritten beside the work's DOI and place
+    // (wild-5 #194). Plausible, the title to check.
+    let given_apart = claimed_title.is_some();
+    if cut
+        || (title.agreement == Agreement::Partial
+            && !misspelt
+            && ((!named && !located) || given_apart))
+    {
         confidence = confidence.min(EXTENDED_TITLE_CAP);
     }
     // A claimed PMID or PMCID that isn't the work's, beside an identifier

@@ -309,6 +309,28 @@ pub(super) fn cites_chapter(text: &str) -> bool {
     })
 }
 
+/// Whether a free-text reference cites a chapter of the book whose title
+/// stands at `span`: another title quoted before the book's, and editors
+/// named ("“Learning to Curse: …” First Images of America: …, edited by
+/// Fredi Chiappelli", MLA's and Chicago's way; wild-5 #645). The book's
+/// record holds the work cited; it isn't it.
+pub(super) fn cites_chapter_of(text: &Normalised, book: &str, span: &Range<usize>) -> bool {
+    let Some(quoted) = super::titles::given_title(&text.raw) else {
+        return false;
+    };
+    let book_at = text.spans[span.start].start;
+    let after = text.raw[book_at..].to_lowercase();
+    super::titles::title_similarity(&quoted, book) < 0.5
+        && text
+            .raw
+            .find(quoted.as_str())
+            .is_some_and(|at| at + quoted.len() <= book_at)
+        && (cites_edited_book(&text.raw)
+            || ["edited by", " ed.", " eds.", "(ed.", "(eds."]
+                .iter()
+                .any(|m| after.contains(m)))
+}
+
 /// Whether a reference cites its work in an edited book: "In" (or "in"
 /// after a comma or quote, Harvard's) and then its editors ("In: Jones K,
 /// Smith P, editors. …", "in Jones, K. (eds) …", "In K. Jones (Ed.), …",

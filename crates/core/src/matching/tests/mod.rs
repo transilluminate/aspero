@@ -21,6 +21,7 @@ mod redteam_holdouts;
 mod redteam_round6;
 mod redteam_round7;
 mod redteam_wild4;
+mod redteam_wild5;
 mod scoring;
 mod titles;
 mod venue;

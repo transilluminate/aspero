@@ -22,6 +22,8 @@ Fixed:
   subtitle ("Death by a thousand cuts" for "Insect decline in the
   Anthropocene: Death by a thousand cuts"), beside its authors, year and
   journal, is now plausible, not not found or another work of that name.
+- Prose opening with a pronoun ("He later returned to the topic …") no
+  longer reads it as an author's name.
 
 ## 0.43.0
 

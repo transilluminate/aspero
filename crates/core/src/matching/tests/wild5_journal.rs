@@ -257,3 +257,31 @@ fn a_work_cited_by_a_quoted_part_of_its_title_is_plausible() {
         assert!(a.confidence < PLAUSIBLE, "{text}: {a:?}");
     }
 }
+
+/// wild-5 #460: prose opening with a pronoun ("He later returned …")
+/// names no one: the work's own title and year, its authors unknown.
+#[test]
+fn a_pronoun_opening_prose_is_no_author() {
+    let rayleigh = article(
+        "XXXIV. On the transmission of light through an atmosphere containing small \
+         particles in suspension, and on the origin of the blue of the sky",
+        &["Lord Rayleigh"],
+        1899,
+        (
+            "The London, Edinburgh, and Dublin Philosophical Magazine and Journal of Science",
+            "47",
+            "375-384",
+        ),
+    );
+    let text = "He later returned to the topic in 1899 with \"On the transmission of light \
+                through an atmosphere containing small particles in suspension, and on the \
+                origin of the blue of the sky,\" also in the Philosophical Magazine.";
+    let a = assess(&Claim::from_text(text), &rayleigh);
+    assert_eq!(a.authors.agreement, Agreement::Unknown, "{a:?}");
+    assert!(a.confidence >= PLAUSIBLE, "{a:?}");
+    // "He" with initials is a name.
+    let text = "He K, Zhang X. On the transmission of light through an atmosphere containing \
+                small particles in suspension, and on the origin of the blue of the sky. 1899.";
+    let a = assess(&Claim::from_text(text), &rayleigh);
+    assert_eq!(a.authors.agreement, Agreement::Mismatch, "{a:?}");
+}

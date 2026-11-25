@@ -100,6 +100,56 @@ fn a_title_leaves_out_its_publisher_volumes_and_role_notes() {
     ]);
 }
 
+#[test]
+fn a_listed_references_title_is_between_its_byline_and_publisher() {
+    // wild-5 #789-#806: "Name, Title, Publisher, City Year".
+    assert_titles(&[
+        (
+            "Cesare Mori, Con la mafia ai ferri corti, Mondadori, 1932",
+            "Con la mafia ai ferri corti",
+        ),
+        (
+            "Pino Arlacchi, La mafia imprenditrice, il Mulino, Bologna 1983",
+            "La mafia imprenditrice",
+        ),
+        (
+            "Rocco Sciarrone, Mafie vecchie, mafie nuove, Donzelli, 1998 (edizione aggiornata \
+             2009)",
+            "Mafie vecchie, mafie nuove",
+        ),
+        (
+            "Giovanni Falcone e Marcelle Padovani, Cose di Cosa Nostra, Rizzoli, Milano 1991",
+            "Cose di Cosa Nostra",
+        ),
+        (
+            "Eric J. Hobsbawm, Primitive Rebels, Manchester University Press, 1959 (ed. it. I \
+             ribelli, Einaudi, 1966)",
+            "Primitive Rebels",
+        ),
+        (
+            "Diego Gambetta, La mafia siciliana. Il business della protezione privata, \
+             Einaudi, Torino 1992",
+            "La mafia siciliana. Il business della protezione privata",
+        ),
+        // Without a byline: the title before the publisher.
+        (
+            "La mafia. Centosessant'anni di storia, Donzelli, 2018",
+            "La mafia. Centosessant'anni di storia",
+        ),
+        // Chicago's state and publisher are no listed reference.
+        (
+            "Herrin, Judith. The Formation of Christendom. Princeton, NJ: Princeton University \
+             Press, 1987.",
+            "The Formation of Christendom",
+        ),
+    ]);
+    // A title first, then names: neither part is told for the title.
+    assert_ne!(
+        probable_title("Machine Learning, Tom Mitchell, McGraw Hill, 1997").as_deref(),
+        Some("Tom Mitchell")
+    );
+}
+
 /// wild-5 #651: "Oxford UP" is a publisher, not a byline naming someone
 /// the book's record lacks.
 #[test]

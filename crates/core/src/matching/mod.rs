@@ -32,7 +32,7 @@
 //!   work.
 //! - `title_layout.rs`: a book's reference around its title: a
 //!   publisher's name, notes of an editor or translator, a byline's
-//!   initials.
+//!   initials; and "Name, Title, Publisher, City Year" references.
 //! - `venue.rs`: the venue cited against a record's: a chapter cited as an
 //!   article or the reverse, another conference or meeting, a preprint at
 //!   one.

@@ -15,6 +15,9 @@ Fixed:
   ("Connor, W. Robert."), or a note naming an editor or translator ("(ed.
   G. S. Koby)"); a publisher after a comma ("…, Columbia UP") and a count
   of volumes ("…, 4 vols") are left out of it.
+- A reference listed as "Name, Title, Publisher, City Year", as Italian,
+  Spanish and French ones are ("Cesare Mori, Con la mafia ai ferri corti,
+  Mondadori, 1932"), is searched by its title, not the whole reference.
 - The title read from a reference's layout is searched beside the
   citation matcher's runs unless one of the runs searched is the title; a
   run past the two searched no longer keeps it out.

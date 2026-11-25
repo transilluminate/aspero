@@ -460,6 +460,9 @@ fn guessed_title(text: &str) -> Option<String> {
     if let Some(title) = after_comma_byline(text) {
         return Some(title);
     }
+    if let Some(title) = layout::listed_title(text) {
+        return Some(title);
+    }
     // Of its sentences, not a byline, a publisher or locator (";"), the
     // one most in sentence case (a link's no word of it), then the
     // longest; a year opening one

@@ -1,7 +1,8 @@
 //! Parts of a book's reference around its title that the layout's guess
 //! ([`super::probable_title`]) leaves out: a publisher's name, a note of
 //! an editor or translator in brackets, a count of volumes, a given name
-//! after an initial.
+//! after an initial; and the title of a reference listed as "Name, Title,
+//! Publisher, City Year", as Italian, Spanish and French references are.
 
 use std::borrow::Cow;
 
@@ -34,6 +35,10 @@ const PARTICLES: &[&str] = &[
     "&", "and", "of", "the", "for", "il", "la", "le", "les", "de", "di", "del", "della", "du",
     "des", "von", "van", "der", "y",
 ];
+
+/// Words joining two people's names ("Giovanni Falcone e Marcelle
+/// Padovani").
+const JOINING_NAMES: &[&str] = &["e", "y", "et", "and", "&", "und"];
 
 /// A four-digit year.
 fn year(w: &str) -> bool {
@@ -232,4 +237,99 @@ pub(super) fn given_after_initial(before: &str, s: &str) -> bool {
         let words: Vec<&str> = s.split_whitespace().collect();
         (1..=2).contains(&words.len()) && words.iter().all(|w| capitalised(w))
     }
+}
+
+/// People's names written out, as a byline before a comma: "Cesare
+/// Mori", "Eric J. Hobsbawm", "Giovanni Falcone e Marcelle Padovani". Each
+/// two to four words, capitalised (an initial or a particle within).
+fn names_written_out(s: &str) -> bool {
+    let mut names = vec![Vec::new()];
+    for w in s.split_whitespace() {
+        if JOINING_NAMES.contains(&w) {
+            names.push(Vec::new());
+        } else if let Some(last) = names.last_mut() {
+            last.push(w);
+        }
+    }
+    names.iter().all(|name| {
+        (2..=4).contains(&name.len())
+            && name.first().is_some_and(|w| capitalised(w))
+            && name.last().is_some_and(|w| capitalised(w))
+            && name
+                .iter()
+                .all(|w| capitalised(w) || initial(w) || PARTICLES.contains(w))
+    })
+}
+
+/// A publisher's name between commas, as a listed reference gives it
+/// ("Einaudi", "il Mulino", "Manchester University Press"): one to four
+/// words, the last capitalised, the others capitalised or particles; not
+/// across a sentence's end ("and Colonialism. Oxford UP"), nor Chicago's
+/// state and publisher ("NJ: Princeton University Press").
+fn publisher_between_commas(s: &str) -> bool {
+    let words: Vec<&str> = s.split_whitespace().collect();
+    (1..=4).contains(&words.len())
+        && !s.contains(". ")
+        && !s.contains(':')
+        && words.first().is_some_and(|w| !JOINING_NAMES.contains(w))
+        && words
+            .last()
+            .is_some_and(|w| w.starts_with(char::is_uppercase))
+        && words.iter().all(|w| {
+            (w.starts_with(char::is_uppercase) || PARTICLES.contains(w))
+                && !w.chars().any(|c| c.is_ascii_digit())
+        })
+}
+
+/// The title of a reference listed as "Name, Title, Publisher, City Year"
+/// or "Title, Publisher, Year" (Italian, Spanish and French references:
+/// "Cesare Mori, Con la mafia ai ferri corti, Mondadori, 1932", "Pino
+/// Arlacchi, La mafia imprenditrice, il Mulino, Bologna 1983", "La mafia.
+/// Centosessant'anni di storia, Donzelli, 2018"), a note in brackets after
+/// it or not. Its last part a year, a city's name or two before it or
+/// not; the one before it a publisher's name; the first, where people's
+/// names written out, the byline. Not a title that reads as names itself
+/// ("Machine Learning, Tom Mitchell, …"), unless after a byline an
+/// initial or a second name marks as one ("Eric J. Hobsbawm, Primitive
+/// Rebels, …", "Giovanni Falcone e Marcelle Padovani, Cose di Cosa
+/// Nostra, …"); nor
+/// one naming people as a byline does ("Smith J, Jones K, …"). Without a
+/// byline, the title is the one part before the publisher; either way it
+/// holds one sentence's end at most (a title and its subtitle, not
+/// Chicago's "Herrin, Judith. The Formation of Christendom. Princeton").
+pub(super) fn listed_title(text: &str) -> Option<String> {
+    let t = super::titles::without_trailing_note(text.trim())
+        .trim_end()
+        .trim_end_matches('.');
+    let parts: Vec<&str> = t.split(", ").collect();
+    let [head @ .., publisher, last] = &parts[..] else {
+        return None;
+    };
+    let dated: Vec<&str> = last.split_whitespace().collect();
+    let (Some(y), city) = (dated.last(), &dated[..dated.len().saturating_sub(1)]) else {
+        return None;
+    };
+    if !year(y) || city.len() > 2 || !city.iter().all(|w| capitalised(w)) {
+        return None;
+    }
+    if !publisher_between_commas(publisher) {
+        return None;
+    }
+    let (title, marked) = match head {
+        [byline, title @ ..] if !title.is_empty() && names_written_out(byline) => {
+            let marked = byline
+                .split_whitespace()
+                .any(|w| initial(w) || JOINING_NAMES.contains(&w));
+            (title, marked)
+        }
+        [_] => (head, false),
+        _ => return None,
+    };
+    let title = title.join(", ");
+    let words = title.split_whitespace().count();
+    let named = (names_written_out(&title) && !marked) || super::authors::names_given(&title);
+    let sentences = title.matches(". ").count();
+    (words >= 2 && !named && sentences <= 1 && !title.contains(['(', ')']))
+        .then(|| super::titles::title_like(&title))
+        .flatten()
 }

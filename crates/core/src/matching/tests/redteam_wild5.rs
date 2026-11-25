@@ -235,3 +235,43 @@ fn a_title_with_a_word_replaced_by_its_opposite_is_reworded() {
     };
     assert!(plausible(&assess(&given, &r)), "{:?}", assess(&given, &r));
 }
+
+/// wild-5 #410: an umlaut cited ("Dällenbach") where the record writes it
+/// out ("Daellenbach"): the same author.
+#[test]
+fn an_umlaut_written_out_is_the_same_name() {
+    let mut r = placed(
+        &[],
+        "Maternal and neonatal infections and obstetrical outcome in water birth",
+        &[
+            "Rosanna A. Zanetti-Daellenbach",
+            "Sibil Tschudin",
+            "Xiao Yan Zhong",
+        ],
+        2007,
+        (
+            "European Journal of Obstetrics & Gynecology and Reproductive Biology",
+            "134",
+            "37-43",
+        ),
+    );
+    r.work.work_type = Some(crate::work::WorkType::JournalArticle);
+    let claim = Claim::from_text(
+        "Zanetti-Dällenbach R et al. Maternal and neonatal infections and obstetrical outcome in \
+         water birth. Eur J Obstet Gynecol Reprod Biol 2007;134(1):37–43.",
+    );
+    let a = assess(&claim, &r);
+    assert_eq!(a.authors.agreement, Agreement::Match, "{a:?}");
+    assert!(a.confidence >= VERIFIED, "{a:?}");
+    let given = Claim {
+        title: r.work.title.clone(),
+        authors: vec!["Müller K".into()],
+        ..Claim::default()
+    };
+    let mut m = r.clone();
+    m.work.authors = vec![crate::work::Person {
+        family: Some("Mueller".into()),
+        ..Default::default()
+    }];
+    assert_eq!(assess(&given, &m).authors.agreement, Agreement::Match);
+}

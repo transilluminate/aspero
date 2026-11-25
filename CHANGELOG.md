@@ -32,6 +32,10 @@ Fixed:
   "Northern Ireland", "Lose" for "Save") is reworded, not misspelt, however
   close the spelling: plausible, never verified.
 
+- An author's umlaut written out ("Zanetti-Daellenbach", "Mueller") or not
+  ("Zanetti-Dällenbach", "Müller") is the same name, for names of five
+  letters or more.
+
 ## 0.43.0
 
 Added:

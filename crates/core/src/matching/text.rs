@@ -671,7 +671,13 @@ impl Normalised {
     /// its own (0.9), with the next authors a small bonus. Without the first
     /// author, later names count for at most half.
     pub(super) fn author_coverage(&self, families: &[String]) -> f64 {
-        let present = |f: &String| self.padded.contains(&format!(" {f} "));
+        let present = |f: &String| {
+            self.padded.contains(&format!(" {f} "))
+                || self
+                    .words
+                    .iter()
+                    .any(|w| super::authors::umlaut_spelling(w, f))
+        };
         let Some((first, rest)) = families.split_first() else {
             return 0.0;
         };

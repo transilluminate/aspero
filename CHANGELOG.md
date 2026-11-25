@@ -7,6 +7,9 @@ and 0.1 to 0.9 in [docs/changelog/0.0x.md](docs/changelog/0.0x.md).
 
 Fixed:
 
+- The title read from a reference's layout is searched beside the
+  citation matcher's runs unless one of the runs searched is the title; a
+  run past the two searched no longer keeps it out.
 - A university press ("Oxford UP, 2002") is no longer read as a person
   the book's record lacks: such a book cited without its author was a
   mismatch.

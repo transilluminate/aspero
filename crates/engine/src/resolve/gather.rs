@@ -246,7 +246,10 @@ impl Engine {
 ///   already do, or nothing (an invented article's).
 ///
 /// A hit's run that is the guess itself is searched however far down the
-/// hits it came, before runs that only hold it and run on.
+/// hits it came, before runs that only hold it and run on. Only the runs
+/// searched speak against the guess: one overlapping it past the searches'
+/// count, cut short ("… shakespeare s caliban a cultural", wild-5 #659),
+/// would be searched in its place by none.
 fn with_guess(mut titles: Vec<String>, text: &str, bookish: bool) -> Vec<String> {
     let Some(title) = matching::probable_title(text) else {
         return titles;
@@ -266,13 +269,17 @@ fn with_guess(mut titles: Vec<String>, text: &str, bookish: bool) -> Vec<String>
             let found = titles.remove(at);
             titles.insert(0, found);
         }
-    } else if titles.iter().all(|t| match beside_title(t, &title, text) {
-        Beside::Part => given,
-        Beside::Apart | Beside::Longer => true,
-        Beside::Same => false,
-    }) || (bookish
-        && titles.len() < MAX_TITLE_SEARCHES
-        && titles.iter().all(|t| fragment(t, &title, text)))
+    } else if titles
+        .iter()
+        .take(MAX_TITLE_SEARCHES)
+        .all(|t| match beside_title(t, &title, text) {
+            Beside::Part => given,
+            Beside::Apart | Beside::Longer => true,
+            Beside::Same => false,
+        })
+        || (bookish
+            && titles.len() < MAX_TITLE_SEARCHES
+            && titles.iter().all(|t| fragment(t, &title, text)))
     {
         titles.insert(0, title);
     }
@@ -474,6 +481,31 @@ mod tests {
             "oxford oxford university press 2019",
         ]);
         assert_eq!(with_guess(runs.clone(), poole, true), runs);
+    }
+
+    #[test]
+    fn a_run_past_the_searches_count_doesnt_keep_the_guess_out() {
+        let owned = |v: &[&str]| v.iter().map(|s| (*s).to_owned()).collect::<Vec<_>>();
+        // wild-5 #659: reviews' runs hold the byline and the title; the
+        // fourth, cut short, overlaps the title but would not be searched.
+        let vaughan = "Vaughan, Alden T., and Virginia Mason Vaughan. Shakespeare's Caliban: A \
+                       Cultural History. Cambridge UP, 1991.";
+        let runs = owned(&[
+            "and virginia mason vaughan shakespeare s caliban a cultural history",
+            "virginia mason vaughan",
+            "and virginia mason vaughan",
+            "and virginia mason vaughan shakespeare s caliban a cultural",
+        ]);
+        assert_eq!(
+            with_guess(runs, vaughan, true)[0],
+            "Shakespeare's Caliban: A Cultural History"
+        );
+        // Among the runs searched, it still does.
+        let runs = owned(&[
+            "and virginia mason vaughan shakespeare s caliban a cultural",
+            "virginia mason vaughan",
+        ]);
+        assert_eq!(with_guess(runs.clone(), vaughan, true), runs);
     }
 
     #[test]

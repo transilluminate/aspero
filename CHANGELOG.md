@@ -7,6 +7,11 @@ and 0.1 to 0.9 in [docs/changelog/0.0x.md](docs/changelog/0.0x.md).
 
 Fixed:
 
+- Journal references without a title, written as chemistry's ACS style
+  writes them ("Mahal, Yarema & Bertozzi. Science 1997, 276, 1125-1128.",
+  "Blackman, Royzen & Fox, JACS 2008, 130, 13518"), are now read and
+  verified by their journal, volume and first page; before, only their
+  year was read and they weren't found.
 - A journal with a possessive, abbreviated without its apostrophe ("J
   Midwifery Womens Health"), is now the journal ("Journal of Midwifery &
   Women's Health"), so such references verify at their place.

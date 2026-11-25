@@ -205,6 +205,37 @@ pub(super) fn styled(tokens: &[&str]) -> Option<(usize, Locator)> {
         {
             return Some((i, at(volume, page, pages)));
         }
+        // ACS: "Mahal, Yarema & Bertozzi. Science 1997, 276, 1125-1128.",
+        // the year between the journal and its volume, each with a comma,
+        // and no title (as ACS cites a journal's article). Only right after
+        // the journal's word, its byline and name all capitalised words
+        // (or "et al.", "and", "&"), and with the pages ranged, or ending
+        // the reference, or followed by its link.
+        let untitled = || {
+            tokens[..i].iter().all(|t| {
+                t.starts_with(|c: char| c.is_uppercase())
+                    || matches!(*t, "&" | "and" | "et" | "al." | "al.,")
+            })
+        };
+        if tokens[i].ends_with(',')
+            && is_year(token)
+            && i > 0
+            && untitled()
+            && name_word(tokens[i - 1].strip_suffix('.').unwrap_or(tokens[i - 1]))
+            && let Some(volume) = tokens
+                .get(i + 1)
+                .and_then(|v| v.strip_suffix(','))
+                .and_then(volume_number)
+                .filter(|v| !is_year(v))
+            && let Some(raw) = tokens.get(i + 2)
+            && let Some(page) = page_number(raw)
+            && (ranged(raw)
+                || tokens
+                    .get(i + 3)
+                    .is_none_or(|t| starts_with_ci(t, "doi") || starts_with_ci(t, "http")))
+        {
+            return Some((i, at(volume, page, raw)));
+        }
         // APA without an issue: "Journal Name, 146, 106274." Bare numbers
         // after commas are common, so only right after a word and its
         // comma (the journal), not a year, and with the page ending the
@@ -488,6 +519,51 @@ mod tests {
             "Smith, J. (2020). Title. Journal, 146, 106274 and more",
         ] {
             assert_eq!(placed(text), Locator::default(), "{text}");
+        }
+    }
+
+    /// ACS (wild-5 #579–#589): the year between the journal and the volume.
+    #[test]
+    fn acs_references_give_their_place_after_the_year() {
+        let loc = |v: &str, p: &str| (Some(v.to_owned()), Some(p.to_owned()));
+        let placed = |text: &str| {
+            let found = locator(text);
+            (found.volume, found.page)
+        };
+        for (text, place) in [
+            (
+                "Mahal, Yarema & Bertozzi. Science 1997, 276, 1125-1128.",
+                loc("276", "1125"),
+            ),
+            (
+                "Agard, Prescher & Bertozzi. J. Am. Chem. Soc. 2004, 126, 15046-15047.",
+                loc("126", "15046"),
+            ),
+            (
+                "Baskin et al. PNAS 2007, 104, 16793-16797.",
+                loc("104", "16793"),
+            ),
+            // A single page, ending the reference.
+            (
+                "Blackman, Royzen & Fox, JACS 2008, 130, 13518",
+                loc("130", "13518"),
+            ),
+            (
+                "Fox. Org. Lett. 2008, 10, 2001. doi:10.1/x",
+                loc("10", "2001"),
+            ),
+        ] {
+            assert_eq!(placed(text), place, "{text}");
+        }
+        // Not after a word with a comma (a publisher's), nor numbers that
+        // run on, nor a year where the volume would be; nor after a title.
+        for text in [
+            "Saliba, M. et al. Rubidium incorporation. Science 2016, 354, 206–209.",
+            "Smith J. Title. Oxford, 2010, 12, 34-56.",
+            "Smith J. Science 2004, 12, 34 patients were seen.",
+            "Smith J. Science 2004, 2005, 34-56.",
+        ] {
+            assert_eq!(placed(text), (None, None), "{text}");
         }
     }
 }

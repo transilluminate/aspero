@@ -3,6 +3,51 @@
 Releases 0.10 to 0.19 are in [docs/changelog/0.1x.md](docs/changelog/0.1x.md),
 and 0.1 to 0.9 in [docs/changelog/0.0x.md](docs/changelog/0.0x.md).
 
+## Unreleased
+
+Added:
+
+- A host tool's result can carry images (#223, an embedder's ask): a
+  document's page as it's drawn, or a crop of one figure, for the agent to
+  look at. aspero sends the text first, then one MCP `image` content per
+  image (base64 `data`, `mimeType` `image/png` or `image/jpeg`), in order;
+  `structuredContent` is unchanged. Each image's bytes must start with its
+  type's signature (PNG's 8-byte header, JPEG's `FF D8 FF`); at most
+  3,932,160 bytes (3.75 MiB) an image, so its base64 stays within the 5
+  MiB agents commonly allow, and at most 4 images and 8 MiB a result. A
+  result past any of these fails as `failed`, its message naming the
+  limit; nothing is cut short. aspero doesn't decode, resize or
+  recompress images: draw them to size (about 1,568 px on the long edge
+  suits a page). The `tool` event gains `images` and `image_bytes` at its
+  end, for a host tool that answered with images; the bytes are never
+  logged. `McpActivity` is unchanged, and so are stdio and the CLI. In
+  Swift:
+  ```swift
+  // Before
+  public struct HostToolResult {
+      public var structured: String
+      public var summary: String
+      public init(structured: String, summary: String)
+  }
+  // After: existing calls compile unchanged
+  public struct HostToolResult {
+      public var structured: String
+      public var summary: String
+      public var images: [HostToolImage]
+      public init(structured: String, summary: String, images: [HostToolImage] = [])
+  }
+  public struct HostToolImage {
+      public var data: Data
+      public var kind: HostImageType
+      public init(data: Data, kind: HostImageType)
+  }
+  public enum HostImageType { case png, jpeg }
+  ```
+  Rust: `http::HostOutput` gains `images: Vec<HostImage>` (a minor
+  release: struct literals need it), with `http::HostImage`,
+  `http::ImageType`, `http::MAX_IMAGES`, `http::MAX_IMAGE_BYTES` and
+  `http::MAX_RESULT_IMAGE_BYTES`.
+
 ## 0.43.1
 
 Fixed:

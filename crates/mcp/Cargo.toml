@@ -21,6 +21,7 @@ workspace = true
 http = [
     "rmcp/transport-streamable-http-server",
     "dep:async-trait",
+    "dep:base64",
     "dep:bytes",
     "dep:http",
     "dep:http-body-util",
@@ -48,6 +49,8 @@ tokio = { workspace = true, features = ["io-std", "sync"] }
 tracing.workspace = true
 # The `http` feature's.
 async-trait = { workspace = true, optional = true }
+# A host tool's images, as MCP sends them; already rmcp's.
+base64 = { version = "0.23.1", optional = true }
 bytes = { version = "1.12.1", optional = true }
 http = { version = "1.5.0", optional = true }
 http-body-util = { version = "0.1.5", optional = true }

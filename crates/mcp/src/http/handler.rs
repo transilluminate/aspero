@@ -14,7 +14,7 @@ use rmcp::{ErrorData, RoleServer, ServerHandler};
 use serde_json::{Map, Value};
 
 use super::auth::Credential;
-use super::host::{Activity, Host, HostError};
+use super::host::{Activity, Host, HostError, HostOutput, content, image_bytes, image_problem};
 use super::{HELD_TIMEOUT, Shared};
 use crate::scope::SOURCES;
 use crate::server::{
@@ -153,10 +153,14 @@ impl Handler {
         scope: &str,
         required: &[String],
         arguments: Map<String, Value>,
-    ) -> (CallToolResult, Activity) {
+    ) -> (CallToolResult, Activity, Option<(usize, usize)>) {
         let k = &key.key;
         // The app words its own tools: no query or count.
-        let fail = |e: ToolError| (tool_error(&e), activity(k, name, None, Err(&e), 0.0));
+        let failure = |e: ToolError| (tool_error(&e), activity(k, name, None, Err(&e), 0.0));
+        let fail = |e: ToolError| {
+            let (result, activity) = failure(e);
+            (result, activity, None)
+        };
         if !holds(&k.scopes, scope) {
             return fail(lacks(name, scope));
         }
@@ -200,25 +204,33 @@ impl Handler {
                 ),
             )),
             Ok(Err(e)) => fail(ToolError::new(host_kind(&e), host_message(&e))),
-            Ok(Ok(output)) => match serde_json::from_str::<Value>(&output.structured) {
-                Ok(structured @ Value::Object(_)) => {
-                    let first = output
-                        .summary
-                        .lines()
-                        .next()
-                        .unwrap_or("")
-                        .trim()
-                        .to_owned();
-                    let mut result =
-                        CallToolResult::success(vec![ContentBlock::text(output.summary)]);
-                    result.structured_content = Some(structured);
-                    (result, activity(k, name, None, Ok((first, None)), 0.0))
-                }
-                _ => fail(ToolError::new(
-                    ToolErrorKind::Failed,
-                    format!("the app's {name} answered with something other than a JSON object"),
-                )),
-            },
+            Ok(Ok(HostOutput {
+                structured,
+                summary,
+                images,
+            })) => {
+                // What the app gave, sent or not, for the `tool` event.
+                let given = (!images.is_empty()).then(|| (images.len(), image_bytes(&images)));
+                let (result, activity) = match serde_json::from_str::<Value>(&structured) {
+                    Ok(structured @ Value::Object(_)) => {
+                        if let Some(problem) = image_problem(name, &images) {
+                            failure(ToolError::new(ToolErrorKind::Failed, problem))
+                        } else {
+                            let first = summary.lines().next().unwrap_or("").trim().to_owned();
+                            let mut result = CallToolResult::success(content(summary, &images));
+                            result.structured_content = Some(structured);
+                            (result, activity(k, name, None, Ok((first, None)), 0.0))
+                        }
+                    }
+                    _ => failure(ToolError::new(
+                        ToolErrorKind::Failed,
+                        format!(
+                            "the app's {name} answered with something other than a JSON object"
+                        ),
+                    )),
+                };
+                (result, activity, given)
+            }
         }
     }
 }
@@ -310,6 +322,7 @@ impl ServerHandler for Handler {
                 started,
                 0.0,
                 None,
+                None,
             );
             return Ok(tool_error(&e).into());
         };
@@ -317,6 +330,7 @@ impl ServerHandler for Handler {
         tool_input(&name, &arguments);
         let engine = self.shared.engine_tools && self.shared.tools.spec(&name).is_some();
         let mut call = None;
+        let mut images = None;
         let (result, activity) = if engine {
             let ((result, activity), id) =
                 with_call_id(self.engine_call(session, &key, &name, arguments)).await;
@@ -327,7 +341,7 @@ impl ServerHandler for Handler {
             let catalog = self.shared.catalog();
             match catalog.iter().find(|l| l.tool.name == name) {
                 Some(listed) => {
-                    let (result, activity) = self
+                    let (result, activity, given) = self
                         .host_call(
                             &key,
                             &context,
@@ -337,6 +351,7 @@ impl ServerHandler for Handler {
                             arguments,
                         )
                         .await;
+                    images = given;
                     (Ok(result), Some(activity))
                 }
                 None => (
@@ -353,7 +368,15 @@ impl ServerHandler for Handler {
             None => (Some(ToolErrorKind::UnknownTool.as_str()), 0.0),
         };
         let tool = activity.is_some().then_some(name.as_str());
-        tool_event(tool, Some(&key.key.name), error, started, cost, call);
+        tool_event(
+            tool,
+            Some(&key.key.name),
+            error,
+            started,
+            cost,
+            call,
+            images,
+        );
         if let Some(activity) = activity {
             self.shared.report(activity);
         }

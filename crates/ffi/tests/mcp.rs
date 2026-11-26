@@ -6,8 +6,8 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use aspero_ffi::mcp::{
-    HostTool, HostToolError, HostToolResult, McpActivity, McpCaller, McpError, McpErrorKind,
-    McpHoldings, McpHost, McpKey, McpServer, McpServerConfig,
+    HostImageType, HostTool, HostToolError, HostToolImage, HostToolResult, McpActivity, McpCaller,
+    McpError, McpErrorKind, McpHoldings, McpHost, McpKey, McpServer, McpServerConfig,
 };
 use aspero_ffi::{Aspero, Config};
 use serde_json::{Value, json};
@@ -73,6 +73,7 @@ impl McpHost for App {
         Ok(HostToolResult {
             structured: json!({"tool": name, "works": []}).to_string(),
             summary: "no recent works".into(),
+            images: Vec::new(),
         })
     }
 
@@ -205,6 +206,11 @@ fn an_app_serves_its_tools_to_an_agent() {
         let result = &answer.unwrap()["result"];
         assert_eq!(result["isError"], false);
         assert_eq!(result["structuredContent"]["tool"], "history_recent");
+        // No images: its text alone, as before images could be sent.
+        assert_eq!(
+            result["content"],
+            json!([{"type": "text", "text": "no recent works"}])
+        );
 
         let call = json!({"jsonrpc": "2.0", "id": 4, "method": "tools/call",
             "params": {"name": "history_recent", "arguments": {"limit": 0}}});
@@ -420,6 +426,112 @@ fn activity_says_when_an_analysis_only_estimated() {
         assert_eq!(
             answer.unwrap()["result"]["tools"].as_array().unwrap().len(),
             8
+        );
+    });
+    rt.block_on(server.stop());
+}
+
+/// An app drawing a page: a PNG and a JPEG, or, asked for `mislabelled`,
+/// a JPEG it calls a PNG.
+struct Drawer;
+
+#[async_trait::async_trait]
+impl McpHost for Drawer {
+    fn tools(&self) -> Vec<HostTool> {
+        vec![HostTool {
+            name: "page_image".into(),
+            title: "A page, drawn".into(),
+            description: "A document's page as it's drawn.".into(),
+            input_schema: json!({"type": "object"}).to_string(),
+            output_schema: None,
+            scope: "documents.read".into(),
+            read_only: true,
+            destructive: false,
+            idempotent: true,
+        }]
+    }
+
+    async fn call(
+        &self,
+        _: String,
+        arguments: String,
+        _: McpCaller,
+    ) -> Result<HostToolResult, HostToolError> {
+        let args: Value = serde_json::from_str(&arguments).unwrap();
+        let png = HostToolImage {
+            data: b"\x89PNG\r\n\x1a\nab".to_vec(),
+            kind: HostImageType::Png,
+        };
+        let jpeg = HostToolImage {
+            data: vec![0xFF, 0xD8, 0xFF, 0xE0],
+            kind: if args["mislabelled"] == true {
+                HostImageType::Png
+            } else {
+                HostImageType::Jpeg
+            },
+        };
+        Ok(HostToolResult {
+            structured: json!({"page": 3, "width": 1568, "height": 2030}).to_string(),
+            summary: "page 3 of 12".into(),
+            images: vec![png, jpeg],
+        })
+    }
+
+    fn activity(&self, _: McpActivity) {}
+}
+
+/// An app's images reach the agent as MCP `image` content after its
+/// text, base64, in order; one whose bytes aren't its type's fails the
+/// call.
+#[test]
+fn an_apps_images_reach_the_agent_after_its_text() {
+    let dir = std::env::temp_dir().join(format!("aspero-ffi-images-{}", std::process::id()));
+    let aspero = Aspero::new(Config {
+        cache_dir: Some(dir.to_string_lossy().into()),
+        ..Config::default()
+    })
+    .unwrap();
+    let port = free_port();
+    let rt = runtime();
+    let server = rt
+        .block_on(McpServer::start(
+            aspero,
+            config(port, &["documents.read"]),
+            Some(Arc::new(Drawer) as Arc<dyn McpHost>),
+            None,
+        ))
+        .unwrap();
+    let http = reqwest::Client::builder().no_proxy().build().unwrap();
+    let mut session = None;
+    rt.block_on(async {
+        let init = json!({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {
+            "protocolVersion": "2025-06-18", "capabilities": {},
+            "clientInfo": {"name": "test", "version": "1"}}});
+        rpc(&http, port, TOKEN, &mut session, init).await;
+        let call = json!({"jsonrpc": "2.0", "id": 2, "method": "tools/call",
+            "params": {"name": "page_image", "arguments": {}}});
+        let (_, answer) = rpc(&http, port, TOKEN, &mut session, call).await;
+        let result = &answer.unwrap()["result"];
+        assert_eq!(result["isError"], false, "{result}");
+        assert_eq!(
+            result["content"],
+            json!([
+                {"type": "text", "text": "page 3 of 12"},
+                {"type": "image", "data": "iVBORw0KGgphYg==", "mimeType": "image/png"},
+                {"type": "image", "data": "/9j/4A==", "mimeType": "image/jpeg"},
+            ])
+        );
+        assert_eq!(result["structuredContent"]["page"], 3);
+
+        let call = json!({"jsonrpc": "2.0", "id": 3, "method": "tools/call",
+            "params": {"name": "page_image", "arguments": {"mislabelled": true}}});
+        let (_, answer) = rpc(&http, port, TOKEN, &mut session, call).await;
+        let result = &answer.unwrap()["result"];
+        assert_eq!(result["isError"], true);
+        assert_eq!(
+            result["content"][0]["text"],
+            "Error (failed): the app's page_image answered with image 2 labelled PNG, but its \
+             bytes don't start with PNG's signature"
         );
     });
     rt.block_on(server.stop());

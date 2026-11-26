@@ -11,8 +11,8 @@ use std::time::Duration;
 
 use aspero_core::testing::Events;
 use aspero_mcp::http::{
-    ACTIVITY_QUEUE, Activity, Host, HostError, HostOutput, HostTool, HttpConfig, HttpServer, Key,
-    Ledger, MemoryLedger, StartError, sha256_hex,
+    ACTIVITY_QUEUE, Activity, Host, HostError, HostImage, HostOutput, HostTool, HttpConfig,
+    HttpServer, ImageType, Key, Ledger, MemoryLedger, StartError, sha256_hex,
 };
 use aspero_mcp::{Caller, ToolErrorKind, Tools};
 use async_trait::async_trait;
@@ -146,10 +146,12 @@ impl Host for FakeHost {
             "history_bad" => Ok(HostOutput {
                 structured: "[1, 2]".into(),
                 summary: "a list".into(),
+                images: Vec::new(),
             }),
             _ => Ok(HostOutput {
                 structured: json!({"found": 2, "q": args["q"]}).to_string(),
                 summary: "found 2 works in history\nfirst: Deep learning".into(),
+                images: Vec::new(),
             }),
         }
     }
@@ -892,6 +894,7 @@ impl Host for StuckHost {
         Ok(HostOutput {
             structured: "{}".into(),
             summary: "nothing".into(),
+            images: Vec::new(),
         })
     }
 
@@ -1896,4 +1899,202 @@ async fn activity_says_when_an_analysis_only_estimated() {
         ]
     );
     server.stop().await;
+}
+
+/// The app drawing pages: `page` answers with the images its arguments
+/// ask for (`[["png", bytes], …]`), each its type's signature and then
+/// `x`s, so they're within or past the limits as asked; a third item
+/// labels it another type (`["jpeg", 10, "png"]`).
+struct Pages {
+    activity: Mutex<Vec<Activity>>,
+}
+
+#[async_trait]
+impl Host for Pages {
+    fn tools(&self) -> Vec<HostTool> {
+        vec![tool("page", READ, &[])]
+    }
+
+    async fn call(&self, _: String, arguments: String, _: Caller) -> Result<HostOutput, HostError> {
+        let args: Value = serde_json::from_str(&arguments).unwrap();
+        let images = args["images"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|i| {
+                let kind = |v: &Value| match v.as_str() {
+                    Some("png") => ImageType::Png,
+                    _ => ImageType::Jpeg,
+                };
+                let mut data = kind(&i[0]).signature().to_vec();
+                data.resize(usize::try_from(i[1].as_u64().unwrap()).unwrap(), b'x');
+                let label = if i[2].is_null() { &i[0] } else { &i[2] };
+                HostImage {
+                    data,
+                    kind: kind(label),
+                }
+            })
+            .collect();
+        Ok(HostOutput {
+            structured: json!({"page": 1, "width": 1568}).to_string(),
+            summary: "page 1, drawn".into(),
+            images,
+        })
+    }
+
+    fn activity(&self, activity: Activity) {
+        self.activity.lock().unwrap().push(activity);
+    }
+}
+
+/// A host tool's images reach the agent after its text, base64, in
+/// order; past a limit the call fails saying which, nothing cut short.
+/// The `tool` event counts them at its end, and their bytes are never
+/// logged.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_host_tools_images_follow_its_text_within_the_limits() {
+    let events = global_events();
+    let pages = Arc::new(Pages {
+        activity: Mutex::default(),
+    });
+    let mut config = config(free_port());
+    config.keys = vec![key("pages", "token-pages", &[READ], 100.0)];
+    let tools: Arc<Tools> = Arc::new(tools(vec![source()]));
+    let host = Some(pages.clone() as Arc<dyn Host>);
+    let ledger = Arc::new(MemoryLedger::default());
+    let server = HttpServer::start(tools, config, host, ledger)
+        .await
+        .unwrap();
+    let mut agent = Agent::new(server.port(), "token-pages");
+    agent.initialize().await;
+
+    let result = agent
+        .call("page", json!({"images": [["png", 10], ["jpeg", 6]]}))
+        .await;
+    assert!(!is_error(&result), "{result}");
+    assert_eq!(
+        result["content"],
+        json!([
+            {"type": "text", "text": "page 1, drawn"},
+            {"type": "image", "data": "iVBORw0KGgp4eA==", "mimeType": "image/png"},
+            {"type": "image", "data": "/9j/eHh4", "mimeType": "image/jpeg"},
+        ])
+    );
+    assert_eq!(
+        result["structuredContent"],
+        json!({"page": 1, "width": 1568})
+    );
+
+    let result = agent.call("page", json!({"images": []})).await;
+    assert_eq!(
+        result["content"],
+        json!([{"type": "text", "text": "page 1, drawn"}])
+    );
+
+    let five = json!({"images": [["png", 10], ["png", 10], ["png", 10], ["png", 10], ["png", 10]]});
+    let result = agent.call("page", five).await;
+    assert!(is_error(&result));
+    assert_eq!(
+        result["content"],
+        json!([{"type": "text", "text": "Error (failed): the app's page answered with 5 images, \
+            past the limit of 4 a result"}])
+    );
+    assert!(result.get("structuredContent").is_none(), "{result}");
+    let big = json!({"images": [["jpeg", 3_932_161]]});
+    let result = agent.call("page", big).await;
+    assert!(text(&result).contains("past the limit of 3932160 bytes (3.75 MiB) an image"));
+    let mislabelled = json!({"images": [["png", 10], ["jpeg", 10, "png"]]});
+    let result = agent.call("page", mislabelled).await;
+    assert!(
+        text(&result).contains("image 2 labelled PNG, but its bytes don't start with"),
+        "{result}"
+    );
+    server.stop().await;
+
+    // It comes from a thread of its own.
+    let mut activity = Vec::new();
+    for _ in 0..200 {
+        activity = pages.activity.lock().unwrap().clone();
+        if activity.len() == 5 {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    assert_eq!(activity.len(), 5, "{activity:?}");
+    let said: Vec<(&str, bool, Option<ToolErrorKind>)> = activity
+        .iter()
+        .map(|a| (a.summary.as_str(), a.is_error, a.error))
+        .collect();
+    assert_eq!(said[0], ("page 1, drawn", false, None));
+    assert_eq!(said[2].2, Some(ToolErrorKind::Failed));
+    assert!(
+        said[2]
+            .0
+            .starts_with("error: the app's page answered with 5 images")
+    );
+
+    let logged: Vec<_> = events
+        .named("aspero::mcp", "tool")
+        .into_iter()
+        .filter(|e| e.field("key") == Some("pages agent"))
+        .collect();
+    let counted: Vec<(Option<&str>, Option<&str>, &str)> = logged
+        .iter()
+        .map(|e| {
+            (
+                e.field("images"),
+                e.field("image_bytes"),
+                e.field("outcome").unwrap(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        counted,
+        [
+            (Some("2"), Some("16"), "ok"),
+            (None, None, "ok"),
+            (Some("5"), Some("50"), "error"),
+            (Some("1"), Some("3932161"), "error"),
+            (Some("2"), Some("20"), "error"),
+        ]
+    );
+    // At the end, after every field there was.
+    let fields = [
+        "v",
+        "tool",
+        "key",
+        "outcome",
+        "ms",
+        "cost_usd",
+        "images",
+        "image_bytes",
+    ];
+    assert_eq!(logged[0].names(), fields);
+    assert_eq!(logged[1].names(), fields[..6]);
+    let failed = [
+        "v",
+        "tool",
+        "key",
+        "outcome",
+        "error",
+        "ms",
+        "cost_usd",
+        "images",
+        "image_bytes",
+    ];
+    assert_eq!(logged[2].names(), failed);
+    // No image's bytes, raw or base64, in any of aspero's events at any
+    // level (rmcp's own debug log of a response is rmcp's, as for text).
+    let all = events.all();
+    let ours: Vec<_> = all
+        .iter()
+        .filter(|e| e.target.starts_with("aspero"))
+        .collect();
+    for text in ["iVBORw0KGgp4eA", "/9j/eHh4", "xxxxx"] {
+        let logged = ours
+            .iter()
+            .any(|e| e.name.contains(text) || e.fields.iter().any(|(_, v)| v.contains(text)));
+        assert!(!logged, "{text} logged");
+    }
+    assert!(ours.iter().any(|e| e.field("image_bytes") == Some("16")));
 }

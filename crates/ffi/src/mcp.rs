@@ -57,6 +57,65 @@ pub struct HostToolResult {
     pub structured: String,
     /// A few lines for the agent; the first is the activity's summary.
     pub summary: String,
+    /// Pictures for the agent to look at (a page as it's drawn, a crop of
+    /// one figure), sent after the summary, in order. At most 4, each at
+    /// most 3,932,160 bytes (3.75 MiB) and 8,388,608 (8 MiB) together, each
+    /// starting with its type's signature; past any, the call fails
+    /// (`failed`) saying which, never cut short. Not resized: draw them to
+    /// size (about 1,568 px on the long edge suits a page). None unless
+    /// given.
+    #[uniffi(default = [])]
+    pub images: Vec<HostToolImage>,
+}
+
+/// A picture in a tool's answer: its encoded bytes, as a file holds them.
+#[derive(Clone, uniffi::Record)]
+pub struct HostToolImage {
+    pub data: Vec<u8>,
+    pub kind: HostImageType,
+}
+
+/// Its size and type only: the bytes are never shown.
+impl std::fmt::Debug for HostToolImage {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("HostToolImage")
+            .field("bytes", &self.data.len())
+            .field("kind", &self.kind)
+            .finish()
+    }
+}
+
+/// The image types a tool may answer with.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Enum)]
+pub enum HostImageType {
+    Png,
+    Jpeg,
+}
+
+impl From<HostImageType> for http::ImageType {
+    fn from(kind: HostImageType) -> Self {
+        match kind {
+            HostImageType::Png => http::ImageType::Png,
+            HostImageType::Jpeg => http::ImageType::Jpeg,
+        }
+    }
+}
+
+impl From<HostToolResult> for http::HostOutput {
+    fn from(r: HostToolResult) -> Self {
+        http::HostOutput {
+            structured: r.structured,
+            summary: r.summary,
+            images: r
+                .images
+                .into_iter()
+                .map(|i| http::HostImage {
+                    data: i.data,
+                    kind: i.kind.into(),
+                })
+                .collect(),
+        }
+    }
 }
 
 /// Why a tool failed: the agent reads the message.
@@ -380,10 +439,7 @@ impl http::Host for ForeignHost {
             scopes: caller.scopes,
         };
         match host.call(name, arguments, caller).await {
-            Ok(r) => Ok(http::HostOutput {
-                structured: r.structured,
-                summary: r.summary,
-            }),
+            Ok(r) => Ok(r.into()),
             Err(e) => Err(match e {
                 HostToolError::InvalidArguments { message } => {
                     http::HostError::InvalidArguments(message)
@@ -557,6 +613,86 @@ mod tests {
             http::HELD_TIMEOUT.as_secs()
         );
         assert!(source.contains(&held), "{held}");
+    }
+
+    /// A result has no images unless given, last: an app's existing
+    /// `HostToolResult(structured:summary:)` calls are unchanged. The
+    /// limits its docs give are aspero-mcp's.
+    #[test]
+    fn images_are_last_none_unless_given_and_their_limits_aspero_mcps() {
+        let source = include_str!("mcp.rs");
+        let attribute = "#[uniffi(default = [])]\n    pub images: Vec<HostToolImage>,\n}";
+        assert!(source.contains(attribute), "{attribute}");
+        // 3932160 as "3,932,160".
+        let grouped = |n: usize| {
+            let digits = n.to_string();
+            let mut out = String::new();
+            for (i, c) in digits.chars().enumerate() {
+                if i > 0 && (digits.len() - i).is_multiple_of(3) {
+                    out.push(',');
+                }
+                out.push(c);
+            }
+            out
+        };
+        let limits = format!(
+            "At most {}, each at most {} bytes (3.75 MiB) and {} (8 MiB) together",
+            http::MAX_IMAGES,
+            grouped(http::MAX_IMAGE_BYTES),
+            grouped(http::MAX_RESULT_IMAGE_BYTES),
+        );
+        let doc: String = source
+            .split_once("pub struct HostToolResult {")
+            .and_then(|(_, rest)| rest.split_once("pub images"))
+            .expect("HostToolResult's images")
+            .0
+            .lines()
+            .map(|l| l.trim().trim_start_matches("///").trim())
+            .collect::<Vec<_>>()
+            .join(" ");
+        assert!(doc.contains(&limits), "{limits}");
+    }
+
+    /// The app's result, as aspero-mcp takes it: its images as given, in
+    /// order, typed.
+    #[test]
+    fn a_result_becomes_aspero_mcps_with_its_images() {
+        let result = HostToolResult {
+            structured: "{}".into(),
+            summary: "page 1".into(),
+            images: vec![
+                HostToolImage {
+                    data: vec![1, 2],
+                    kind: HostImageType::Jpeg,
+                },
+                HostToolImage {
+                    data: vec![3],
+                    kind: HostImageType::Png,
+                },
+            ],
+        };
+        let output = http::HostOutput::from(result);
+        assert_eq!(output.summary, "page 1");
+        let images: Vec<_> = output
+            .images
+            .iter()
+            .map(|i| (i.data.clone(), i.kind))
+            .collect();
+        assert_eq!(
+            images,
+            [
+                (vec![1, 2], http::ImageType::Jpeg),
+                (vec![3], http::ImageType::Png)
+            ]
+        );
+        let debugged = format!(
+            "{:?}",
+            HostToolImage {
+                data: vec![0; 64],
+                kind: HostImageType::Png,
+            }
+        );
+        assert_eq!(debugged, "HostToolImage { bytes: 64, kind: Png }");
     }
 
     /// An activity says it only estimated unless set: an app's existing

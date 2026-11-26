@@ -90,7 +90,9 @@ pub(crate) fn engine_result(
 /// name (HTTP; none over stdio), `outcome=ok`, or `outcome=error` and
 /// `error`, the error's kind (`None` for ok), its time since
 /// `started`, what it cost, and the id of the engine call it made, if it
-/// made one ([`with_call_id`]).
+/// made one ([`with_call_id`]), and, for a host tool that answered with
+/// images (sent or refused by a limit), how many and their bytes together:
+/// counts only, never the bytes.
 pub(crate) fn tool_event(
     tool: Option<&str>,
     key: Option<&str>,
@@ -98,6 +100,7 @@ pub(crate) fn tool_event(
     started: tokio::time::Instant,
     cost_usd: f64,
     call: Option<u64>,
+    images: Option<(usize, usize)>,
 ) {
     tracing::info!(
         target: "aspero::mcp",
@@ -105,7 +108,8 @@ pub(crate) fn tool_event(
         outcome = %if error.is_some() { "error" } else { "ok" },
         error = error.map(tracing::field::display),
         ms = u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX),
-        cost_usd = %format_args!("{cost_usd:.6}"), call, "tool"
+        cost_usd = %format_args!("{cost_usd:.6}"), call,
+        images = images.map(|(n, _)| n), image_bytes = images.map(|(_, bytes)| bytes), "tool"
     );
 }
 
@@ -194,6 +198,7 @@ impl ServerHandler for Handler {
             started,
             cost,
             call,
+            None,
         );
         Ok(engine_result(&self.session, result)?.into())
     }

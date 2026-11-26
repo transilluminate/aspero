@@ -63,7 +63,10 @@ use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 
 pub use auth::sha256_hex;
-pub use host::{Activity, Host, HostError, HostOutput, HostTool};
+pub use host::{
+    Activity, Host, HostError, HostImage, HostOutput, HostTool, ImageType, MAX_IMAGE_BYTES,
+    MAX_IMAGES, MAX_RESULT_IMAGE_BYTES,
+};
 
 use auth::Credential;
 use handler::{Authed, Handler};

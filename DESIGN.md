@@ -625,6 +625,24 @@ so free; abandoned after 5 s, when nothing is marked. A host that doesn't
 say (the default), stdio and the CLI change nothing. Activity's
 `estimate_only` (#211) says an `analyse` call only estimated.
 
+**Images** (#223). A host tool's result may carry images
+(`HostOutput.images`; over FFI `HostToolResult.images`, PNG or JPEG by an
+enum, so the types allowed are the contract): a page as it's drawn, a
+crop of one figure.
+They go after the text as MCP `image` content (base64, `mimeType`), in
+order; `structuredContent` is unchanged, and a result without images is
+as it was, byte for byte. aspero-mcp enforces the limits, so every host
+gets the same (`crates/mcp/src/http/host.rs`): each image's bytes start
+with its type's signature, so a mislabelled one fails cleanly; at most
+3.75 MiB an image (`MAX_IMAGE_BYTES`, so its base64 stays within the
+5 MiB agents commonly allow), 4 images (`MAX_IMAGES`) and 8 MiB
+(`MAX_RESULT_IMAGE_BYTES`) a result. Past any, the call is `failed`, its
+message naming the limit, never cut short. aspero doesn't decode, resize
+or recompress: the host draws to size (about 1,568 px on a page's long
+edge; agents scale larger ones down anyway). Images in arguments,
+resource links and embedded resources aren't served. The images go only
+to the agent the key's holder connected, as host tools' text does.
+
 **Threat model.** For agents on the same machine, acting for the user.
 Loopback only: nothing off the machine connects. Every request needs a key
 the app minted and can revoke; aspero holds only hashes (the app keeps
@@ -801,8 +819,16 @@ count its provider as asked.
 or `error`), `error` (only with `outcome=error`, the tool error's kind:
 `refused`, `timeout`, `unknown_tool`, …), `ms`,
 `cost_usd`, `call`: the id of the engine call the tool made, absent where
-it made none (host tools, a refused or invalid call). A name no tool has
-is the client's text: `tool=unknown`, the name only in `tool_input`.
+it made none (host tools, a refused or invalid call), then `images` and
+`image_bytes` (#223): how many images a host tool answered with and their
+bytes together, whether sent or refused by a limit; absent where it gave
+none (engine tools, a host tool's result without images, a host error). A
+name no tool has is the client's text: `tool=unknown`, the name only in
+`tool_input`. An image's bytes are never logged, base64 or raw, by
+aspero's events. rmcp's own `debug` and `trace` events (target
+`rmcp::service`) log whole responses, images included, as they do text:
+aspero's log outputs take only `aspero` targets, and an embedder that
+subscribes to rmcp's should expect them there.
 
 **`retry`** (target `aspero::net`): a failed attempt about to be retried:
 `v`, `provider`, `op`, `attempt` (the one that failed), `status` (where
@@ -833,7 +859,7 @@ parameters redacted, `call`), `call_input` (`op`, `input`, `call`),
 `tool_input` (`tool`, `arguments`), and `*_error` and `*_detail` events
 (an error's text). The HTTP tape's warnings name requests: it's a
 developer tool, read from the environment by the CLI only. Tests assert
-no claim or query reaches an info event
+no claim or query reaches an info event, and no image's bytes any event
 (`crates/engine/tests/events.rs`, `crates/mcp/tests/http.rs`).
 
 **Cost when off.** Fields are computed inside the macros (a URL only when

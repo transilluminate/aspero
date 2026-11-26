@@ -824,7 +824,11 @@ it made none (host tools, a refused or invalid call), then `images` and
 bytes together, whether sent or refused by a limit; absent where it gave
 none (engine tools, a host tool's result without images, a host error). A
 name no tool has is the client's text: `tool=unknown`, the name only in
-`tool_input`. An image's bytes are never logged, base64 or raw.
+`tool_input`. An image's bytes are never logged, base64 or raw, by
+aspero's events. rmcp's own `debug` and `trace` events (target
+`rmcp::service`) log whole responses, images included, as they do text:
+aspero's log outputs take only `aspero` targets, and an embedder that
+subscribes to rmcp's should expect them there.
 
 **`retry`** (target `aspero::net`): a failed attempt about to be retried:
 `v`, `provider`, `op`, `attempt` (the one that failed), `status` (where

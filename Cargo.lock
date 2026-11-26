@@ -298,6 +298,7 @@ dependencies = [
  "aspero-json",
  "aspero-openalex",
  "async-trait",
+ "base64",
  "bytes",
  "futures",
  "http",

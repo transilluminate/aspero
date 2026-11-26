@@ -383,6 +383,7 @@ impl http::Host for ForeignHost {
             Ok(r) => Ok(http::HostOutput {
                 structured: r.structured,
                 summary: r.summary,
+                images: Vec::new(),
             }),
             Err(e) => Err(match e {
                 HostToolError::InvalidArguments { message } => {

@@ -1,0 +1,51 @@
+{
+  "mentions": [
+    {
+      "column": 11,
+      "context": "As shown (doi:10.1038/nature14539), and at",
+      "file": "paper.txt",
+      "id": "doi:10.1038/nature14539",
+      "kind": "doi",
+      "line": 1,
+      "text": "doi:10.1038/nature14539"
+    },
+    {
+      "column": 1,
+      "context": "https://doi.org/10.1145/3448250 and in 10.1093/nar/gkab-",
+      "file": "paper.txt",
+      "from_url": true,
+      "id": "doi:10.1145/3448250",
+      "kind": "doi",
+      "line": 2,
+      "text": "https://doi.org/10.1145/3448250"
+    },
+    {
+      "alternative": "doi:10.1093/nar/gkab1112",
+      "column": 40,
+      "context": "https://doi.org/10.1145/3448250 and in 10.1093/nar/gkab-\n1112 too. See arXiv:1706.03762 and PMID: 12345678.",
+      "file": "paper.txt",
+      "id": "doi:10.1093/nar/gkab-1112",
+      "kind": "doi",
+      "line": 2,
+      "text": "10.1093/nar/gkab-\n1112"
+    },
+    {
+      "column": 15,
+      "context": "1112 too. See arXiv:1706.03762 and PMID: 12345678.",
+      "file": "paper.txt",
+      "id": "arxiv:1706.03762",
+      "kind": "arxiv",
+      "line": 3,
+      "text": "arXiv:1706.03762"
+    },
+    {
+      "column": 36,
+      "context": "1112 too. See arXiv:1706.03762 and PMID: 12345678.",
+      "file": "paper.txt",
+      "id": "pmid:12345678",
+      "kind": "pmid",
+      "line": 3,
+      "text": "PMID: 12345678"
+    }
+  ]
+}

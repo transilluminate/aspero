@@ -3,7 +3,7 @@
 use std::io::IsTerminal;
 use std::path::PathBuf;
 
-use aspero_engine::Engine;
+use aspero_engine::{Engine, Identified};
 use serde_json::json;
 
 use super::verify::{exit_for, verdict_text};
@@ -55,12 +55,48 @@ pub async fn run(
             println!("{verdict} by {by}");
             print!("{}", term::fill(&verdict_text(&input, v)));
         }
-        _ => {
-            let mut item = aspero_json::verification(json!({"input": input}), v, out.full);
-            item["identified"] = json!(true);
-            item["decided_by"] = json!(found.decided_by.as_str());
-            print(&item);
-        }
+        _ => print(&item(&found, out.full)),
     }
     Ok(exit_for(v.verdict))
+}
+
+/// The JSON of a document identified: its verification, `identified`
+/// and `decided_by`.
+fn item(found: &Identified, full: bool) -> serde_json::Value {
+    let input = found.input();
+    let mut item = aspero_json::verification(json!({"input": input}), &found.verification, full);
+    item["identified"] = json!(true);
+    item["decided_by"] = json!(found.decided_by.as_str());
+    item
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::cmd::testing::{Scripted, engine, pinned, work};
+
+    /// What `identify --format json` prints for a first page whose DOI
+    /// and title agree, lean and `--full`.
+    #[tokio::test]
+    async fn json_is_pinned() {
+        let lecun = ["Yann LeCun", "Yoshua Bengio", "Geoffrey Hinton"];
+        let engine = engine(vec![Scripted::new(
+            "openalex",
+            vec![work(
+                &["10.1038/nature14539"],
+                "Deep learning",
+                &lecun,
+                2015,
+            )],
+        )]);
+        let page = "Deep learning\nYann LeCun, Yoshua Bengio & Geoffrey Hinton\n\
+                    Nature 521, 436-444 (2015). doi:10.1038/nature14539\n";
+        let found = engine
+            .identify(page, None, Some("Deep learning"))
+            .await
+            .identified
+            .expect("identified");
+        let lines = format!("{}\n{}\n", item(&found, false), item(&found, true));
+        pinned("identify/expected.jsonl", &lines);
+    }
 }

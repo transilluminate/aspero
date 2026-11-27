@@ -322,5 +322,25 @@ mod tests {
             })
             .collect();
         pinned("lookup/expected.txt", &text);
+        // The JSON document `--format json` prints, lean; and its items
+        // with `--full`, a line each as `--format jsonl` prints them.
+        let items: Vec<Value> = inputs
+            .iter()
+            .zip(&report.items)
+            .map(|(input, lookup)| aspero_json::input_lookup(input, lookup, false))
+            .collect();
+        let doc = serde_json::json!({"results": items, "usage": output::usage(&report.usage)});
+        pinned(
+            "lookup/expected.json",
+            &(serde_json::to_string_pretty(&doc).unwrap() + "\n"),
+        );
+        let full: String = inputs
+            .iter()
+            .zip(&report.items)
+            .map(|(input, lookup)| {
+                aspero_json::input_lookup(input, lookup, true).to_string() + "\n"
+            })
+            .collect();
+        pinned("lookup/full.jsonl", &full);
     }
 }

@@ -73,7 +73,7 @@ pub fn run(files: Vec<PathBuf>, out: Out) -> Result<Exit, Failure> {
                 println!("{}", term::fill(&line));
             }
         }
-        _ => print(&json!({ "mentions": mentions })),
+        _ => print(&document(&mentions)),
     }
     Ok(Exit::Ok)
 }
@@ -98,4 +98,34 @@ fn documents(files: Vec<PathBuf>) -> Result<Vec<(String, String)>, Failure> {
             Ok((path.display().to_string(), text))
         })
         .collect()
+}
+
+/// The JSON document `scan --format json` prints.
+fn document(mentions: &[serde_json::Value]) -> serde_json::Value {
+    json!({ "mentions": mentions })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::cmd::testing::pinned;
+
+    /// The mentions in a text, as `scan --format json` prints them: a DOI,
+    /// one from a web address, one broken at a hyphen, an arXiv id and a
+    /// PMID.
+    #[test]
+    fn json_is_pinned() {
+        let text = "As shown (doi:10.1038/nature14539), and at\n\
+                    https://doi.org/10.1145/3448250 and in 10.1093/nar/gkab-\n\
+                    1112 too. See arXiv:1706.03762 and PMID: 12345678.\n";
+        let mentions: Vec<_> = scan(text)
+            .iter()
+            .map(|m| aspero_json::mention("paper.txt", text, m))
+            .collect();
+        let doc = document(&mentions);
+        pinned(
+            "scan/expected.json",
+            &(serde_json::to_string_pretty(&doc).unwrap() + "\n"),
+        );
+    }
 }

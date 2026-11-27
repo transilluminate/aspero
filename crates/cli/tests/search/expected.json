@@ -1,0 +1,41 @@
+{
+  "hits": [
+    {
+      "rank": 1,
+      "score": 100.0,
+      "work": {
+        "authors": [
+          {
+            "name": "Yann LeCun"
+          },
+          {
+            "name": "Yoshua Bengio"
+          },
+          {
+            "name": "Geoffrey Hinton"
+          }
+        ],
+        "canonical_id": "doi:10.1038/nature14539",
+        "cited_by_count": 91234,
+        "ids": [
+          "doi:10.1038/nature14539",
+          "openalex:W1"
+        ],
+        "issued": "2015",
+        "source": "openalex",
+        "title": "Deep learning"
+      }
+    }
+  ],
+  "ignored_filters": [],
+  "next_command": null,
+  "next_cursor": null,
+  "provider": "openalex",
+  "served": "live",
+  "total": null,
+  "usage": {
+    "openalex": {
+      "cost_usd": 0.5
+    }
+  }
+}

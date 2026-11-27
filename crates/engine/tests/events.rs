@@ -50,9 +50,35 @@ const ERRORS: [&str; 13] = [
     "not_cached",
 ];
 
+/// The contract's sample lines, a release asset: every shape of contract
+/// event aspero emits is among them (target, name and field names, in
+/// order).
+const VECTORS: &str = include_str!("../../../contracts/diagnostics-v2.jsonl");
+
+fn in_vectors(e: &Captured) {
+    let known = VECTORS.lines().any(|line| {
+        let v: serde_json::Value = serde_json::from_str(line).unwrap();
+        let names: Vec<&str> = v["fields"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|pair| pair[0].as_str().unwrap())
+            .collect();
+        v["target"] == e.target.as_str() && v["event"] == e.name.as_str() && names == e.names()
+    });
+    assert!(
+        known,
+        "no line of contracts/diagnostics-v2.jsonl has this shape: {} {} {:?}",
+        e.target,
+        e.name,
+        e.names()
+    );
+}
+
 /// A contract event's schema (`v=2`): `v` first, `status` an HTTP code
-/// or absent, `error` a kind or absent.
+/// or absent, `error` a kind or absent, and its shape a vector's.
 fn contract(e: &Captured) {
+    in_vectors(e);
     assert_eq!(e.names().first(), Some(&"v"), "{e:?}");
     assert_eq!(e.field("v"), Some("2"), "{e:?}");
     if let Some(status) = e.field("status") {
@@ -199,6 +225,7 @@ async fn a_batch_reads_as_a_tree() {
     assert_eq!(checked.len(), 1, "{checked:?}");
     assert_eq!(checked[0].field("op"), Some("check"));
     assert_eq!(checked[0].field("parent"), None);
+    all_contract(&events);
 }
 
 #[tokio::test(start_paused = true)]

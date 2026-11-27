@@ -10,8 +10,8 @@
 //! digits, `W1` or a 40-digit hex string in prose are more often something
 //! else. Elsevier's PIIs are read from ScienceDirect, Cell and Lancet
 //! pages. Each mention says whether it was [`Mention::from_url`]. Mentions are cleaned like pasted input: wrapping
-//! brackets, quotes and emphasis and trailing sentence punctuation are not
-//! part of them, while brackets inside a DOI are. Markdown links and table
+//! brackets, quotes and emphasis, trailing sentence punctuation and footnote
+//! marks (`†`, `‡`, superscript digits) are not part of them, while brackets inside a DOI are. Markdown links and table
 //! cells are split apart. A DOI or URL broken across lines, as text from
 //! PDFs is, is rejoined by the rules `split_references` uses: the mention
 //! then spans both lines.
@@ -778,6 +778,25 @@ mod tests {
             .into_iter()
             .map(|m| (m.id.to_string(), &text[m.span]))
             .collect()
+    }
+
+    #[test]
+    fn footnote_marks_ending_a_mention_are_not_part_of_it() {
+        // wild-6 #414, minimised.
+        assert_eq!(
+            found("Alshammari et al. ICSE 2021. https://doi.org/10.1109/ICSE43902.2021.00140†"),
+            [(
+                "doi:10.1109/icse43902.2021.00140".into(),
+                "https://doi.org/10.1109/ICSE43902.2021.00140"
+            )]
+        );
+        assert_eq!(
+            found("PMID: 29565522‡; arXiv:1706.03762v5¹"),
+            [
+                ("pmid:29565522".into(), "PMID: 29565522"),
+                ("arxiv:1706.03762v5".into(), "arXiv:1706.03762v5"),
+            ]
+        );
     }
 
     #[test]

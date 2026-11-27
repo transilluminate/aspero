@@ -20,6 +20,13 @@ Added:
 
 Fixed:
 
+- An identifier with a footnote mark glued to its end
+  (`https://doi.org/10.1109/ICSE43902.2021.00140†`) is read without it:
+  daggers, `§`, `¶`, `‖`, asterisk look-alikes and superscript digits come
+  off every kind, as trailing sentence punctuation does, so the DOI is
+  looked up rather than reported as one that doesn't exist (wild-6 #404,
+  #411, #414 and three more from the same answer). `#` and `+`, which can
+  end a SICI-style DOI, stay.
 - The wrong-verdict issue form offers `unverifiable`, so a `verify
   --report` link for an unverifiable result fills in its verdict; a test
   now checks the form against every verdict the engine gives.

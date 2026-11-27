@@ -55,10 +55,24 @@ pub(crate) fn finish<T: IdSyntax>(
         })
 }
 
+/// Footnote and affiliation marks a reference glues to its end
+/// (`https://doi.org/10.1109/ICSE43902.2021.00140†`, wild-6 #414): daggers,
+/// the section and paragraph signs, the double bar, asterisk look-alikes
+/// and superscript digits. No identifier ends in one: DOIs may in principle
+/// end in any printable character, but registration agencies issue ASCII
+/// suffixes, and the marks are in no other kind's grammar. Not `#` or `+`,
+/// which end SICI-style DOIs (`…3.0.CO;2-#`).
+const FOOTNOTE_MARKS: &[char] = &[
+    '\u{2020}', '\u{2021}', '\u{00a7}', '\u{00b6}', '\u{2016}', '\u{204e}', '\u{2217}', '\u{00b9}',
+    '\u{00b2}', '\u{00b3}', '\u{2070}', '\u{2074}', '\u{2075}', '\u{2076}', '\u{2077}', '\u{2078}',
+    '\u{2079}',
+];
+
 /// Removes what clings to identifiers pasted from Markdown or prose:
 /// surrounding brackets, emphasis (`*`, `_`), quotes and backticks, and
-/// trailing sentence punctuation. A closing bracket goes only when it is
-/// unbalanced, so DOIs like `10.1016/S0140-6736(10)60835-5` stay whole.
+/// trailing sentence punctuation and [`FOOTNOTE_MARKS`]. A closing bracket
+/// goes only when it is unbalanced, so DOIs like
+/// `10.1016/S0140-6736(10)60835-5` stay whole.
 pub(crate) fn clean_pasted(input: &str) -> &str {
     const LEADING: &[u8] = b"([{<*_\"'`";
     const TRAILING: &[u8] = b"*_\"'`>.,;:";
@@ -67,7 +81,10 @@ pub(crate) fn clean_pasted(input: &str) -> &str {
     loop {
         let before = s.len();
         s = trim_start(s, LEADING, &['\u{201c}', '\u{2018}']);
-        s = trim_end(s, TRAILING, &['\u{201d}', '\u{2019}']).trim();
+        s = trim_end(s, TRAILING, |c| {
+            matches!(c, '\u{201d}' | '\u{2019}') || FOOTNOTE_MARKS.contains(&c)
+        })
+        .trim();
         for (open, close) in [(b'(', b')'), (b'[', b']'), (b'{', b'}')] {
             if s.as_bytes().last() == Some(&close) && count(s, open) < count(s, close) {
                 s = &s[..s.len() - 1];
@@ -95,13 +112,13 @@ fn trim_start<'a>(s: &'a str, ascii: &[u8], other: &[char]) -> &'a str {
 }
 
 /// `s` without trailing `ascii` bytes and `other` characters.
-fn trim_end<'a>(s: &'a str, ascii: &[u8], other: &[char]) -> &'a str {
+fn trim_end<'a>(s: &'a str, ascii: &[u8], other: impl Fn(char) -> bool) -> &'a str {
     let mut s = s;
     loop {
         match s.as_bytes().last() {
             Some(b) if ascii.contains(b) => s = &s[..s.len() - 1],
             Some(b) if !b.is_ascii() => match s.chars().next_back() {
-                Some(c) if other.contains(&c) => s = &s[..s.len() - c.len_utf8()],
+                Some(c) if other(c) => s = &s[..s.len() - c.len_utf8()],
                 _ => return s,
             },
             _ => return s,
@@ -195,6 +212,7 @@ mod tests {
         const TRAILING: &[char] = &[
             '*', '_', '"', '\'', '`', '>', '\u{201d}', '\u{2019}', '.', ',', ';', ':',
         ];
+        let trailing = |c: char| TRAILING.contains(&c) || FOOTNOTE_MARKS.contains(&c);
         let unbalanced = |s: &str, open: char, close: char| {
             s.ends_with(close) && s.matches(open).count() < s.matches(close).count()
         };
@@ -203,7 +221,7 @@ mod tests {
             let before = s.len();
             s = s
                 .trim_start_matches(LEADING)
-                .trim_end_matches(TRAILING)
+                .trim_end_matches(trailing)
                 .trim();
             for (open, close) in [('(', ')'), ('[', ']'), ('{', '}')] {
                 if unbalanced(s, open, close) {
@@ -222,7 +240,7 @@ mod tests {
             parts in prop::collection::vec(prop::sample::select(vec![
                 "(", ")", "[", "]", "{", "}", "<", ">", "*", "_", "\"", "'", "`", ".", ",",
                 ";", ":", " ", "\u{2003}", "\u{201c}", "\u{201d}", "\u{2018}", "\u{2019}",
-                "a", "1", "/", "é", "10.1016/S0140-6736(10)60835-5",
+                "a", "1", "/", "é", "†", "‡", "§", "¹", "⁹", "#", "10.1016/S0140-6736(10)60835-5",
             ]), 0..16),
         ) {
             let input = parts.concat();
@@ -250,6 +268,20 @@ mod tests {
             (
                 "[10.1002/(SICI)1097-4636(199601)]",
                 "10.1002/(SICI)1097-4636(199601)",
+            ),
+            (
+                "10.1109/ICSE43902.2021.00140†",
+                "10.1109/ICSE43902.2021.00140",
+            ),
+            ("10.1002/spe.2929‡.", "10.1002/spe.2929"),
+            ("PMID: 12345678¹²", "PMID: 12345678"),
+            ("arXiv:1706.03762§", "arXiv:1706.03762"),
+            ("ISBN 978-92-4-155008-6¶", "ISBN 978-92-4-155008-6"),
+            ("(10.1056/NEJMoa072006)*", "10.1056/NEJMoa072006"),
+            // A SICI check character is no mark.
+            (
+                "10.1002/(SICI)1097-4636(199601)30:1<1::AID-JBM1>3.0.CO;2-#",
+                "10.1002/(SICI)1097-4636(199601)30:1<1::AID-JBM1>3.0.CO;2-#",
             ),
         ] {
             assert_eq!(clean_pasted(input), want, "{input:?}");

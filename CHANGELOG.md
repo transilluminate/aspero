@@ -13,7 +13,8 @@ Fixed:
 - Reading a .docx no longer spends time quadratic in a tag's attributes
   (quick-xml 0.41, RUSTSEC-2026-0194), so a crafted document can't pin a
   core. rmcp is 3.9.0 (RUSTSEC-2026-0462, in its HTTP client, which aspero
-  uses only in tests).
+  uses only in tests), and url is 2.5.9 (RUSTSEC-2026-0592, a stack
+  overflow in `Url::origin()`, which aspero doesn't call).
 
 ## 0.44.0
 

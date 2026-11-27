@@ -1,7 +1,10 @@
 {
   "artefact": "aspero-ffi",
   "version": "0.44.0",
-  "target": "aarch64-apple-darwin",
+  "targets": [
+    "aarch64-apple-darwin",
+    "x86_64-apple-darwin"
+  ],
   "dependencies": [
     {
       "name": "anyhow",

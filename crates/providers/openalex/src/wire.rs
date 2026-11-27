@@ -264,7 +264,7 @@ impl WireWork {
             .and_then(rebuild_abstract)
             .map(|text| tidy_abstract(&text))
             .and_then(without_footer)
-            .filter(|text| !scraped_page(text));
+            .filter(|text| !scraped_page(text) && text.chars().count() <= LONGEST_ABSTRACT);
         work.url = self
             .primary_location
             .as_ref()
@@ -403,6 +403,15 @@ fn scraped_page(text: &str) -> bool {
         glued && number && rest.contains(", Issue ") && rest.contains(" p. ")
     })
 }
+
+/// The longest text taken for an abstract, in characters. Longer is a full
+/// text or a page OpenAlex indexed as one: of the tape's 64,533 whole
+/// indexes (2026-11-27), the longest real abstracts are reviews' and
+/// technology assessments' at 7,000 to 8,000 characters; the 86 over
+/// 10,000 are articles' and editorials' opening sections, book lists and
+/// pages, up to 29,309 ("New books Astronomy and astrophysics Section:
+/// Choose Top of page…").
+const LONGEST_ABSTRACT: usize = 10_000;
 
 /// Shortest text before a page's footer that is still an abstract.
 const ABSTRACT_BEFORE_FOOTER: usize = 100;
@@ -672,6 +681,23 @@ mod tests {
         let doubled = index(&[("a", &[0]), ("b", &[0]), ("c", &[1])]);
         assert_eq!(rebuild_abstract(&doubled), None);
         assert_eq!(rebuild_abstract(&BTreeMap::new()).as_deref(), Some(""));
+    }
+
+    #[test]
+    fn a_full_text_indexed_as_an_abstract_is_none() {
+        let abstract_of = |words: usize| {
+            let index: BTreeMap<String, Vec<usize>> =
+                (0..words).map(|i| (format!("w{i:05}"), vec![i])).collect();
+            let wire: WireWork = serde_json::from_value(serde_json::json!({
+                "type": "article",
+                "abstract_inverted_index": index,
+            }))
+            .unwrap();
+            wire.work().abstract_text
+        };
+        // 1,428 six-letter words and their spaces: 9,995 characters.
+        assert!(abstract_of(1_428).is_some_and(|a| a.len() == 9_995));
+        assert_eq!(abstract_of(1_430), None);
     }
 
     #[test]

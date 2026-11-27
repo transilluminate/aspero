@@ -33,6 +33,11 @@ jobs:
       - run: cargo clippy --workspace --all-targets --all-features -- -D warnings
       # Provider tests replay recorded fixtures: no network or API keys needed.
       - run: cargo test --workspace --all-features
+      # The Swift API: bindings generated as the release's are the committed
+      # snapshot, contracts/aspero_ffi.swift (on macOS, where the release
+      # generates them).
+      - if: matrix.os == 'macos-latest'
+        run: scripts/swift-bindings.sh
       # Doc links resolve, as docs.rs builds them (default features).
       - run: cargo doc --workspace --no-deps
         env:

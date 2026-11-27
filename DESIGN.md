@@ -153,6 +153,30 @@ ids (`CallId`), cache hits and each request's op and attempt in
 - **Search modes**: `Keywords`, or `Citation` (a whole reference) where a
   provider has a citation matcher (Crossref). Scores compare only within
   one provider. **Cache trait**: batch-first; the engine owns freshness.
+- **Pinned contracts** (`contracts/`): four files an embedder can pin,
+  each failing a check when what aspero does drifts from it, and each
+  attached to every release (`.github/workflows/xcframework.yml`) from
+  the tagged commit. `ASPERO_BLESS=1` rewrites them after an intended
+  change, which is then a change embedders see.
+  - `tools.json`: the MCP `tools/list` result as `aspero mcp` serves it,
+    with every source enabled: names, descriptions, input and output
+    schemas (`crates/cli/tests/mcp.rs`).
+  - `stored-v1.jsonl`: a stored `reasonJson` (`v: 1`) per reason code, and
+    a work's full JSON (`workFromJson`) today and as stored before 0.35,
+    each with what it reads back as (`crates/ffi/src/records/stored.rs`).
+  - `diagnostics-v2.jsonl`: a sample line of each shape of contract event
+    (DESIGN "Diagnostics events"), with its target, unified-log category
+    and parsed fields in order; the event tests fail on a shape emitted
+    that no line has (`crates/engine/tests/events.rs`,
+    `crates/mcp/tests/http.rs`).
+  - `aspero_ffi.swift`: the generated Swift bindings, byte for byte the
+    release's asset (`scripts/swift-bindings.sh`, in CI on macOS). An
+    exported item's doc comment feeds its UniFFI checksum and enum cases
+    keep their places, so its diff is what Swift callers see.
+
+  The CLI's JSON is pinned too, by goldens beside the commands' tests
+  (`crates/cli/tests/{check,graph,verify,lookup,search,identify,scan}/`),
+  though not shipped.
 
 ### Routing and concurrency
 
@@ -591,8 +615,8 @@ budgets and activity: `crates/mcp/src/http/mod.rs`; the FFI surface:
 `crates/ffi/src/mcp.rs`. Loopback only, on the app's fixed port;
 sessions required, so budgets can't be dodged; keys minted by the app,
 held as SHA-256 hashes and compared in constant time, with scopes and a
-daily budget kept in `mcp_spend`. Host tools cost $0 and get 30 s; a
-timeout says the outcome is unknown (a retry could write twice).
+daily budget kept in `mcp_spend`. Host tools cost $0, within the bounds
+below.
 
 **Scopes** are strings (`crates/mcp/src/scope.rs`). `sources` is
 aspero's own, for the engine tools. Every other is declared by the host
@@ -621,7 +645,7 @@ aspero asks with every identifier each work carries (its canonical id,
 its record's `ids`, an analysis' OpenAlex `id` and merged `ids`), so the
 host matches a work under whichever id it keeps. Held works get `held:
 true` (absent otherwise), " (held)" in the text and a count line. Local,
-so free; abandoned after 5 s, when nothing is marked. A host that doesn't
+so free; abandoned after its wait (below), when nothing is marked. A host that doesn't
 say (the default), stdio and the CLI change nothing. Activity's
 `estimate_only` (#211) says an `analyse` call only estimated.
 
@@ -632,16 +656,50 @@ crop of one figure.
 They go after the text as MCP `image` content (base64, `mimeType`), in
 order; `structuredContent` is unchanged, and a result without images is
 as it was, byte for byte. aspero-mcp enforces the limits, so every host
-gets the same (`crates/mcp/src/http/host.rs`): each image's bytes start
-with its type's signature, so a mislabelled one fails cleanly; at most
-3.75 MiB an image (`MAX_IMAGE_BYTES`, so its base64 stays within the
-5 MiB agents commonly allow), 4 images (`MAX_IMAGES`) and 8 MiB
-(`MAX_RESULT_IMAGE_BYTES`) a result. Past any, the call is `failed`, its
-message naming the limit, never cut short. aspero doesn't decode, resize
+gets the same (`crates/mcp/src/http/host.rs`, the bounds below): each
+image's bytes start with its type's signature, so a mislabelled one fails
+cleanly. Past a limit, the call is `failed`, its message naming the
+limit, never cut short. aspero doesn't decode, resize
 or recompress: the host draws to size (about 1,568 px on a page's long
 edge; agents scale larger ones down anyway). Images in arguments,
 resource links and embedded resources aren't served. The images go only
 to the agent the key's holder connected, as host tools' text does.
+
+**Bounds and contract for hosts.** These are a **contract**: a change to
+any is one every host must make. The values are in
+`crates/mcp/src/http/mod.rs` and `host.rs`.
+
+- **Waits.** A host tool's call is abandoned after 30 s (`HOST_TIMEOUT`):
+  the agent gets `timeout`, saying whether the tool did anything is
+  unknown (it may yet; a retry could write twice). The holdings question
+  (`held`) is abandoned after 5 s (`HELD_TIMEOUT`), and the results go
+  unmarked. A host's own I/O should finish within the call's wait;
+  partial work done before cancellation is kept (aspero undoes nothing).
+- **Errors.** `HostToolError` (Rust `HostError`) has exactly four kinds.
+  Each is an MCP tool result with `isError: true` and the text
+  `Error (<kind>): <message>` (the kind in words when the message is
+  empty), never a protocol error; activity and the `tool` event carry the
+  kind. `invalidArguments` becomes `invalid_arguments`, `notFound`
+  becomes `not_found`, `refused` stays `refused` and `failed` stays
+  `failed`. A callback that throws anything else is `failed`.
+- **Hints.** A host tool that declares none is listed as MCP assumes:
+  `readOnlyHint` false, `destructiveHint` true, `idempotentHint` false.
+  A read-only tool is never listed as destructive.
+- **Images** (since 0.44.0, #223). A result may carry PNG or JPEG images,
+  at most 3.75 MiB each (`MAX_IMAGE_BYTES`, so its base64 stays within
+  the 5 MiB agents commonly allow), 4 (`MAX_IMAGES`) and 8 MiB together
+  (`MAX_RESULT_IMAGE_BYTES`) a result.
+- **Names.** A host tool's name must not be one of aspero's own tools
+  (checked even when the engine tools aren't served) or another host
+  tool's. On a clash, `start` fails with `ToolNameClash`
+  (`McpError.toolNameClash`), and `hostToolsChanged()` throws it and
+  keeps the tools it had. `tools.json`, a release asset (DESIGN "Seams and
+  contracts"), is the list of aspero's names a host can check against
+  before it pins a release.
+- **Attachment ids.** An attachment in a host's library is named
+  `sha256:<hex>`: the SHA-256 of the file's bytes, in lower-case hex. The
+  host forms it; aspero neither forms nor reads it, and passes it through
+  host tools' arguments and results as their text.
 
 **Threat model.** For agents on the same machine, acting for the user.
 Loopback only: nothing off the machine connects. Every request needs a key
@@ -672,6 +730,59 @@ xcframework` builds the static `AsperoFFI.xcframework` and Swift
 bindings, attached to each release. Not on crates.io. Third-party notices
 ship inside it and the CLI (`crates/notices-gen`; run `just notices`
 after a version bump or dependency change).
+
+**Words.** Names here that an app might say otherwise, or that mean two
+things. None is renamed: each is a contract to Swift callers.
+
+- **provider** and **source** name the same thing, a bibliographic
+  source (`openalex`, `crossref`, …). Answers say provider
+  (`SearchResults.provider`, `ProviderUsage.provider`, `Failure.provider`,
+  `Attempt.provider`). Requests and a work's origin say source
+  (`SearchRequest.source`, `SourceSearch.source`, `Work.source`,
+  `Config.disabledSources`, by the names `provider` gives). A third
+  sense: `Notice.source` and `OpenAccess.source` are who reported it
+  (`retraction-watch`, `publisher`).
+- **`Claim`** (`verify(claims:)`, `Verification.claimKey`, `PageClaim`,
+  `BibEntry.claim`): a citation as given, what it asserts. An app may say
+  citation, as MCP's arguments do (`citation`, `citations`).
+  `Reason.invalidClaim` is a stored reason only: the JSON says verdict
+  `invalid`.
+- **`Work`**: a found work (a paper, a book), `work` in the JSON.
+- **reference** has four senses. `Reference`, `LineReference` and
+  `splitReferences` are entries of a pasted list. `readReferences` reads a
+  BibTeX, RIS or CSL file into a `Bibliography`. `references(id)`,
+  `ReferencesPage` and `RetractedReference` are the works a work cites.
+  `DocxReferences` are a Word document's citations.
+- **`Notice`** (`NoticeKind`, `Work.notices`, `noticeFor`): an editorial
+  notice about a work, stored in the core's serde as `updates` and
+  `update_to`. **`WorkKind`** (`Difference.kind`) is what the found work
+  itself is: both have `retraction`, `correction` and
+  `expressionOfConcern`.
+- **`CitedField.journal`, `.firstPage`, `.identifier`** are the fields
+  `Claim`, `Checks` and `Work` call `container`, `page` and `ids`.
+- **`ErrorKind.budgetSpent`** is a provider's own budget spent
+  (OpenAlex's, until it resets). **`McpErrorKind.budgetSpent`** is the MCP
+  session's budget, or the key's daily one; there a provider's spent
+  budget is `.throttled`. The two `timeout`s differ too: a provider's,
+  and the app's tool's.
+- **`ErrorKind.keyRejected`, `.notCached`, `.budgetSpent`** come from the
+  core's `Error::AuthRejected`, `Offline` and `QuotaExhausted`. The CLI
+  JSON's `category` for a rejected key is `auth`, and not-found's is
+  `notfound` (no underscore).
+- **`Freshness`** (`Lookup.served`, `SearchResults.served`) is the
+  engine's `Served`, the JSON's `served`. **`IdentifiedBy`**
+  (`Identification.decidedBy`) is the engine's `Decision`, the JSON's
+  `decided_by`.
+- **`AnalysisStage`, `SearchSort`, `SearchField`, `SearchFilter`,
+  `SearchRelation`, `SearchBoolean`** are the engine's `Stage`, `Sort`,
+  `TermField`, `Filter`, `Relation` and `BooleanSupport`, prefixed.
+- **`KeyStatus`** is the OpenAlex key's (`valid`, `rejected`,
+  `unreachable`). **`McpKeyStatus`** is an MCP bearer key's use.
+- **`Work.abstractText`, `.workType`, `OpenAccess.isOa`** are the JSON's
+  `abstract`, `type` and `is_oa` (`abstract` and `type` are Rust
+  keywords).
+- **licences** is the CLI command. **license** is the SPDX field
+  (`Dependency.license`, `CitationStyle.license`).
 
 **Comparing given works** (`compare`, #166) scores works the caller
 already has (a search's results) against a claim with no requests, on

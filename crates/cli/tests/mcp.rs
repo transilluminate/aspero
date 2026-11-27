@@ -6,12 +6,19 @@ use std::process::{Command, Stdio};
 
 use serde_json::{Value, json};
 
+/// The tool list as `tools/list` serves it, with every source enabled:
+/// names, descriptions and schemas. A release asset (`tools.json`) that
+/// hosts and agents pin; `ASPERO_BLESS=1` rewrites it after an intended
+/// change.
+const TOOLS: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../../contracts/tools.json");
+
 #[test]
 fn stdout_carries_the_protocol_and_eof_ends_it() {
     let cache = tempfile::tempdir().unwrap();
     let mut child = Command::new(env!("CARGO_BIN_EXE_aspero"))
         .arg("mcp")
         .env("ASPERO_CACHE_DIR", cache.path())
+        .env_remove("ASPERO_DISABLED_SOURCES")
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -45,6 +52,13 @@ fn stdout_carries_the_protocol_and_eof_ends_it() {
     let tools = replies[1]["result"]["tools"].as_array().unwrap();
     assert_eq!(tools.len(), 8);
     assert!(tools.iter().all(|t| t["outputSchema"].is_object()));
+
+    let listed = serde_json::to_string_pretty(&replies[1]["result"]).unwrap() + "\n";
+    if std::env::var_os("ASPERO_BLESS").is_some() {
+        std::fs::write(TOOLS, &listed).unwrap();
+    }
+    let pinned = std::fs::read_to_string(TOOLS).unwrap();
+    assert_eq!(listed, pinned, "contracts/tools.json changed");
 }
 
 #[test]

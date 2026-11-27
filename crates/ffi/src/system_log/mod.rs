@@ -148,7 +148,11 @@ struct Line {
 
 impl Line {
     fn put(&mut self, field: &Field, value: &str) {
-        if field.name() == "message" {
+        self.push(field.name(), value);
+    }
+
+    fn push(&mut self, name: &str, value: &str) {
+        if name == "message" {
             value.clone_into(&mut self.name);
             return;
         }
@@ -160,9 +164,9 @@ impl Line {
                 .chars()
                 .any(|c| c.is_whitespace() || c == '"' || c == '=' || c.is_control());
         if plain {
-            let _ = write!(self.fields, "{}={value}", field.name());
+            let _ = write!(self.fields, "{name}={value}");
         } else {
-            let _ = write!(self.fields, "{}={value:?}", field.name());
+            let _ = write!(self.fields, "{name}={value:?}");
         }
     }
 
@@ -315,6 +319,30 @@ mod tests {
                 ),
             ]
         );
+    }
+
+    /// The contract's sample lines (`contracts/diagnostics-v2.jsonl`, a
+    /// release asset) are what this log writes for their fields, in
+    /// their categories.
+    #[test]
+    fn the_vectors_are_lines_as_written() {
+        let vectors = include_str!("../../../../contracts/diagnostics-v2.jsonl");
+        for vector in vectors.lines() {
+            let v: serde_json::Value = serde_json::from_str(vector).unwrap();
+            let mut line = Line::default();
+            line.push("message", v["event"].as_str().unwrap());
+            let mut provider = None;
+            for pair in v["fields"].as_array().unwrap() {
+                let (name, value) = (pair[0].as_str().unwrap(), pair[1].as_str().unwrap());
+                if name == "provider" {
+                    provider = Some(value);
+                }
+                line.push(name, value);
+            }
+            assert_eq!(line.text(), v["line"].as_str().unwrap(), "{vector}");
+            let target = v["target"].as_str().unwrap();
+            assert_eq!(category(target, provider), v["category"].as_str().unwrap());
+        }
     }
 
     #[test]

@@ -26,6 +26,7 @@ async fn a_client_lists_and_calls_the_tools() {
     let (client_io, server_io) = tokio::io::duplex(64 * 1024);
     let (read, write) = tokio::io::split(server_io);
     let tools = Arc::new(tools(vec![source()]));
+    let served = tools.clone();
     let session = Arc::new(session(1.0));
     let server = tokio::spawn(serve(tools, session.clone(), read, write));
 
@@ -43,19 +44,9 @@ async fn a_client_lists_and_calls_the_tools() {
 
     let listed = client.list_all_tools().await.unwrap();
     let names: Vec<&str> = listed.iter().map(|t| t.name.as_ref()).collect();
-    assert_eq!(
-        names,
-        [
-            "search",
-            "search_supports",
-            "lookup",
-            "verify",
-            "identify",
-            "citing_works",
-            "references",
-            "analyse"
-        ]
-    );
+    // The names themselves are pinned once, in tests/tools.rs.
+    let specs: Vec<&str> = served.specs().iter().map(|s| s.name).collect();
+    assert_eq!(names, specs);
     for tool in &listed {
         assert_eq!(tool.input_schema["type"], "object", "{}", tool.name);
         let output = tool.output_schema.as_ref().unwrap();

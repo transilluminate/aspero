@@ -1639,6 +1639,28 @@ fn global_events() -> Events {
         .clone()
 }
 
+/// Whether a `tool` event's shape (its field names, in order) is one of
+/// the contract's sample lines, `contracts/diagnostics-v2.jsonl`.
+fn in_vectors(e: &aspero_core::testing::Captured) {
+    let vectors = include_str!("../../../contracts/diagnostics-v2.jsonl");
+    let known = vectors.lines().any(|line| {
+        let v: Value = serde_json::from_str(line).unwrap();
+        let names: Vec<&str> = v["fields"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|pair| pair[0].as_str().unwrap())
+            .collect();
+        v["target"] == e.target.as_str() && v["event"] == e.name.as_str() && names == e.names()
+    });
+    assert!(
+        known,
+        "no vector has this shape: {} {:?}",
+        e.name,
+        e.names()
+    );
+}
+
 /// A `tool` event per call (DESIGN "Diagnostics events"), engine tools
 /// and the host's, by the key's name; what was asked only at debug. An
 /// engine tool's says the id of the engine call it made; the host's make
@@ -1691,6 +1713,7 @@ async fn each_tool_call_is_logged_with_the_keys_name_and_no_query() {
             ("unknown", "error", "unknown_tool", "0.000000"),
         ]
     );
+    logged.iter().for_each(in_vectors);
     let fields = ["v", "tool", "key", "outcome", "ms", "cost_usd"];
     let failed = ["v", "tool", "key", "outcome", "error", "ms", "cost_usd"];
     assert_eq!(logged[0].names(), [&fields[..], &["call"]].concat());
@@ -2058,6 +2081,7 @@ async fn a_host_tools_images_follow_its_text_within_the_limits() {
             (Some("2"), Some("20"), "error"),
         ]
     );
+    logged.iter().for_each(in_vectors);
     // At the end, after every field there was.
     let fields = [
         "v",

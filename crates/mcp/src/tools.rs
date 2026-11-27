@@ -819,6 +819,28 @@ fn trim_authors(v: &mut Value) {
 mod tests {
     use super::*;
 
+    /// Every tool has its own estimate, summary and activity line: a new
+    /// one can't fall through to holding $0, an empty summary or "called x".
+    #[test]
+    fn every_tool_is_costed_and_summed_up() {
+        let sample = json!({"results": [{}], "hits": [], "supported": true});
+        for spec in specs(&["openalex".to_owned()]) {
+            let name = spec.name;
+            if spec.spends {
+                assert!(estimate(name, &json!({})) > 0.0, "{name} holds nothing");
+            }
+            assert!(
+                !summary::of(name, &sample).is_empty(),
+                "{name} has no summary"
+            );
+            #[cfg(feature = "http")]
+            {
+                let said = crate::http::handler::engine_summary(name, &Map::new());
+                assert!(!said.starts_with("called "), "{name}: {said}");
+            }
+        }
+    }
+
     #[test]
     fn lean_works_list_five_authors_and_count_the_rest() {
         let authors: Vec<Value> = (0..8).map(|i| json!({"name": format!("A{i}")})).collect();

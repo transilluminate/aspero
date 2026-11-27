@@ -678,15 +678,27 @@ mod tests {
         ];
         let mut text = String::new();
         let mut grid = Grid::new(cols());
+        let (mut lean, mut full) = (String::new(), String::new());
         for line in lines {
             let claim = InputClaim::from_line(line);
             let v = engine.verify(claim.claim.as_ref().unwrap(), 5).await;
             text.push_str(&verdict_text(&claim.input, &v));
             text.push('\n');
             grid.row(row(&claim.input, &v));
+            for (out, full_json) in [(&mut lean, false), (&mut full, true)] {
+                let item = aspero_json::verification(claim.echo(), &v, full_json);
+                out.push_str(&(item.to_string() + "\n"));
+            }
         }
         text.push_str(&grid.render(Some(80), false));
         text.push('\n');
         pinned("verify/expected.txt", &text);
+        // The JSON, a line per claim as `--format jsonl` prints it, lean
+        // and `--full`; and a claim that couldn't be read.
+        let invalid = InputClaim::from_line(r#"{"doi": "not a doi"}"#);
+        let reason = invalid.claim.as_ref().unwrap_err();
+        lean.push_str(&(aspero_json::invalid_claim(invalid.echo(), reason).to_string() + "\n"));
+        pinned("verify/expected.jsonl", &lean);
+        pinned("verify/full.jsonl", &full);
     }
 }

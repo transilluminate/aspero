@@ -83,10 +83,7 @@ pub async fn run(
             print!("{}", export.finish());
         }
         Format::Json | Format::Auto => {
-            doc["next_command"] = json!(next);
-            if let Some(u) = &report.usage {
-                doc["usage"] = json!({ report.provider.to_string(): aspero_json::usage_one(u) });
-            }
+            with_footer(&mut doc, &report, next.as_deref());
             print(&doc);
         }
     }
@@ -130,6 +127,18 @@ fn hits_table(hits: &[aspero_core::Hit]) -> Grid {
         grid.row(row);
     }
     grid
+}
+
+/// The JSON document's `next_command` and `usage`, after the page.
+fn with_footer(
+    doc: &mut serde_json::Value,
+    report: &aspero_engine::SearchReport,
+    next: Option<&str>,
+) {
+    doc["next_command"] = json!(next);
+    if let Some(u) = &report.usage {
+        doc["usage"] = json!({ report.provider.to_string(): aspero_json::usage_one(u) });
+    }
 }
 
 /// Totals, ignored filters, paging and spend, on stderr.
@@ -288,6 +297,52 @@ fn parse_years(s: &str) -> Result<YearRange, Failure> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::cmd::testing::{Scripted, engine, pinned, work};
+
+    fn options() -> SearchOptions {
+        SearchOptions {
+            source: None,
+            year: None,
+            work_type: None,
+            oa: false,
+            author: None,
+            title: None,
+            container: None,
+            tree: None,
+            sort: SortBy::Relevance,
+            since: None,
+            limit: 5,
+            cursor: None,
+        }
+    }
+
+    /// The JSON document `search --format json` prints, lean and `--full`.
+    #[tokio::test]
+    async fn json_is_pinned() {
+        let lecun = ["Yann LeCun", "Yoshua Bengio", "Geoffrey Hinton"];
+        let mut found = work(
+            &["10.1038/nature14539", "W1"],
+            "Deep learning",
+            &lecun,
+            2015,
+        );
+        found.work.cited_by_count = Some(91_234);
+        let engine = engine(vec![Scripted::new(
+            "openalex",
+            vec![
+                found,
+                work(&["10.1145/3448250"], "Deep learning for AI", &lecun, 2021),
+            ],
+        )]);
+        let options = options();
+        let query = query("Deep learning".into(), &options).unwrap();
+        let report = engine.search(None, &query).await.unwrap();
+        for (name, full) in [("search/expected.json", false), ("search/full.json", true)] {
+            let mut doc = aspero_json::search_page(&report, full);
+            with_footer(&mut doc, &report, None);
+            pinned(name, &(serde_json::to_string_pretty(&doc).unwrap() + "\n"));
+        }
+    }
 
     #[test]
     fn tables_rank_without_scores_and_show_citations_when_known() {

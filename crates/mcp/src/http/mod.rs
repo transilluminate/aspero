@@ -31,7 +31,7 @@
 //!   what it cost, from a thread of its own, in order.
 
 mod auth;
-mod handler;
+pub(crate) mod handler;
 mod host;
 
 use std::collections::HashMap;

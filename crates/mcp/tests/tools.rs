@@ -80,6 +80,43 @@ fn every_tool_is_listed_with_its_schemas() {
     assert!(verify["$defs"]["ClaimInput"]["properties"]["container"].is_object());
 }
 
+/// The output schemas' enums are the engine's values (and the JSON's
+/// `invalid`), not a list kept by hand beside them.
+#[test]
+fn output_enums_are_the_engines_values() {
+    use aspero_engine::{Decision, Served, Verdict};
+    let tools = tools(vec![source()]);
+    let schema = |name: &str| Value::Object(tools.spec(name).unwrap().output_schema.clone());
+    let strs = |values: Vec<&str>| json!(values);
+
+    let mut verdicts: Vec<&str> = Verdict::ALL.iter().map(|v| v.as_str()).collect();
+    verdicts.push("invalid");
+    let verify = schema("verify");
+    let item = &verify["properties"]["results"]["items"]["properties"];
+    assert_eq!(item["verdict"]["enum"], strs(verdicts.clone()));
+    let identify = schema("identify");
+    assert_eq!(identify["properties"]["verdict"]["enum"], strs(verdicts));
+    let decisions = Decision::ALL.iter().map(|d| d.as_str()).collect();
+    assert_eq!(
+        identify["properties"]["decided_by"]["enum"],
+        strs(decisions)
+    );
+
+    let served: Vec<&str> = Served::ALL.iter().map(|s| s.as_str()).collect();
+    for name in ["search", "citing_works", "references"] {
+        assert_eq!(
+            schema(name)["properties"]["served"]["enum"],
+            strs(served.clone()),
+            "{name}"
+        );
+    }
+    // A lookup's item says how it was served only when not live.
+    let cached: Vec<&str> = served.into_iter().filter(|s| *s != "live").collect();
+    let lookup = schema("lookup");
+    let item = &lookup["properties"]["results"]["items"]["properties"];
+    assert_eq!(item["served"]["enum"], strs(cached));
+}
+
 #[test]
 fn the_tool_list_stays_small() {
     // Every session pays for the tool list before it does anything (#157):

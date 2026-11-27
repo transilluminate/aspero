@@ -31,6 +31,11 @@ Fixed:
   know, beside a book the citation otherwise matches, is plausible with
   the ISBN named, not a mismatch saying the ISBN doesn't exist: the
   catalogue misses many real books (a WHO guideline's, wild-6 #207).
+- An identifier's work with the title cited, no authors to compare (a
+  record without them, a corporate author) and only the year different
+  is plausible, its year named, not a mismatch: a preprint dated by its
+  journal version (wild-3 #931), a guideline's Bookshelf record (holdout-5
+  #99).
 - The wrong-verdict issue form offers `unverifiable`, so a `verify
   --report` link for an unverifiable result fills in its verdict; a test
   now checks the form against every verdict the engine gives.

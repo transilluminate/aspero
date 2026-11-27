@@ -223,3 +223,34 @@ async fn an_unknown_isbn_beside_an_invented_book_is_still_not_found() {
         .await;
     assert_eq!(v.verdict, Verdict::NotFound, "{}", v.reason_text);
 }
+
+#[tokio::test]
+async fn the_ids_work_without_authors_to_compare_and_another_year_is_plausible() {
+    // wild-3 #931, minimised: an arXiv ID's work, dated by its journal
+    // version, cited by its title and preprint year.
+    let mut source = Scripted::new("openalex").keyword().with(vec![work(
+        "openalex",
+        &["arxiv:2309.07864"],
+        "The rise and potential of large language model based agents: a survey",
+        &["Zhiheng Xi"],
+        2025,
+    )]);
+    source.caps.lookup_kinds.push(IdKind::Arxiv);
+    let v = engine(vec![Arc::new(source)])
+        .verify(
+            &Claim::from_text(
+                "The rise and potential of large language model based agents: a survey                  (2023). arXiv:2309.07864",
+            ),
+            5,
+        )
+        .await;
+    assert_eq!(v.verdict, Verdict::Plausible, "{}", v.reason_text);
+    assert!(
+        v.reason
+            .differs()
+            .iter()
+            .any(|d| d.field == CitedField::Year),
+        "{:?}",
+        v.reason
+    );
+}

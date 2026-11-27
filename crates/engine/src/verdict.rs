@@ -264,6 +264,20 @@ fn near_miss(c: &Candidate) -> bool {
         && (a.authors.agreement == Agreement::Match || a.year.agreement == Agreement::Match)
 }
 
+/// The same title and no authors to compare (a record without them, a
+/// citation by its corporate author), nothing else contradicted but the
+/// year: the identifiers' work cited with another year, as a chapter of a
+/// report reissued in print (wild-6 #597) or a preprint by its later
+/// journal version's date (wild-3 #931) is.
+fn unauthored_near_miss(c: &Candidate) -> bool {
+    let a = &c.assessment;
+    a.title.agreement == Agreement::Match
+        && a.authors.agreement == Agreement::Unknown
+        && [a.container, a.volume, a.page]
+            .iter()
+            .all(|f| f.agreement != Agreement::Mismatch)
+}
+
 /// Titles alike enough to be one book's.
 const SAME_TITLE: f64 = 0.9;
 
@@ -597,7 +611,7 @@ fn weigh(claim: &Claim, report: &ResolveReport) -> (Verdict, Reason, Option<usiz
             Some(j) => (Verdict::Mismatch, Reason::IdElsewhere { cited: i }, Some(j)),
             // The identifiers' work, cited with an error (a wrong year):
             // the same title, and matching authors or year.
-            None if near_miss(c) => (
+            None if near_miss(c) || unauthored_near_miss(c) => (
                 Verdict::Plausible,
                 Reason::IdPartlyMatches {
                     differs: differences(claim, c, true),

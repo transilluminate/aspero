@@ -86,6 +86,31 @@ impl Doi {
     }
 }
 
+/// What the Cochrane Database of Systematic Reviews' DOIs begin with,
+/// before the review's id (`10.1002/14651858.CD001955.pub5`).
+const COCHRANE_REVIEWS: &str = "10.1002/14651858.";
+
+impl Doi {
+    /// The DOI of a Cochrane review given by its id alone, as the
+    /// database's citations write it: `CD001955` (the first version) or
+    /// `CD001955.pub5`. Two letters `CD`, six digits, and a version.
+    pub(crate) fn cochrane_review(s: &str) -> Option<Doi> {
+        let s = s.trim();
+        let digits = s.get(..2)?.eq_ignore_ascii_case("cd").then(|| &s[2..])?;
+        let (number, version) = match digits.split_once('.') {
+            Some((number, version)) => (number, Some(version)),
+            None => (digits, None),
+        };
+        let version_ok = version.is_none_or(|v| {
+            v.get(..3).is_some_and(|p| p.eq_ignore_ascii_case("pub"))
+                && v.len() > 3
+                && is_digits(&v[3..])
+        });
+        (number.len() == 6 && is_digits(number) && version_ok)
+            .then(|| Doi(format!("{COCHRANE_REVIEWS}{}", s.to_ascii_lowercase())))
+    }
+}
+
 impl ArxivId {
     /// arXiv's DataCite DOI, `10.48550/arxiv.<id>`, which has no version.
     pub fn doi(&self) -> Doi {
@@ -337,6 +362,29 @@ mod tests {
             "(sici)1097-4636(199601)"
         );
         assert!(doi("10.1145/.").is_err());
+    }
+
+    #[test]
+    fn a_cochrane_reviews_id_alone_is_its_doi() {
+        let review = |s| Doi::cochrane_review(s).map(|d| d.to_string());
+        assert_eq!(
+            review("CD001955.pub5").as_deref(),
+            Some("10.1002/14651858.cd001955.pub5")
+        );
+        assert_eq!(
+            review(" cd001955 ").as_deref(),
+            Some("10.1002/14651858.cd001955")
+        );
+        for not in [
+            "CD00195",
+            "CD0019551",
+            "CD001955.pub",
+            "CD001955.v2",
+            "XD001955",
+            "CD",
+        ] {
+            assert_eq!(review(not), None, "{not}");
+        }
     }
 
     #[test]

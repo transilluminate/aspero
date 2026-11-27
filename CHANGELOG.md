@@ -5,6 +5,13 @@ and 0.1 to 0.9 in [docs/changelog/0.0x.md](docs/changelog/0.0x.md).
 
 ## Unreleased
 
+Added:
+
+- A Cochrane review's id given on its own (`CD001955.pub5`, or
+  `CD001955` for the first version) is looked up as its DOI
+  (`10.1002/14651858.CD001955.pub5`). It isn't read from a citation's
+  text, where it is the review's page.
+
 Fixed:
 
 - A Cochrane review's version is dated by its own record. OpenAlex merges

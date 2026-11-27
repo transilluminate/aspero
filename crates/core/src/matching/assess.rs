@@ -133,11 +133,22 @@ pub fn assess(claim: &Claim, record: &SourceRecord) -> Assessment {
             }
             _ => text.raw.clone(),
         };
+        // An organisation's report found by its whole title is often cited
+        // without the organisation: what stands before the title there
+        // ("Pakistan Country Economic Memorandum: From Swimming in Sand …"
+        // for the World Bank Group's "From Swimming in Sand …", wild-6
+        // #600) is no byline of others, unless it names people.
+        let body_found = title_span.as_ref().is_some_and(|s| !s.is_empty())
+            && work
+                .authors
+                .iter()
+                .all(|p| p.display_name().is_some_and(|n| authors::is_body(&n)));
         let others = || {
             authors::names_given(&outside_title())
-                || byline(text, work_title.as_deref(), title_span.as_ref()).is_some_and(|b| {
-                    byline_strangers(&b, &work.authors, work.container_title.as_deref())
-                })
+                || (!body_found
+                    && byline(text, work_title.as_deref(), title_span.as_ref()).is_some_and(|b| {
+                        byline_strangers(&b, &work.authors, work.container_title.as_deref())
+                    }))
         };
         match text.author_coverage(&families) {
             0.0 if !others() => FieldCheck::UNKNOWN,

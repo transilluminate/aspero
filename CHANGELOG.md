@@ -32,6 +32,10 @@ Fixed:
   (two names or more) and year is now plausible without the journal
   named too ("Kraft & Falken, \"A Blueprint for Scaling Tutoring\"
   (2021)", wild-6 #594).
+- An organisation's report found by its whole title, cited without the
+  organisation, no longer reads what stands before the title as another
+  byline ("Pakistan Country Economic Memorandum: From Swimming in Sand …"
+  for the World Bank Group's report, wild-6 #600): plausible.
 
 ## 0.44.0
 

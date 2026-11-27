@@ -128,3 +128,71 @@ fn a_title_written_as_people_do_is_no_rewording() {
         );
     }
 }
+
+/// wild-6 #49: the title's opening words, the ones the rest depends on,
+/// dropped ("The effect of …"): plausible, the title partly the work's.
+#[test]
+fn a_title_without_its_opening_words_is_plausible() {
+    let r = article(
+        "The effect of additional strengthening of hip abductor and lateral rotator muscles in \
+         patellofemoral pain syndrome: a randomized controlled pilot study",
+        &["Theresa Helissa Nakagawa", "Thiago Batista Muniz"],
+        2008,
+        ("Clinical Rehabilitation", "22", "1051-1060"),
+    );
+    let claim = Claim::from_text(
+        "Nakagawa TH et al. (2008). Additional strengthening of hip abductor and lateral rotator \
+         muscles in patellofemoral pain syndrome: a randomized controlled pilot study. Clinical \
+         Rehabilitation.",
+    );
+    let a = assess(&claim, &r);
+    assert_eq!(a.title.agreement, Agreement::Partial, "{a:?}");
+    assert!(plausible(&a), "{a:?}");
+}
+
+/// Not cut in front: a leading article dropped, a main title dropped
+/// before its subtitle, the opening words found elsewhere.
+#[test]
+fn a_title_shortened_at_its_start_as_people_do_is_no_cut() {
+    for (text, title) in [
+        (
+            "Smith J. Backfire effect after correcting misinformation is strongly associated \
+             with reliability. J Exp Psychol Gen. 2022.",
+            "The backfire effect after correcting misinformation is strongly associated with \
+             reliability",
+        ),
+        (
+            "Levitsky S, Way L. 2002. \"The Rise of Competitive Authoritarianism.\" Journal of \
+             Democracy 13(2): 51-65.",
+            "Elections Without Democracy: The Rise of Competitive Authoritarianism",
+        ),
+        (
+            "Williams A. (1987). \"Response: QALYfying the value of life.\" JME 13(3): 123.",
+            "Brief response: QALYfying the value of life",
+        ),
+    ] {
+        assert!(!Normalised::new(text).cut_in_front(title), "{text}");
+    }
+}
+
+/// holdout-5 #294: a correction notice's record, its original's title
+/// cited: not a title cut in front ("Correction to"), but a notice for its
+/// original, as before.
+#[test]
+fn a_notice_cited_by_its_originals_title_is_no_cut_in_front() {
+    let mut notice = article(
+        "Correction to “Characterisation of Impaired Wound Healing in a Preclinical Model of \
+         Induced Diabetes Using Wide‐Field Imaging and Conventional Immunohistochemistry Assays”",
+        &[],
+        2024,
+        ("International Wound Journal", "21", "e70142"),
+    );
+    notice.work.work_type = Some(crate::work::WorkType::Other("erratum".into()));
+    let claim = Claim::from_text(
+        "Saidian M, Lakey JRT, Ponticorvo A, et al. Characterisation of impaired wound healing \
+         in a preclinical model of induced diabetes using wide‐field imaging and conventional \
+         immunohistochemistry assays. International Wound Journal. 2024;21(12):e70142.",
+    );
+    let a = assess(&claim, &notice);
+    assert_ne!(a.title.agreement, Agreement::Partial, "{a:?}");
+}

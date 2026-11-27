@@ -273,6 +273,14 @@ pub fn assess(claim: &Claim, record: &SourceRecord) -> Assessment {
     let cut = work_title
         .as_deref()
         .is_some_and(|actual| text::title_cut(claimed_title.as_deref(), text.as_ref(), actual));
+    // Or without its opening words, the ones the rest depends on
+    // (`Normalised::cut_in_front`, wild-6 #49). Not a notice's ("Correction
+    // to “…”"), cited for its original: `derivative.rs` tells those.
+    let cut = cut
+        || (record_derivative_kind(work).is_none()
+            && work_title.as_deref().is_some_and(|actual| {
+                text::title_cut_in_front(claimed_title.as_deref(), text.as_ref(), actual)
+            }));
     let title = match (title.score, reworded) {
         (Some(s), Some(true)) => FieldCheck::scored(s.min(OTHER_IN_SERIES)),
         (Some(s), Some(false)) => FieldCheck::scored(s.min(EXTENDED_TITLE)),

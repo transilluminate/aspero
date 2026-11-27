@@ -27,6 +27,11 @@ Fixed:
   around a "vs." (wild-6 #14, #130, #653). A title misspelt, abbreviated,
   given without its subtitle or a leading article, or a formula printed
   spaced ("B F 3") is still verified.
+- A title without its opening words, the ones the rest depends on
+  ("Additional strengthening of …" for "The effect of additional
+  strengthening of …"), is plausible, the title named (wild-6 #49). A
+  leading article dropped, or a main title dropped before its subtitle,
+  is still verified.
 - The wrong-verdict issue form offers `unverifiable`, so a `verify
   --report` link for an unverifiable result fills in its verdict; a test
   now checks the form against every verdict the engine gives.

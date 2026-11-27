@@ -36,6 +36,8 @@ Fixed:
   organisation, no longer reads what stands before the title as another
   byline ("Pakistan Country Economic Memorandum: From Swimming in Sand …"
   for the World Bank Group's report, wild-6 #600): plausible.
+- An era marker beside a year in a record's title ("The Paston letters,
+  A.D. 1422-1509") is no word the citation lacks (wild-6 #347).
 
 ## 0.44.0
 

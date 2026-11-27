@@ -1,0 +1,40 @@
+# cargo-deny: `cargo deny check advisories bans sources` (CI runs it on
+# every push and pull request). https://embarkstudios.github.io/cargo-deny/
+#
+# Licences aren't checked here yet. The third-party notices
+# (crates/notices-gen) are written for the released binaries' main target,
+# aarch64-apple-darwin; across all targets cargo-deny also finds
+# webpki-root-certs (CDLA-Permissive-2.0, under rustls-platform-verifier
+# off Apple), which the notices' licence list doesn't hold. Decide that
+# first, then add a [licenses] allow list matching notices-gen's.
+
+[graph]
+all-features = true
+
+[advisories]
+# Every advisory fails the check unless ignored here, with its reason.
+ignore = [
+    # quick-xml 0.38.4 remains only under citationberg 0.7.0 (hayagriva's
+    # CSL parser, its latest release), to read a citation style: a bundled
+    # one, or a .csl file the user (`--style path.csl`) or an embedder
+    # names. The .docx reader uses quick-xml 0.41, fixed. Drop both when
+    # citationberg moves to quick-xml >= 0.41.
+    { id = "RUSTSEC-2026-0194", reason = "quick-xml 0.38 only via citationberg, reading a style file the user names; no newer citationberg" },
+    { id = "RUSTSEC-2026-0195", reason = "NsReader, which neither aspero nor citationberg uses" },
+    # Unmaintained, not vulnerable, and no release of their dependents
+    # without them.
+    { id = "RUSTSEC-2024-0436", reason = "paste is unmaintained; via biblatex" },
+    { id = "RUSTSEC-2024-0449", reason = "unsafe-libyaml is unmaintained; via hayagriva's serde_yaml" },
+    { id = "RUSTSEC-2026-0543", reason = "chrono is unmaintained; via rmcp and schemars" },
+    { id = "RUSTSEC-2026-0374", reason = "basic-toml is unmaintained; via uniffi_bindgen's askama, at build time" },
+]
+
+[bans]
+# Two majors of syn and quick-xml today, both from dependencies.
+multiple-versions = "warn"
+wildcards = "deny"
+allow-wildcard-paths = true
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"

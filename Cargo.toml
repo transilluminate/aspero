@@ -38,7 +38,7 @@ aspero-pmc = { path = "crates/providers/pmc", version = "0.44.0" }
 
 async-trait = "0.1.92"
 biblatex = "0.12.0"
-quick-xml = "0.38.4"
+quick-xml = "0.41"
 zip = { version = "9.5.1", default-features = false, features = ["deflate-flate2-zlib-rs"] }
 hayagriva = { version = "0.10.1", default-features = false, features = ["csl-json"] }
 clap = { version = "4.6.7", features = ["derive", "env", "wrap_help"] }
@@ -51,7 +51,7 @@ percent-encoding = "2.3.2"
 proptest = "1.12.0"
 # The official MCP SDK, pinned exactly: it moves fast (3.0 to 3.10 in
 # four months).
-rmcp = { version = "=3.8.0", default-features = false }
+rmcp = { version = "=3.9.0", default-features = false }
 # Only one crate per build may link sqlite3 (`links = "sqlite3"`), so a
 # workspace that depends on aspero's crates must use the same rusqlite
 # major (libsqlite3-sys 0.39): bump them together.
@@ -67,7 +67,7 @@ tokio = "1.54.1"
 unicode-normalization = "0.1.26"
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", default-features = false, features = ["fmt", "std", "ansi"] }
-url = "2.5.8"
+url = "2.5.9"
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

@@ -1,14 +1,17 @@
 //! The venue cited against a record's: a chapter cited as a journal's
 //! article or the reverse, another conference or meeting, and a preprint or
-//! unplaced copy cited in a meeting's proceedings.
+//! unplaced copy cited in a meeting's proceedings ([`venue_checks`]). And
+//! the record's kind against the work cited: a copy or a book for a
+//! journal's article, a chapter for its book or the reverse, a proceedings
+//! for its paper ([`record_kind`]).
 
 use std::ops::Range;
 
-use super::claim::{cited_venue, cites_chapter, cites_edited_book};
+use super::claim::{cited_venue, cites_chapter, cites_chapter_of, cites_edited_book};
 use super::preprint::preprint_server;
 use super::text::Normalised;
 use super::{Agreement, Claim, FieldCheck};
-use crate::id::IdKind;
+use crate::id::{IdKind, is_digits};
 use crate::publication::{self, Locator};
 use crate::record::SourceRecord;
 use crate::work::WorkType;
@@ -307,5 +310,181 @@ pub(super) fn venue_checks(input: &VenueInputs<'_>) -> VenueChecks {
         article_as_chapter,
         other_conference,
         preprint_at_conference,
+    }
+}
+
+/// What [`record_kind`] reads: the claim, the record, and what
+/// [`super::assess()`] has made of them so far.
+pub(super) struct KindInputs<'a> {
+    pub(super) claim: &'a Claim,
+    pub(super) record: &'a SourceRecord,
+    /// The claim's free text, read.
+    pub(super) text: Option<&'a Normalised>,
+    /// Where the record's title stands in `text`.
+    pub(super) title_span: Option<&'a Range<usize>>,
+    /// The record's title, unless a URL.
+    pub(super) work_title: Option<&'a str>,
+    /// The title cited apart: structured, or BibTeX's.
+    pub(super) claimed_title: Option<&'a str>,
+    /// The volume and page cited.
+    pub(super) cited_place: &'a Locator,
+    /// A claimed identifier names the work.
+    pub(super) named: bool,
+    /// The claim cites a journal.
+    pub(super) cites_journal: bool,
+    /// The container, after [`venue_checks`].
+    pub(super) container: FieldCheck,
+    /// The years cited, and the record's (its editions' too).
+    pub(super) claimed_years: &'a [i16],
+    pub(super) actual_years: &'a [i16],
+}
+
+/// What [`record_kind`] decides: facts about the record's kind against
+/// the work cited, which [`super::assess()`] caps or floors in its order.
+pub(super) struct RecordKind {
+    /// A book in no volume, cited with an issue.
+    pub(super) book_cited_with_issue: bool,
+    /// The record can't be the journal's article cited: it has no journal,
+    /// volume or page, or it's a book cited as BibTeX's `@article`.
+    pub(super) not_the_article: bool,
+    /// A book, or a chapter that may be another edition of the work cited.
+    pub(super) edition: bool,
+    /// A chapter cited as its book, or a book with a chapter of it quoted.
+    pub(super) part_for_whole: bool,
+    /// A proceedings' own record, cited at a paper's page.
+    pub(super) volume_for_paper: bool,
+}
+
+/// The record's kind against the work cited: a copy or a book where a
+/// journal's article is cited, a chapter for its book or the reverse, a
+/// proceedings for its paper.
+pub(super) fn record_kind(input: &KindInputs<'_>) -> RecordKind {
+    let KindInputs {
+        claim,
+        record,
+        text,
+        title_span,
+        work_title,
+        claimed_title,
+        cited_place,
+        named,
+        cites_journal,
+        container,
+        claimed_years,
+        actual_years,
+    } = *input;
+    let work = &record.work;
+    // A copy deposited elsewhere (Zenodo, a repository, a technical
+    // report) has the work's title, authors and year but no journal,
+    // volume or page: it can't confirm the journal cited, and it isn't the
+    // article cited there, unless the claim's identifier says it is.
+    // Preprints, books, chapters, data and software have none to give,
+    // but nor do they confirm a journal, volume and page all cited
+    // (PsycEXTRA's record of a paper Science printed).
+    let unconfirmable = cited_place.volume.is_some()
+        && cited_place.page.is_some()
+        && work.volume.is_none()
+        && work.page.is_none()
+        && container.agreement != Agreement::Match;
+    let journal_less = !matches!(
+        work.work_type,
+        Some(
+            WorkType::Preprint
+                | WorkType::Book
+                | WorkType::Chapter
+                | WorkType::Dataset
+                | WorkType::Software
+        )
+    ) && work.container_title.is_none()
+        && work.volume.is_none()
+        && work.page.is_none();
+    // A BibTeX `@article` with its journal cites a journal's article: a
+    // book of that title (a working paper's monograph) isn't it.
+    let book_for_article = work.work_type == Some(WorkType::Book)
+        && text.is_some_and(|t| {
+            t.raw
+                .trim_start()
+                .get(..8)
+                .is_some_and(|head| head.eq_ignore_ascii_case("@article"))
+        });
+    // Nor is a book cited with a volume and issue (its title where the
+    // journal stands: "Methane Cycling and Climate. Biogeochemical Cycles
+    // and Climate. 2019;23(5):159-175" cites a chapter of it).
+    let book_cited_with_issue = work.work_type == Some(WorkType::Book)
+        && work.volume.is_none()
+        && claim.text.as_deref().is_some_and(publication::cites_issue);
+    // A book cited with its publisher, found reprinted whole as a chapter
+    // of a reader (Bourdieu's "Distinction" in a 2018 collection): the
+    // chapter is another edition of the book.
+    let cites_book = text.is_some_and(|t| {
+        t.words.iter().any(|w| {
+            matches!(
+                w.as_str(),
+                "press" | "publisher" | "publishers" | "publishing" | "books" | "verlag"
+            )
+        })
+    });
+    // So is a journal's article reprinted whole, later, as a chapter of a
+    // collection ("Islam, Judeo-Christianity and Byzantine Iconoclasm",
+    // Jerusalem Studies in Arabic and Islam 1980, found only in a 2017
+    // Variorum volume): an original and its reprint are versions.
+    let reprint = work.work_type == Some(WorkType::Chapter)
+        && (cites_journal || cited_place.volume.is_some())
+        && !claimed_years.is_empty()
+        && actual_years
+            .iter()
+            .all(|a| claimed_years.iter().all(|c| c < a));
+    // A chapter whose book is the title cited ("Orri Vésteinsson, The
+    // Christianization of Iceland: Priests, Power, and Social Change"
+    // for its chapter "The Priests"), cited as the book (no "In:", no
+    // editors, no page), is part of the work cited, not it: the book's
+    // record ranks first, and without it, plausible. Not when the
+    // chapter's own title is cited before its book's ("Second Victim
+    // Syndrome. In *StatPearls*"), or is its book's.
+    let book_span = match (text, &work.container_title) {
+        (Some(text), Some(book)) => text.title_span(book),
+        _ => None,
+    };
+    let chapter_cited_first = matches!(
+        (title_span, &book_span),
+        (Some(own), Some(book)) if own.start <= book.start
+    );
+    let chapter_for_book = work.work_type == Some(WorkType::Chapter)
+        && claimed_title.is_none()
+        && container.agreement == Agreement::Match
+        && book_span.is_some()
+        && !chapter_cited_first
+        && cited_place.page.is_none()
+        && !reprint
+        && !named
+        && !claim
+            .text
+            .as_deref()
+            .is_some_and(|t| cites_chapter(t) || cites_edited_book(t));
+    // And a book's record, a chapter of it quoted: the book holds the work.
+    let book_for_chapter = work.work_type == Some(WorkType::Book)
+        && !named
+        && matches!((text, work_title, title_span), (Some(t), Some(book), Some(span))
+            if cites_chapter_of(t, book, span));
+    // A proceedings' own record (the volume: "2014 IEEE International
+    // Conference on Communications Workshops (ICC)"), cited at a page, is
+    // the venue of the paper cited, not the paper (holdout-6 #1010).
+    let volume_for_paper = matches!(&work.work_type, Some(WorkType::Other(t)) if t == "proceedings")
+        && (cited_place.page.is_some()
+            || claim.text.as_deref().is_some_and(|t| {
+                t.split_whitespace().any(|w| {
+                    let w = w.trim_matches(|c: char| !c.is_ascii_digit());
+                    w.split_once(['-', '–'])
+                        .is_some_and(|(a, b)| is_digits(a) && is_digits(b) && a != b)
+                })
+            }))
+        && !named;
+    RecordKind {
+        book_cited_with_issue,
+        not_the_article: journal_less || unconfirmable || book_for_article,
+        edition: work.work_type == Some(WorkType::Book)
+            || (work.work_type == Some(WorkType::Chapter) && (cites_book || reprint)),
+        part_for_whole: chapter_for_book || book_for_chapter,
+        volume_for_paper,
     }
 }

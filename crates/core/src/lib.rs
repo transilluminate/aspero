@@ -7,6 +7,13 @@
 //! - [`provider`]: the [`Provider`] trait and its request/response types.
 //! - [`error`]: the shared [`Error`] contract.
 //! - [`matching`]: does a record match what a citation claims?
+//! - [`publication`]: where a citation says a work appeared: journal,
+//!   volume, first page.
+//! - [`query`]: query trees (all, any, none of terms, filters and
+//!   relations) for searches.
+//! - [`free_copy`]: whether a work's free copy can be fetched by a program
+//!   or only read in a browser.
+//! - `fold`: cleaning text extracted from PDFs and word processors.
 //! - [`references`]: splitting a pasted reference list.
 //! - [`tagged`]: a reference pasted as a Wikipedia citation template, an
 //!   RIS or an EndNote record, read as a structured claim.

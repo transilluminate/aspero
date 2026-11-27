@@ -238,11 +238,13 @@ impl Fields {
 
 fn attr(e: &quick_xml::events::BytesStart, name: &[u8]) -> Option<String> {
     let a = e.try_get_attribute(name).ok()??;
-    Some(a.unescape_value().ok()?.into_owned())
+    let value = a.normalized_value(quick_xml::XmlVersion::Implicit1_0);
+    Some(value.ok()?.into_owned())
 }
 
 #[cfg(test)]
 mod tests {
+    use std::fmt::Write as _;
     use std::io::Write;
 
     use super::*;
@@ -334,6 +336,32 @@ mod tests {
         assert_eq!(read.manager, None);
         assert_eq!(read.text, "1. Smith J. A study. 2020.\n");
         assert_eq!(read_docx(b"not a zip"), Err(ReadError::Unrecognised));
+    }
+
+    /// A start tag with a great many attributes, distinct and repeated:
+    /// quick-xml before 0.41 checked each name against all before it
+    /// (RUSTSEC-2026-0194), so one tag in an untrusted document could pin
+    /// a core for minutes. It must be read in linear time.
+    #[test]
+    fn a_tag_with_many_attributes_is_read_promptly() {
+        let mendeley = r#"{"citationItems":[{"id":"ITEM-1","itemData":{"type":"book","title":"Deep Learning","ISBN":"9780262035613"}}],"mendeley":{}}"#;
+        let instr = escape(&format!("ADDIN CSL_CITATION {mendeley}"));
+        // Distinct names first (the quadratic case), then repeats.
+        let mut attrs = String::new();
+        for n in 0..100_000 {
+            write!(attrs, r#" a{n}="""#).unwrap();
+        }
+        attrs.push_str(&r#" x="""#.repeat(100_000));
+        let body = format!(
+            r#"<w:p><w:fldSimple{attrs} w:instr="{instr}"><w:r><w:t>[1]</w:t></w:r></w:fldSimple></w:p>"#
+        );
+        let file = docx(&body, None);
+        let started = std::time::Instant::now();
+        let read = read_docx(&file).unwrap();
+        let took = started.elapsed();
+        assert!(took.as_secs() < 10, "took {took:?}");
+        assert!(read.entries.len() <= 1);
+        assert_eq!(read.text, "[1]\n");
     }
 
     /// A 3 MB file whose body inflated to 3 GB was read whole (out of

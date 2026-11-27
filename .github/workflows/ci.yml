@@ -41,3 +41,27 @@ jobs:
       # picking its own), and with one of them alone.
       - run: cargo check -p aspero-engine --no-default-features
       - run: cargo check -p aspero-engine --no-default-features --features crossref
+
+  # The declared MSRV (`rust-version`) builds: a dependency bump that needs
+  # a newer rustc fails here, not in a user's build.
+  msrv:
+    name: msrv (1.91)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.91
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo check --workspace --all-features --locked
+
+  # Advisories (RustSec), banned or wildcard dependencies, and unknown
+  # sources, per deny.toml; each ignored advisory says why there.
+  deny:
+    name: cargo-deny
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-deny@0.20.2
+      - run: cargo deny --workspace check advisories bans sources

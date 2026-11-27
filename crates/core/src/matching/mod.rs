@@ -25,6 +25,12 @@
 //!   caps and floors, and the verdict thresholds.
 //! - `authors.rs`: author names; `titles.rs`: comparing titles; `text.rs`:
 //!   words, and finding a record's fields inside free text.
+//! - `edition.rs`: a book's first edition as a citation states it ("(1st
+//!   ed.)", "(Original work published 1969)").
+//! - `publisher.rs`: the publisher a book's citation names, and whether its
+//!   editions know it.
+//! - `record_title.rs`: a record's title cleaned of markup and provider
+//!   furniture before it is compared.
 //! - `preprint.rs`: preprint servers, and a preprint's DOI cited for a
 //!   journal's article.
 //! - `derivative.rs`: replies, corrections and notices about a work.

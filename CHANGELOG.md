@@ -7,6 +7,16 @@ and 0.1 to 0.9 in [docs/changelog/0.0x.md](docs/changelog/0.0x.md).
 
 Fixed:
 
+- A Cochrane review's version is dated by its own record. OpenAlex merges
+  a review's versions into one work dated by the earliest, so `.pub5`
+  ("Glucocorticoids for croup", 2023) came back as issued in 2011, with
+  `disagreements` saying Crossref has 2023. Where OpenAlex's record shows
+  it merges two works (another version's or work's DOI under its own
+  prefix, or two PubMed records) and its year is none of Crossref's for
+  the DOI, Crossref's date stands, in lookups and in verify; OpenAlex's
+  year is kept among the work's other years, so a citation's year matches
+  as before. Other records keep their earliest date, mostly the
+  online-first one.
 - A work's free copy is no longer another version's: OpenAlex offered
   `.pub4`'s PDF for the Cochrane review's `.pub5`, so a tool fetching
   `open_access.pdf_url` got the superseded version. A copy whose link names

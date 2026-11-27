@@ -52,6 +52,19 @@ struct WireLocation {
 /// is OpenAlex's usual merge of one work's versions, not a sign. False for
 /// another provider's record.
 pub fn looks_merged(record: &SourceRecord, asked: &WorkId) -> bool {
+    signs(record, Some(asked))
+}
+
+/// Whether OpenAlex's `record` looks like two works merged into one by
+/// its record alone: [`looks_merged`]'s signs but the DOI asked. Its date
+/// may then be the other work's: a Cochrane review's `.pub5` (2023)
+/// merged with its earlier versions has the 2011 version's date
+/// (W1949163494), a book's reissue its first edition's.
+pub fn merges_works(record: &SourceRecord) -> bool {
+    signs(record, None)
+}
+
+fn signs(record: &SourceRecord, asked: Option<&WorkId>) -> bool {
     if record.source != ID {
         return false;
     }
@@ -81,7 +94,7 @@ pub fn looks_merged(record: &SourceRecord, asked: &WorkId) -> bool {
         return false;
     };
     let another = |doi: &Doi| !version_doi(doi) && !versions(doi, &own);
-    let asked_another = matches!(asked, WorkId::Doi(doi) if another(doi));
+    let asked_another = matches!(asked, Some(WorkId::Doi(doi)) if another(doi));
     asked_another
         || urls()
             .filter(|u| u.contains("doi.org/"))
@@ -91,10 +104,15 @@ pub fn looks_merged(record: &SourceRecord, asked: &WorkId) -> bool {
 
 /// Whether `a` and `b` are one work's DOI: the same but for punctuation
 /// (APA's `10.1037//0022-3514…` beside `10.1037/0022-3514…`, Oxford's
-/// `clipsy.bpg016` beside `clipsy/bpg016`), one a part or version of the
-/// other (`….pub2`, a PLOS figure's `….t001`, a dataset's files), or two
-/// numbered versions of one (`….v1`, `…/v2`).
+/// `clipsy.bpg016` beside `clipsy/bpg016`), one a part of the other (a
+/// PLOS figure's `….t001`, a dataset's files), or two numbered versions
+/// of one (`….v1`, `…/v2`). Not a Cochrane review's versions (`….pub2`,
+/// [`Doi::other_version`]): each is its own work, with its own date,
+/// PMID and copy.
 fn versions(a: &Doi, b: &Doi) -> bool {
+    if a.other_version(b) {
+        return false;
+    }
     let key = |d: &str| -> String { d.chars().filter(char::is_ascii_alphanumeric).collect() };
     let (a, b) = (a.as_str(), b.as_str());
     let part = |whole: &str, part: &str| {
@@ -227,6 +245,34 @@ mod tests {
         // One PubMed record, at two addresses.
         let pm = "https://pubmed.ncbi.nlm.nih.gov/33355258";
         assert!(!merged("10.2337/dc20-1729", &[pm, pm]));
+    }
+
+    /// W1949163494, minimised: a Cochrane review's `.pub5` merged with its
+    /// earlier versions, the first of them without a `.pub` suffix.
+    #[test]
+    fn a_cochrane_reviews_versions_merged_show_it() {
+        let doi = |d: &str| format!("https://doi.org/{d}");
+        for (own, other) in [
+            (
+                "10.1002/14651858.cd001955.pub5",
+                "10.1002/14651858.cd001955.pub4",
+            ),
+            (
+                "10.1002/14651858.cd007491.pub2",
+                "10.1002/14651858.cd007491",
+            ),
+        ] {
+            assert!(merged(own, &[&doi(own), &doi(other)]), "{own} {other}");
+            assert!(merges_works(&record(own, &[&doi(other)])), "{own} {other}");
+        }
+        let alone = "10.1002/14651858.cd001955.pub5";
+        assert!(!merges_works(&record(alone, &[&doi(alone)])));
+        // Found by its earlier version's DOI.
+        assert!(looks_merged(
+            &record(alone, &[]),
+            &"10.1002/14651858.cd001955".parse().unwrap()
+        ));
+        assert!(!merges_works(&record(alone, &[])));
     }
 
     #[test]

@@ -1,7 +1,8 @@
 //! The third-party notices aspero's artefacts ship: the FFI library
 //! (`aspero-ffi`, in the xcframework) and the CLI (`aspero`). For each,
-//! the crates it's built from (the normal dependency closure, for
-//! [`TARGET`], from `cargo tree`), their licences and copyright lines
+//! the crates it's built from (the normal dependency closure, across
+//! the artefact's release targets, from `cargo tree`), their licences and
+//! copyright lines
 //! (from `cargo metadata` and the crates' own files),
 //! and the citation style data bundled with them.
 //!
@@ -22,9 +23,18 @@ use serde::Serialize;
 
 pub type Error = Box<dyn std::error::Error>;
 
-/// The platform the artefacts are resolved for: the macOS app and the
-/// released binaries' main target.
-pub const TARGET: &str = "aarch64-apple-darwin";
+/// The platforms the CLI is released for, as `dist-workspace.toml` lists
+/// them (a test checks).
+pub const CLI_TARGETS: &[&str] = &[
+    "aarch64-apple-darwin",
+    "aarch64-unknown-linux-gnu",
+    "x86_64-apple-darwin",
+    "x86_64-unknown-linux-gnu",
+];
+
+/// The platforms the xcframework is built for (`scripts/xcframework.sh`,
+/// with `UNIVERSAL=1` for the second).
+pub const FFI_TARGETS: &[&str] = &["aarch64-apple-darwin", "x86_64-apple-darwin"];
 
 /// What fixing stale notices takes.
 pub const FIX: &str = "run `just notices`";
@@ -36,6 +46,9 @@ pub struct Artefact {
     pub package: &'static str,
     /// The features it's built with.
     pub features: &'static [&'static str],
+    /// The platforms it's released for: its notices cover the crates any
+    /// of them is built from.
+    pub targets: &'static [&'static str],
     /// What it is, for the notices' header.
     pub what: &'static str,
     /// Where its notices go, from the workspace root.
@@ -47,12 +60,14 @@ pub const ARTEFACTS: [Artefact; 2] = [
         package: "aspero-ffi",
         // As scripts/xcframework.sh builds it.
         features: &["mcp"],
+        targets: FFI_TARGETS,
         what: "The aspero-ffi library (AsperoFFI.xcframework)",
         dir: "crates/ffi/notices",
     },
     Artefact {
         package: "aspero",
         features: &[],
+        targets: CLI_TARGETS,
         what: "The aspero command-line tool",
         dir: "crates/cli/notices",
     },
@@ -79,14 +94,11 @@ pub fn workspace_root() -> PathBuf {
 pub fn generate(root: &Path) -> Result<Vec<Output>, Error> {
     let metadata = MetadataCommand::new()
         .manifest_path(root.join("Cargo.toml"))
-        // Every feature: a lookup table for the artefacts' crates, some of
-        // which only an artefact's features bring in.
+        // Every feature and platform: a lookup table for the artefacts'
+        // crates, some of which only an artefact's features or one of its
+        // targets bring in.
         .features(cargo_metadata::CargoOpt::AllFeatures)
-        .other_options(vec![
-            "--filter-platform".to_owned(),
-            TARGET.to_owned(),
-            "--locked".to_owned(),
-        ])
+        .other_options(vec!["--locked".to_owned()])
         .exec()?;
     let data = Data::read(root)?;
     let mut outputs = Vec::new();
@@ -126,7 +138,8 @@ pub fn stale(root: &Path, outputs: &[Output]) -> Vec<PathBuf> {
         .collect()
 }
 
-/// The packages `package` is built from, itself included: its normal
+/// The packages `package` is built from for any of its targets, itself
+/// included: its normal
 /// dependencies, theirs, and so on, sorted by name (ignoring case), then
 /// version. Proc macros, build and dev dependencies don't count: they run
 /// when building and aren't in what ships. (A proc macro's own
@@ -148,8 +161,11 @@ fn closure<'m>(
     if !artefact.features.is_empty() {
         tree.args(["--features", &artefact.features.join(",")]);
     }
+    for target in artefact.targets {
+        tree.args(["--target", target]);
+    }
     let out = tree
-        .args(["--edges", "normal,no-proc-macro", "--target", TARGET])
+        .args(["--edges", "normal,no-proc-macro"])
         .args(["--prefix", "none", "--format", "{p}"])
         .arg("--manifest-path")
         .arg(root.join("Cargo.toml"))
@@ -719,7 +735,7 @@ struct Dependency {
 struct Dependencies<'a> {
     artefact: &'a str,
     version: &'a str,
-    target: &'a str,
+    targets: &'a [&'a str],
     /// Crates and data, by name (ignoring case).
     dependencies: Vec<Dependency>,
 }
@@ -750,10 +766,19 @@ fn dependencies_json(
     let file = Dependencies {
         artefact: artefact.package,
         version,
-        target: TARGET,
+        targets: artefact.targets,
         dependencies,
     };
     Ok(serde_json::to_string_pretty(&file)? + "\n")
+}
+
+/// "a", "a and b", "a, b and c".
+fn and_list(items: &[&str]) -> String {
+    match items {
+        [] => String::new(),
+        [one] => (*one).to_owned(),
+        [rest @ .., last] => format!("{} and {last}", rest.join(", ")),
+    }
 }
 
 const RULE: &str =
@@ -800,11 +825,17 @@ fn notices_text(
         None => "",
     };
     let intro = format!(
-        "{}, built for {TARGET}, is made from the {} Rust crates below, \
+        "{}, built for {}, is made from the {} Rust crates below{}, \
          aspero's own among them.{data_too} Each licence or notice text appears \
          once, after the crates under it and their copyright notices.",
         artefact.what,
+        and_list(artefact.targets),
         crates.len(),
+        if artefact.targets.len() > 1 {
+            " (some for only some of those)"
+        } else {
+            ""
+        },
     );
     writeln!(out, "{}", wrap(&intro, 76))?;
     writeln!(out)?;
@@ -946,6 +977,37 @@ mod tests {
             let (body, _) = split_copyrights(template(id).unwrap());
             assert_eq!(classify(&body), [id]);
         }
+    }
+
+    #[test]
+    fn targets_are_the_released_ones() {
+        let root = workspace_root();
+        let dist = std::fs::read_to_string(root.join("dist-workspace.toml")).unwrap();
+        let line = dist
+            .lines()
+            .find(|l| l.starts_with("targets = ["))
+            .expect("dist-workspace.toml lists its targets");
+        let listed: Vec<&str> = line
+            .trim_start_matches("targets = [")
+            .trim_end_matches(']')
+            .split(',')
+            .map(|t| t.trim().trim_matches('"'))
+            .collect();
+        assert_eq!(listed, CLI_TARGETS, "CLI_TARGETS should be dist's targets");
+        let script = std::fs::read_to_string(root.join("scripts/xcframework.sh")).unwrap();
+        for target in FFI_TARGETS {
+            assert!(
+                script.contains(target),
+                "xcframework.sh doesn't build {target}"
+            );
+        }
+    }
+
+    #[test]
+    fn lists_read_as_prose() {
+        assert_eq!(and_list(&["a"]), "a");
+        assert_eq!(and_list(&["a", "b"]), "a and b");
+        assert_eq!(and_list(&["a", "b", "c"]), "a, b and c");
     }
 
     #[test]

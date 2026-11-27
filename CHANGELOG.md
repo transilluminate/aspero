@@ -28,6 +28,11 @@ Fixed:
   core. rmcp is 3.9.0 (RUSTSEC-2026-0462, in its HTTP client, which aspero
   uses only in tests), and url is 2.5.9 (RUSTSEC-2026-0592, a stack
   overflow in `Url::origin()`, which aspero doesn't call).
+- The CLI's third-party notices (`aspero licences`) cover every platform
+  it's released for: the Linux builds' three extra crates (rustls-native-certs,
+  openssl-probe, linux-raw-sys, all MIT, Apache-2.0 or ISC) were missing.
+  The FFI's notices name both Apple targets. cargo-deny now checks licences
+  too, against the texts the notices can hold.
 
 ## 0.44.0
 

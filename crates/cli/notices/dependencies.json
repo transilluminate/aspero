@@ -1,7 +1,12 @@
 {
   "artefact": "aspero",
   "version": "0.44.0",
-  "target": "aarch64-apple-darwin",
+  "targets": [
+    "aarch64-apple-darwin",
+    "aarch64-unknown-linux-gnu",
+    "x86_64-apple-darwin",
+    "x86_64-unknown-linux-gnu"
+  ],
   "dependencies": [
     {
       "name": "anstream",
@@ -604,6 +609,12 @@
       "repository": "https://github.com/rusqlite/rusqlite"
     },
     {
+      "name": "linux-raw-sys",
+      "version": "0.12.1",
+      "license": "Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT",
+      "repository": "https://github.com/sunfishcode/linux-raw-sys"
+    },
+    {
       "name": "litemap",
       "version": "0.8.3",
       "license": "Unicode-3.0",
@@ -656,6 +667,12 @@
       "version": "1.21.4",
       "license": "MIT OR Apache-2.0",
       "repository": "https://github.com/matklad/once_cell"
+    },
+    {
+      "name": "openssl-probe",
+      "version": "0.2.2",
+      "license": "MIT OR Apache-2.0",
+      "repository": "https://github.com/rustls/openssl-probe"
     },
     {
       "name": "option-ext",
@@ -746,6 +763,12 @@
       "version": "0.23.46",
       "license": "Apache-2.0 OR ISC OR MIT",
       "repository": "https://github.com/rustls/rustls"
+    },
+    {
+      "name": "rustls-native-certs",
+      "version": "0.8.5",
+      "license": "Apache-2.0 OR ISC OR MIT",
+      "repository": "https://github.com/rustls/rustls-native-certs"
     },
     {
       "name": "rustls-pki-types",

@@ -1,10 +1,10 @@
 Third-party software and data in aspero 0.44.0
 
 The aspero-ffi library (AsperoFFI.xcframework), built for
-aarch64-apple-darwin, is made from the 179 Rust crates below, aspero's own
-among them. It also bundles the citation style data at the end. Each licence
-or notice text appears once, after the crates under it and their copyright
-notices.
+aarch64-apple-darwin and x86_64-apple-darwin, is made from the 179 Rust
+crates below (some for only some of those), aspero's own among them. It also
+bundles the citation style data at the end. Each licence or notice text
+appears once, after the crates under it and their copyright notices.
 
 Generated from Cargo.lock by `just notices`; don't edit by hand.
 

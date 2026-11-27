@@ -33,6 +33,15 @@ Fixed:
   lookup, and asks PMC. Other DOIs in a link still count as the work's
   copy: a repository's copy has the repository's DOI. The answer cache is
   rebuilt once, for OpenAlex's records to be read again.
+- `scan` no longer reads a DOI ending its line on into the next line's
+  `key:` label. In Markdown frontmatter, `doi: 10.1136/gutjnl-2017-315909`
+  followed by `pdf_url: https://…` gave the DOI
+  `10.1136/gutjnl-2017-315909pdf_url`, and `…/kel163a` followed by
+  `doi: …` had `…/kel163adoi` as its alternative. A line starting with a
+  word directly followed by a colon (a YAML key, `PMID:`, `url:`) never
+  continues a DOI or link on the line before, in `scan` or in
+  `split_references`. A PDF's DOI wrapped mid-suffix is rejoined as
+  before.
 - An identifier with a footnote mark glued to its end
   (`https://doi.org/10.1109/ICSE43902.2021.00140†`) is read without it:
   daggers, `§`, `¶`, `‖`, asterisk look-alikes and superscript digits come

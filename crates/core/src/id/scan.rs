@@ -88,7 +88,8 @@ impl Mention {
 
 impl Mention {
     /// The DOI `written` continued by the start of the next line, if it
-    /// ends its line and that line starts with what a DOI suffix holds.
+    /// ends its line and that line starts with what a DOI suffix holds,
+    /// not a `key:` label (`doi:`, `pdf_url:`).
     fn continued(&self, text: &str, written: &str) -> Option<WorkId> {
         let after = text.get(self.span.end..)?;
         let (rest_of_line, next) = after.split_once('\n')?;
@@ -96,6 +97,9 @@ impl Mention {
             return None;
         }
         let word = next.split_whitespace().next()?;
+        if crate::references::key_label(word) {
+            return None;
+        }
         let token = clean_pasted(word);
         let suffix = |c: char| c.is_ascii_alphanumeric() || "._;()/:-<>".contains(c);
         // The next reference's number ("21.").
@@ -1049,6 +1053,43 @@ mod tests {
             let text = format!("doi:10.1038/nature14539\n{next}");
             assert_eq!(found(&text)[0].1, "doi:10.1038/nature14539");
         }
+    }
+
+    /// A user's tool: in Markdown frontmatter, a DOI ending its line read
+    /// on into the next key (`…315909pdf_url`), or had it as its
+    /// alternative (`…kel163adoi`).
+    #[test]
+    fn a_key_label_starting_the_next_line_never_continues_a_doi() {
+        for next in [
+            "pdf_url: https://gut.bmj.com/x.pdf",
+            "doi: 10.1/x",
+            "PMID: 1",
+            "url:",
+        ] {
+            let text = format!("doi: 10.1136/gutjnl-2017-315909\n{next}");
+            let m = &scan(&text)[0];
+            assert_eq!(m.id.to_string(), "doi:10.1136/gutjnl-2017-315909", "{next}");
+            assert_eq!(&text[m.span.clone()], "doi: 10.1136/gutjnl-2017-315909");
+            assert_eq!(m.alternative(&text), None, "{next}");
+        }
+        let text = "url: https://doi.org/10.1093/rheumatology/kel163a\ndoi: 10.1093/x\n";
+        assert_eq!(scan(text)[0].alternative(text), None);
+        // Broken after a slash or a hyphen, the same.
+        for written in ["doi: 10.1136/", "https://doi.org/10.1136/gutjnl-"] {
+            let text = format!("{written}\npdf_url: https://gut.bmj.com/x.pdf");
+            assert!(
+                scan(&text)
+                    .iter()
+                    .all(|m| !m.id.to_string().contains("pdf_url")),
+                "{written}"
+            );
+        }
+        // A word that isn't a label still continues it, as a PDF wraps it.
+        let text = "https://doi.org/10.1097/HJH.0b013e\n3282f35c67";
+        assert_eq!(
+            scan(text)[0].id.to_string(),
+            "doi:10.1097/hjh.0b013e3282f35c67"
+        );
     }
 
     #[test]

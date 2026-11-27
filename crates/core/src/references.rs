@@ -598,13 +598,19 @@ fn hyphenated_word(text: &str) -> bool {
 /// or mid-word before more of the link (`j.ce` + `ll.2020.01.001`, not
 /// `2015` or `2015.`).
 /// Hyphens are kept as printed: DOIs have real ones, and typesetters
-/// rarely add their own inside a link.
+/// rarely add their own inside a link. Never before a `key:` label
+/// ([`key_label`]).
 pub(crate) fn link_continues(text: &str, next: &str) -> bool {
     let token = next.split_whitespace().next().unwrap_or_default();
     let Some(first) = token.chars().next() else {
         return false;
     };
-    if !in_link(text) || !first.is_alphanumeric() || starts_link(token) || is_number(token) {
+    if !in_link(text)
+        || !first.is_alphanumeric()
+        || starts_link(token)
+        || is_number(token)
+        || key_label(token)
+    {
         return false;
     }
     // A line that is one word of a DOI suffix's characters, digits among
@@ -638,6 +644,21 @@ pub(crate) fn link_continues(text: &str, next: &str) -> bool {
             && inner.parse::<f64>().is_err()
             && (inner.contains(['.', '/', '_']) || (first.is_ascii_digit() && inner.contains('-')))
     }
+}
+
+/// `token`, a line's first word, is a `key:` label: a word directly
+/// followed by a colon, then nothing or a link (`pdf_url:`, `PMID:`,
+/// `url:https://…`), as YAML frontmatter and metadata lines start. What
+/// follows is a field of its own, never the rest of a link on the line
+/// before. A DOI suffix's colons follow digits or brackets (`54:4<431::`),
+/// not a word.
+pub(crate) fn key_label(token: &str) -> bool {
+    let Some((key, rest)) = token.split_once(':') else {
+        return false;
+    };
+    key.starts_with(char::is_alphabetic)
+        && key.chars().all(|c| c.is_alphanumeric() || "_-".contains(c))
+        && (rest.is_empty() || rest.contains("://"))
 }
 
 /// A number that reads as itself ("3.14", "2019", "797"), not a run of a

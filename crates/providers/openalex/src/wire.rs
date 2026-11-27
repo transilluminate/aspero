@@ -261,7 +261,8 @@ impl WireWork {
         work.abstract_text = self
             .abstract_inverted_index
             .as_ref()
-            .map(|index| tidy_abstract(&rebuild_abstract(index)))
+            .and_then(rebuild_abstract)
+            .map(|text| tidy_abstract(&text))
             .and_then(without_footer)
             .filter(|text| !scraped_page(text));
         work.url = self
@@ -475,18 +476,29 @@ fn glued_date(text: &str) -> bool {
     })
 }
 
-/// OpenAlex ships abstracts as `{word: [positions]}`; put the words back in order.
-fn rebuild_abstract(index: &BTreeMap<String, Vec<usize>>) -> String {
+/// OpenAlex ships abstracts as `{word: [positions]}`; put the words back in
+/// order. `None` when a position has no word, or two: the index has lost
+/// words, and the text would read on across them ("…was reported in of it
+/// was not seen in any patient…", W2089383900, a guideline's full text
+/// with 636 of its 4,588 positions empty). Of 64,975 indexes on the
+/// red-team tape (2026-11-27), 442 have holes: some long full texts with
+/// hundreds or thousands, and 125 with one, which still drops a word that
+/// matters ("use of ▯ key systems", "on a ▯ dataset"). Without it another
+/// provider's abstract can stand.
+fn rebuild_abstract(index: &BTreeMap<String, Vec<usize>>) -> Option<String> {
     let mut positioned: Vec<(usize, &str)> = index
         .iter()
         .flat_map(|(word, positions)| positions.iter().map(move |&p| (p, word.as_str())))
         .collect();
     positioned.sort_unstable();
-    positioned
-        .into_iter()
-        .map(|(_, word)| word)
-        .collect::<Vec<_>>()
-        .join(" ")
+    let whole = positioned.iter().enumerate().all(|(i, &(p, _))| p == i);
+    whole.then(|| {
+        positioned
+            .into_iter()
+            .map(|(_, word)| word)
+            .collect::<Vec<_>>()
+            .join(" ")
+    })
 }
 
 #[cfg(test)]
@@ -621,7 +633,45 @@ mod tests {
             ("you".to_owned(), vec![3, 5]),
             ("need".to_owned(), vec![4]),
         ]);
-        assert_eq!(rebuild_abstract(&index), "Attention is all you need you");
+        assert_eq!(
+            rebuild_abstract(&index).as_deref(),
+            Some("Attention is all you need you")
+        );
+    }
+
+    #[test]
+    fn an_index_with_holes_is_no_abstract() {
+        let index = |pairs: &[(&str, &[usize])]| -> BTreeMap<String, Vec<usize>> {
+            pairs
+                .iter()
+                .map(|(word, at)| ((*word).to_owned(), at.to_vec()))
+                .collect()
+        };
+        // W2089383900's: "…was reported in [25%] of [patients]; it was not
+        // seen…", two words gone.
+        let holed = index(&[
+            ("was", &[0]),
+            ("reported", &[1]),
+            ("in", &[2]),
+            ("of", &[4]),
+            ("it", &[6]),
+            ("seen", &[7]),
+        ]);
+        assert_eq!(rebuild_abstract(&holed), None);
+        // One word gone is still a hole: "use of [public] key systems".
+        let one = index(&[
+            ("use", &[0]),
+            ("of", &[1]),
+            ("key", &[3]),
+            ("systems", &[4]),
+        ]);
+        assert_eq!(rebuild_abstract(&one), None);
+        // Nothing at the start.
+        assert_eq!(rebuild_abstract(&index(&[("late", &[1])])), None);
+        // Two words at one place.
+        let doubled = index(&[("a", &[0]), ("b", &[0]), ("c", &[1])]);
+        assert_eq!(rebuild_abstract(&doubled), None);
+        assert_eq!(rebuild_abstract(&BTreeMap::new()).as_deref(), Some(""));
     }
 
     #[test]

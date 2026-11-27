@@ -148,6 +148,12 @@
       "repository": "https://github.com/bitflags/bitflags"
     },
     {
+      "name": "block-buffer",
+      "version": "0.12.1",
+      "license": "MIT OR Apache-2.0",
+      "repository": "https://github.com/RustCrypto/utils"
+    },
+    {
       "name": "bytes",
       "version": "1.12.1",
       "license": "MIT",
@@ -202,6 +208,12 @@
       "repository": "https://github.com/nukesor/comfy-table"
     },
     {
+      "name": "const-oid",
+      "version": "0.10.3",
+      "license": "Apache-2.0 OR MIT",
+      "repository": "https://github.com/RustCrypto/formats"
+    },
+    {
       "name": "constant_time_eq",
       "version": "0.6.1",
       "license": "CC0-1.0 OR MIT-0 OR Apache-2.0",
@@ -220,6 +232,12 @@
       "repository": "https://github.com/servo/core-foundation-rs"
     },
     {
+      "name": "cpufeatures",
+      "version": "0.3.1",
+      "license": "MIT OR Apache-2.0",
+      "repository": "https://github.com/RustCrypto/utils"
+    },
+    {
       "name": "crc32fast",
       "version": "1.5.5",
       "license": "MIT OR Apache-2.0",
@@ -232,6 +250,12 @@
       "repository": "https://github.com/crossterm-rs/crossterm"
     },
     {
+      "name": "crypto-common",
+      "version": "0.2.2",
+      "license": "MIT OR Apache-2.0",
+      "repository": "https://github.com/RustCrypto/traits"
+    },
+    {
       "name": "CSL locales (2)",
       "version": "8bef426",
       "license": "CC-BY-SA-3.0",
@@ -242,6 +266,12 @@
       "version": "af0aea3",
       "license": "CC-BY-SA-3.0",
       "repository": "https://github.com/citation-style-language/styles"
+    },
+    {
+      "name": "digest",
+      "version": "0.11.3",
+      "license": "MIT OR Apache-2.0",
+      "repository": "https://github.com/RustCrypto/traits"
     },
     {
       "name": "directories",
@@ -404,6 +434,12 @@
       "version": "1.10.1",
       "license": "MIT OR Apache-2.0",
       "repository": "https://github.com/seanmonstar/httparse"
+    },
+    {
+      "name": "hybrid-array",
+      "version": "0.4.15",
+      "license": "MIT OR Apache-2.0",
+      "repository": "https://github.com/RustCrypto/hybrid-array"
     },
     {
       "name": "hyper",
@@ -664,6 +700,12 @@
       "repository": "https://github.com/tafia/quick-xml"
     },
     {
+      "name": "quick-xml",
+      "version": "0.41.0",
+      "license": "MIT",
+      "repository": "https://github.com/tafia/quick-xml"
+    },
+    {
       "name": "ref-cast",
       "version": "1.0.27",
       "license": "MIT OR Apache-2.0",
@@ -677,7 +719,7 @@
     },
     {
       "name": "rmcp",
-      "version": "3.8.0",
+      "version": "3.9.0",
       "license": "Apache-2.0",
       "repository": "https://github.com/modelcontextprotocol/rust-sdk/"
     },
@@ -788,6 +830,12 @@
       "version": "0.9.34+deprecated",
       "license": "MIT OR Apache-2.0",
       "repository": "https://github.com/dtolnay/serde-yaml"
+    },
+    {
+      "name": "sha2",
+      "version": "0.11.1",
+      "license": "MIT OR Apache-2.0",
+      "repository": "https://github.com/RustCrypto/hashes"
     },
     {
       "name": "sharded-slab",
@@ -944,6 +992,12 @@
       "version": "0.13.0",
       "license": "MIT OR Apache-2.0",
       "repository": "https://github.com/chipsenkbeil/typed-path"
+    },
+    {
+      "name": "typenum",
+      "version": "1.20.1",
+      "license": "MIT OR Apache-2.0",
+      "repository": "https://github.com/paholg/typenum"
     },
     {
       "name": "unic-langid",

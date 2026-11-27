@@ -10,6 +10,10 @@ Fixed:
 - The wrong-verdict issue form offers `unverifiable`, so a `verify
   --report` link for an unverifiable result fills in its verdict; a test
   now checks the form against every verdict the engine gives.
+- Reading a .docx no longer spends time quadratic in a tag's attributes
+  (quick-xml 0.41, RUSTSEC-2026-0194), so a crafted document can't pin a
+  core. rmcp is 3.9.0 (RUSTSEC-2026-0462, in its HTTP client, which aspero
+  uses only in tests).
 
 ## 0.44.0
 

@@ -184,6 +184,12 @@
       "repository": "https://github.com/typst/citationberg"
     },
     {
+      "name": "const-oid",
+      "version": "0.10.3",
+      "license": "Apache-2.0 OR MIT",
+      "repository": "https://github.com/RustCrypto/formats"
+    },
+    {
       "name": "constant_time_eq",
       "version": "0.6.1",
       "license": "CC0-1.0 OR MIT-0 OR Apache-2.0",
@@ -622,6 +628,12 @@
       "repository": "https://github.com/tafia/quick-xml"
     },
     {
+      "name": "quick-xml",
+      "version": "0.41.0",
+      "license": "MIT",
+      "repository": "https://github.com/tafia/quick-xml"
+    },
+    {
       "name": "rand",
       "version": "0.10.3",
       "license": "MIT OR Apache-2.0",
@@ -647,7 +659,7 @@
     },
     {
       "name": "rmcp",
-      "version": "3.8.0",
+      "version": "3.9.0",
       "license": "Apache-2.0",
       "repository": "https://github.com/modelcontextprotocol/rust-sdk/"
     },

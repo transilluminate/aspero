@@ -1,7 +1,7 @@
 Third-party software and data in aspero 0.44.0
 
 The aspero command-line tool, built for aarch64-apple-darwin, is made from
-the 180 Rust crates below, aspero's own among them. It also bundles the
+the 189 Rust crates below, aspero's own among them. It also bundles the
 citation style data at the end. Each licence or notice text appears once,
 after the crates under it and their copyright notices.
 
@@ -446,10 +446,15 @@ Used by:
   atomic-waker 1.1.2 (Copyright (c) 2016 Alex Crichton; Copyright (c) 2017 The Tokio Authors)
   base64 0.23.1 (Copyright (c) 2025 Alice Maz, Marshall Pierce)
   bitflags 2.13.2 (Copyright (c) 2014 The Rust Project Developers)
+  block-buffer 0.12.1 (Copyright (c) 2018-2025 The RustCrypto Project Developers)
   cfg-if 1.0.5 (Copyright (c) 2014 Alex Crichton)
   citationberg 0.7.0 (Copyright 2023 Martin Haug)
+  const-oid 0.10.3 (Copyright (c) 2020-2026 The RustCrypto Project Developers)
   core-foundation 0.10.1 (Copyright (c) 2012-2013 Mozilla Foundation)
   core-foundation-sys 0.8.7 (Copyright (c) 2012-2013 Mozilla Foundation)
+  cpufeatures 0.3.1 (Copyright (c) 2020-2026 The RustCrypto Project Developers)
+  crypto-common 0.2.2 (Copyright (c) 2021-2026 RustCrypto Developers)
+  digest 0.11.3 (Copyright (c) 2017-2025 RustCrypto Developers; Copyright (c) 2017 Artyom Pavlov)
   equivalent 1.0.3 (Copyright (c) 2016--2023)
   errno 0.3.14 (Copyright (c) 2014 Chris Wong)
   fastrand 2.5.0 (authors: Stjepan Glavina)
@@ -467,6 +472,7 @@ Used by:
   hashlink 0.12.2
   http 1.5.0 (Copyright 2017 http-rs authors; Copyright (c) 2017 http-rs authors)
   httparse 1.10.1 (Copyright (c) 2015-2025 Sean McArthur)
+  hybrid-array 0.4.15 (Copyright (c) 2022-2026 The RustCrypto Project Developers)
   hyper-rustls 0.27.10 (Copyright (c) 2016, Joseph Birr-Pixton <jpixton@gmail.com>; Copyright (c) 2016 Joseph Birr-Pixton <jpixton@gmail.com>)
   idna 1.1.0 (Copyright (c) 2013-2025 The rust-url developers)
   idna_adapter 1.2.2 (Copyright (c) The rust-url developers)
@@ -488,12 +494,14 @@ Used by:
   secrecy 0.10.3 (Copyright (c) 2019-2024 iqlusion)
   security-framework 3.7.0 (Copyright (c) 2015 Steven Fackler)
   security-framework-sys 2.17.0 (Copyright (c) 2015 Steven Fackler)
+  sha2 0.11.1 (Copyright (c) 2016-2026 The RustCrypto Project Developers; Copyright (c) 2016 Artyom Pavlov; Copyright (c) 2009-2013 Mozilla Foundation; Copyright (c) 2006-2009 Graydon Hoare)
   smallvec 1.16.5 (Copyright (c) 2018 The Servo Project Developers)
   socket2 0.6.5 (Copyright (c) 2014 Alex Crichton)
   stable_deref_trait 1.2.1 (Copyright (c) 2017 Robert Grosse)
   thread_local 1.1.10 (Copyright (c) 2016 The Rust Project Developers)
   tinyvec 1.13.3 (Copyright (c) 2019 Daniel "Lokathor" Gee.)
   tokio-rustls 0.26.6 (Copyright 2017 quininer kel; Copyright (c) 2017 quininer kel)
+  typenum 1.20.1 (Copyright 2014 Paho Lurie-Gregg; Copyright (c) 2014 Paho Lurie-Gregg)
   unic-langid 0.9.6 (authors: Zibi Braniecki)
   unic-langid-impl 0.9.6 (authors: Zibi Braniecki)
   unicode-normalization 0.1.26 (Copyright (c) 2015 The Rust Project Developers; Copyright © 1991-2023 Unicode, Inc.)
@@ -2206,7 +2214,7 @@ OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 Licences Apache-2.0, MIT (LICENSE, one text)
 
 Used by:
-  rmcp 3.8.0 (Copyright (c) 2024-2025 Model Context Protocol a Series of LF Projects, LLC.)
+  rmcp 3.9.0 (Copyright (c) 2024-2025 Model Context Protocol a Series of LF Projects, LLC.)
 
 The MCP project is undergoing a licensing transition from the MIT License to the Apache License, Version 2.0 ("Apache-2.0"). All new code and specification contributions to the project are licensed under Apache-2.0. Documentation contributions (excluding specifications) are licensed under CC-BY-4.0.
 
@@ -2979,6 +2987,7 @@ Used by:
   atomic-waker 1.1.2 (Copyright (c) 2016 Alex Crichton; Copyright (c) 2017 The Tokio Authors)
   biblatex 0.12.0 (authors: Martin Haug)
   bitflags 2.13.2 (Copyright (c) 2014 The Rust Project Developers)
+  block-buffer 0.12.1 (Copyright (c) 2018-2025 The RustCrypto Project Developers)
   bytes 1.12.1 (Copyright (c) 2018 Carl Lerche)
   cfg-if 1.0.5 (Copyright (c) 2014 Alex Crichton)
   citationberg 0.7.0 (Copyright 2023 Martin Haug)
@@ -2986,8 +2995,12 @@ Used by:
   clap_builder 4.6.7 (Copyright Individual contributors; Copyright (c) Individual contributors)
   clap_lex 1.1.1 (Copyright Individual contributors; Copyright (c) Individual contributors)
   colorchoice 1.0.5 (Copyright (c) Individual contributors)
+  const-oid 0.10.3 (Copyright (c) 2020-2026 The RustCrypto Project Developers)
   core-foundation 0.10.1 (Copyright (c) 2012-2013 Mozilla Foundation)
   core-foundation-sys 0.8.7 (Copyright (c) 2012-2013 Mozilla Foundation)
+  cpufeatures 0.3.1 (Copyright (c) 2020-2026 The RustCrypto Project Developers)
+  crypto-common 0.2.2 (Copyright (c) 2021-2026 RustCrypto Developers)
+  digest 0.11.3 (Copyright (c) 2017-2025 RustCrypto Developers; Copyright (c) 2017 Artyom Pavlov)
   directories 6.0.0 (Copyright (c) 2018 directories-rs contributors)
   dirs-sys 0.5.0 (Copyright (c) 2018-2019 dirs-rs contributors)
   dyn-clone 1.0.20 (authors: David Tolnay)
@@ -3013,6 +3026,7 @@ Used by:
   http-body 1.1.0 (Copyright (c) 2019-2026 Sean McArthur & Hyper Contributors)
   http-body-util 0.1.5 (Copyright (c) 2019-2026 Sean McArthur & Hyper Contributors)
   httparse 1.10.1 (Copyright (c) 2015-2025 Sean McArthur)
+  hybrid-array 0.4.15 (Copyright (c) 2022-2026 The RustCrypto Project Developers)
   hyper 1.12.0 (Copyright (c) 2014-2026 Sean McArthur)
   hyper-rustls 0.27.10 (Copyright (c) 2016, Joseph Birr-Pixton <jpixton@gmail.com>; Copyright (c) 2016 Joseph Birr-Pixton <jpixton@gmail.com>)
   hyper-util 0.1.21 (Copyright (c) 2023-2025 Sean McArthur)
@@ -3046,6 +3060,7 @@ Used by:
   serde_json 1.0.154
   serde_path_to_error 0.1.20 (authors: David Tolnay)
   serde_yaml 0.9.34+deprecated (authors: David Tolnay)
+  sha2 0.11.1 (Copyright (c) 2016-2026 The RustCrypto Project Developers; Copyright (c) 2016 Artyom Pavlov; Copyright (c) 2009-2013 Mozilla Foundation; Copyright (c) 2006-2009 Graydon Hoare)
   sharded-slab 0.1.7 (Copyright (c) 2019 Eliza Weisman)
   slab 0.4.12 (Copyright (c) 2019 Carl Lerche)
   smallvec 1.16.5 (Copyright (c) 2018 The Servo Project Developers)
@@ -3206,9 +3221,11 @@ Used by:
   nix 0.31.3 (Copyright (c) 2015 Carl Lerche + nix-rust Authors)
   nu-ansi-term 0.50.3 (Copyright (c) 2014 Benjamin Sago; Copyright (c) 2021-2022 The Nushell Project Developers)
   quick-xml 0.38.4 (Copyright (c) 2016 Johann Tuffe)
+  quick-xml 0.41.0 (Copyright (c) 2016 Johann Tuffe)
   security-framework 3.7.0 (Copyright (c) 2015 Steven Fackler)
   security-framework-sys 2.17.0 (Copyright (c) 2015 Steven Fackler)
   strsim 0.11.1 (Copyright (c) 2015 Danny Guo; Copyright (c) 2016 Titus Wormer <tituswormer@gmail.com>; Copyright (c) 2018 Akash Kurdekar)
+  typenum 1.20.1 (Copyright 2014 Paho Lurie-Gregg; Copyright (c) 2014 Paho Lurie-Gregg)
   zip 9.5.1 (Copyright (c) 2014 Mathijs van de Nes)
 
 The MIT License (MIT)
@@ -3847,6 +3864,14 @@ limitations under the Licenses.
 
 Test code is dedicated to the Public Domain when so designated (see
 the individual files for PD/CC0-dedicated sections).
+
+================================================================================
+Notice (LICENSE)
+
+Used by:
+  typenum 1.20.1 (Copyright 2014 Paho Lurie-Gregg; Copyright (c) 2014 Paho Lurie-Gregg)
+
+MIT OR Apache-2.0
 
 ================================================================================
 Notice (NOTICE)

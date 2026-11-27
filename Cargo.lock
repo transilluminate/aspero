@@ -153,7 +153,7 @@ dependencies = [
  "aspero-core",
  "biblatex",
  "hayagriva",
- "quick-xml",
+ "quick-xml 0.41.0",
  "serde",
  "serde_json",
  "thiserror",
@@ -600,7 +600,7 @@ version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "756ff1e3d43a9ecc8183932fb4d9fd3971236f3ce4acb62fe51d1cd43297547d"
 dependencies = [
- "quick-xml",
+ "quick-xml 0.38.4",
  "serde",
  "serde_path_to_error",
  "unscanny",
@@ -682,6 +682,12 @@ dependencies = [
  "unicode-segmentation",
  "unicode-width",
 ]
+
+[[package]]
+name = "const-oid"
+version = "0.10.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "be95d4a884358a21a199689323c29e9256b4a1b315e22f183d155422041d3a9a"
 
 [[package]]
 name = "constant_time_eq"
@@ -771,6 +777,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f1dd6dbb5841937940781866fa1281a1ff7bd3bf827091440879f9994983d5c2"
 dependencies = [
  "block-buffer",
+ "const-oid",
  "crypto-common",
 ]
 
@@ -1862,6 +1869,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "quick-xml"
+version = "0.41.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e660451e55124f798a69a5af3f49ccfbefbd41910eefd25caf2393e1f3473ec1"
+dependencies = [
+ "memchr",
+]
+
+[[package]]
 name = "quinn"
 version = "0.11.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2064,9 +2080,9 @@ dependencies = [
 
 [[package]]
 name = "rmcp"
-version = "3.8.0"
+version = "3.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f8be15815186873ea063bf005011d16c356804973489e40c39116ae3a2878d1f"
+checksum = "d24a7e92f4bcaa36b97fa93c4fa7ca8f3e669eced949345b3462dba333c7f909"
 dependencies = [
  "async-trait",
  "base64",
@@ -2084,6 +2100,7 @@ dependencies = [
  "schemars",
  "serde",
  "serde_json",
+ "sha2",
  "sse-stream",
  "thiserror",
  "tokio",

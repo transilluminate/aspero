@@ -337,6 +337,12 @@ impl Normalised {
         let together = |from: usize, to: usize, edge: bool| {
             (at[from]..at[to]).all(|i| {
                 let gap = &self.raw[self.spans[i].end..self.spans[i + 1].start];
+                // "vs." stops no sentence ("Pseudobinaural vs. real binaural
+                // …", wild-6 #14).
+                let gap = match self.words[i].as_str() {
+                    "vs" | "v" => gap.strip_prefix('.').unwrap_or(gap),
+                    _ => gap,
+                };
                 gap.chars().all(|c| {
                     c.is_whitespace()
                         || matches!(c, '-' | '‐' | '\'' | '’')

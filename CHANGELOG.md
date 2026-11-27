@@ -20,6 +20,13 @@ Added:
 
 Fixed:
 
+- A title reworded is plausible, not verified, even beside the work's DOI
+  or place, when its words are dropped in one place and others put in
+  another ("… and birth outcomes" for "… and the risks of low
+  birthweight and preterm birth"), when a quoted title is reworded, or
+  around a "vs." (wild-6 #14, #130, #653). A title misspelt, abbreviated,
+  given without its subtitle or a leading article, or a formula printed
+  spaced ("B F 3") is still verified.
 - The wrong-verdict issue form offers `unverifiable`, so a `verify
   --report` link for an unverifiable result fills in its verdict; a test
   now checks the form against every verdict the engine gives.

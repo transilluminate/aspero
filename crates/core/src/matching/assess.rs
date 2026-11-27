@@ -29,6 +29,10 @@ use crate::publication::{self, first_page, journal_in, other_journal, same_journ
 use crate::record::SourceRecord;
 use crate::work::WorkType;
 
+/// A quoted span's similarity to the record's title, at least, for it to be
+/// read as the title cited.
+const QUOTED_TITLE_SHARE: f64 = 2.0 / 3.0;
+
 /// Scores how well `record` matches `claim`.
 // The caps and floors apply in order, each reading what the ones before
 // left; splitting them up hides that order. Follow-up: move the facts the
@@ -241,6 +245,17 @@ pub fn assess(claim: &Claim, record: &SourceRecord) -> Assessment {
             text.substitutes_in(actual)
                 .or_else(|| text.inserts_in(actual).then_some(false))
                 .or_else(|| text.replaces_in(actual).then_some(false))
+                // A title quoted is the title cited, all of it, as one
+                // given apart is (wild-6 #653); not a reference quoted
+                // whole ("Corrections to “Shamloul R, Bella AJ. …”").
+                .or_else(|| {
+                    titles::given_title(&text.raw)
+                        .is_some_and(|quoted| {
+                            title_similarity(&quoted, actual) >= QUOTED_TITLE_SHARE
+                                && titles::replaces(&quoted, actual)
+                        })
+                        .then_some(false)
+                })
         }
         (Some(actual), Some(text)) if found && main_only && claim.title.is_none() => {
             text.substitutes_in(actual)

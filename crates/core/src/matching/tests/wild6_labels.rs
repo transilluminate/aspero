@@ -121,7 +121,7 @@ fn a_title_with_a_compounds_acronym_and_its_id_verifies() {
 /// ("MAE | Masked Autoencoders …"), defines them.
 #[test]
 fn acronyms_take_a_compound_only_where_one_is() {
-    let expand = super::super::titles::expand_acronyms;
+    let expand = super::super::acronyms::expand_acronyms;
     assert_eq!(
         expand("Gated SAEs", "Gated Sparse Autoencoders").as_deref(),
         Some("Gated Sparse Autoencoders")

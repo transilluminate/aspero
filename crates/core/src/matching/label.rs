@@ -18,7 +18,7 @@ const FURNITURE: &[&str] = &["arxiv", "preprint", "doi", "pmid", "pmcid"];
 /// titled `title`: some words besides a year and furniture, and each of
 /// them a word of the title, its plural or a form of its stem
 /// ("sparsity" for "Sparse"). Compare `text` with its acronyms expanded
-/// for the title ([`super::titles::expand_acronyms`]).
+/// for the title ([`super::acronyms::expand_acronyms`]).
 pub(super) fn labels(text: &str, title: &str, ids: &[WorkId]) -> bool {
     let mut rest = String::with_capacity(text.len());
     let mut at = 0;

@@ -25,6 +25,8 @@
 //!   caps and floors, and the verdict thresholds.
 //! - `authors.rs`: author names; `titles.rs`: comparing titles; `text.rs`:
 //!   words, and finding a record's fields inside free text.
+//! - `acronyms.rs`: a cited title's acronyms, written out as the record
+//!   title's words.
 //! - `edition.rs`: a book's first edition as a citation states it ("(1st
 //!   ed.)", "(Original work published 1969)").
 //! - `label.rs`: a label for a work beside its identifier ("Gated SAEs:
@@ -50,6 +52,7 @@
 //! - `written.rs`: a free-text reference's title and authors as written,
 //!   for the claim as read.
 
+mod acronyms;
 mod assess;
 mod authors;
 mod caps;
@@ -72,7 +75,7 @@ use serde::{Deserialize, Serialize};
 
 pub use assess::assess;
 pub use authors::share_an_author;
-pub use caps::{ID_CONFLICT_CAP, PLAUSIBLE, VERIFIED};
+pub use caps::{ID_CONFLICT_CAP, PLAUSIBLE, VERIFIED, WHOLE_BYLINE};
 pub use claim::{Alternative, Claim, find_ids};
 pub use derivative::{
     WorkKind, claim_mentions_derivative, derivative_kind, derivative_work_kind, is_derivative,
@@ -87,8 +90,8 @@ pub use publisher::{
 pub use same_work::{conflicting_id, id_agreement, same_work, same_work_id};
 pub use text::normalise;
 pub use titles::{
-    given_title, probable_title, search_terms, shared_title, title_similarity, unmarked,
-    whole_title_similarity,
+    distinctive_title, given_title, probable_title, search_terms, shared_title, title_similarity,
+    unmarked, whole_title_similarity,
 };
 pub use version::earlier_id_claimed;
 

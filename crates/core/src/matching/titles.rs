@@ -72,121 +72,6 @@ pub(super) fn dice(a: &[String], b: &[String]) -> f64 {
     2.0 * shared as f64 / (a.len() + b.len()) as f64
 }
 
-/// A reference with the acronyms it writes for a run of `title`'s words
-/// written out as those words ("Theory of Mind in LLMs" for "… in Large
-/// Language Models", "RLHF" for "Reinforcement Learning from Human
-/// Feedback", "ToM"): models abbreviate titles so. An acronym is two
-/// capitals or more, a plural's "s" aside, spelling the initials of
-/// consecutive words of the title, its joining words' optional, the last
-/// a compound's two parts' ("SAEs" for "Sparse Autoencoders"); one the
-/// title holds as a word stays. `None` when there is none.
-pub fn expand_acronyms(text: &str, title: &str) -> Option<String> {
-    /// Prefixes a compound word is made with, its second part a word.
-    const COMPOUND_PREFIXES: &[&str] = &[
-        "auto", "self", "multi", "hyper", "meta", "super", "micro", "nano", "inter", "cross",
-        "over", "under", "back", "semi", "counter",
-    ];
-    // The run of title words from `at` whose initials spell `letters`.
-    fn spelt(letters: &[char], words: &[String], at: usize) -> Option<usize> {
-        let Some(&c) = letters.first() else {
-            return Some(at);
-        };
-        let word = words.get(at)?;
-        let joining = STOPWORDS.contains(&word.as_str());
-        if word.starts_with(c)
-            && let Some(end) = spelt(&letters[1..], words, at + 1)
-        {
-            return Some(end);
-        }
-        // A compound word may give the initials of both its parts, last
-        // in the run ("Sparse Autoencoders" in "SAEs": auto-encoders), its
-        // first part a prefix compounds are made with ("Attention" is no
-        // compound for "GAT").
-        if let [c, inner] = letters
-            && COMPOUND_PREFIXES.iter().any(|p| {
-                word.strip_prefix(p).is_some_and(|part| {
-                    p.starts_with(*c) && part.len() >= 4 && part.starts_with(*inner)
-                })
-            })
-        {
-            return Some(at + 1);
-        }
-        // A joining word inside the run may give no letter ("Learning
-        // from Human" in "RLHF").
-        if joining && at > 0 {
-            return spelt(letters, words, at + 1);
-        }
-        None
-    }
-    let title_words: Vec<&str> = title
-        .split(|c: char| !c.is_alphanumeric())
-        .filter(|w| !w.is_empty())
-        .collect();
-    let lower: Vec<String> = title_words.iter().map(|w| w.to_lowercase()).collect();
-    let mut out = String::with_capacity(text.len());
-    let mut changed = false;
-    let mut rest = text;
-    let mut previous = "";
-    while !rest.is_empty() {
-        let start = rest.find(char::is_alphanumeric).unwrap_or(rest.len());
-        out.push_str(&rest[..start]);
-        rest = &rest[start..];
-        let end = rest
-            .find(|c: char| !c.is_alphanumeric())
-            .unwrap_or(rest.len());
-        let token = &rest[..end];
-        rest = &rest[end..];
-        let capitals = token.chars().filter(char::is_ascii_uppercase).count();
-        let stem = token
-            .strip_suffix('s')
-            .filter(|_| token.len() > 2)
-            .unwrap_or(token);
-        let letters: Vec<char> = stem.to_lowercase().chars().collect();
-        // A name's initials ("Kishore CP,") are no acronym.
-        let initials = token.chars().all(|c| c.is_ascii_uppercase())
-            && previous.starts_with(char::is_uppercase)
-            && previous.chars().any(char::is_lowercase)
-            && (rest.is_empty() || rest.starts_with([',', '.', ';']));
-        let expansion = (capitals >= 2
-            && !initials
-            && (2..=8).contains(&letters.len())
-            && token.chars().all(|c| c.is_ascii_alphabetic())
-            && !lower
-                .iter()
-                .any(|w| w.eq_ignore_ascii_case(token) || *w == stem.to_lowercase()))
-        .then(|| {
-            (0..lower.len())
-                .filter(|&i| !STOPWORDS.contains(&lower[i].as_str()))
-                .find_map(|i| {
-                    let end = spelt(&letters, &lower, i)?;
-                    // A run ends on a word of its own, not a joining word.
-                    (end - i >= 2 && !STOPWORDS.contains(&lower[end - 1].as_str()))
-                        .then(|| title_words[i..end].join(" "))
-                })
-        })
-        .flatten();
-        // Nor one its words follow, written out ("MAE | Masked
-        // Autoencoders Are …"): it defines them, and isn't more of them.
-        let expansion = expansion.filter(|run| !defines(token, rest, run));
-        match expansion {
-            Some(words) => {
-                out.push_str(&words);
-                changed = true;
-            }
-            None => out.push_str(token),
-        }
-        previous = token;
-    }
-    changed.then_some(out)
-}
-
-/// Whether `acronym`, `rest` the text after it, is followed by the words
-/// it stands for, `run` ("LATS: Language Agent Tree Search"): a definition.
-fn defines(acronym: &str, rest: &str, run: &str) -> bool {
-    let run = words(run);
-    !acronym.is_empty() && !run.is_empty() && words(rest).starts_with(&run)
-}
-
 /// Whether `text` quotes a part of `title` that stands for it: its opening
 /// words or its subtitle, three content words or more ("« Some types of
 /// exercise are more effective than others »", "\"Death by a thousand
@@ -229,6 +114,29 @@ pub(super) fn main_title(title: &str) -> &str {
     title
         .find([':', '\u{2014}', '\u{2013}'])
         .map_or(title, |i| title[..i].trim())
+}
+
+/// Whether `cited` is `title`'s main title, before its subtitle, with one
+/// word put in place of one, not a number ("The political economy of coal
+/// in Germany" for "The political economy of coal in Poland: Drivers and
+/// barriers …"): three content words or more alike, in order.
+pub(super) fn main_title_replaced(cited: &str, title: &str) -> bool {
+    let title = unmarked(title);
+    let main = main_title(title);
+    if main == title {
+        return false;
+    }
+    let (cited, main) = (words(unmarked(cited)), words(main));
+    if cited.len() != main.len() {
+        return false;
+    }
+    let differ: Vec<(&String, &String)> = cited.iter().zip(&main).filter(|(a, b)| a != b).collect();
+    let number = |w: &str| w.chars().any(|c| c.is_ascii_digit());
+    differ.len() == 1
+        && differ
+            .iter()
+            .all(|(a, b)| !number(a) && !number(b) && !STOPWORDS.contains(&a.as_str()))
+        && content_words(&main.join(" ")).len() >= 4
 }
 
 /// A title's first sentence, when a record's runs on into a description
@@ -625,6 +533,9 @@ fn guessed_title(text: &str) -> Option<String> {
     // title's sentence at their full stops ("… Processes (ed. G. S.
     // Koby). Kent State UP.").
     let text = &*layout::without_role_notes(text);
+    // Nor its translators or editors named outside them, nor its authors
+    // named after it ("… Care by Richard Twycross and Andrew Wilcock").
+    let text = &*layout::without_name_phrases(text);
     if let Some(title) = after_comma_byline(text) {
         return Some(title);
     }
@@ -647,19 +558,20 @@ fn guessed_title(text: &str) -> Option<String> {
     // a publisher after a comma ("…, Columbia UP") or a count of volumes
     // ("…, 4 vols") is left out of one.
     let editors = |s: &str| {
-        s.split_whitespace().last().is_some_and(|w| {
-            matches!(
-                w.trim_matches(|c: char| !c.is_alphabetic())
-                    .to_lowercase()
-                    .as_str(),
-                "ed" | "eds" | "editor" | "editors" | "dir" | "hrsg"
-            )
-        })
+        !layout::ends_in_edition(s)
+            && s.split_whitespace().last().is_some_and(|w| {
+                matches!(
+                    w.trim_matches(|c: char| !c.is_alphabetic())
+                        .to_lowercase()
+                        .as_str(),
+                    "ed" | "eds" | "editor" | "editors" | "dir" | "hrsg"
+                )
+            })
     };
     let sentences: Vec<&str> = text.split(". ").collect();
     sentences
         .iter()
-        .map(|s| without_trailing_note(without_name_byline(s)))
+        .map(|s| without_trailing_note(layout::without_name_byline(s)))
         .enumerate()
         .filter(|(i, s)| {
             !(s.contains(';')
@@ -670,8 +582,10 @@ fn guessed_title(text: &str) -> Option<String> {
                 || (*i == 1 && layout::given_after_initial(sentences[0], s)))
         })
         .map(|(_, s)| {
-            let s = without_byline_year(without_leading_year(s));
-            layout::without_volumes(layout::without_trailing_publisher(s))
+            let s = without_byline_year(without_leading_year(layout::without_body_byline(s)));
+            layout::without_volumes(layout::without_trailing_publisher(layout::without_edition(
+                s,
+            )))
         })
         .filter_map(title_like)
         .enumerate()
@@ -801,37 +715,6 @@ fn without_byline_year(s: &str) -> &str {
     after
 }
 
-/// A sentence without a byline of a name written out and a comma before
-/// a title that a year in brackets ends: "Einar Arnórsson, Réttarsaga
-/// Alþingis (1945)", "Eddie Faye Gates, They Came Searching: … (1997)".
-/// Two to four words, each a capitalised word of letters.
-fn without_name_byline(s: &str) -> &str {
-    let Some((name, rest)) = s.split_once(", ") else {
-        return s;
-    };
-    let words: Vec<&str> = name.split_whitespace().collect();
-    let named = (2..=4).contains(&words.len())
-        && words.iter().all(|w| {
-            w.starts_with(char::is_uppercase)
-                && w.chars().any(char::is_lowercase)
-                && w.chars()
-                    .all(|c| c.is_alphabetic() || matches!(c, '-' | '\'' | '’'))
-        });
-    let t = rest.trim_end().trim_end_matches('.');
-    let dated = t
-        .strip_suffix(')')
-        .and_then(|t| t.rfind(" (").map(|at| &t[at + 2..]))
-        .is_some_and(|year| {
-            year.get(..4)
-                .is_some_and(|y| y.bytes().all(|b| b.is_ascii_digit()))
-        });
-    if named && dated && rest.starts_with(char::is_uppercase) {
-        without_trailing_note(rest)
-    } else {
-        s
-    }
-}
-
 /// A sentence without the year in brackets opening it: "(2011) Viking
 /// coinage …".
 fn without_leading_year(s: &str) -> &str {
@@ -905,7 +788,7 @@ fn after_comma_byline(text: &str) -> Option<String> {
     }
     let first = rest.split_whitespace().next()?;
     if matches!(
-        first.to_lowercase().as_str(),
+        first.trim_end_matches('.').to_lowercase().as_str(),
         "and" | "&" | "et" | "y" | "und" | "e" | "ed" | "eds" | "dir"
     ) || first.starts_with(|c: char| c.is_ascii_digit())
     {
@@ -917,6 +800,19 @@ fn after_comma_byline(text: &str) -> Option<String> {
     for stop in [". ", " (", ";"] {
         if let Some(at) = rest.find(stop) {
             end = end.min(at);
+        }
+    }
+    // Not at a full stop after one word: a title's first part ("Italiano.
+    // Antico e nuovo, Milano, Garzanti, 1988", wild-6 #677).
+    let one_word = rest[..end].split_whitespace().count() == 1
+        && rest[..end].chars().filter(|c| c.is_alphabetic()).count() >= 3;
+    if one_word && rest[end..].starts_with(". ") {
+        let after = end + 2;
+        end = rest.len();
+        for stop in [". ", " (", ";"] {
+            if let Some(at) = rest[after..].find(stop) {
+                end = end.min(after + at);
+            }
         }
     }
     let mut from = 0;
@@ -984,6 +880,13 @@ pub fn given_title(text: &str) -> Option<String> {
             title(&text[start..start + end])
         })
         .max_by_key(|t| t.split_whitespace().count())
+}
+
+/// Whether `title` has words enough to name one work: four distinct content
+/// words or more ("Disciplinary History and the Situation of History
+/// Teachers"), not "Deep learning" or "The Spirit Level".
+pub fn distinctive_title(title: &str) -> bool {
+    content_words(unmarked(title)).len() >= super::caps::DISTINCTIVE_TITLE_WORDS
 }
 
 /// Keywords for a plain search engine from a messy reference: years,

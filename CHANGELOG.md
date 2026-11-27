@@ -58,6 +58,40 @@ Fixed:
   it doesn't have, is plausible, the authors named (wild-6 #267). A book's
   record listing one author may list only the first, and is still not
   held against the others cited.
+- A title quoted by its opening words beside the work's whole byline
+  (two names or more) and year is now plausible without the journal
+  named too ("Kraft & Falken, \"A Blueprint for Scaling Tutoring\"
+  (2021)", wild-6 #594).
+- An organisation's report found by its whole title, cited without the
+  organisation, no longer reads what stands before the title as another
+  byline ("Pakistan Country Economic Memorandum: From Swimming in Sand …"
+  for the World Bank Group's report, wild-6 #600): plausible.
+- An era marker beside a year in a record's title ("The Paston letters,
+  A.D. 1422-1509") is no word the citation lacks (wild-6 #347).
+- A real work cited with an error, found but scoring below plausible, is
+  a mismatch naming what differs in two more cases: a title of four
+  content words or more, given whole, with no one named and only the year
+  wrong, for a record that names its authors (wild-6 #710); and the whole
+  byline with such a title nearly the work's and the year wrong (wild-6
+  #108). They were not found.
+- A quoted title that is the work's main title with one word put in
+  place of one ("'The political economy of coal in Germany'" for "… in
+  Poland: Drivers and barriers …") is partly the work's: plausible beside
+  its authors, year and journal (wild-6 #464).
+- Books are searched by their titles more often (wild-6 #92, #247,
+  #265, #347, #519, #677, #217): an edition after the title ("…, 4th
+  ed.") is no editors' byline and no part of the title; nor are authors
+  named after it ("… by Richard Twycross and Andrew Wilcock"), its
+  translators or editors outside brackets (", translated by …"), a family
+  name alone before a title with an article ("Snowdon, The Spirit Level
+  Delusion"), an editor's byline ("James Gairdner, ed., …"), a note's
+  place, publisher and page ("(Paris: L'Harmattan, 2001), [page]") or
+  organisations listed before a colon ("HPA / College of Radiographers /
+  RCR: …"); a one-word sentence opening a title ("Italiano. Antico e
+  nuovo") is the title's first part.
+- A book's guessed title is searched beside a citation matcher's hit
+  that shares only part of it, when a title search is left ("The Spirit
+  Level Delusion" beside a namesake's "Spirit Level", wild-6 #265).
 
 ## 0.44.1
 

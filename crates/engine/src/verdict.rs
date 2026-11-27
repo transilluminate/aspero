@@ -1,7 +1,7 @@
 //! Turning scored candidates into a verdict, why ([`Reason`]), and a
 //! one-sentence reason in English.
 
-use aspero_core::matching::{self, PLAUSIBLE, VERIFIED, WorkKind};
+use aspero_core::matching::{self, PLAUSIBLE, VERIFIED, WHOLE_BYLINE, WorkKind};
 use aspero_core::publication::first_page;
 use aspero_core::{Agreement, Claim, IdKind, Notice, NoticeKind};
 
@@ -258,10 +258,45 @@ impl std::fmt::Display for Difference {
 /// real work cited with an error (wrong year, misattributed authors), not a
 /// missing one. The title alone proves little: short titles like "Protein
 /// Folding" occur inside many longer ones.
-fn near_miss(c: &Candidate) -> bool {
+///
+/// So is a title of words enough to name one work, found whole in the
+/// claim, with no one named beside a record that names its authors, and
+/// only the year wrong ("\"Disciplinary history and the situation of
+/// history teachers\" (2016)" for 2012's, wild-6 #710); and the whole
+/// byline, a year wrong, beside such a title with a word put in ("… on
+/// chronic musculoskeletal pain" for "… on chronic pain", wild-6 #108).
+fn near_miss(claim: &Claim, c: &Candidate) -> bool {
     let a = &c.assessment;
-    a.title.agreement == Agreement::Match
-        && (a.authors.agreement == Agreement::Match || a.year.agreement == Agreement::Match)
+    let work = &c.record.work;
+    let year_wrong = a.year.agreement == Agreement::Mismatch;
+    let whole_byline = a.authors.score.is_some_and(|s| s >= WHOLE_BYLINE);
+    let distinctive = work
+        .title
+        .as_deref()
+        .is_some_and(matching::distinctive_title);
+    // The record's whole title, not its main title alone, as the claim
+    // gives it.
+    let found_whole = work.title.as_deref().is_some_and(|title| {
+        let cited = claim.title.as_deref().or(claim.text.as_deref());
+        let own = matching::normalise(matching::unmarked(title));
+        cited
+            .and_then(|cited| matching::shared_title(title, cited))
+            .is_some_and(|run| run == own)
+    });
+    (a.title.agreement == Agreement::Match
+        && (a.authors.agreement == Agreement::Match || a.year.agreement == Agreement::Match))
+        || (a.title.agreement == Agreement::Match
+            && a.authors.agreement == Agreement::Unknown
+            && !work.authors.is_empty()
+            && year_wrong
+            && distinctive
+            && found_whole)
+        || (a.title.agreement == Agreement::Partial
+            && a.title.score.is_some_and(|s| s >= NEARLY_THE_TITLE)
+            && whole_byline
+            && work.authors.len() > 1
+            && distinctive
+            && year_wrong)
 }
 
 /// The same title and no authors to compare (a record without them, a
@@ -292,6 +327,9 @@ fn its_book(chapter: &Candidate, other: &Candidate) -> bool {
     let (book, title) = (matching::normalise(book), matching::normalise(title));
     book.split_whitespace().count() >= 3 && format!(" {title} ").contains(&format!(" {book} "))
 }
+/// A title score from which a title is the work's with a word or so put
+/// in or left out (a partial match: three of four content words).
+const NEARLY_THE_TITLE: f64 = 0.75;
 
 /// Titles alike enough to be one book's.
 const SAME_TITLE: f64 = 0.9;
@@ -546,7 +584,7 @@ fn weigh(claim: &Claim, report: &ResolveReport) -> (Verdict, Reason, Option<usiz
                 },
                 Some(0),
             ),
-            Some(c) if near_miss(c) => (
+            Some(c) if near_miss(claim, c) => (
                 Verdict::Mismatch,
                 Reason::Closest {
                     differs: differences(claim, c, false),
@@ -631,7 +669,7 @@ fn weigh(claim: &Claim, report: &ResolveReport) -> (Verdict, Reason, Option<usiz
             Some(j) => (Verdict::Mismatch, Reason::IdElsewhere { cited: i }, Some(j)),
             // The identifiers' work, cited with an error (a wrong year):
             // the same title, and matching authors or year.
-            None if near_miss(c) || unauthored_near_miss(c) => (
+            None if near_miss(claim, c) || unauthored_near_miss(c) => (
                 Verdict::Plausible,
                 Reason::IdPartlyMatches {
                     differs: differences(claim, c, true),

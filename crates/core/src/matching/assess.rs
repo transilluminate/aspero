@@ -10,7 +10,7 @@ use super::caps::{
     EXTENDED_TITLE_CAP, FIRST_EDITION_CAP, ID_CONFLICT_CAP, JOURNAL_MISMATCH_CAP,
     JOURNAL_MISMATCH_PENALTY, LOCATION_MISMATCH_CAP, NO_EVIDENCE_CAP, OTHER_IN_SERIES, PLACED,
     PLACED_YEAR_OFF, PLACED_YEAR_WRONG, PLAUSIBLE, SHORT_TITLE_WORDS, STRANGERS_CAP,
-    UNCORROBORATED_CAP, UNPLACED_CAP, VENUE_RECORD_CAP, VERSION, combine,
+    UNCORROBORATED_CAP, UNPLACED_CAP, VENUE_RECORD_CAP, VERSION, WHOLE_BYLINE, combine,
 };
 use super::claim::{byline, cites_chapter, title_region, untitled_byline};
 use super::derivative::{self, WorkKind, record_derivative_kind};
@@ -54,7 +54,7 @@ pub fn assess(claim: &Claim, record: &SourceRecord) -> Assessment {
         let t = work
             .title
             .as_deref()
-            .and_then(|title| titles::expand_acronyms(&t, title))
+            .and_then(|title| super::acronyms::expand_acronyms(&t, title))
             .unwrap_or(t);
         Normalised::new(&t)
     });
@@ -96,8 +96,19 @@ pub fn assess(claim: &Claim, record: &SourceRecord) -> Assessment {
     });
     let title = match (&claimed_title, &work_title, &text) {
         (Some(claimed), Some(actual), _) => FieldCheck::scored(title_similarity(claimed, actual)),
+        // A title quoted that is the work's main title with one word put
+        // in place of one ("'The political economy of coal in Germany'"
+        // for "… in Poland: Drivers and barriers …", wild-6 #464): partly
+        // the work's, however few of its words the text has.
         (None, Some(actual), Some(text)) if !untitled => {
-            FieldCheck::scored(text.title_coverage(actual))
+            let quoted = titles::given_title(&text.raw)
+                .is_some_and(|q| titles::main_title_replaced(&q, actual));
+            let coverage = text.title_coverage(actual);
+            FieldCheck::scored(if quoted {
+                coverage.max(EXTENDED_TITLE)
+            } else {
+                coverage
+            })
         }
         _ => FieldCheck::UNKNOWN,
     };
@@ -138,11 +149,22 @@ pub fn assess(claim: &Claim, record: &SourceRecord) -> Assessment {
             }
             _ => text.raw.clone(),
         };
+        // An organisation's report found by its whole title is often cited
+        // without the organisation: what stands before the title there
+        // ("Pakistan Country Economic Memorandum: From Swimming in Sand …"
+        // for the World Bank Group's "From Swimming in Sand …", wild-6
+        // #600) is no byline of others, unless it names people.
+        let body_found = title_span.as_ref().is_some_and(|s| !s.is_empty())
+            && work
+                .authors
+                .iter()
+                .all(|p| p.display_name().is_some_and(|n| authors::is_body(&n)));
         let others = || {
             authors::names_given(&outside_title())
-                || byline(text, work_title.as_deref(), title_span.as_ref()).is_some_and(|b| {
-                    byline_strangers(&b, &work.authors, work.container_title.as_deref())
-                })
+                || (!body_found
+                    && byline(text, work_title.as_deref(), title_span.as_ref()).is_some_and(|b| {
+                        byline_strangers(&b, &work.authors, work.container_title.as_deref())
+                    }))
         };
         match text.author_coverage(&families) {
             0.0 if !others() => FieldCheck::UNKNOWN,
@@ -721,12 +743,18 @@ pub fn assess(claim: &Claim, record: &SourceRecord) -> Assessment {
     }
     // A quoted part of the work's title (its opening words or subtitle) beside
     // its authors, year and journal: the work (wild-5 #400, #488). Plausible.
+    // Without a journal, beside its whole byline, two names or more
+    // ("Kraft & Falken, \"A Blueprint for Scaling Tutoring\" (2021)" for
+    // "… Tutoring and Mentoring Across Public Schools", wild-6 #594).
     if claimed_title.is_none()
         && title.agreement == Agreement::Mismatch
         && authors.score.is_some_and(|s| s >= CORROBORATING_AUTHORS)
         && !(strangers || earlier)
         && year.agreement == Agreement::Match
-        && container.agreement == Agreement::Match
+        && (container.agreement == Agreement::Match
+            || (container.agreement == Agreement::Unknown
+                && work.authors.len() > 1
+                && authors.score.is_some_and(|s| s >= WHOLE_BYLINE)))
         && (text.as_ref().zip(work_title.as_deref()))
             .is_some_and(|(t, w)| titles::quotes_part_of(&t.raw, w))
     {

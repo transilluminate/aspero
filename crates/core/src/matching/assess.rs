@@ -153,13 +153,15 @@ pub fn assess(claim: &Claim, record: &SourceRecord) -> Assessment {
     // Names the claim gives that the record's byline lacks: invented
     // co-authors beside a real first author. Not a match, whoever is first.
     // Not for books, whose records often list only the first author (Open
-    // Library's Sutton without Barto).
+    // Library's Sutton without Barto), or their editors or translators,
+    // unless the reference swaps one of the record's co-authors for
+    // another (`authors::book_co_author_swapped`, wild-6 #267).
     let journal = work
         .container_title
         .as_deref()
         .map(publication::significant);
+    let book = work.work_type == Some(crate::work::WorkType::Book);
     let strangers = authors.agreement != Agreement::Unknown
-        && work.work_type != Some(crate::work::WorkType::Book)
         && complete_byline(&work.authors)
         && if claim.authors.is_empty() {
             text.as_ref()
@@ -168,10 +170,15 @@ pub fn assess(claim: &Claim, record: &SourceRecord) -> Assessment {
                         .or_else(|| untitled_byline(text, journal.as_deref()))
                 })
                 .is_some_and(|b| {
-                    byline_strangers(&b, &work.authors, work.container_title.as_deref())
+                    let journal = work.container_title.as_deref();
+                    if book {
+                        authors::book_co_author_swapped(&b, &work.authors, journal)
+                    } else {
+                        byline_strangers(&b, &work.authors, journal)
+                    }
                 })
         } else {
-            claimed_strangers(&claim.authors, &work.authors)
+            !book && claimed_strangers(&claim.authors, &work.authors)
         };
     // Or names an earlier version's first author.
     let earlier = authors.agreement != Agreement::Unknown

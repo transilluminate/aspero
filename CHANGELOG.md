@@ -37,6 +37,10 @@ Fixed:
   and volume to verify]."), and between the year and a quoted title
   ("(2024), PNAS, \"…\""). Another journal there makes the citation
   plausible, the journal named (wild-6 #145, #592).
+- A book whose record lists more than one author, cited with a co-author
+  it doesn't have, is plausible, the authors named (wild-6 #267). A book's
+  record listing one author may list only the first, and is still not
+  held against the others cited.
 - The wrong-verdict issue form offers `unverifiable`, so a `verify
   --report` link for an unverifiable result fills in its verdict; a test
   now checks the form against every verdict the engine gives.

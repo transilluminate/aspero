@@ -240,3 +240,62 @@ fn another_journal_before_a_quoted_title_is_plausible() {
     let a = assess(&cited("Science Advances"), &r);
     assert!(a.confidence >= VERIFIED, "{a:?}");
 }
+
+/// wild-6 #267: a book whose record lists its authors, cited with a
+/// co-author it doesn't have: plausible, the authors to check. A record
+/// listing one author may list only the first.
+#[test]
+fn a_book_cited_with_a_co_author_it_lacks_is_plausible() {
+    let mut r = record(
+        &["doi:10.1093/med:psych/9780195189186.001.0001"],
+        "Mastering Your Fears and Phobias: Workbook",
+        &["Martin M. Antony", "Michelle G. Craske", "David H. Barlow"],
+        2006,
+    );
+    r.work.work_type = Some(crate::work::WorkType::Book);
+    let claim = Claim::from_text(
+        "Antony, M. M., & Swinson, R. P., Mastering Your Fears and Phobias (Workbook).",
+    );
+    let a = assess(&claim, &r);
+    assert!(plausible(&a), "{a:?}");
+    r.work.authors = vec![Person::literal("Martin M. Antony")];
+    let a = assess(&claim, &r);
+    assert!(a.confidence >= VERIFIED, "{a:?}");
+}
+
+/// Not a co-author swapped: a later edition's co-author added, a
+/// translator or a chapter's author cited beside a book's people.
+#[test]
+fn a_book_cited_with_others_beside_its_people_is_not_held_against_it() {
+    let solomons = [
+        Person::literal("T. W. Graham Solomons"),
+        Person::literal("Craig B. Fryhle"),
+    ];
+    let mauss = [
+        Person::literal("Marcel Mauss"),
+        Person::literal("Jane I. Guyer"),
+    ];
+    let smelser = [
+        Person::literal("Neil J. Smelser"),
+        Person::literal("Richard Swedberg"),
+    ];
+    for (byline, authors) in [
+        ("Solomons, Fryhle & Snyder, ", &solomons),
+        ("Ian Cunnison (1954), ", &mauss),
+        ("Portes, A., & Haller, W. (2005). ", &smelser),
+    ] {
+        assert!(
+            !crate::matching::authors::book_co_author_swapped(byline, authors, None),
+            "{byline}"
+        );
+    }
+    assert!(crate::matching::authors::book_co_author_swapped(
+        "Antony, M. M., & Swinson, R. P., ",
+        &[
+            Person::literal("Martin M. Antony"),
+            Person::literal("Michelle G. Craske"),
+            Person::literal("David H. Barlow"),
+        ],
+        None,
+    ));
+}

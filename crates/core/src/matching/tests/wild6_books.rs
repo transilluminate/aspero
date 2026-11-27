@@ -118,3 +118,48 @@ fn an_era_marker_beside_a_year_is_no_word_of_the_title() {
         "AD and ADHD in adults"
     );
 }
+
+/// wild-6 #464: a quoted title that is the work's main title with one word
+/// put in place of one: partly the work's, plausible beside its authors,
+/// year and journal.
+#[test]
+fn a_quoted_main_title_with_a_word_replaced_is_partly_the_works() {
+    let coal = article(
+        "The political economy of coal in Poland: Drivers and barriers for a shift away from \
+         fossil fuels",
+        &["Hanna Brauers", "Pao-Yu Oei"],
+        2020,
+        ("Energy Policy", "144", "111621"),
+    );
+    let text = "Brauers, H. und Oei, P.-Y. (2020) 'The political economy of coal in Germany', Energy Policy.";
+    let a = assess(&Claim::from_text(text), &coal);
+    assert_eq!(a.title.agreement, Agreement::Partial, "{a:?}");
+    assert!(
+        a.confidence >= PLAUSIBLE && a.confidence < VERIFIED,
+        "{a:?}"
+    );
+    let main = "The political economy of coal in Poland: Drivers and barriers";
+    assert!(super::super::titles::main_title_replaced(
+        "The political economy of coal in Germany",
+        main
+    ));
+    // Not two words, a number, a title without a subtitle, nor a short one.
+    for cited in [
+        "The political economy of oil in Germany",
+        "The political economy of coal in 2019",
+        "The political economy of coal",
+    ] {
+        assert!(
+            !super::super::titles::main_title_replaced(cited, main),
+            "{cited}"
+        );
+    }
+    assert!(!super::super::titles::main_title_replaced(
+        "The political economy of coal in Germany",
+        "The political economy of coal in Poland"
+    ));
+    assert!(!super::super::titles::main_title_replaced(
+        "Deep thinking",
+        "Deep learning: a review"
+    ));
+}

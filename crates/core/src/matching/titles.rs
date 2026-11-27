@@ -202,6 +202,29 @@ pub(super) fn main_title(title: &str) -> &str {
         .map_or(title, |i| title[..i].trim())
 }
 
+/// Whether `cited` is `title`'s main title, before its subtitle, with one
+/// word put in place of one, not a number ("The political economy of coal
+/// in Germany" for "The political economy of coal in Poland: Drivers and
+/// barriers …"): three content words or more alike, in order.
+pub(super) fn main_title_replaced(cited: &str, title: &str) -> bool {
+    let title = unmarked(title);
+    let main = main_title(title);
+    if main == title {
+        return false;
+    }
+    let (cited, main) = (words(unmarked(cited)), words(main));
+    if cited.len() != main.len() {
+        return false;
+    }
+    let differ: Vec<(&String, &String)> = cited.iter().zip(&main).filter(|(a, b)| a != b).collect();
+    let number = |w: &str| w.chars().any(|c| c.is_ascii_digit());
+    differ.len() == 1
+        && differ
+            .iter()
+            .all(|(a, b)| !number(a) && !number(b) && !STOPWORDS.contains(&a.as_str()))
+        && content_words(&main.join(" ")).len() >= 4
+}
+
 /// A title's first sentence, when a record's runs on into a description
 /// ("Nurse staffing and patient outcomes: Strengths and limitations of
 /// the evidence to inform policy and practice. A review and discussion

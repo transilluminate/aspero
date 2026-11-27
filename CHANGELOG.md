@@ -38,6 +38,10 @@ Fixed:
   for the World Bank Group's report, wild-6 #600): plausible.
 - An era marker beside a year in a record's title ("The Paston letters,
   A.D. 1422-1509") is no word the citation lacks (wild-6 #347).
+- A quoted title that is the work's main title with one word put in
+  place of one ("'The political economy of coal in Germany'" for "… in
+  Poland: Drivers and barriers …") is partly the work's: plausible beside
+  its authors, year and journal (wild-6 #464).
 
 ## 0.44.0
 

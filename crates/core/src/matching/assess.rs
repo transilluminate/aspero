@@ -91,8 +91,19 @@ pub fn assess(claim: &Claim, record: &SourceRecord) -> Assessment {
     });
     let title = match (&claimed_title, &work_title, &text) {
         (Some(claimed), Some(actual), _) => FieldCheck::scored(title_similarity(claimed, actual)),
+        // A title quoted that is the work's main title with one word put
+        // in place of one ("'The political economy of coal in Germany'"
+        // for "… in Poland: Drivers and barriers …", wild-6 #464): partly
+        // the work's, however few of its words the text has.
         (None, Some(actual), Some(text)) if !untitled => {
-            FieldCheck::scored(text.title_coverage(actual))
+            let quoted = titles::given_title(&text.raw)
+                .is_some_and(|q| titles::main_title_replaced(&q, actual));
+            let coverage = text.title_coverage(actual);
+            FieldCheck::scored(if quoted {
+                coverage.max(EXTENDED_TITLE)
+            } else {
+                coverage
+            })
         }
         _ => FieldCheck::UNKNOWN,
     };

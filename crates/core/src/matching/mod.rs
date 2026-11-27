@@ -41,7 +41,8 @@
 //!   initials; and "Name, Title, Publisher, City Year" references.
 //! - `venue.rs`: the venue cited against a record's: a chapter cited as an
 //!   article or the reverse, another conference or meeting, a preprint at
-//!   one.
+//!   one; and the record's kind against the work cited (a book or copy for
+//!   an article, a chapter for its book, a proceedings for its paper).
 //! - `version.rs`: versions of one work told apart: a Cochrane review's
 //!   earlier version's byline, or a newer version's year merged in.
 //! - `written.rs`: a free-text reference's title and authors as written,

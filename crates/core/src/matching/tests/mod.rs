@@ -29,6 +29,7 @@ mod versions;
 mod wild4_reading;
 mod wild5_books;
 mod wild5_journal;
+mod wild6_labels;
 mod written;
 
 fn record(ids: &[&str], title: &str, authors: &[&str], year: i16) -> SourceRecord {

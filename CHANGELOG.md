@@ -20,6 +20,9 @@ Added:
 
 Fixed:
 
+- An acronym may take both initials of a compound word ("SAEs" for
+  "Sparse Autoencoders"), so a title written with one ("SAEs Do Not Find
+  Canonical Units of Analysis") is the title.
 - The wrong-verdict issue form offers `unverifiable`, so a `verify
   --report` link for an unverifiable result fills in its verdict; a test
   now checks the form against every verdict the engine gives.

@@ -3,7 +3,8 @@
 
     scripts/file-sizes.py
 
-Counts the lines of every `crates/**/src/**/*.rs` up to its first top-level
+Counts the lines of every crate's `src/**/*.rs` (each `Cargo.toml` under
+`crates/`, however deep, so `crates/providers/*` too) up to its first top-level
 `#[cfg(test)]` (the whole file if it has none), so a file's unit tests
 don't count against it. Test directories (`tests/`), `fuzz/` and generated
 files (`@generated` in the first lines) are skipped.
@@ -42,7 +43,9 @@ def generated(path):
 
 
 def sources():
-    for path in sorted((ROOT / "crates").glob("*/src/**/*.rs")):
+    crates = (ROOT / "crates").rglob("Cargo.toml")
+    paths = {p for c in crates for p in (c.parent / "src").glob("**/*.rs")}
+    for path in sorted(paths):
         rel = path.relative_to(ROOT)
         if "tests" in rel.parts or "fuzz" in rel.parts or generated(path):
             continue
@@ -67,7 +70,12 @@ def allow_list():
 def main():
     allowed = allow_list()
     failures, warnings, stale = [], [], []
-    for rel, path in sources():
+    seen = list(sources())
+    # The provider crates sit a level deeper; a glob that misses them
+    # passes silently, so insist on seeing them.
+    if not any(rel.parts[:2] == ("crates", "providers") for rel, _ in seen):
+        sys.exit("error: no source under crates/providers/ was counted")
+    for rel, path in seen:
         n = code_lines(path)
         key = rel.as_posix()
         if n > LIMIT:

@@ -3,6 +3,21 @@
 Releases 0.10 to 0.19 are in [docs/changelog/0.1x.md](docs/changelog/0.1x.md),
 and 0.1 to 0.9 in [docs/changelog/0.0x.md](docs/changelog/0.0x.md).
 
+## Unreleased
+
+Added:
+
+- The pinned contracts ship as release assets, for embedders to pin and
+  test against: `tools.json` (the MCP tool list as served: names,
+  descriptions, input and output schemas), `stored-v1.jsonl` (a stored
+  `reasonJson` per reason code, and `workFromJson` examples including the
+  pre-0.35 `updates` form, each with what it reads back as) and
+  `diagnostics-v2.jsonl` (a sample line of each diagnostics event shape,
+  with its parsed fields), beside `aspero_ffi.swift`, which is now
+  committed and checked in CI, byte for byte the asset. They live in
+  `contracts/` (DESIGN "Seams and contracts"); DESIGN also gains a
+  "Words" glossary for the FFI and one list of the host-tool bounds.
+
 ## 0.44.0
 
 Added:

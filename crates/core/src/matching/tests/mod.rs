@@ -22,6 +22,7 @@ mod redteam_round6;
 mod redteam_round7;
 mod redteam_wild4;
 mod redteam_wild5;
+mod redteam_wild6;
 mod scoring;
 mod titles;
 mod venue;
@@ -29,6 +30,8 @@ mod versions;
 mod wild4_reading;
 mod wild5_books;
 mod wild5_journal;
+mod wild6_books;
+mod wild6_labels;
 mod written;
 
 fn record(ids: &[&str], title: &str, authors: &[&str], year: i16) -> SourceRecord {

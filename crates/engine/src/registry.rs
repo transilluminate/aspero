@@ -9,7 +9,9 @@
 
 use aspero_core::matching::{same_work_id, title_similarity};
 use aspero_core::publication::first_page;
-use aspero_core::{FieldSet, IdKind, NoticeKind, PartialDate, ProviderId, SourceRecord, WorkId};
+use aspero_core::{
+    FieldSet, IdKind, NoticeKind, PartialDate, ProviderId, SourceRecord, Work, WorkId,
+};
 
 use crate::{Engine, Entry, LookupReport, LookupResult};
 
@@ -24,6 +26,18 @@ fn looks_merged(record: &SourceRecord, asked: &WorkId) -> bool {
 
 #[cfg(not(feature = "openalex"))]
 fn looks_merged(_: &SourceRecord, _: &WorkId) -> bool {
+    false
+}
+
+/// Whether `record` looks like two works merged into one by its record
+/// alone ([`aspero_openalex::merges_works`]).
+#[cfg(feature = "openalex")]
+fn merges_works(record: &SourceRecord) -> bool {
+    aspero_openalex::merges_works(record)
+}
+
+#[cfg(not(feature = "openalex"))]
+fn merges_works(_: &SourceRecord) -> bool {
     false
 }
 
@@ -58,16 +72,10 @@ pub fn disagreements(record: &SourceRecord, registry: &SourceRecord) -> Vec<Disa
             registry: registry.source.clone(),
         });
     };
-    if let (Some(a), Some(b)) = (w.issued, r.issued) {
-        let years = |d: PartialDate, others: &[i16]| {
-            std::iter::once(d.year())
-                .chain(others.iter().copied())
-                .collect::<Vec<_>>()
-        };
-        let ours = years(a, &w.other_years);
-        if !years(b, &r.other_years).iter().any(|y| ours.contains(y)) {
-            differ("issued", a.to_string(), b.to_string());
-        }
+    if let (Some(a), Some(b)) = (w.issued, r.issued)
+        && !share_a_year(w, r)
+    {
+        differ("issued", a.to_string(), b.to_string());
     }
     if let (Some(a), Some(b)) = (&w.volume, &r.volume)
         && !a.trim().eq_ignore_ascii_case(b.trim())
@@ -85,6 +93,66 @@ pub fn disagreements(record: &SourceRecord, registry: &SourceRecord) -> Vec<Disa
         differ("title", a.clone(), b.clone());
     }
     out
+}
+
+/// Whether two works' dates share a year, any of either's years counting
+/// (online-first and print years differ legitimately). True when either
+/// has no date.
+fn share_a_year(a: &Work, b: &Work) -> bool {
+    let (Some(x), Some(y)) = (a.issued, b.issued) else {
+        return true;
+    };
+    let years = |d: PartialDate, others: &[i16]| {
+        std::iter::once(d.year())
+            .chain(others.iter().copied())
+            .collect::<Vec<_>>()
+    };
+    let ours = years(x, &a.other_years);
+    years(y, &b.other_years).iter().any(|y| ours.contains(y))
+}
+
+/// Whether `record`'s date may be another work's than `own`'s, the DOI
+/// registry's record of one of the same works (sharing a DOI or PMID),
+/// one version's alone: `record` is the aggregator's, looks like two works
+/// merged into one ([`merges_works`]), and shares no year with `own`. OpenAlex's record of a Cochrane review's `.pub5` (2023),
+/// merged with its earlier versions, has the 2011 version's date; of a
+/// book's 2020 reissue, the first edition's. Of the 9,835 DOIs the
+/// red-team tape has from both OpenAlex and Crossref (2026-11-27), 140
+/// records show the signs and 22 of those share no year with Crossref's:
+/// in 21 OpenAlex's is another version's or work's (Cochrane versions,
+/// reissued books, updated guidelines and statistics, F1000 versions), in
+/// one the article's online-first date where Crossref gives only print.
+/// Where OpenAlex's record shows no such sign, its earlier year is mostly
+/// the online-first date (Crossref's `created`), which stands: a merge of
+/// records keeps the earliest.
+pub(crate) fn dates_another_work(record: &SourceRecord, own: &SourceRecord) -> bool {
+    record.source.as_str() == AGGREGATOR
+        && own.source.as_str() == DATED_BY
+        && own.work.issued.is_some()
+        && !share_a_year(&record.work, &own.work)
+        && merges_works(record)
+}
+
+/// The registry whose dates win over the aggregator's merged records
+/// ([`dates_another_work`]): Crossref, the one measured. DataCite's
+/// record of a dataset's DOI may have its latest version's year (MIMIC-III,
+/// 2023 for v1.4 of 2016), and Europe PMC's, PubMed's, the print date
+/// beside OpenAlex's online-first one.
+const DATED_BY: &str = "crossref";
+
+/// `record` dated as `own` is ([`dates_another_work`]): its year is kept
+/// among its other years, where a citation's year still finds it.
+pub(crate) fn date_as(record: &mut SourceRecord, own: &SourceRecord) {
+    let w = &mut record.work;
+    if let Some(year) = w.issued.map(|d| d.year())
+        && !w.other_years.contains(&year)
+    {
+        w.other_years.push(year);
+        w.other_years.sort_unstable();
+    }
+    w.issued = own.work.issued;
+    w.other_years
+        .retain(|&y| Some(y) != w.issued.map(|d| d.year()));
 }
 
 /// Whether `record` contradicts `registry`'s record of a DOI it carries on
@@ -233,6 +301,10 @@ impl Engine {
             }
             // Once replaced, the record is the registry's own.
             if !overrules(&theirs, ours) {
+                // Its date another work's: the DOI's own date stands.
+                if own && dates_another_work(ours, &theirs) {
+                    date_as(ours, &theirs);
+                }
                 continue;
             }
             if own {

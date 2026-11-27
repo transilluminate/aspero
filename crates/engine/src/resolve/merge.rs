@@ -9,7 +9,7 @@ use aspero_core::{
 
 use super::rank::rank;
 use super::{Candidate, ResolveReport, Sighting, Via};
-use crate::registry::{carries_doi, drop_foreign, overrules};
+use crate::registry::{carries_doi, dates_another_work, drop_foreign, overrules};
 use crate::{EngineError, SearchReport, add_usage};
 
 /// Confidence at which `verify` stops gathering candidates early.
@@ -146,6 +146,9 @@ fn absorb(
 ///     2020-12-01 over Crossref's 2021-01), and of dates that overlap
 ///     (2021 and 2021-01-05) the more precise. The other date's year stays
 ///     in `other_years`, where verification's year matching finds it.
+///     But not OpenAlex's date where its record merges two works and
+///     shares no year with the other's ([`dates_another_work`]): the
+///     other's, one version's own, stands.
 fn merged_values(a: &mut SourceRecord, b: &mut SourceRecord, counts: (bool, bool)) -> (bool, bool) {
     let oa = best_open_access(a.work.open_access.as_ref(), b.work.open_access.as_ref()).cloned();
     a.work.open_access.clone_from(&oa);
@@ -164,6 +167,8 @@ fn merged_values(a: &mut SourceRecord, b: &mut SourceRecord, counts: (bool, bool
     a.work.cited_by_count = count;
     b.work.cited_by_count = count;
     let issued = match (a.work.issued, b.work.issued) {
+        _ if dates_another_work(a, b) => b.work.issued,
+        _ if dates_another_work(b, a) => a.work.issued,
         (Some(x), Some(y)) => Some(earliest(x, y)),
         (x, y) => x.or(y),
     };

@@ -22,7 +22,8 @@ const TRAILING_PUNCTUATION: &[char] = &['.', ',', ';', ':'];
 /// non-ASCII characters are left untouched) with no `doi:` or URL wrapper.
 /// URL forms are percent-decoded; bare and prefixed forms are taken literally.
 ///
-/// Trailing `.` `,` `;` `:` are stripped. The DOI spec technically permits a
+/// Trailing `.` `,` `;` `:` and footnote marks (`†`, `‡`, superscript
+/// digits) are stripped. The DOI spec technically permits a
 /// suffix ending in one, but in practice that is far rarer than a DOI copied
 /// with the end of its sentence, and a wrong DOI is caught later by lookup.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -58,6 +59,56 @@ impl Doi {
             return None;
         }
         self.suffix().strip_prefix("arxiv.")?.parse().ok()
+    }
+}
+
+impl Doi {
+    /// The DOI without a `.pubN` version suffix, and that version (1 for
+    /// a DOI without one, the first version). Read up to the suffix's
+    /// first `/`: a link's DOI may keep its page's path
+    /// (`….pub4/pdf/full`).
+    fn publication(&self) -> (&str, u32) {
+        let end = self.prefix().len() + 1 + self.suffix().find('/').unwrap_or(self.suffix().len());
+        let doi = &self.0[..end];
+        match doi.rsplit_once(".pub") {
+            Some((work, n)) if !n.is_empty() && is_digits(n) => (work, n.parse().unwrap_or(0)),
+            _ => (doi, 1),
+        }
+    }
+
+    /// Whether `other` is another numbered version of this DOI's work:
+    /// the same DOI but for a different `.pubN` suffix, the DOI without one
+    /// being the first version. Cochrane reviews are versioned so
+    /// (`….CD001955.pub4`, superseded by `.pub5`), each version its own
+    /// work. A suffix's path after a `/` is not compared.
+    pub fn other_version(&self, other: &Doi) -> bool {
+        let (a, b) = (self.publication(), other.publication());
+        a.0 == b.0 && a.1 != b.1
+    }
+}
+
+/// What the Cochrane Database of Systematic Reviews' DOIs begin with,
+/// before the review's id (`10.1002/14651858.CD001955.pub5`).
+const COCHRANE_REVIEWS: &str = "10.1002/14651858.";
+
+impl Doi {
+    /// The DOI of a Cochrane review given by its id alone, as the
+    /// database's citations write it: `CD001955` (the first version) or
+    /// `CD001955.pub5`. Two letters `CD`, six digits, and a version.
+    pub(crate) fn cochrane_review(s: &str) -> Option<Doi> {
+        let s = s.trim();
+        let digits = s.get(..2)?.eq_ignore_ascii_case("cd").then(|| &s[2..])?;
+        let (number, version) = match digits.split_once('.') {
+            Some((number, version)) => (number, Some(version)),
+            None => (digits, None),
+        };
+        let version_ok = version.is_none_or(|v| {
+            v.get(..3).is_some_and(|p| p.eq_ignore_ascii_case("pub"))
+                && v.len() > 3
+                && is_digits(&v[3..])
+        });
+        (number.len() == 6 && is_digits(number) && version_ok)
+            .then(|| Doi(format!("{COCHRANE_REVIEWS}{}", s.to_ascii_lowercase())))
     }
 }
 
@@ -312,6 +363,61 @@ mod tests {
             "(sici)1097-4636(199601)"
         );
         assert!(doi("10.1145/.").is_err());
+    }
+
+    #[test]
+    fn a_cochrane_reviews_id_alone_is_its_doi() {
+        let review = |s| Doi::cochrane_review(s).map(|d| d.to_string());
+        assert_eq!(
+            review("CD001955.pub5").as_deref(),
+            Some("10.1002/14651858.cd001955.pub5")
+        );
+        assert_eq!(
+            review(" cd001955 ").as_deref(),
+            Some("10.1002/14651858.cd001955")
+        );
+        for not in [
+            "CD00195",
+            "CD0019551",
+            "CD001955.pub",
+            "CD001955.v2",
+            "XD001955",
+            "CD",
+        ] {
+            assert_eq!(review(not), None, "{not}");
+        }
+    }
+
+    #[test]
+    fn pub_suffixes_number_one_works_versions() {
+        let v = |a: &str, b: &str| doi(a).unwrap().other_version(&doi(b).unwrap());
+        assert!(v(
+            "10.1002/14651858.cd001955.pub5",
+            "10.1002/14651858.CD001955.pub4"
+        ));
+        assert!(v(
+            "10.1002/14651858.cd007491",
+            "10.1002/14651858.cd007491.pub2"
+        ));
+        // A link's DOI keeps its page's path.
+        assert!(v(
+            "10.1002/14651858.cd001955.pub5",
+            "10.1002/14651858.cd001955.pub4/pdf"
+        ));
+        assert!(!v(
+            "10.1002/14651858.cd001955.pub5",
+            "10.1002/14651858.cd001955.pub5/pdf"
+        ));
+        assert!(!v(
+            "10.1002/14651858.cd001955.pub5",
+            "10.1002/14651858.cd001956.pub5"
+        ));
+        // Other numbering schemes name one work's versions, or the work.
+        assert!(!v("10.3886/icpsr28141.v1", "10.3886/icpsr28141"));
+        assert!(!v(
+            "10.12688/f1000research.51912.2",
+            "10.12688/f1000research.51912.1"
+        ));
     }
 
     #[test]

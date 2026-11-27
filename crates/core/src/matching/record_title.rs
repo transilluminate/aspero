@@ -29,6 +29,16 @@ pub fn record_title(title: &str, cited: &str, book: bool) -> String {
     } else {
         unbarred(&demath(&title))
     };
+    let cited_tokens: Vec<&str> = cited
+        .split_whitespace()
+        .map(|t| t.trim_matches(['(', ')', '[', ']']))
+        .collect();
+    let cited_era = cited_tokens.iter().enumerate().any(|(i, t)| {
+        is_era(t)
+            || cited_tokens
+                .get(i + 1)
+                .is_some_and(|n| is_era(&format!("{t}{n}")))
+    });
     let cited = words(cited);
     let lacks = |extra: &str| {
         let extra: Vec<String> = words(extra)
@@ -58,7 +68,61 @@ pub fn record_title(title: &str, cited: &str, book: bool) -> String {
         let keep = head.len();
         title.truncate(keep);
     }
-    title
+    if cited_era {
+        title
+    } else {
+        without_era(&title)
+    }
+}
+
+/// Whether `token` is an era marker ("A.D.", "BC", "CE"), or `token` and
+/// `next` are one ("A. D.").
+fn is_era(token: &str) -> bool {
+    let bare: String = token.chars().filter(char::is_ascii_alphabetic).collect();
+    matches!(bare.as_str(), "AD" | "BC" | "CE" | "BCE")
+        && token
+            .chars()
+            .all(|c| c.is_ascii_uppercase() || ".,;".contains(c))
+}
+
+/// `title` without an era marker beside a year ("The Paston letters, A.D.
+/// 1422-1509"): a library's furniture, which a citation leaves out ("The
+/// Paston Letters, 1422–1509", wild-6 #347).
+fn without_era(title: &str) -> String {
+    let tokens: Vec<&str> = title.split_whitespace().collect();
+    let year = |t: Option<&&str>| {
+        t.is_some_and(|t| {
+            let digits = t.chars().take_while(char::is_ascii_digit).count();
+            (3..=4).contains(&digits)
+        })
+    };
+    // "A. D." as two tokens is one marker.
+    let mut out: Vec<&str> = Vec::with_capacity(tokens.len());
+    let mut i = 0;
+    while i < tokens.len() {
+        let pair = (i + 1 < tokens.len())
+            .then(|| format!("{}{}", tokens[i], tokens[i + 1]))
+            .filter(|p| p.len() <= 6 && is_era(p) && tokens[i].ends_with('.'));
+        let width = if pair.is_some() {
+            2
+        } else if is_era(tokens[i]) {
+            1
+        } else {
+            out.push(tokens[i]);
+            i += 1;
+            continue;
+        };
+        if year(tokens.get(i + width)) || (i > 0 && year(tokens.get(i - 1))) {
+            i += width;
+        } else {
+            out.extend(&tokens[i..i + width]);
+            i += width;
+        }
+    }
+    if out.len() == tokens.len() {
+        return title.to_owned();
+    }
+    out.join(" ")
 }
 
 /// Math markup as the text it sets: `$…$` and `$$…$$` spans with their

@@ -1,8 +1,11 @@
 //! Parts of a book's reference around its title that the layout's guess
 //! ([`super::probable_title`]) leaves out: a publisher's name, a note of
-//! an editor or translator in brackets, a count of volumes, a given name
-//! after an initial; and the title of a reference listed as "Name, Title,
-//! Publisher, City Year", as Italian, Spanish and French references are.
+//! an editor or translator in brackets or a phrase naming them outside
+//! ("…, translated by …"), authors named after the title ("… by …"), an
+//! edition's statement, a count of volumes, a given name after an
+//! initial, a byline before a comma or organisations' before a colon; and
+//! the title of a reference listed as "Name, Title, Publisher, City Year",
+//! as Italian, Spanish and French references are.
 
 use std::borrow::Cow;
 
@@ -332,4 +335,272 @@ pub(super) fn listed_title(text: &str) -> Option<String> {
     (words >= 2 && !named && sentences <= 1 && !title.contains(['(', ')']))
         .then(|| super::titles::title_like(&title))
         .flatten()
+}
+
+/// An edition's ordinal or kind before "ed." or "edition": "4th", "2nd",
+/// "Fourth", "rev.", "new".
+fn edition_word(w: &str) -> bool {
+    let w = w
+        .trim_matches(|c: char| !c.is_alphanumeric())
+        .to_lowercase();
+    let digits = w.trim_end_matches(|c: char| c.is_ascii_alphabetic());
+    let numbered = !digits.is_empty()
+        && digits.len() < w.len()
+        && digits.bytes().all(|b| b.is_ascii_digit())
+        && matches!(&w[digits.len()..], "st" | "nd" | "rd" | "th");
+    numbered
+        || matches!(
+            w.as_str(),
+            "first"
+                | "second"
+                | "third"
+                | "fourth"
+                | "fifth"
+                | "sixth"
+                | "seventh"
+                | "eighth"
+                | "ninth"
+                | "tenth"
+                | "rev"
+                | "revised"
+                | "new"
+                | "expanded"
+                | "updated"
+        )
+}
+
+/// Whether a sentence ends in an edition's statement ("…, 4th ed", "2nd
+/// edition"): not an editors' "eds" after names.
+pub(super) fn ends_in_edition(s: &str) -> bool {
+    let words: Vec<&str> = s
+        .trim_end()
+        .trim_end_matches(['.', ')'])
+        .split_whitespace()
+        .collect();
+    match words[..] {
+        [.., before, last] => {
+            let last = last
+                .trim_matches(|c: char| !c.is_alphabetic())
+                .to_lowercase();
+            matches!(last.as_str(), "ed" | "edn" | "edition") && edition_word(before)
+        }
+        _ => false,
+    }
+}
+
+/// A sentence without the edition's statement that ends it: "Motivational
+/// Interviewing: Helping People Change and Grow, 4th ed" (wild-6 #92).
+/// Only where two words or more are left.
+pub(super) fn without_edition(s: &str) -> &str {
+    if !ends_in_edition(s) {
+        return s;
+    }
+    let t = s.trim_end().trim_end_matches(['.', ')']);
+    let Some(cut) = t
+        .rfind(|c: char| c.is_whitespace())
+        .and_then(|last| t[..last].trim_end().rfind(|c: char| c.is_whitespace()))
+    else {
+        return s;
+    };
+    let head = t[..cut]
+        .trim_end()
+        .trim_end_matches([',', '(', ';'])
+        .trim_end();
+    if head.split_whitespace().count() >= 2 {
+        head
+    } else {
+        s
+    }
+}
+
+/// The length of the people's names `s` opens with: capitalised words,
+/// initials and particles, joined by commas, "and" or "&"; each name two
+/// to four words, its last a capitalised word ("J. Lennart Berggren",
+/// "Andrew Wilcock").
+fn names_run(s: &str) -> usize {
+    let mut end = 0;
+    for (at, w) in s
+        .split_whitespace()
+        .map(|w| (w.as_ptr() as usize - s.as_ptr() as usize, w))
+    {
+        let bare = w.trim_end_matches([',', ';']);
+        let name = capitalised(bare.trim_end_matches('.'))
+            || initial(bare)
+            || PARTICLES.contains(&bare)
+            || JOINING_NAMES.contains(&bare);
+        if !name {
+            break;
+        }
+        end = at + w.len();
+        if w.ends_with([';', ':']) || (w.ends_with('.') && !initial(w)) {
+            break;
+        }
+    }
+    let run = s[..end].trim_end_matches(['.', ',', ';', ':']);
+    let mut names = vec![Vec::new()];
+    for w in run.split_whitespace() {
+        let w = w.trim_end_matches(',');
+        if JOINING_NAMES.contains(&w) {
+            names.push(Vec::new());
+        } else if let Some(last) = names.last_mut() {
+            last.push(w);
+        }
+    }
+    let people = names.iter().all(|name| {
+        (2..=4).contains(&name.len())
+            && name.last().is_some_and(|w| capitalised(w))
+            && (name.iter().filter(|w| capitalised(w)).count() >= 2
+                || name.iter().any(|w| initial(w)))
+    });
+    if people { run.len() } else { 0 }
+}
+
+/// Phrases naming who translated or edited a work, outside brackets: ",
+/// translated by J. Lennart Berggren and Alexander Jones" (wild-6 #703).
+const ROLE_PHRASES: &[&str] = &[
+    ", translated by ",
+    ", trans. by ",
+    ", transl. by ",
+    ", edited by ",
+    ", ed. by ",
+    ", introduced by ",
+    ", with an introduction by ",
+    " translated by ",
+    " edited by ",
+];
+
+/// A reference without a phrase naming its translators or editors,
+/// unbracketed ("Ptolemy, Geography, translated by J. Lennart Berggren
+/// and Alexander Jones (2000)"), or its authors after its title ("
+/// Introducing Palliative Care by Richard Twycross and Andrew Wilcock",
+/// wild-6 #247): their initials' full stops would split the title's
+/// sentence, or their names run on in it. "by" alone only before names
+/// that end the reference (a year or note in brackets aside), after two
+/// words or more.
+pub(super) fn without_name_phrases(text: &str) -> Cow<'_, str> {
+    let lower = text.to_lowercase();
+    for phrase in ROLE_PHRASES {
+        if let Some(at) = lower.find(phrase) {
+            let from = at + phrase.len();
+            let run = names_run(&text[from..]);
+            if run > 0 {
+                let rest = text[from + run..].trim_start_matches(['.', ',']);
+                let joint = if rest.trim().is_empty() || rest.starts_with(' ') {
+                    ""
+                } else {
+                    " "
+                };
+                return Cow::Owned(format!("{}{joint}{rest}", &text[..at]));
+            }
+        }
+    }
+    if let Some(at) = lower.rfind(" by ") {
+        let from = at + 4;
+        let run = names_run(&text[from..]);
+        let rest = text[from + run..].trim();
+        let bare = rest.trim_end_matches(['.', ',', ';']).trim();
+        let ends = bare.is_empty()
+            || (bare.starts_with('(') && bare.ends_with(')') && bare.matches('(').count() == 1);
+        if run > 0 && ends && text[..at].split_whitespace().count() >= 2 {
+            return Cow::Owned(format!("{}{}", &text[..at], rest));
+        }
+    }
+    Cow::Borrowed(text)
+}
+
+/// A sentence without a byline of organisations before a colon:
+/// "HPA / College of Radiographers / RCR: Protection of Pregnant
+/// Patients …" (wild-6 #217). Bodies listed with slashes, or one named
+/// as a body ("Royal College of Radiologists:"); not a title's own
+/// acronym ("BERT: Pre-training of …").
+pub(super) fn without_body_byline(s: &str) -> &str {
+    let Some((byline, rest)) = s.split_once(": ") else {
+        return s;
+    };
+    let words: Vec<&str> = byline.split_whitespace().collect();
+    let shaped = words.iter().all(|w| {
+        *w == "/"
+            || w.starts_with(char::is_uppercase)
+            || PARTICLES.contains(w)
+            || w.chars().all(|c| c.is_uppercase() || c == '/')
+    });
+    let bodies = byline.contains(" / ")
+        || words
+            .iter()
+            .any(|w| crate::work::is_body_word(&w.to_lowercase()));
+    if shaped && bodies && words.len() <= 12 && rest.split_whitespace().count() >= 3 {
+        rest
+    } else {
+        s
+    }
+}
+
+/// A sentence without a byline of a name written out and a comma before
+/// a title that a year in brackets ends: "Einar Arnórsson, Réttarsaga
+/// Alþingis (1945)", "Eddie Faye Gates, They Came Searching: … (1997)".
+/// Two to four words, each a capitalised word of letters; one before a
+/// title opening with an article ("Snowdon, The Spirit Level Delusion
+/// (2010)", wild-6 #265). The brackets may give the place and publisher
+/// before the year, a page after them, as a note does ("François
+/// Blancpain, Un siècle … (Paris: L'Harmattan, 2001), [page]", wild-6
+/// #519). An editor's byline needs no year: "James Gairdner, ed., The
+/// Paston Letters, 1422–1509" (wild-6 #347).
+pub(super) fn without_name_byline(s: &str) -> &str {
+    let Some((name, rest)) = s.split_once(", ") else {
+        return s;
+    };
+    let words: Vec<&str> = name.split_whitespace().collect();
+    let name_word = |w: &&str| {
+        w.starts_with(char::is_uppercase)
+            && w.chars().any(char::is_lowercase)
+            && w.chars()
+                .all(|c| c.is_alphabetic() || matches!(c, '-' | '\'' | '’'))
+    };
+    let article = ["The ", "A ", "An "].iter().any(|a| rest.starts_with(a));
+    let named = ((2..=4).contains(&words.len()) || (words.len() == 1 && article))
+        && words.iter().all(name_word);
+    if (2..=4).contains(&words.len()) && words.iter().all(name_word) {
+        for role in ["ed., ", "eds., ", "(ed.), ", "(eds.), "] {
+            if let Some(after) = rest.strip_prefix(role)
+                && after.starts_with(char::is_uppercase)
+            {
+                return after;
+            }
+        }
+    }
+    let t = without_page(rest.trim_end().trim_end_matches('.'));
+    let dated = t
+        .strip_suffix(')')
+        .and_then(|t| t.rfind(" (").map(|at| &t[at + 2..]))
+        .is_some_and(|inner| {
+            let year = inner.rsplit_once(", ").map_or(inner, |(place, year)| {
+                if place.contains(": ") { year } else { inner }
+            });
+            year.get(..4)
+                .is_some_and(|y| y.bytes().all(|b| b.is_ascii_digit()))
+        });
+    if named && dated && rest.starts_with(char::is_uppercase) {
+        super::titles::without_trailing_note(&rest[..t.len()])
+    } else {
+        s
+    }
+}
+
+/// A reference without the page a note cites after it: ", [page]", ",
+/// 45", ", 45–47", ", p. 12".
+fn without_page(s: &str) -> &str {
+    let Some((head, page)) = s.rsplit_once(", ") else {
+        return s;
+    };
+    let page = page
+        .trim_start_matches("pp.")
+        .trim_start_matches("p.")
+        .trim();
+    let bare = page.trim_matches(['[', ']']);
+    let numbered = !bare.is_empty() && bare.chars().all(|c| c.is_ascii_digit() || "-–".contains(c));
+    if bare == "page" || bare == "pages" || numbered {
+        head
+    } else {
+        s
+    }
 }

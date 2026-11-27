@@ -9,7 +9,8 @@ use std::collections::BTreeMap;
 use aspero_core::csl::{null_default, plain_text};
 use aspero_core::{
     ArxivId, AuthorId, Doi, FieldSet, Notice, NoticeKind, OpenAccess, OpenAlexId, PartialDate,
-    Person, Pmcid, Pmid, Raw, SourceRecord, Work, WorkId, WorkType, orcid, tidy_abstract,
+    Person, Pmcid, Pmid, Raw, SourceRecord, Work, WorkId, WorkType, another_versions_copy, orcid,
+    tidy_abstract,
 };
 use jiff::Timestamp;
 use serde::Deserialize;
@@ -86,6 +87,8 @@ struct WireAuthor {
 #[derive(Debug, Default, Deserialize)]
 #[serde(default)]
 struct WireLocation {
+    #[serde(deserialize_with = "null_default")]
+    is_oa: bool,
     landing_page_url: Option<String>,
     pdf_url: Option<String>,
     license: Option<String>,
@@ -270,26 +273,55 @@ impl WireWork {
             .as_ref()
             .and_then(|l| l.landing_page_url.clone());
         work.cited_by_count = self.cited_by_count;
-        work.open_access = self.open_access.as_ref().map(|oa| {
-            let best = self.best_oa_location.as_ref().filter(|_| oa.is_oa);
-            let mut out = OpenAccess::default();
-            out.is_oa = oa.is_oa;
-            out.status.clone_from(&oa.oa_status);
-            out.pdf_url = best.and_then(|l| l.pdf_url.clone());
-            out.url = best
-                .and_then(|l| l.landing_page_url.clone())
-                .or_else(|| oa.oa_url.clone().filter(|_| oa.is_oa));
-            out.license = best.and_then(|l| l.license.clone());
-            out.version = best.and_then(|l| l.version.clone());
-            out.source = Some("openalex".into());
-            out
-        });
+        work.open_access = self.open_access();
         if self.is_retracted {
             let mut retraction = Notice::new(NoticeKind::Retraction);
             retraction.source = Some("openalex".into());
             work.notices.push(retraction);
         }
         work
+    }
+}
+
+impl WireWork {
+    /// Unpaywall's data: its best free copy, unless that is another
+    /// version's (a Cochrane review's `.pub4` offered for its `.pub5`,
+    /// [`another_versions_copy`]), then the next free location that isn't.
+    /// A location chosen so has its own status: `green` in a repository,
+    /// else unknown. With no such location, the work isn't known to be
+    /// free.
+    fn open_access(&self) -> Option<OpenAccess> {
+        let oa = self.open_access.as_ref()?;
+        let ids = self.ids();
+        let theirs = |l: &WireLocation| {
+            [&l.landing_page_url, &l.pdf_url]
+                .into_iter()
+                .flatten()
+                .any(|u| another_versions_copy(u, &ids))
+        };
+        let mut status = oa.oa_status.clone();
+        let best = match self.best_oa_location.as_ref().filter(|_| oa.is_oa) {
+            Some(best) if theirs(best) => {
+                let next = self.locations.iter().find(|l| l.is_oa && !theirs(l));
+                let repository = next
+                    .and_then(|l| l.source.as_ref())
+                    .is_some_and(|s| s.source_type.as_deref() == Some("repository"));
+                status = repository.then(|| "green".to_owned());
+                next
+            }
+            best => best,
+        };
+        let mut out = OpenAccess::default();
+        out.is_oa = oa.is_oa;
+        out.status = status;
+        out.pdf_url = best.and_then(|l| l.pdf_url.clone());
+        out.url = best
+            .and_then(|l| l.landing_page_url.clone())
+            .or_else(|| oa.oa_url.clone().filter(|_| oa.is_oa));
+        out.license = best.and_then(|l| l.license.clone());
+        out.version = best.and_then(|l| l.version.clone());
+        out.source = Some("openalex".into());
+        Some(out.without_other_versions(&ids))
     }
 }
 
@@ -561,6 +593,53 @@ mod tests {
             assert!(authorship(Some(tail), None).is_none(), "{tail}");
         }
         assert!(authorship(Some(" "), None).is_none());
+    }
+
+    /// W1949163494, minimised: OpenAlex's record of a Cochrane review's
+    /// `.pub5` (2023), merging its versions, offers `.pub4`'s copy as the
+    /// best; PMC's copy of `.pub5` is the next free location.
+    fn croup(locations: &serde_json::Value) -> Work {
+        let pub4 = "https://doi.org/10.1002/14651858.cd001955.pub4";
+        let pdf4 =
+            "https://www.cochranelibrary.com/cdsr/doi/10.1002/14651858.CD001955.pub4/pdf/full";
+        let wire: WireWork = serde_json::from_value(serde_json::json!({
+            "doi": "https://doi.org/10.1002/14651858.cd001955.pub5",
+            "ids": {"pmcid": "https://www.ncbi.nlm.nih.gov/pmc/articles/9831289"},
+            "open_access": {"is_oa": true, "oa_status": "bronze", "oa_url": pdf4},
+            "best_oa_location": {"is_oa": true, "landing_page_url": pub4, "pdf_url": pdf4},
+            "locations": locations,
+        }))
+        .unwrap();
+        wire.work()
+    }
+
+    #[test]
+    fn another_versions_free_copy_gives_way_to_the_next() {
+        let pmc = serde_json::json!([
+            {"is_oa": false, "landing_page_url": "https://doi.org/10.1002/14651858.cd001955.pub5"},
+            {"is_oa": true, "landing_page_url": "https://doi.org/10.1002/14651858.cd001955.pub4"},
+            {"is_oa": true,
+             "landing_page_url": "https://www.ncbi.nlm.nih.gov/pmc/articles/9831289",
+             "pdf_url": "https://pmc.ncbi.nlm.nih.gov/articles/PMC9831289/pdf/CD001955.pdf",
+             "version": "publishedVersion",
+             "source": {"display_name": "PubMed Central", "type": "repository"}},
+        ]);
+        let oa = croup(&pmc).open_access.unwrap();
+        assert!(oa.is_oa);
+        assert_eq!(
+            oa.url.as_deref(),
+            Some("https://www.ncbi.nlm.nih.gov/pmc/articles/9831289")
+        );
+        assert_eq!(
+            oa.pdf_url.as_deref(),
+            Some("https://pmc.ncbi.nlm.nih.gov/articles/PMC9831289/pdf/CD001955.pdf")
+        );
+        assert_eq!(oa.status.as_deref(), Some("green"));
+        assert_eq!(oa.free_copy(), aspero_core::FreeCopyKind::BrowserOnly);
+        // With no copy of its own, the work isn't known to be free.
+        let oa = croup(&serde_json::json!([])).open_access.unwrap();
+        assert!(!oa.is_oa);
+        assert_eq!((oa.url, oa.pdf_url, oa.status), (None, None, None));
     }
 
     /// An article whose primary location is a repository holding a copy.

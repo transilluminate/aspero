@@ -510,6 +510,157 @@ mod tests {
         assert_eq!(cited.found_by, ["crossref"]);
     }
 
+    /// The stored codes, written out: a rename made everywhere at once
+    /// (engine, writer and reader) still fails here.
+    const CODES: [&str; 15] = [
+        "matches",
+        "partly_matches",
+        "unconfirmed",
+        "closest",
+        "no_match",
+        "id_exists",
+        "id_agrees",
+        "id_partly_matches",
+        "id_elsewhere",
+        "id_disagrees",
+        "id_missing_elsewhere",
+        "id_missing",
+        "providers_failed",
+        "invalid_claim",
+        "internal_error",
+    ];
+
+    #[test]
+    fn codes_are_as_they_were() {
+        let cases: Vec<&str> = every_case().iter().map(Reason::code).collect();
+        assert_eq!(cases, CODES);
+        let mut engine: Vec<&str> = engine::Reason::ALL
+            .iter()
+            .map(engine::Reason::as_str)
+            .collect();
+        engine.push("invalid_claim");
+        engine.sort_unstable();
+        let mut codes = CODES.to_vec();
+        codes.sort_unstable();
+        assert_eq!(engine, codes);
+    }
+
+    /// Stored reasons and works as this version writes them, one line
+    /// each with what it reads back as: a release asset an app's tests
+    /// read. `ASPERO_BLESS=1` rewrites it; lines are only ever added.
+    const STORED: &str = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../contracts/stored-v1.jsonl"
+    );
+
+    /// What a reason reads back as, in the stored form's names.
+    fn reason_meaning(r: &Reason) -> Value {
+        let mut out = json!({"code": r.code()});
+        match r {
+            Reason::PartlyMatches { differs }
+            | Reason::Closest { differs }
+            | Reason::IdPartlyMatches { differs } => {
+                out["differs"] = differs.iter().map(difference_json).collect();
+            }
+            Reason::IdElsewhere { cited } => {
+                let k = &cited.checks;
+                let checks = [
+                    ("title", k.title),
+                    ("authors", k.authors),
+                    ("year", k.year),
+                    ("container", k.container),
+                    ("volume", k.volume),
+                    ("page", k.page),
+                    ("ids", k.ids),
+                ]
+                .into_iter()
+                .map(|(name, a)| (name.to_owned(), json!(agreement_name(a))))
+                .collect::<Map<_, _>>();
+                out["cited"] = json!({
+                    "confidence": cited.confidence,
+                    "checks": checks,
+                    "found_by": cited.found_by,
+                    "work": work_meaning(&cited.work),
+                });
+            }
+            Reason::InvalidClaim { why } => out["why"] = json!(why),
+            _ => {}
+        }
+        out
+    }
+
+    /// What a work reads back as, in part.
+    fn work_meaning(w: &Work) -> Value {
+        use super::super::NoticeKind as Kind;
+        // As the Swift cases: `correction`, `other(name: "comment")`.
+        let kind = |k: &Kind| match k {
+            Kind::Retraction => "retraction".to_owned(),
+            Kind::Withdrawal => "withdrawal".to_owned(),
+            Kind::ExpressionOfConcern => "expressionOfConcern".to_owned(),
+            Kind::Correction => "correction".to_owned(),
+            Kind::NewVersion => "newVersion".to_owned(),
+            Kind::Other { name } => format!("other(name: {name:?})"),
+        };
+        let notices: Vec<String> = w.notices.iter().map(|n| kind(&n.kind)).collect();
+        let notice_for: Vec<&str> = w.notice_for.iter().map(|n| n.work.as_str()).collect();
+        json!({
+            "source": w.source,
+            "ids": w.ids,
+            "title": w.title,
+            "year": w.year,
+            "container": w.container,
+            "notices": notices,
+            "notice_for": notice_for,
+        })
+    }
+
+    /// The lines this version writes: every reason case, a work in full,
+    /// and the same work as stored before 0.35 (`updates`, `update_to`).
+    fn stored_lines() -> String {
+        let mut lines: Vec<Value> = every_case()
+            .iter()
+            .map(|r| json!({"reason_json": r.to_json(), "reads": reason_meaning(r)}))
+            .collect();
+        let w = work();
+        lines.push(json!({"work_json": w.json, "reads": work_meaning(&w)}));
+        let mut old: Value = serde_json::from_str(&w.json).unwrap();
+        let fields = old.as_object_mut().unwrap();
+        for (now, then) in [("notices", "updates"), ("notice_for", "update_to")] {
+            let v = fields.remove(now).unwrap();
+            fields.insert(then.into(), v);
+        }
+        lines.push(json!({
+            "work_json": old.to_string(),
+            "reads": work_meaning(&w),
+            "note": "as stored before 0.35: notices as updates, notice_for as update_to",
+        }));
+        lines.iter().map(|l| l.to_string() + "\n").collect()
+    }
+
+    #[test]
+    fn stored_v1_reads_back_as_it_did() {
+        if std::env::var_os("ASPERO_BLESS").is_some() {
+            std::fs::write(STORED, stored_lines()).unwrap();
+        }
+        let file = std::fs::read_to_string(STORED).unwrap();
+        let mut codes = Vec::new();
+        for line in file.lines() {
+            let v: Value = serde_json::from_str(line).unwrap();
+            if let Some(text) = v["reason_json"].as_str() {
+                let back = reason_from_json(text.into()).unwrap_or_else(|| panic!("{text}"));
+                assert_eq!(reason_meaning(&back), v["reads"], "{text}");
+                // And this version still writes it so.
+                assert_eq!(back.to_json(), text);
+                codes.push(back.code());
+            } else {
+                let text = v["work_json"].as_str().unwrap();
+                let back = work_from_json(text.into()).unwrap_or_else(|| panic!("{text}"));
+                assert_eq!(work_meaning(&back), v["reads"], "{text}");
+            }
+        }
+        assert_eq!(codes, CODES, "a line per code");
+    }
+
     #[test]
     fn works_read_back_from_their_json() {
         let w = work();

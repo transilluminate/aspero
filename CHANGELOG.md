@@ -38,6 +38,12 @@ Fixed:
   for the World Bank Group's report, wild-6 #600): plausible.
 - An era marker beside a year in a record's title ("The Paston letters,
   A.D. 1422-1509") is no word the citation lacks (wild-6 #347).
+- A real work cited with an error, found but scoring below plausible, is
+  a mismatch naming what differs in two more cases: a title of four
+  content words or more, given whole, with no one named and only the year
+  wrong, for a record that names its authors (wild-6 #710); and the whole
+  byline with such a title nearly the work's and the year wrong (wild-6
+  #108). They were not found.
 - A quoted title that is the work's main title with one word put in
   place of one ("'The political economy of coal in Germany'" for "… in
   Poland: Drivers and barriers …") is partly the work's: plausible beside

@@ -84,8 +84,8 @@ pub use publisher::{
 pub use same_work::{conflicting_id, id_agreement, same_work, same_work_id};
 pub use text::normalise;
 pub use titles::{
-    given_title, probable_title, search_terms, shared_title, title_similarity, unmarked,
-    whole_title_similarity,
+    distinctive_title, given_title, probable_title, search_terms, shared_title, title_similarity,
+    unmarked, whole_title_similarity,
 };
 pub use version::earlier_id_claimed;
 

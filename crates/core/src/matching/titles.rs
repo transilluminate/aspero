@@ -930,6 +930,13 @@ pub fn given_title(text: &str) -> Option<String> {
         .max_by_key(|t| t.split_whitespace().count())
 }
 
+/// Whether `title` has words enough to name one work: four distinct content
+/// words or more ("Disciplinary History and the Situation of History
+/// Teachers"), not "Deep learning" or "The Spirit Level".
+pub fn distinctive_title(title: &str) -> bool {
+    content_words(unmarked(title)).len() >= super::caps::DISTINCTIVE_TITLE_WORDS
+}
+
 /// Keywords for a plain search engine from a messy reference: years,
 /// numbers, initials and "et al." dropped, since they dilute keyword
 /// ranking (observed with OpenAlex).

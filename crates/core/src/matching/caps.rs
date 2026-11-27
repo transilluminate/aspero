@@ -58,6 +58,9 @@ pub(super) const VERSION: f64 = PLAUSIBLE;
 /// Content words below which a title found inside free text is short: one
 /// or two words turn up in any text ("Aspero", "Deep learning").
 pub(super) const SHORT_TITLE_WORDS: usize = 3;
+/// Distinct content words from which a title is distinctive: found whole
+/// with only its year cited wrong, it names a work cited with an error.
+pub(super) const DISTINCTIVE_TITLE_WORDS: usize = 4;
 /// Multiplier for replies, corrections, errata and commentaries.
 pub(super) const DERIVATIVE_PENALTY: f64 = 0.5;
 /// Confidence ceiling for the original when the claim cites a reply,

@@ -59,6 +59,9 @@ Fixed:
   organisations listed before a colon ("HPA / College of Radiographers /
   RCR: …"); a one-word sentence opening a title ("Italiano. Antico e
   nuovo") is the title's first part.
+- A book's guessed title is searched beside a citation matcher's hit
+  that shares only part of it, when a title search is left ("The Spirit
+  Level Delusion" beside a namesake's "Spirit Level", wild-6 #265).
 
 ## 0.44.0
 

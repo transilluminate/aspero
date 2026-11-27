@@ -3,6 +3,14 @@
 Releases 0.10 to 0.19 are in [docs/changelog/0.1x.md](docs/changelog/0.1x.md),
 and 0.1 to 0.9 in [docs/changelog/0.0x.md](docs/changelog/0.0x.md).
 
+## Unreleased
+
+Fixed:
+
+- The wrong-verdict issue form offers `unverifiable`, so a `verify
+  --report` link for an unverifiable result fills in its verdict; a test
+  now checks the form against every verdict the engine gives.
+
 ## 0.44.0
 
 Added:

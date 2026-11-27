@@ -15,6 +15,7 @@ use super::caps::{
 use super::claim::{byline, cites_chapter, title_region, untitled_byline};
 use super::derivative::{self, WorkKind, record_derivative_kind};
 use super::edition;
+use super::label;
 use super::preprint::{names_preprint, preprint_server, preprint_version_claimed};
 use super::record_title::record_title;
 use super::same_work::{id_agreement, same_work_id};
@@ -665,6 +666,26 @@ pub fn assess(claim: &Claim, record: &SourceRecord) -> Assessment {
         && [year, volume, page]
             .iter()
             .all(|c| c.agreement != Agreement::Mismatch)
+    {
+        confidence = confidence.max(PLAUSIBLE);
+    }
+    // A claimed identifier that is the work's, beside a label for it and
+    // nothing else ("Gated SAEs: 2404.16014", "Lookahead Decoding |
+    // 2402.02057"): a method's name or a short form, every word of it the
+    // title's, as a model's list of papers gives them (wild-6 #319,
+    // #545). Plausible, its title to check; never verified. Not another
+    // work's name, with words of its own ("DESI 2024 III" for "DESI 2024
+    // VI", wild-6 #589), nor beside other people or a wrong year or place.
+    if ids == Agreement::Match
+        && claimed_title.is_none()
+        && title.agreement != Agreement::Match
+        && authors.agreement != Agreement::Mismatch
+        && !(strangers || earlier)
+        && [year, volume, page, container]
+            .iter()
+            .all(|c| c.agreement != Agreement::Mismatch)
+        && (text.as_ref().zip(work_title.as_deref()))
+            .is_some_and(|(t, w)| label::labels(&t.raw, w, &claim.ids))
     {
         confidence = confidence.max(PLAUSIBLE);
     }

@@ -41,6 +41,17 @@ Fixed:
 - A chapter cited by its DOI is no longer a mismatch because the book it
   is in matches the citation too: the book a chapter's citation names is
   not another work it points at (wild-6 #597, an IPCC report's chapter).
+- A paper listed by its identifier beside a short label for it, as a
+  model's list of papers gives them ("Gated SAEs: 2404.16014",
+  "Lookahead Decoding | 2402.02057", "DESI DR2 BAO (arXiv:2503.14738,
+  2025)"), is plausible, its title to check, where it was a mismatch
+  saying the identifier is another work's: every word of the label is a
+  word of the work's title, its acronyms written out. A label with words
+  of its own ("DESI 2024 III" beside DESI 2024 VI's identifier) is still
+  a mismatch.
+- An acronym may take both initials of a compound word ("SAEs" for
+  "Sparse Autoencoders"), so a title written with one ("SAEs Do Not Find
+  Canonical Units of Analysis") is the title.
 - The wrong-verdict issue form offers `unverifiable`, so a `verify
   --report` link for an unverifiable result fills in its verdict; a test
   now checks the form against every verdict the engine gives.

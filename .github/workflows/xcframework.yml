@@ -1,5 +1,7 @@
 # Attaches the macOS app framework (AsperoFFI.xcframework.zip) and its
-# Swift bindings to each release, once dist's Release workflow has made it.
+# Swift bindings to each release, once dist's Release workflow has made it,
+# with the tag's pinned contracts (contracts/, DESIGN "Seams and
+# contracts"): tools.json, stored-v1.jsonl and diagnostics-v2.jsonl.
 name: xcframework
 
 on:
@@ -40,9 +42,12 @@ jobs:
           if [ -f contracts/aspero_ffi.swift ]; then
             cmp target/xcframework/aspero_ffi.swift contracts/aspero_ffi.swift
           fi
-      - run: >-
-          gh release upload "$TAG" --clobber
-          target/xcframework/AsperoFFI.xcframework.zip
-          target/xcframework/aspero_ffi.swift
+      - run: |
+          assets=(target/xcframework/AsperoFFI.xcframework.zip target/xcframework/aspero_ffi.swift)
+          # Older tags have no contracts/.
+          for f in tools.json stored-v1.jsonl diagnostics-v2.jsonl; do
+            if [ -f "contracts/$f" ]; then assets+=("contracts/$f"); fi
+          done
+          gh release upload "$TAG" --clobber "${assets[@]}"
         env:
           GH_TOKEN: ${{ github.token }}

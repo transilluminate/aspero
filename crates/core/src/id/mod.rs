@@ -36,7 +36,7 @@ pub use isbn::Isbn;
 pub use numeric::{CorpusId, Nbk, OpenAlexId, Pmcid, Pmid};
 pub use pii::Pii;
 pub use s2::S2PaperId;
-pub use scan::{Mention, scan};
+pub use scan::{Mention, scan, unreadable_arxiv};
 
 use syntax::IdSyntax;
 pub(crate) use syntax::{is_digits, starts_with_ci};

@@ -115,6 +115,25 @@ impl Mention {
     }
 }
 
+/// An arXiv identifier written with its label that no paper can have:
+/// `arXiv:` and a new-style number its month doesn't allow
+/// ("arXiv:1201.11701", five digits in 2012; "arXiv:2513.01234", a
+/// thirteenth month). [`scan`] doesn't read it, so a citation giving one
+/// would otherwise count as giving no identifier. The first such, as
+/// written; `None` when every labelled one reads (or there is none).
+pub fn unreadable_arxiv(text: &str) -> Option<&str> {
+    let lower = text.to_ascii_lowercase();
+    lower.match_indices("arxiv:").find_map(|(at, label)| {
+        let rest = text.get(at + label.len()..)?.trim_start();
+        let token = clean_pasted(rest.split_whitespace().next()?);
+        let (yymm, seq) = token.split_once('.')?;
+        let seq = seq.split(['v', 'V']).next().unwrap_or(seq);
+        let shaped =
+            yymm.len() == 4 && is_digits(yymm) && (4..=5).contains(&seq.len()) && is_digits(seq);
+        (shaped && WorkId::parse_as(IdKind::Arxiv, token).is_err()).then_some(token)
+    })
+}
+
 /// Every identifier mentioned in `text`, in order, repeats included. Text
 /// from PDFs is cleaned first (ligatures, invisible characters, look-alike
 /// dashes and quotes); spans point into `text` as given.
@@ -692,6 +711,25 @@ fn offset(whole: &str, part: &str) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn arxiv_numbers_no_month_allows_are_unreadable() {
+        // Five digits in 2012, four in 2015, a thirteenth month.
+        assert_eq!(
+            unreadable_arxiv("Scaling of Congestion. arXiv:1201.11701."),
+            Some("1201.11701")
+        );
+        assert_eq!(unreadable_arxiv("arXiv: 1503.0123v2"), Some("1503.0123v2"));
+        assert_eq!(unreadable_arxiv("ARXIV:2513.01234"), Some("2513.01234"));
+        // Real ones, and labels without a number, aren't.
+        assert_eq!(
+            unreadable_arxiv("arXiv:1706.03762v5; arXiv:2404.16014"),
+            None
+        );
+        assert_eq!(unreadable_arxiv("arXiv: preprint, 2024"), None);
+        assert_eq!(unreadable_arxiv("hep-th/9901001"), None);
+        assert!(scan("arXiv:1201.11701").is_empty());
+    }
 
     /// The first implementation of `scan_line`, for comparison.
     fn reference_scan_line(line: &str) -> Vec<(WorkId, Range<usize>)> {

@@ -218,7 +218,8 @@ pub enum CitedField {
     /// A claimed identifier that isn't the work's, beside another that is:
     /// a PMID or PMCID other than the work's, or one a different work's
     /// record carries (`actual`: the work's of that kind, `pmid:19623052`;
-    /// `cited`: the one claimed).
+    /// `cited`: the one claimed). Or an arXiv identifier written that no
+    /// paper has, beside a work found by its title (`cited`, as written).
     Identifier,
     /// A book's publisher, which none of its editions names (`actual`:
     /// the one most of them name; `cited`: the one the citation names).
@@ -575,6 +576,29 @@ fn weigh(claim: &Claim, report: &ResolveReport) -> (Verdict, Reason, Option<usiz
             .any(|l| l.record.is_none() && !l.is_not_found());
 
     if claim.ids.is_empty() {
+        // An arXiv identifier written that no paper has ("arXiv:1201.11701"):
+        // a work found otherwise is cited with an identifier it can't have,
+        // as one that doesn't exist is (holdout-5 #944).
+        let unreadable = claim
+            .text
+            .as_deref()
+            .and_then(aspero_core::id::unreadable_arxiv);
+        if let (Some(written), Some(c)) = (unreadable, best)
+            && best_conf >= PLAUSIBLE
+        {
+            let differs = vec![Difference {
+                field: CitedField::Identifier,
+                actual: c
+                    .record
+                    .ids
+                    .iter()
+                    .find(|id| id.kind() == IdKind::Arxiv)
+                    .map(ToString::to_string),
+                cited: Some(format!("arXiv:{written}")),
+                kind: None,
+            }];
+            return (Verdict::Mismatch, Reason::Closest { differs }, Some(0));
+        }
         return match best {
             Some(_) if best_conf >= VERIFIED => (Verdict::Verified, Reason::Matches, Some(0)),
             Some(c) if best_conf >= PLAUSIBLE => (

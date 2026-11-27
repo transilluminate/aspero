@@ -1015,7 +1015,8 @@ never spans; once per process, as it's the global subscriber.
 
 ## Conventions
 
-- Licence MIT OR Apache-2.0; edition 2024 on current stable, no MSRV yet.
+- Licence MIT OR Apache-2.0; edition 2024; MSRV 1.91 (`rust-version` in
+  `Cargo.toml`), which CI builds as well as current stable.
 - Conventional commits; small, focused changes; clippy and rustfmt clean.
 - Navigable by grep and this file (`bench/nav-dogfood.md`): `just check`
   and CI fail a source file over 1,000 lines before its tests

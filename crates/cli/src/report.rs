@@ -278,8 +278,14 @@ mod tests {
             );
         }
         let verdicts = &fields.iter().find(|(id, _)| id == "verdict").unwrap().1;
-        for verdict in ["verified", "plausible", "mismatch", "not_found", "invalid"] {
-            assert!(verdicts.iter().any(|v| v == verdict), "{verdict}");
+        // Every verdict the engine gives, and the JSON's `invalid` for a
+        // claim that couldn't be read.
+        let engine = aspero_engine::Verdict::ALL.iter().map(|v| v.as_str());
+        for verdict in engine.chain(["invalid"]) {
+            assert!(
+                verdicts.iter().any(|v| v == verdict),
+                "the form's verdict dropdown lacks {verdict:?}"
+            );
         }
     }
 }

@@ -12,9 +12,7 @@ use super::caps::{
     PLACED_YEAR_OFF, PLACED_YEAR_WRONG, PLAUSIBLE, SHORT_TITLE_WORDS, STRANGERS_CAP,
     UNCORROBORATED_CAP, UNPLACED_CAP, VENUE_RECORD_CAP, VERSION, combine,
 };
-use super::claim::{
-    byline, cites_chapter, cites_chapter_of, cites_edited_book, title_region, untitled_byline,
-};
+use super::claim::{byline, cites_chapter, title_region, untitled_byline};
 use super::derivative::{self, WorkKind, record_derivative_kind};
 use super::edition;
 use super::preprint::{names_preprint, preprint_server, preprint_version_claimed};
@@ -33,8 +31,10 @@ use crate::work::WorkType;
 
 /// Scores how well `record` matches `claim`.
 // The caps and floors apply in order, each reading what the ones before
-// left; splitting them up hides that order. Follow-up: move the cap/floor
-// tail into `caps.rs` as one function over the field checks.
+// left; splitting them up hides that order. Follow-up: move the facts the
+// tail computes into their field modules (the record's kind against the
+// venue is `venue::record_kind`), then the tail into `caps.rs` as one
+// function over the field checks and those facts.
 #[allow(clippy::too_many_lines)]
 pub fn assess(claim: &Claim, record: &SourceRecord) -> Assessment {
     let work = &record.work;
@@ -749,78 +749,34 @@ pub fn assess(claim: &Claim, record: &SourceRecord) -> Assessment {
     if wrong_journal {
         confidence = confidence.min(JOURNAL_MISMATCH_CAP);
     }
-    // A copy deposited elsewhere (Zenodo, a repository, a technical
-    // report) has the work's title, authors and year but no journal,
-    // volume or page: it can't confirm the journal cited, and it isn't the
-    // article cited there, unless the claim's identifier says it is.
-    // Preprints, books, chapters, data and software have none to give,
-    // but nor do they confirm a journal, volume and page all cited
-    // (PsycEXTRA's record of a paper Science printed).
-    let unconfirmable = cited_place.volume.is_some()
-        && cited_place.page.is_some()
-        && work.volume.is_none()
-        && work.page.is_none()
-        && container.agreement != Agreement::Match;
-    let journal_less = !matches!(
-        work.work_type,
-        Some(
-            WorkType::Preprint
-                | WorkType::Book
-                | WorkType::Chapter
-                | WorkType::Dataset
-                | WorkType::Software
-        )
-    ) && work.container_title.is_none()
-        && work.volume.is_none()
-        && work.page.is_none();
-    // A BibTeX `@article` with its journal cites a journal's article: a
-    // book of that title (a working paper's monograph) isn't it.
-    let book_for_article = work.work_type == Some(WorkType::Book)
-        && text.as_ref().is_some_and(|t| {
-            t.raw
-                .trim_start()
-                .get(..8)
-                .is_some_and(|head| head.eq_ignore_ascii_case("@article"))
-        });
-    // Nor is a book cited with a volume and issue (its title where the
-    // journal stands: "Methane Cycling and Climate. Biogeochemical Cycles
-    // and Climate. 2019;23(5):159-175" cites a chapter of it).
-    let book_as_journal = work.work_type == Some(WorkType::Book)
-        && work.volume.is_none()
-        && claim.text.as_deref().is_some_and(publication::cites_issue);
-    if chapter_as_article || (book_as_journal && !named) {
+    // What the record is, against the work and venue cited, in
+    // `venue.rs`: each fact below caps or floors in this order.
+    let kind = venue::record_kind(&venue::KindInputs {
+        claim,
+        record,
+        text: text.as_ref(),
+        title_span: title_span.as_ref(),
+        work_title: work_title.as_deref(),
+        claimed_title: claimed_title.as_deref(),
+        cited_place: &cited_place,
+        named,
+        cites_journal,
+        container,
+        claimed_years: &claimed_years,
+        actual_years: &actual_years,
+    });
+    if chapter_as_article || (kind.book_cited_with_issue && !named) {
         confidence = confidence.min(UNPLACED_CAP);
     }
-    if (journal_less || unconfirmable || book_for_article) && cites_journal && !named {
+    if kind.not_the_article && cites_journal && !named {
         confidence = confidence.min(UNPLACED_CAP);
     }
     // Another edition of a book: the same title and authors, another year
     // (a 9th edition cited, a later one found). The book is right; the
     // year, or a publisher given as its container, is a difference. A
     // chapter cited in the book is not the book: its authors found may be
-    // the book's editors. A book cited with its publisher, found reprinted
-    // whole as a chapter of a reader (Bourdieu's "Distinction" in a 2018
-    // collection), is another edition too.
-    let cites_book = text.as_ref().is_some_and(|t| {
-        t.words.iter().any(|w| {
-            matches!(
-                w.as_str(),
-                "press" | "publisher" | "publishers" | "publishing" | "books" | "verlag"
-            )
-        })
-    });
-    // So is a journal's article reprinted whole, later, as a chapter of a
-    // collection ("Islam, Judeo-Christianity and Byzantine Iconoclasm",
-    // Jerusalem Studies in Arabic and Islam 1980, found only in a 2017
-    // Variorum volume): an original and its reprint are versions.
-    let reprint = work.work_type == Some(WorkType::Chapter)
-        && (cites_journal || cited_place.volume.is_some())
-        && !claimed_years.is_empty()
-        && actual_years
-            .iter()
-            .all(|a| claimed_years.iter().all(|c| c < a));
-    if (work.work_type == Some(WorkType::Book)
-        || (work.work_type == Some(WorkType::Chapter) && (cites_book || reprint)))
+    // the book's editors.
+    if kind.edition
         && (title.agreement == Agreement::Match || extended)
         && authors.score.is_some_and(|s| s >= CORROBORATING_AUTHORS)
         && year.agreement == Agreement::Mismatch
@@ -848,55 +804,10 @@ pub fn assess(claim: &Claim, record: &SourceRecord) -> Assessment {
         }
         _ => year,
     };
-    // A chapter whose book is the title cited ("Orri Vésteinsson, The
-    // Christianization of Iceland: Priests, Power, and Social Change"
-    // for its chapter "The Priests"), cited as the book (no "In:", no
-    // editors, no page), is part of the work cited, not it: the book's
-    // record ranks first, and without it, plausible. Not when the
-    // chapter's own title is cited before its book's ("Second Victim
-    // Syndrome. In *StatPearls*"), or is its book's.
-    let book_span = match (&text, &work.container_title) {
-        (Some(text), Some(book)) => text.title_span(book),
-        _ => None,
-    };
-    let chapter_cited_first = matches!(
-        (&title_span, &book_span),
-        (Some(own), Some(book)) if own.start <= book.start
-    );
-    let chapter_for_book = work.work_type == Some(WorkType::Chapter)
-        && claimed_title.is_none()
-        && container.agreement == Agreement::Match
-        && book_span.is_some()
-        && !chapter_cited_first
-        && cited_place.page.is_none()
-        && !reprint
-        && !named
-        && !claim
-            .text
-            .as_deref()
-            .is_some_and(|t| cites_chapter(t) || cites_edited_book(t));
-    // And a book's record, a chapter of it quoted: the book holds the work.
-    let book_for_chapter = work.work_type == Some(WorkType::Book)
-        && !named
-        && matches!((&text, &work_title, &title_span), (Some(t), Some(book), Some(span))
-            if cites_chapter_of(t, book, span));
-    if chapter_for_book || book_for_chapter {
+    if kind.part_for_whole {
         confidence = confidence.min(LOCATION_MISMATCH_CAP);
     }
-    // A proceedings' own record (the volume: "2014 IEEE International
-    // Conference on Communications Workshops (ICC)"), cited at a page, is
-    // the venue of the paper cited, not the paper (holdout-6 #1010).
-    let volume_for_paper = matches!(&work.work_type, Some(WorkType::Other(t)) if t == "proceedings")
-        && (cited_place.page.is_some()
-            || claim.text.as_deref().is_some_and(|t| {
-                t.split_whitespace().any(|w| {
-                    let w = w.trim_matches(|c: char| !c.is_ascii_digit());
-                    w.split_once(['-', '–'])
-                        .is_some_and(|(a, b)| is_digits(a) && is_digits(b) && a != b)
-                })
-            }))
-        && !named;
-    if volume_for_paper {
+    if kind.volume_for_paper {
         confidence = confidence.min(VENUE_RECORD_CAP);
     }
     // A dataset's or software's record carries its latest version's date:

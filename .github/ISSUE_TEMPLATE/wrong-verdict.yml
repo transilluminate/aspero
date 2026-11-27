@@ -29,6 +29,7 @@ body:
         - plausible
         - mismatch
         - not_found
+        - unverifiable
         - invalid
   - type: textarea
     id: output

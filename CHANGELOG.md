@@ -48,6 +48,17 @@ Fixed:
   place of one ("'The political economy of coal in Germany'" for "… in
   Poland: Drivers and barriers …") is partly the work's: plausible beside
   its authors, year and journal (wild-6 #464).
+- Books are searched by their titles more often (wild-6 #92, #247,
+  #265, #347, #519, #677, #217): an edition after the title ("…, 4th
+  ed.") is no editors' byline and no part of the title; nor are authors
+  named after it ("… by Richard Twycross and Andrew Wilcock"), its
+  translators or editors outside brackets (", translated by …"), a family
+  name alone before a title with an article ("Snowdon, The Spirit Level
+  Delusion"), an editor's byline ("James Gairdner, ed., …"), a note's
+  place, publisher and page ("(Paris: L'Harmattan, 2001), [page]") or
+  organisations listed before a colon ("HPA / College of Radiographers /
+  RCR: …"); a one-word sentence opening a title ("Italiano. Antico e
+  nuovo") is the title's first part.
 
 ## 0.44.0
 

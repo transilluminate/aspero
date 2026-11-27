@@ -7,10 +7,94 @@
 use super::super::record_title::record_title;
 use super::*;
 
+fn assert_titles(cases: &[(&str, &str)]) {
+    for (text, title) in cases {
+        assert_eq!(probable_title(text).as_deref(), Some(*title), "{text}");
+    }
+}
+
 fn book(title: &str, authors: &[&str], year: i16) -> SourceRecord {
     let mut r = record(&[], title, authors, year);
     r.work.work_type = Some(crate::work::WorkType::Book);
     r
+}
+
+#[test]
+fn a_books_edition_authors_and_translators_are_no_part_of_its_title() {
+    assert_titles(&[
+        // wild-6 #92: "4th ed." is no editors' "eds", nor the title's.
+        (
+            "Miller, W. R., & Rollnick, S. Motivational Interviewing: Helping People Change and \
+             Grow, 4th ed. (Guilford Press, 2023).",
+            "Motivational Interviewing: Helping People Change and Grow",
+        ),
+        // wild-6 #247: the authors named after the title.
+        (
+            "Introducing Palliative Care by Richard Twycross and Andrew Wilcock.",
+            "Introducing Palliative Care",
+        ),
+    ]);
+    // Editors' names still end no title (wild-5's "Ragep, eds").
+    assert_ne!(
+        probable_title("Jamil Ragep, eds. Tradition, Transmission, Transformation.").as_deref(),
+        Some("Jamil Ragep, eds")
+    );
+    // "by" before words that aren't people's names, or more after them,
+    // is the title's.
+    assert_titles(&[(
+        "Smith, J. (2019). Learning by doing in the laboratory. Oxford: Clarendon, 2019.",
+        "Learning by doing in the laboratory",
+    )]);
+    // A translator's initials no longer split the reference: the title
+    // isn't "translated by J" (wild-6 #703).
+    assert_ne!(
+        probable_title(
+            "Ptolemy, Geography, translated by J. Lennart Berggren and Alexander Jones (2000)."
+        )
+        .as_deref(),
+        Some("translated by J")
+    );
+}
+
+#[test]
+fn a_bylines_name_before_a_comma_is_no_part_of_the_title() {
+    assert_titles(&[
+        // wild-6 #265: a family name alone, before a title with an article.
+        (
+            "Snowdon, The Spirit Level Delusion (2010).",
+            "The Spirit Level Delusion",
+        ),
+        // wild-6 #347: an editor's byline.
+        (
+            "James Gairdner, ed., The Paston Letters, 1422–1509 (6 vols, 1872–75)",
+            "The Paston Letters, 1422–1509",
+        ),
+        // wild-6 #519: a note's place, publisher and year in brackets,
+        // and its page after them.
+        (
+            "François Blancpain, Un siècle de relations financières entre Haïti et la France \
+             (1825–1922) (Paris: L'Harmattan, 2001), [page].",
+            "Un siècle de relations financières entre Haïti et la France",
+        ),
+        // wild-6 #677: a title's first part ends in a full stop.
+        (
+            "Beccaria, Gian Luigi, Italiano. Antico e nuovo, Milano, Garzanti, 1988.",
+            "Italiano. Antico e nuovo",
+        ),
+        // wild-6 #217: organisations listed before a colon.
+        (
+            "HPA / College of Radiographers / RCR: Protection of Pregnant Patients during \
+             Diagnostic Medical Exposures to Ionising Radiation (2009, report RCE-9).",
+            "Protection of Pregnant Patients during Diagnostic Medical Exposures to Ionising \
+             Radiation",
+        ),
+    ]);
+    // A title's own acronym before its colon stays.
+    assert_titles(&[(
+        "Devlin J, Chang MW. BERT: Pre-training of Deep Bidirectional Transformers for Language \
+         Understanding. NAACL 2019.",
+        "BERT: Pre-training of Deep Bidirectional Transformers for Language Understanding",
+    )]);
 }
 
 /// wild-6 #594: a title quoted by its opening words beside the work's

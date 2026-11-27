@@ -569,6 +569,9 @@ fn guessed_title(text: &str) -> Option<String> {
     // title's sentence at their full stops ("… Processes (ed. G. S.
     // Koby). Kent State UP.").
     let text = &*layout::without_role_notes(text);
+    // Nor its translators or editors named outside them, nor its authors
+    // named after it ("… Care by Richard Twycross and Andrew Wilcock").
+    let text = &*layout::without_name_phrases(text);
     if let Some(title) = after_comma_byline(text) {
         return Some(title);
     }
@@ -591,19 +594,20 @@ fn guessed_title(text: &str) -> Option<String> {
     // a publisher after a comma ("…, Columbia UP") or a count of volumes
     // ("…, 4 vols") is left out of one.
     let editors = |s: &str| {
-        s.split_whitespace().last().is_some_and(|w| {
-            matches!(
-                w.trim_matches(|c: char| !c.is_alphabetic())
-                    .to_lowercase()
-                    .as_str(),
-                "ed" | "eds" | "editor" | "editors" | "dir" | "hrsg"
-            )
-        })
+        !layout::ends_in_edition(s)
+            && s.split_whitespace().last().is_some_and(|w| {
+                matches!(
+                    w.trim_matches(|c: char| !c.is_alphabetic())
+                        .to_lowercase()
+                        .as_str(),
+                    "ed" | "eds" | "editor" | "editors" | "dir" | "hrsg"
+                )
+            })
     };
     let sentences: Vec<&str> = text.split(". ").collect();
     sentences
         .iter()
-        .map(|s| without_trailing_note(without_name_byline(s)))
+        .map(|s| without_trailing_note(layout::without_name_byline(s)))
         .enumerate()
         .filter(|(i, s)| {
             !(s.contains(';')
@@ -614,8 +618,10 @@ fn guessed_title(text: &str) -> Option<String> {
                 || (*i == 1 && layout::given_after_initial(sentences[0], s)))
         })
         .map(|(_, s)| {
-            let s = without_byline_year(without_leading_year(s));
-            layout::without_volumes(layout::without_trailing_publisher(s))
+            let s = without_byline_year(without_leading_year(layout::without_body_byline(s)));
+            layout::without_volumes(layout::without_trailing_publisher(layout::without_edition(
+                s,
+            )))
         })
         .filter_map(title_like)
         .enumerate()
@@ -745,37 +751,6 @@ fn without_byline_year(s: &str) -> &str {
     after
 }
 
-/// A sentence without a byline of a name written out and a comma before
-/// a title that a year in brackets ends: "Einar Arnórsson, Réttarsaga
-/// Alþingis (1945)", "Eddie Faye Gates, They Came Searching: … (1997)".
-/// Two to four words, each a capitalised word of letters.
-fn without_name_byline(s: &str) -> &str {
-    let Some((name, rest)) = s.split_once(", ") else {
-        return s;
-    };
-    let words: Vec<&str> = name.split_whitespace().collect();
-    let named = (2..=4).contains(&words.len())
-        && words.iter().all(|w| {
-            w.starts_with(char::is_uppercase)
-                && w.chars().any(char::is_lowercase)
-                && w.chars()
-                    .all(|c| c.is_alphabetic() || matches!(c, '-' | '\'' | '’'))
-        });
-    let t = rest.trim_end().trim_end_matches('.');
-    let dated = t
-        .strip_suffix(')')
-        .and_then(|t| t.rfind(" (").map(|at| &t[at + 2..]))
-        .is_some_and(|year| {
-            year.get(..4)
-                .is_some_and(|y| y.bytes().all(|b| b.is_ascii_digit()))
-        });
-    if named && dated && rest.starts_with(char::is_uppercase) {
-        without_trailing_note(rest)
-    } else {
-        s
-    }
-}
-
 /// A sentence without the year in brackets opening it: "(2011) Viking
 /// coinage …".
 fn without_leading_year(s: &str) -> &str {
@@ -849,7 +824,7 @@ fn after_comma_byline(text: &str) -> Option<String> {
     }
     let first = rest.split_whitespace().next()?;
     if matches!(
-        first.to_lowercase().as_str(),
+        first.trim_end_matches('.').to_lowercase().as_str(),
         "and" | "&" | "et" | "y" | "und" | "e" | "ed" | "eds" | "dir"
     ) || first.starts_with(|c: char| c.is_ascii_digit())
     {
@@ -861,6 +836,19 @@ fn after_comma_byline(text: &str) -> Option<String> {
     for stop in [". ", " (", ";"] {
         if let Some(at) = rest.find(stop) {
             end = end.min(at);
+        }
+    }
+    // Not at a full stop after one word: a title's first part ("Italiano.
+    // Antico e nuovo, Milano, Garzanti, 1988", wild-6 #677).
+    let one_word = rest[..end].split_whitespace().count() == 1
+        && rest[..end].chars().filter(|c| c.is_alphabetic()).count() >= 3;
+    if one_word && rest[end..].starts_with(". ") {
+        let after = end + 2;
+        end = rest.len();
+        for stop in [". ", " (", ";"] {
+            if let Some(at) = rest[after..].find(stop) {
+                end = end.min(after + at);
+            }
         }
     }
     let mut from = 0;

@@ -36,6 +36,9 @@ Fixed:
   is plausible, its year named, not a mismatch: a preprint dated by its
   journal version (wild-3 #931), a guideline's Bookshelf record (holdout-5
   #99).
+- A chapter cited by its DOI is no longer a mismatch because the book it
+  is in matches the citation too: the book a chapter's citation names is
+  not another work it points at (wild-6 #597, an IPCC report's chapter).
 - The wrong-verdict issue form offers `unverifiable`, so a `verify
   --report` link for an unverifiable result fills in its verdict; a test
   now checks the form against every verdict the engine gives.

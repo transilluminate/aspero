@@ -278,6 +278,21 @@ fn unauthored_near_miss(c: &Candidate) -> bool {
             .all(|f| f.agreement != Agreement::Mismatch)
 }
 
+/// Whether `other` is the book `chapter` (a record whose title and
+/// container the citation gives) is in: its title holds the container's.
+/// A chapter's citation names its book, so the book's record matches it
+/// too, but isn't another work it points at (wild-6 #597).
+fn its_book(chapter: &Candidate, other: &Candidate) -> bool {
+    let (Some(book), Some(title)) = (
+        chapter.record.work.container_title.as_deref(),
+        other.record.work.title.as_deref(),
+    ) else {
+        return false;
+    };
+    let (book, title) = (matching::normalise(book), matching::normalise(title));
+    book.split_whitespace().count() >= 3 && format!(" {title} ").contains(&format!(" {book} "))
+}
+
 /// Titles alike enough to be one book's.
 const SAME_TITLE: f64 = 0.9;
 
@@ -569,11 +584,16 @@ fn weigh(claim: &Claim, report: &ResolveReport) -> (Verdict, Reason, Option<usiz
                 && !(a.title.agreement == Agreement::Mismatch
                     && a.authors.agreement == Agreement::Mismatch)
         });
+        let chapter = skip.map(|i| &report.candidates[i]).filter(|c| {
+            c.assessment.title.agreement == Agreement::Match
+                && c.assessment.container.agreement == Agreement::Match
+        });
         report.candidates.iter().enumerate().position(|(i, c)| {
             let a = &c.assessment;
             Some(i) != skip
                 && a.confidence >= PLAUSIBLE
                 && !own.is_some_and(|own| another_edition(own, c))
+                && !chapter.is_some_and(|chapter| its_book(chapter, c))
                 && !(placed
                     && (a.ids == Agreement::Mismatch || a.page.agreement == Agreement::Mismatch))
         })

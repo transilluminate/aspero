@@ -3,6 +3,19 @@
 Releases 0.10 to 0.19 are in [docs/changelog/0.1x.md](docs/changelog/0.1x.md),
 and 0.1 to 0.9 in [docs/changelog/0.0x.md](docs/changelog/0.0x.md).
 
+## Unreleased
+
+Fixed:
+
+- An abstract rebuilt from OpenAlex's word index is no longer served when
+  the index has lost words: the text read on across the gaps, dropping
+  numbers and words mid-sentence (the ACG 2015 colon ischaemia
+  guideline's ran to 25,000 characters with 636 words missing). Nor is
+  one over 10,000 characters, which is a full text or a page rather than
+  an abstract. Either way `--abstract` looks for one at the other
+  providers (Crossref, then Europe PMC). The cache is rebuilt once, so
+  records stored with such an abstract are read again.
+
 ## 0.44.1
 
 Added:

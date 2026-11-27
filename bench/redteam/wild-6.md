@@ -299,7 +299,75 @@ uncertain were wrong (26/66), against 15% of those it didn't (28/186).
 
 ## aspero's results
 
-Not yet run.
+**These measure the hard tail on purpose, and wild-6 more than most.** It
+is weighted toward the requests and the writer that err most (identifiers
+asked, named styles, recent work, grey literature; haiku in half the
+sessions), so its wrong references are many and its real ones terse. It is
+not typical input. With 83 wrong references, one wrong `verified` is 1.2
+points.
+
+The run was live, through `scripts/redteam.py` on 0.43.1, the release
+wild-6 was held out from (no fix had seen it). It took two recorder
+nights: on 2026-11-26 the free OpenAlex allowance ran out with 59 claims
+capped, and on 2026-11-27 the run resumed from the tape and finished with
+none capped. No claim panicked or failed internally. The 43 misses and
+wrong verifieds were re-run live off the tape, with a fresh cache, the
+same day: 42 gave the same verdict, and one came back `unverifiable` as
+Europe PMC was slow that morning.
+
+| Criterion | 0.43.1, held out | Target |
+|---|---|---|
+| Wrong → `verified` | 8/83 (9.6%) | ≤ 2% |
+| Real → `mismatch` or `not_found` | 35/665 (5.3%) | ≤ 3% |
+| Real → `verified` | 564/665 (84.8%) | ≥ 85% |
+| Real → `verified` or `plausible` | 630/665 (94.7%) | ≥ 95% |
+| Wrong → `plausible` naming the field that differs | 36/36 (100%) | ≥ 80% |
+| … medicine/nursing/allied health: wrong → `verified` | 5/44 | |
+| … medicine/nursing/allied health: real → `verified` | 216/248 (87.1%) | |
+| … other fields: real → `verified` | 348/417 (83.5%) | |
+
+Four criteria fail their targets, the real-citation ones narrowly. The
+corpus has no invented works, nonexistent identifiers or retracted works.
+
+By writer, wrong → `verified` was haiku 8/54, sonnet 0/23 and opus 0/6;
+real → `verified` was haiku 169/198 (85.4%), sonnet 259/313 (82.7%) and
+opus 136/154 (88.3%).
+
+- **Wrong and verified (8, all haiku's).** Each matched the work the
+  model meant, with one field wrong:
+  - five titles reworded, everything else right: #14 (a cochlear-implant
+    comparison retitled), #49 ("Additional strengthening …" for "The
+    effect of additional strengthening …"), #130 ("… and birth outcomes"
+    for "… and the risks of low birthweight and preterm birth"), #653 (a
+    meta-analysis's title paraphrased) and #673 (a book's subtitle with
+    one word changed);
+  - two in the wrong journal: #145 and #592 (cited in PNAS, published in
+    Science Advances);
+  - one with a co-author changed: #267 (a workbook cited with Swinson for
+    Craske and Barlow).
+- **Real and missed (35: 11 `not_found`, 24 `mismatch`).** A first look:
+  - **arXiv papers listed by a label beside their identifier, 18.** Two
+    sonnet answers list sparse-autoencoder and speculative-decoding papers
+    as "Gated SAEs: 2404.16014" or "Lookahead Decoding | 2402.02057", and
+    a haiku answer cites "DESI DR2 BAO (arXiv:2503.14738)" (#590). The
+    identifier is right; the label isn't the title, so the identifier is
+    called another work's.
+  - **A DOI with a dagger glued to its end, 3** (#404, #411, #414:
+    "…00140†"), read as a DOI that doesn't exist.
+  - **Books, 8,** not found or another work's (#92, #247, #265, #347,
+    #487, #519, #677, #703).
+  - **Grey literature and reports, 4** (#217, #218, #594, #600), and **2
+    others**: #207, a WHO guideline beside an ISBN that doesn't resolve,
+    and #597, an IPCC chapter matched to the whole report.
+- **Accepted as another work (27).** Real references accepted whose
+  matched record doesn't carry the cited DOI or PMID; as in wild-5, most
+  are the same work under another identifier.
+
+Against wild-5's held-out run on 0.43.0 (13.5%, 5.3%, 83.8%, 94.7%), the
+real-citation figures are level or a point better on a corpus built to be
+harder, and wrong → `verified` is lower, now measured on more than twice
+as many wrong references. wild-6's misses are the next round's tuning
+data; from that round on it no longer counts as held out.
 
 ## Notes
 

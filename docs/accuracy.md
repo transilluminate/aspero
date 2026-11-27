@@ -152,6 +152,33 @@ recorded fixture), so it stays fixed without the network.
 These are the hardest cases (see the note at the top), not typical
 input.
 
+**Round 9 (0.43.1), real model output, held out** —
+`bench/redteam/wild-6.jsonl`. It measures the hard tail on purpose, and
+more than wild-5: its prompts were weighted toward the requests that draw
+the most errors (identifiers asked, named citation styles, recent work,
+grey literature) and its writers toward the model that errs most, so that
+wrong references are numerous enough to measure. The corpus holds 748
+references from 120 model sessions, each checked by hand without aspero
+(see [wild-6.md](../bench/redteam/wild-6.md)). 83 are wrong, so one wrong
+`verified` is 1.2 points. It was run live on 2026-11-26 and 2026-11-27, on
+the release it was held out from:
+
+| Criterion | 0.43.1 | Target |
+|---|---|---|
+| Wrong → `verified` | 8/83 (9.6%) | ≤ 2% — not yet met |
+| Correct → `verified` | 564/665 (84.8%) | ≥ 85% — not yet met |
+| Correct → `verified` or `plausible` | 630/665 (94.7%) | ≥ 95% — not yet met |
+| Correct → `mismatch` or `not_found` | 35/665 (5.3%) | ≤ 3% — not yet met |
+| Wrong → `plausible` naming the field that differs | 36/36 (100%) | ≥ 80% |
+
+Each wrong verified matched the work the model meant with one field
+wrong: five reworded titles, two wrong journals, one changed co-author.
+Half the correct citations missed are arXiv papers listed by a short
+label beside a correct identifier, from two answers; the rest are books,
+grey literature, and three DOIs with a dagger glued to their end. Against
+wild-5 on 0.43.0, the real-citation figures are level or better and wrong
+→ `verified` is lower, on a harder corpus.
+
 **Round 8 (0.43.0), real model output, held out** —
 `bench/redteam/wild-5.jsonl`. Like wild-4, it measures the hard tail on
 purpose: references as models write them, whose wrong ones are near-misses
@@ -342,6 +369,7 @@ measured on a corpus it had never seen:
 | 6 (0.32.0 candidate) | wild-3 (unseen model output) | 25/122 (20.5%) | 95.9% |
 | 7 (0.38.3) | wild-4 (unseen model output) | 2/75 (2.7%) | 92.4% |
 | 8 (0.43.0) | wild-5 (unseen model output, naive prompts) | 5/37 (13.5%) | 94.7% |
+| 9 (0.43.1) | wild-6 (unseen model output, weighted to error-prone requests) | 8/83 (9.6%) | 94.7% |
 
 Each held-out corpus was built to be harder than the last, so the rates
 aren't a smooth series; what they show is that invented works and other

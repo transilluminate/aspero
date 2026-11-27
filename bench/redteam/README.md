@@ -626,6 +626,37 @@ answer), and 8 are other kinds
 round's tuning corpus. No corpus file or API response seen in this round
 contained instruction-like text.
 
+## Round 9: the wild-5 round, measured on held-out wild-6 (2026-11-27, aspero 0.43.1)
+
+0.43.1 is the wild-5 fix round (#217, #218, #219, merged as #220): books
+read by layout and searched by title, titleless ACS references, cut and
+reworded titles held to plausible. Tuned on wild-5, it passed every
+criterion there (not held out). It was then run live on `wild-6.jsonl`:
+748 references from 120 model sessions, each checked by hand without
+aspero (see [wild-6.md](wild-6.md)). wild-6 is weighted toward
+error-prone requests and toward haiku **on purpose**, so it holds 83 wrong
+references (one wrong verified is 1.2 points) and is harder than wild-5.
+The recorder took two nights (59 claims capped on the first); no claim
+panicked.
+
+```
+wild-6 (held out on 0.43.1, live)            0.43.1
+wrong -> verified                          8/83 (9.6%)      <= 2%
+real -> mismatch or not_found             35/665 (5.3%)     <= 3%
+real -> verified                         564/665 (84.8%)    >= 85%
+real -> verified or plausible            630/665 (94.7%)    >= 95%
+wrong -> plausible names a differing field 36/36 (100.0%)   >= 80%
+```
+
+All 8 wrong verifieds are haiku's: five reworded titles, two wrong
+journals, one changed co-author. Of the 35 real misses, 18 are arXiv
+papers listed by a label beside a correct identifier, 3 are DOIs with a
+dagger glued to their end, 8 are books, 4 grey literature and 2 other
+([wild-6.md](wild-6.md#asperos-results)). Against wild-5 on 0.43.0
+(13.5%, 5.3%, 83.8%, 94.7%), the real-citation figures are level or
+better on a harder corpus. No corpus file or API response seen in this
+round contained instruction-like text.
+
 ## Failures (`failures.jsonl`)
 
 Every false VERIFIED from the corpus (31) and the adversarial round (48),

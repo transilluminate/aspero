@@ -69,7 +69,7 @@ use serde::{Deserialize, Serialize};
 
 pub use assess::assess;
 pub use authors::share_an_author;
-pub use caps::{ID_CONFLICT_CAP, PLAUSIBLE, VERIFIED};
+pub use caps::{ID_CONFLICT_CAP, PLAUSIBLE, VERIFIED, WHOLE_BYLINE};
 pub use claim::{Alternative, Claim, find_ids};
 pub use derivative::{
     WorkKind, claim_mentions_derivative, derivative_kind, derivative_work_kind, is_derivative,

@@ -10,7 +10,7 @@ use super::caps::{
     EXTENDED_TITLE_CAP, FIRST_EDITION_CAP, ID_CONFLICT_CAP, JOURNAL_MISMATCH_CAP,
     JOURNAL_MISMATCH_PENALTY, LOCATION_MISMATCH_CAP, NO_EVIDENCE_CAP, OTHER_IN_SERIES, PLACED,
     PLACED_YEAR_OFF, PLACED_YEAR_WRONG, PLAUSIBLE, SHORT_TITLE_WORDS, STRANGERS_CAP,
-    UNCORROBORATED_CAP, UNPLACED_CAP, VENUE_RECORD_CAP, VERSION, combine,
+    UNCORROBORATED_CAP, UNPLACED_CAP, VENUE_RECORD_CAP, VERSION, WHOLE_BYLINE, combine,
 };
 use super::claim::{byline, cites_chapter, title_region, untitled_byline};
 use super::derivative::{self, WorkKind, record_derivative_kind};
@@ -670,12 +670,18 @@ pub fn assess(claim: &Claim, record: &SourceRecord) -> Assessment {
     }
     // A quoted part of the work's title (its opening words or subtitle) beside
     // its authors, year and journal: the work (wild-5 #400, #488). Plausible.
+    // Without a journal, beside its whole byline, two names or more
+    // ("Kraft & Falken, \"A Blueprint for Scaling Tutoring\" (2021)" for
+    // "… Tutoring and Mentoring Across Public Schools", wild-6 #594).
     if claimed_title.is_none()
         && title.agreement == Agreement::Mismatch
         && authors.score.is_some_and(|s| s >= CORROBORATING_AUTHORS)
         && !(strangers || earlier)
         && year.agreement == Agreement::Match
-        && container.agreement == Agreement::Match
+        && (container.agreement == Agreement::Match
+            || (container.agreement == Agreement::Unknown
+                && work.authors.len() > 1
+                && authors.score.is_some_and(|s| s >= WHOLE_BYLINE)))
         && (text.as_ref().zip(work_title.as_deref()))
             .is_some_and(|(t, w)| titles::quotes_part_of(&t.raw, w))
     {

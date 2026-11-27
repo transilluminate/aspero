@@ -28,6 +28,10 @@ Fixed:
   core. rmcp is 3.9.0 (RUSTSEC-2026-0462, in its HTTP client, which aspero
   uses only in tests), and url is 2.5.9 (RUSTSEC-2026-0592, a stack
   overflow in `Url::origin()`, which aspero doesn't call).
+- A title quoted by its opening words beside the work's whole byline
+  (two names or more) and year is now plausible without the journal
+  named too ("Kraft & Falken, \"A Blueprint for Scaling Tutoring\"
+  (2021)", wild-6 #594).
 
 ## 0.44.0
 

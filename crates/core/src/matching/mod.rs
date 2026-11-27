@@ -27,6 +27,8 @@
 //!   words, and finding a record's fields inside free text.
 //! - `edition.rs`: a book's first edition as a citation states it ("(1st
 //!   ed.)", "(Original work published 1969)").
+//! - `label.rs`: a label for a work beside its identifier ("Gated SAEs:
+//!   2404.16014"), not a title cited.
 //! - `publisher.rs`: the publisher a book's citation names, and whether its
 //!   editions know it.
 //! - `record_title.rs`: a record's title cleaned of markup and provider
@@ -54,6 +56,7 @@ mod caps;
 mod claim;
 mod derivative;
 mod edition;
+mod label;
 mod preprint;
 mod publisher;
 mod record_title;

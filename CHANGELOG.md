@@ -20,6 +20,14 @@ Added:
 
 Fixed:
 
+- A paper listed by its identifier beside a short label for it, as a
+  model's list of papers gives them ("Gated SAEs: 2404.16014",
+  "Lookahead Decoding | 2402.02057", "DESI DR2 BAO (arXiv:2503.14738,
+  2025)"), is plausible, its title to check, where it was a mismatch
+  saying the identifier is another work's: every word of the label is a
+  word of the work's title, its acronyms written out. A label with words
+  of its own ("DESI 2024 III" beside DESI 2024 VI's identifier) is still
+  a mismatch.
 - An acronym may take both initials of a compound word ("SAEs" for
   "Sparse Autoencoders"), so a title written with one ("SAEs Do Not Find
   Canonical Units of Analysis") is the title.

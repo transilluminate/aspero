@@ -61,6 +61,31 @@ impl Doi {
     }
 }
 
+impl Doi {
+    /// The DOI without a `.pubN` version suffix, and that version (1 for
+    /// a DOI without one, the first version). Read up to the suffix's
+    /// first `/`: a link's DOI may keep its page's path
+    /// (`….pub4/pdf/full`).
+    fn publication(&self) -> (&str, u32) {
+        let end = self.prefix().len() + 1 + self.suffix().find('/').unwrap_or(self.suffix().len());
+        let doi = &self.0[..end];
+        match doi.rsplit_once(".pub") {
+            Some((work, n)) if !n.is_empty() && is_digits(n) => (work, n.parse().unwrap_or(0)),
+            _ => (doi, 1),
+        }
+    }
+
+    /// Whether `other` is another numbered version of this DOI's work:
+    /// the same DOI but for a different `.pubN` suffix, the DOI without one
+    /// being the first version. Cochrane reviews are versioned so
+    /// (`….CD001955.pub4`, superseded by `.pub5`), each version its own
+    /// work. A suffix's path after a `/` is not compared.
+    pub fn other_version(&self, other: &Doi) -> bool {
+        let (a, b) = (self.publication(), other.publication());
+        a.0 == b.0 && a.1 != b.1
+    }
+}
+
 impl ArxivId {
     /// arXiv's DataCite DOI, `10.48550/arxiv.<id>`, which has no version.
     pub fn doi(&self) -> Doi {
@@ -312,6 +337,38 @@ mod tests {
             "(sici)1097-4636(199601)"
         );
         assert!(doi("10.1145/.").is_err());
+    }
+
+    #[test]
+    fn pub_suffixes_number_one_works_versions() {
+        let v = |a: &str, b: &str| doi(a).unwrap().other_version(&doi(b).unwrap());
+        assert!(v(
+            "10.1002/14651858.cd001955.pub5",
+            "10.1002/14651858.CD001955.pub4"
+        ));
+        assert!(v(
+            "10.1002/14651858.cd007491",
+            "10.1002/14651858.cd007491.pub2"
+        ));
+        // A link's DOI keeps its page's path.
+        assert!(v(
+            "10.1002/14651858.cd001955.pub5",
+            "10.1002/14651858.cd001955.pub4/pdf"
+        ));
+        assert!(!v(
+            "10.1002/14651858.cd001955.pub5",
+            "10.1002/14651858.cd001955.pub5/pdf"
+        ));
+        assert!(!v(
+            "10.1002/14651858.cd001955.pub5",
+            "10.1002/14651858.cd001956.pub5"
+        ));
+        // Other numbering schemes name one work's versions, or the work.
+        assert!(!v("10.3886/icpsr28141.v1", "10.3886/icpsr28141"));
+        assert!(!v(
+            "10.12688/f1000research.51912.2",
+            "10.12688/f1000research.51912.1"
+        ));
     }
 
     #[test]

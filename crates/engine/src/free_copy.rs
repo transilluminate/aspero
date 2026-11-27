@@ -99,17 +99,16 @@ impl Engine {
         records: &[&SourceRecord],
         usage: &mut Vec<(ProviderId, Usage)>,
     ) -> Vec<(Option<OpenAccess>, Option<Attempt>)> {
-        let mut out: Vec<(Option<OpenAccess>, Option<Attempt>)> = records
-            .iter()
-            .map(|r| (r.work.open_access.clone(), None))
-            .collect();
+        let mut out: Vec<(Option<OpenAccess>, Option<Attempt>)> =
+            records.iter().map(|r| (own_copy(r), None)).collect();
         let Some(entry) = &self.free_copies else {
             return out;
         };
         let wanted: Vec<(usize, WorkId)> = records
             .iter()
+            .zip(&out)
             .enumerate()
-            .filter_map(|(i, r)| Some((i, wanted(r)?)))
+            .filter_map(|(i, (r, (oa, _)))| Some((i, wanted(r, oa.as_ref())?)))
             .collect();
         if wanted.is_empty() {
             return out;
@@ -128,13 +127,21 @@ impl Engine {
     }
 }
 
-/// The PMCID to ask about: a record's without a fetchable PDF.
-fn wanted(record: &SourceRecord) -> Option<WorkId> {
-    let has_pdf = record
+/// A record's open access without another version's copy
+/// ([`OpenAccess::without_other_versions`]): a work an embedder kept from
+/// a lookup may carry a Cochrane review's older version's PDF.
+fn own_copy(record: &SourceRecord) -> Option<OpenAccess> {
+    record
         .work
         .open_access
-        .as_ref()
-        .is_some_and(|oa| oa.free_copy() == FreeCopyKind::Pdf);
+        .clone()
+        .map(|oa| oa.without_other_versions(&record.ids))
+}
+
+/// The PMCID to ask about: a record's without a fetchable PDF of its own
+/// (`oa`).
+fn wanted(record: &SourceRecord, oa: Option<&OpenAccess>) -> Option<WorkId> {
+    let has_pdf = oa.is_some_and(|oa| oa.free_copy() == FreeCopyKind::Pdf);
     if has_pdf {
         return None;
     }

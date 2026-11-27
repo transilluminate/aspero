@@ -23,7 +23,9 @@ use crate::{Result, SqliteCache, StoreError};
 /// relations map to `new_version` updates. 8: notices are typed as such.
 /// 9: `http://` ORCIDs read everywhere; Crossref works read as CSL items.
 /// 10: records carry the works they cite (OpenAlex `referenced_works`).
-const SCHEMA_VERSION: i64 = 10;
+/// 11: OpenAlex's free copy isn't another version's (a Cochrane review's
+/// `.pub4` for its `.pub5`).
+const SCHEMA_VERSION: i64 = 11;
 
 const SCHEMA: &str = "
 CREATE TABLE record (

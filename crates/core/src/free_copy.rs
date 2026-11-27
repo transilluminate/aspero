@@ -9,6 +9,7 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::id::{Doi, WorkId};
 use crate::work::OpenAccess;
 
 /// What kind of free copy is known: a PDF a program can fetch, a copy to
@@ -61,6 +62,73 @@ impl OpenAccess {
     }
 }
 
+impl OpenAccess {
+    /// This open access without the copies that are another version's
+    /// than the work with `ids` ([`another_versions_copy`]): those links
+    /// dropped and, when no link is left, the work not known to be free
+    /// (`is_oa` false, its status, licence and version, which were that
+    /// copy's, unknown). Unchanged when no link is another version's.
+    #[must_use]
+    pub fn without_other_versions(mut self, ids: &[WorkId]) -> Self {
+        let other = |url: &Option<String>| {
+            url.as_deref()
+                .is_some_and(|u| another_versions_copy(u, ids))
+        };
+        let (page, pdf) = (other(&self.url), other(&self.pdf_url));
+        if !page && !pdf {
+            return self;
+        }
+        if page {
+            self.url = None;
+        }
+        if pdf {
+            self.pdf_url = None;
+        }
+        if self.url.is_none() && self.pdf_url.is_none() {
+            self.is_oa = false;
+            self.status = None;
+            self.license = None;
+            self.version = None;
+        }
+        self
+    }
+}
+
+/// Whether `url` is the copy of another version of the work with `ids`:
+/// it names a DOI (at doi.org, or in a publisher's path,
+/// `cochranelibrary.com/cdsr/doi/10.1002/14651858.CD001955.pub4/pdf/full`)
+/// that is another numbered version of one of the work's DOIs
+/// ([`Doi::other_version`]). OpenAlex merges a Cochrane review's versions,
+/// and offers one version's copy for another's. Other DOIs aren't held
+/// against a link: a repository's copy has the repository's own DOI, and a
+/// work can have two (checked on 48,416 OpenAlex records, 2026-11-27).
+pub fn another_versions_copy(url: &str, ids: &[WorkId]) -> bool {
+    let Ok(WorkId::Doi(named)) = url.trim().parse::<WorkId>() else {
+        return false;
+    };
+    let own = ids.iter().filter_map(|id| match id {
+        WorkId::Doi(d) => Some(d),
+        _ => None,
+    });
+    let mut versions = false;
+    for doi in own {
+        if names(&named, doi) {
+            return false;
+        }
+        versions |= doi.other_version(&named);
+    }
+    versions
+}
+
+/// Whether a link's DOI is `doi`, maybe with its page's path after it.
+fn names(link: &Doi, doi: &Doi) -> bool {
+    link == doi
+        || link
+            .as_str()
+            .strip_prefix(doi.as_str())
+            .is_some_and(|rest| rest.starts_with('/'))
+}
+
 /// Whether a PDF link can be fetched by a program, as far as is known: not
 /// PubMed Central's site (`pmc.ncbi.nlm.nih.gov`, `ncbi.nlm.nih.gov/pmc/`),
 /// whose PDF links serve a browser challenge, nor Europe PMC's rendering
@@ -109,6 +177,54 @@ mod tests {
         ] {
             assert!(pdf_is_fetchable(url), "{url}");
         }
+    }
+
+    fn ids(ids: &[&str]) -> Vec<WorkId> {
+        ids.iter().map(|s| s.parse().unwrap()).collect()
+    }
+
+    /// OpenAlex's record of a Cochrane review's `.pub5` (W1949163494)
+    /// offers `.pub4`'s PDF; a repository's copy with its own DOI, or the
+    /// work's own page, stand.
+    #[test]
+    fn another_versions_copy_is_dropped() {
+        let pub5 = ids(&["doi:10.1002/14651858.cd001955.pub5", "pmcid:PMC9831289"]);
+        for url in [
+            "https://doi.org/10.1002/14651858.cd001955.pub4",
+            "https://www.cochranelibrary.com/cdsr/doi/10.1002/14651858.CD001955.pub4/pdf/full",
+            "https://doi.org/10.1002/14651858.CD001955",
+        ] {
+            assert!(another_versions_copy(url, &pub5), "{url}");
+        }
+        for url in [
+            "https://doi.org/10.1002/14651858.cd001955.pub5",
+            "https://www.cochranelibrary.com/cdsr/doi/10.1002/14651858.CD001955.pub5/pdf/full",
+            "https://pmc.ncbi.nlm.nih.gov/articles/PMC9831289/",
+            "https://doi.org/10.25405/ncl.34560306.v1",
+            "https://doi.org/10.1002/14651858.cd001956.pub4",
+        ] {
+            assert!(!another_versions_copy(url, &pub5), "{url}");
+        }
+        let mut oa = OpenAccess {
+            is_oa: true,
+            status: Some("bronze".into()),
+            url: Some("https://doi.org/10.1002/14651858.cd001955.pub4".into()),
+            pdf_url: Some(
+                "https://www.cochranelibrary.com/cdsr/doi/10.1002/14651858.CD001955.pub4/pdf/full"
+                    .into(),
+            ),
+            ..OpenAccess::default()
+        };
+        let gone = oa.clone().without_other_versions(&pub5);
+        assert!(!gone.is_oa);
+        assert_eq!(gone.free_copy(), FreeCopyKind::NoneKnown);
+        assert_eq!((gone.url, gone.pdf_url, gone.status), (None, None, None));
+        oa.url = Some("https://pmc.ncbi.nlm.nih.gov/articles/PMC9831289/".into());
+        let kept = oa.clone().without_other_versions(&pub5);
+        assert!(kept.is_oa && kept.pdf_url.is_none());
+        assert_eq!(kept.url, oa.url);
+        let pub4 = ids(&["doi:10.1002/14651858.cd001955.pub4"]);
+        assert_eq!(oa.clone().without_other_versions(&pub4), oa);
     }
 
     #[test]

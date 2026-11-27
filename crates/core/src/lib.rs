@@ -46,7 +46,7 @@ pub mod work;
 pub mod testing;
 
 pub use error::{CapKind, Error, ErrorCategory, ErrorKind, Result};
-pub use free_copy::{FreeCopyKind, pdf_is_fetchable};
+pub use free_copy::{FreeCopyKind, another_versions_copy, pdf_is_fetchable};
 pub use http::{HttpClient, HttpRequest, HttpResponse};
 pub use id::{
     ArxivId, CorpusId, Doi, IdError, IdKind, Isbn, Nbk, OpenAlexId, Pii, Pmcid, Pmid, S2PaperId,

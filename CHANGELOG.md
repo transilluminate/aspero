@@ -3,6 +3,20 @@
 Releases 0.10 to 0.19 are in [docs/changelog/0.1x.md](docs/changelog/0.1x.md),
 and 0.1 to 0.9 in [docs/changelog/0.0x.md](docs/changelog/0.0x.md).
 
+## Unreleased
+
+Fixed:
+
+- A work's free copy is no longer another version's: OpenAlex offered
+  `.pub4`'s PDF for the Cochrane review's `.pub5`, so a tool fetching
+  `open_access.pdf_url` got the superseded version. A copy whose link names
+  another `.pubN` version of the work's DOI gives way to the work's next
+  free copy (PMC's, here), or the work isn't known to be free. `free_copy`
+  (and the FFI's) drops such a link from a work kept from an earlier
+  lookup, and asks PMC. Other DOIs in a link still count as the work's
+  copy: a repository's copy has the repository's DOI. The answer cache is
+  rebuilt once, for OpenAlex's records to be read again.
+
 ## 0.44.1
 
 Added:

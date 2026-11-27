@@ -27,6 +27,10 @@ Fixed:
   looked up rather than reported as one that doesn't exist (wild-6 #404,
   #411, #414 and three more from the same answer). `#` and `+`, which can
   end a SICI-style DOI, stay.
+- A citation whose only identifier is an ISBN that Open Library doesn't
+  know, beside a book the citation otherwise matches, is plausible with
+  the ISBN named, not a mismatch saying the ISBN doesn't exist: the
+  catalogue misses many real books (a WHO guideline's, wild-6 #207).
 - The wrong-verdict issue form offers `unverifiable`, so a `verify
   --report` link for an unverifiable result fills in its verdict; a test
   now checks the form against every verdict the engine gives.

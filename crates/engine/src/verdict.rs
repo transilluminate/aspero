@@ -3,7 +3,7 @@
 
 use aspero_core::matching::{self, PLAUSIBLE, VERIFIED, WorkKind};
 use aspero_core::publication::first_page;
-use aspero_core::{Agreement, Claim, Notice, NoticeKind};
+use aspero_core::{Agreement, Claim, IdKind, Notice, NoticeKind};
 
 use crate::resolve::{Candidate, ClaimExt, ResolveReport};
 
@@ -608,6 +608,31 @@ fn weigh(claim: &Claim, report: &ResolveReport) -> (Verdict, Reason, Option<usiz
         },
         None if failed => (Verdict::Unverifiable, Reason::ProvidersFailed, None),
         None => match elsewhere(None) {
+            // An ISBN no catalogue knows, beside a book the citation
+            // matches: Open Library's coverage is far from whole (a WHO
+            // guideline's, wild-6 #207), so the ISBN is named, not called
+            // nonexistent.
+            Some(j) if claim.ids.iter().all(|id| id.kind() == IdKind::Isbn) => {
+                let c = &report.candidates[j];
+                let mut differs = differences(claim, c, true);
+                differs.extend(claim.ids.first().map(|cited| {
+                    Difference {
+                        field: CitedField::Identifier,
+                        actual: c
+                            .ids
+                            .iter()
+                            .find(|k| k.kind() == IdKind::Isbn)
+                            .map(ToString::to_string),
+                        cited: Some(cited.to_string()),
+                        kind: None,
+                    }
+                }));
+                (
+                    Verdict::Plausible,
+                    Reason::PartlyMatches { differs },
+                    Some(j),
+                )
+            }
             Some(j) => (Verdict::Mismatch, Reason::IdMissingElsewhere, Some(j)),
             None => (Verdict::NotFound, Reason::IdMissing, None),
         },

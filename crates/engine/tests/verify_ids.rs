@@ -166,3 +166,60 @@ async fn identifiers_all_another_works_stay_a_mismatch() {
         .await;
     assert_eq!(v.verdict, Verdict::Mismatch, "{}", v.reason_text);
 }
+
+const WHO_TITLE: &str = "Guideline: protecting, promoting and supporting breastfeeding in \
+                         facilities providing maternity and newborn services";
+
+/// One source that looks up ISBNs (and knows none of these) and finds
+/// the guideline by its title.
+fn who_engine() -> Engine {
+    let guideline = work(
+        "europepmc",
+        &["pmid:29565522"],
+        WHO_TITLE,
+        &["World Health Organization"],
+        2017,
+    );
+    let mut source = Scripted::new("openlibrary").keyword().with(vec![guideline]);
+    source.caps.lookup_kinds.push(IdKind::Isbn);
+    engine(vec![Arc::new(source)])
+}
+
+#[tokio::test]
+async fn an_isbn_no_catalogue_knows_beside_the_book_is_plausible() {
+    // wild-6 #207, minimised: a real guideline, its ISBN missing from the
+    // catalogue looked in.
+    let v = who_engine()
+        .verify(
+            &Claim::from_text(format!(
+                "World Health Organization. {WHO_TITLE}. Geneva: World Health Organization; \
+                 2017. ISBN 978-92-4-155008-6."
+            )),
+            5,
+        )
+        .await;
+    assert_eq!(v.verdict, Verdict::Plausible, "{}", v.reason_text);
+    assert_eq!(
+        identifier(&v.reason),
+        (None, Some("isbn:9789241550086".into()))
+    );
+    assert!(
+        !v.reason_text.contains("does not exist"),
+        "{}",
+        v.reason_text
+    );
+}
+
+#[tokio::test]
+async fn an_unknown_isbn_beside_an_invented_book_is_still_not_found() {
+    let v = who_engine()
+        .verify(
+            &Claim::from_text(
+                "Quillfeather-Ondrak P. Lanterns of the inland sea. Harbourline; 2017. \
+                 ISBN 978-92-4-155008-6.",
+            ),
+            5,
+        )
+        .await;
+    assert_eq!(v.verdict, Verdict::NotFound, "{}", v.reason_text);
+}

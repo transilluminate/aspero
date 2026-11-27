@@ -196,3 +196,47 @@ fn a_notice_cited_by_its_originals_title_is_no_cut_in_front() {
     let a = assess(&claim, &notice);
     assert_ne!(a.title.agreement, Agreement::Partial, "{a:?}");
 }
+
+/// wild-6 #145: the journal cited before a model's note ("[year and
+/// volume to verify]") is another: plausible, the journal named.
+#[test]
+fn another_journal_before_a_note_is_plausible() {
+    let r = article(
+        "Caries Management Strategies for Primary Molars: 1-Yr Randomized Control Trial Results",
+        &["R.M. Santamaria", "N.P.T. Innes", "V. Machiulskiene"],
+        2014,
+        ("Journal of Dental Research", "93", "1062-1069"),
+    );
+    let claim = Claim::from_text(
+        "Santamaría RM, Innes NPT, Machiulskiene V. Caries management strategies for primary \
+         molars: 1-year randomized controlled clinical trial. Caries Res. 2014 [year and volume \
+         to verify].",
+    );
+    let a = assess(&claim, &r);
+    assert_eq!(a.container.agreement, Agreement::Mismatch, "{a:?}");
+    assert!(plausible(&a), "{a:?}");
+}
+
+/// wild-6 #592: the journal between the year and a quoted title ("(2024),
+/// PNAS, \"…\"") is another: plausible. The right one verifies (wild-6
+/// #591).
+#[test]
+fn another_journal_before_a_quoted_title_is_plausible() {
+    let r = article(
+        "Physics-based early warning signal shows that AMOC is on tipping course",
+        &["René M. van Westen", "Michael Kliphuis", "Henk A. Dijkstra"],
+        2024,
+        ("Science Advances", "10", "eadk1189"),
+    );
+    let cited = |journal: &str| {
+        Claim::from_text(format!(
+            "van Westen, Kliphuis & Dijkstra (2024), {journal}, \"Physics-based early warning \
+             signal shows that AMOC is on tipping course.\""
+        ))
+    };
+    let a = assess(&cited("PNAS"), &r);
+    assert_eq!(a.container.agreement, Agreement::Mismatch, "{a:?}");
+    assert!(plausible(&a), "{a:?}");
+    let a = assess(&cited("Science Advances"), &r);
+    assert!(a.confidence >= VERIFIED, "{a:?}");
+}

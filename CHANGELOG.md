@@ -32,6 +32,11 @@ Fixed:
   strengthening of …"), is plausible, the title named (wild-6 #49). A
   leading article dropped, or a main title dropped before its subtitle,
   is still verified.
+- A journal is read in two more places, as one possible reading: before a
+  note in square brackets ending the reference ("Caries Res. 2014 [year
+  and volume to verify]."), and between the year and a quoted title
+  ("(2024), PNAS, \"…\""). Another journal there makes the citation
+  plausible, the journal named (wild-6 #145, #592).
 - The wrong-verdict issue form offers `unverifiable`, so a `verify
   --report` link for an unverifiable result fills in its verdict; a test
   now checks the form against every verdict the engine gives.

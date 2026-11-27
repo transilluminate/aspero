@@ -22,7 +22,8 @@ const TRAILING_PUNCTUATION: &[char] = &['.', ',', ';', ':'];
 /// non-ASCII characters are left untouched) with no `doi:` or URL wrapper.
 /// URL forms are percent-decoded; bare and prefixed forms are taken literally.
 ///
-/// Trailing `.` `,` `;` `:` are stripped. The DOI spec technically permits a
+/// Trailing `.` `,` `;` `:` and footnote marks (`†`, `‡`, superscript
+/// digits) are stripped. The DOI spec technically permits a
 /// suffix ending in one, but in practice that is far rarer than a DOI copied
 /// with the end of its sentence, and a wrong DOI is caught later by lookup.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]

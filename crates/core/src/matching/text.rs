@@ -166,6 +166,20 @@ pub(super) fn title_cut(claimed: Option<&str>, text: Option<&Normalised>, actual
     }
 }
 
+/// Whether the title cited (as for [`title_cut`]) is `actual` without its
+/// opening words ([`Normalised::cut_in_front`]).
+pub(super) fn title_cut_in_front(
+    claimed: Option<&str>,
+    text: Option<&Normalised>,
+    actual: &str,
+) -> bool {
+    match (claimed, text) {
+        (Some(claimed), _) => Normalised::new(claimed).cut_in_front(actual),
+        (None, Some(text)) => text.cut_in_front(actual),
+        _ => false,
+    }
+}
+
 /// A reference string prepared for "is X mentioned?" questions.
 pub(super) struct Normalised {
     /// The reference as written.
@@ -337,6 +351,12 @@ impl Normalised {
         let together = |from: usize, to: usize, edge: bool| {
             (at[from]..at[to]).all(|i| {
                 let gap = &self.raw[self.spans[i].end..self.spans[i + 1].start];
+                // "vs." stops no sentence ("Pseudobinaural vs. real binaural
+                // …", wild-6 #14).
+                let gap = match self.words[i].as_str() {
+                    "vs" | "v" => gap.strip_prefix('.').unwrap_or(gap),
+                    _ => gap,
+                };
                 gap.chars().all(|c| {
                     c.is_whitespace()
                         || matches!(c, '-' | '‐' | '\'' | '’')
@@ -639,6 +659,58 @@ impl Normalised {
             .iter()
             .any(|w| w.chars().filter(|c| c.is_alphabetic()).count() >= 3)
             && dropped.iter().all(|w| !self.words.contains(w))
+    }
+
+    /// Whether the reference gives `title` without its opening words, the
+    /// ones the rest depends on: "Additional strengthening of hip abductor
+    /// …" for "The effect of additional strengthening of hip abductor …"
+    /// (wild-6 #49). The words dropped end in a joining word ("of", "on",
+    /// "for"), one of them a word of three letters or more found nowhere
+    /// else in the reference, and not at a separator (a main title dropped
+    /// before its subtitle, "The Rise of Competitive Authoritarianism" of
+    /// "Elections Without Democracy: The Rise …", is a part cited); the
+    /// rest is given, to the title's end or its main title's, at least
+    /// [`SHORT_TITLE_WORDS`] content words, and the title cited starts
+    /// there (a stop, a quote, or the reference's start before it). The
+    /// title cited names what the work studied, not the work.
+    pub(super) fn cut_in_front(&self, title: &str) -> bool {
+        let title = unmarked(title);
+        let t = words(title);
+        if t.len() < 2 || self.title_span(title).is_some() {
+            return false;
+        }
+        let main = words(main_title(title)).len();
+        (1..t.len()).any(|k| {
+            if !STOPWORDS.contains(&t[k - 1].as_str())
+                || cut_at_separator(title, k)
+                || [&t[k..], &t[k..main.max(k)]]
+                    .iter()
+                    .all(|rest| content_words(&rest.join(" ")).len() < SHORT_TITLE_WORDS)
+            {
+                return false;
+            }
+            let dropped = significant_words(&t[..k]);
+            let carried = dropped
+                .iter()
+                .any(|w| w.chars().filter(|c| c.is_alphabetic()).count() >= 3)
+                && dropped.iter().all(|w| !self.words.contains(w));
+            if !carried {
+                return false;
+            }
+            [&t[k..], &t[k..main.max(k)]].iter().any(|rest| {
+                content_words(&rest.join(" ")).len() >= SHORT_TITLE_WORDS
+                    && self
+                        .words
+                        .windows(rest.len())
+                        .position(|run| run == *rest)
+                        .is_some_and(|at| {
+                            let before = &self.raw[..self.spans[at].start];
+                            let before = before.trim_end();
+                            before.is_empty()
+                                || before.ends_with(['.', '"', '“', '\'', '‘', ':', ')'])
+                        })
+            })
+        })
     }
 
     /// Whether `title` is found as a phrase only in a short form: its main

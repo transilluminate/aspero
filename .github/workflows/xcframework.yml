@@ -34,6 +34,12 @@ jobs:
           targets: aarch64-apple-darwin
       - uses: Swatinem/rust-cache@v2
       - run: scripts/xcframework.sh
+      # The bindings attached are the tag's committed snapshot, byte for
+      # byte (embedders pin its sha256; CI checks the two agree).
+      - run: |
+          if [ -f contracts/aspero_ffi.swift ]; then
+            cmp target/xcframework/aspero_ffi.swift contracts/aspero_ffi.swift
+          fi
       - run: >-
           gh release upload "$TAG" --clobber
           target/xcframework/AsperoFFI.xcframework.zip

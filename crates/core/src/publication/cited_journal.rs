@@ -76,15 +76,75 @@ fn read_cited_journal(text: &str) -> Option<Reading> {
         // BibTeX: its journal field.
         return bibtex_field(text, "journal").map(Reading::Sure);
     }
-    let compact = compact(text);
+    let compact = compact(without_note(text));
     let tokens: Vec<&str> = compact.split_whitespace().collect();
     told(&tokens).or_else(|| {
         styled(&tokens)
             .is_none()
-            .then(|| unstopped_journal(&tokens).or_else(|| named_after_quote(&tokens)))
+            .then(|| {
+                unstopped_journal(&tokens)
+                    .or_else(|| named_after_quote(&tokens))
+                    .or_else(|| named_before_quote(&tokens))
+            })
             .flatten()
             .map(|journal| Reading::Maybe(vec![journal]))
     })
+}
+
+/// A reference without the note in square brackets ending it, a model's
+/// to its reader: "… Caries Res. 2014 [year and volume to verify]."
+/// (wild-6 #145). Only words, one of them lowercase: not an identifier
+/// ("[arXiv:hep-th/0112119]") or a publisher's placeholder ("[s.n.]").
+fn without_note(text: &str) -> &str {
+    let trimmed = text.trim_end().trim_end_matches('.').trim_end();
+    let Some(inner) = trimmed.strip_suffix(']') else {
+        return text;
+    };
+    let Some(open) = inner.rfind('[') else {
+        return text;
+    };
+    let note = &inner[open + 1..];
+    let words = note
+        .chars()
+        .all(|c| c.is_alphabetic() || c.is_whitespace() || matches!(c, ',' | '-'))
+        && note.contains(' ')
+        && note
+            .split_whitespace()
+            .any(|w| w.chars().count() >= 3 && w.chars().all(char::is_lowercase));
+    if words {
+        inner[..open].trim_end()
+    } else {
+        text
+    }
+}
+
+/// The name between a bracketed year and a quoted title, set off by
+/// commas: "van Westen, Kliphuis & Dijkstra (2024), PNAS, \"Physics-based
+/// early warning signal …\"" (wild-6 #592), as a model shortens a
+/// reference. One reading, not a sure one. Not a publisher or a
+/// conference.
+fn named_before_quote(tokens: &[&str]) -> Option<String> {
+    let quote = tokens
+        .iter()
+        .position(|t| t.starts_with(['"', '“']) && t.chars().count() > 1)?;
+    let dated = tokens[..quote].iter().rposition(|t| {
+        t.strip_suffix(',')
+            .and_then(|t| t.strip_prefix('('))
+            .is_some_and(bracketed_year)
+    })?;
+    let words = &tokens[dated + 1..quote];
+    let (last, rest) = words.split_last()?;
+    let last = last.strip_suffix(',')?;
+    let name: Vec<&str> = rest.iter().copied().chain([last]).collect();
+    let first = name[0];
+    let joined = name.join(" ");
+    (name.len() <= JOURNAL_WORDS
+        && name.iter().all(|w| name_word(w))
+        && capitalised(first)
+        && !is_stopword(&first.to_lowercase())
+        && !publisher(&joined)
+        && !proceedings(&joined))
+    .then_some(joined)
 }
 
 /// [`read_cited_journal`]'s reading where a style tells the journal.
@@ -573,6 +633,52 @@ fn is_date_word(t: &str) -> bool {
 mod tests {
     use super::*;
     use crate::publication::{Locator, locator};
+
+    /// wild-6 #145, #592: a journal before a model's note to check it, or
+    /// between the year and a quoted title.
+    #[test]
+    fn a_journal_beside_a_note_or_before_a_quoted_title_is_one_reading() {
+        for (text, journal) in [
+            (
+                "Santamaría RM, Innes NPT, Splieth CH. Caries management strategies for primary \
+                 molars: 1-year randomized controlled clinical trial. Caries Res. 2014 [year and \
+                 volume to verify].",
+                "Caries Res",
+            ),
+            (
+                "van Westen, Kliphuis & Dijkstra (2024), PNAS, \"Physics-based early warning \
+                 signal shows that AMOC is on tipping course.\"",
+                "PNAS",
+            ),
+            (
+                "Ditlevsen & Ditlevsen (2023), Nature Communications, \"Warning of a \
+                 forthcoming collapse of the Atlantic meridional overturning circulation.\"",
+                "Nature Communications",
+            ),
+        ] {
+            assert!(
+                cited_journals(text).iter().any(|j| j == journal),
+                "{text}: {:?}",
+                cited_journals(text)
+            );
+        }
+        // Not a publisher, a conference, a placeholder or an identifier.
+        for text in [
+            "Vaswani et al. (2017), NeurIPS, \"Attention is all you need.\"",
+            "Smith (2010), Oxford University Press, \"A history of the world.\"",
+            "Barton, R. F. (1941). The Kalingas: their institutions and custom law. [s.n.].",
+            "Bianchi M. Holographic Renormalization. Nucl Phys B. 2002 [arXiv:hep-th/0112119].",
+        ] {
+            let read = cited_journals(text);
+            assert!(
+                read.iter().all(|j| !matches!(
+                    j.as_str(),
+                    "NeurIPS" | "Oxford University Press" | "s.n." | "Nucl Phys B 2002"
+                )),
+                "{text}: {read:?}"
+            );
+        }
+    }
 
     #[test]
     fn the_cited_journal_is_read_where_a_reference_gives_it() {

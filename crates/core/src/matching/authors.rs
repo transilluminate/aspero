@@ -224,6 +224,42 @@ pub(super) fn is_body(name: &str) -> bool {
 /// the byline at its first lowercase word ("Huang et al. described in The
 /// Lancet").
 pub(super) fn byline_strangers(byline: &str, authors: &[Person], journal: Option<&str>) -> bool {
+    !stranger_words(byline, authors, journal).is_empty()
+}
+
+/// Whether a book's reference swaps one of its record's co-authors for
+/// another ("Antony, M. M., & Swinson, R. P." for Antony, Craske and
+/// Barlow's workbook, wild-6 #267): its byline names someone not on the
+/// record's ([`byline_strangers`]), the record lists two people or more,
+/// the first cited is the record's first, and the byline names no more
+/// people than the record lists. Not a record listing only the first
+/// author, nor a later edition's co-author added ("Solomons, Fryhle &
+/// Snyder" for Solomons and Fryhle), nor a chapter's author or a
+/// translator cited beside a book's editors.
+pub(super) fn book_co_author_swapped(
+    byline: &str,
+    authors: &[Person],
+    journal: Option<&str>,
+) -> bool {
+    let strangers = stranger_words(byline, authors, journal);
+    let families: Vec<String> = authors.iter().filter_map(family_name).collect();
+    let cited = words(byline);
+    let Some(first) = cited.iter().find(|w| w.chars().count() >= 2) else {
+        return false;
+    };
+    let known = families
+        .iter()
+        .filter(|f| cited.iter().any(|w| near(w, f)))
+        .count();
+    !strangers.is_empty()
+        && families.len() >= 2
+        && near(first, &families[0])
+        && known + strangers.len() <= families.len()
+}
+
+/// The words of a byline that name someone not on the record's
+/// ([`byline_strangers`]).
+fn stranger_words(byline: &str, authors: &[Person], journal: Option<&str>) -> Vec<String> {
     let mut tokens: Vec<(String, &str)> = Vec::new();
     let mut spans = Vec::new();
     for (word, span) in spanned_words(byline) {
@@ -250,7 +286,7 @@ pub(super) fn byline_strangers(byline: &str, authors: &[Person], journal: Option
         })
     };
     if tokens.iter().any(|(w, _)| is_body_word(w)) {
-        return false;
+        return Vec::new();
     }
     let names = name_words(authors);
     let people: Vec<(Vec<String>, String)> = authors
@@ -271,7 +307,7 @@ pub(super) fn byline_strangers(byline: &str, authors: &[Person], journal: Option
             .find(|(family, _)| family.iter().any(|f| near(f, &tokens[i].0)))
             .map(|(_, initials)| initials)
     };
-    tokens.iter().enumerate().any(|(i, (word, raw))| {
+    let strange = |(i, (word, raw)): (usize, &(String, &str))| {
         let name_like = word.chars().count() >= 2
             && raw.chars().next().is_some_and(char::is_uppercase)
             && raw.chars().any(char::is_lowercase)
@@ -301,7 +337,13 @@ pub(super) fn byline_strangers(byline: &str, authors: &[Person], journal: Option
                 .filter(|&j| j != i)
                 .any(|j| initials_at(j).is_some_and(|ini| ini.is_empty() || ini.contains(first)));
         !given
-    })
+    };
+    tokens
+        .iter()
+        .enumerate()
+        .filter(|&(i, token)| strange((i, token)))
+        .map(|(_, (word, _))| word.clone())
+        .collect()
 }
 
 /// A person's family name, normalised: the `family` field, or the last

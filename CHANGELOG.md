@@ -52,6 +52,27 @@ Fixed:
 - An acronym may take both initials of a compound word ("SAEs" for
   "Sparse Autoencoders"), so a title written with one ("SAEs Do Not Find
   Canonical Units of Analysis") is the title.
+- A title reworded is plausible, not verified, even beside the work's DOI
+  or place, when its words are dropped in one place and others put in
+  another ("… and birth outcomes" for "… and the risks of low
+  birthweight and preterm birth"), when a quoted title is reworded, or
+  around a "vs." (wild-6 #14, #130, #653). A title misspelt, abbreviated,
+  given without its subtitle or a leading article, or a formula printed
+  spaced ("B F 3") is still verified.
+- A title without its opening words, the ones the rest depends on
+  ("Additional strengthening of …" for "The effect of additional
+  strengthening of …"), is plausible, the title named (wild-6 #49). A
+  leading article dropped, or a main title dropped before its subtitle,
+  is still verified.
+- A journal is read in two more places, as one possible reading: before a
+  note in square brackets ending the reference ("Caries Res. 2014 [year
+  and volume to verify]."), and between the year and a quoted title
+  ("(2024), PNAS, \"…\""). Another journal there makes the citation
+  plausible, the journal named (wild-6 #145, #592).
+- A book whose record lists more than one author, cited with a co-author
+  it doesn't have, is plausible, the authors named (wild-6 #267). A book's
+  record listing one author may list only the first, and is still not
+  held against the others cited.
 - The wrong-verdict issue form offers `unverifiable`, so a `verify
   --report` link for an unverifiable result fills in its verdict; a test
   now checks the form against every verdict the engine gives.

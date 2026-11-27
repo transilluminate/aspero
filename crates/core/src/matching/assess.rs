@@ -30,6 +30,10 @@ use crate::publication::{self, first_page, journal_in, other_journal, same_journ
 use crate::record::SourceRecord;
 use crate::work::WorkType;
 
+/// A quoted span's similarity to the record's title, at least, for it to be
+/// read as the title cited.
+const QUOTED_TITLE_SHARE: f64 = 2.0 / 3.0;
+
 /// Scores how well `record` matches `claim`.
 // The caps and floors apply in order, each reading what the ones before
 // left; splitting them up hides that order. Follow-up: move the facts the
@@ -150,13 +154,15 @@ pub fn assess(claim: &Claim, record: &SourceRecord) -> Assessment {
     // Names the claim gives that the record's byline lacks: invented
     // co-authors beside a real first author. Not a match, whoever is first.
     // Not for books, whose records often list only the first author (Open
-    // Library's Sutton without Barto).
+    // Library's Sutton without Barto), or their editors or translators,
+    // unless the reference swaps one of the record's co-authors for
+    // another (`authors::book_co_author_swapped`, wild-6 #267).
     let journal = work
         .container_title
         .as_deref()
         .map(publication::significant);
+    let book = work.work_type == Some(crate::work::WorkType::Book);
     let strangers = authors.agreement != Agreement::Unknown
-        && work.work_type != Some(crate::work::WorkType::Book)
         && complete_byline(&work.authors)
         && if claim.authors.is_empty() {
             text.as_ref()
@@ -165,10 +171,15 @@ pub fn assess(claim: &Claim, record: &SourceRecord) -> Assessment {
                         .or_else(|| untitled_byline(text, journal.as_deref()))
                 })
                 .is_some_and(|b| {
-                    byline_strangers(&b, &work.authors, work.container_title.as_deref())
+                    let journal = work.container_title.as_deref();
+                    if book {
+                        authors::book_co_author_swapped(&b, &work.authors, journal)
+                    } else {
+                        byline_strangers(&b, &work.authors, journal)
+                    }
                 })
         } else {
-            claimed_strangers(&claim.authors, &work.authors)
+            !book && claimed_strangers(&claim.authors, &work.authors)
         };
     // Or names an earlier version's first author.
     let earlier = authors.agreement != Agreement::Unknown
@@ -242,6 +253,17 @@ pub fn assess(claim: &Claim, record: &SourceRecord) -> Assessment {
             text.substitutes_in(actual)
                 .or_else(|| text.inserts_in(actual).then_some(false))
                 .or_else(|| text.replaces_in(actual).then_some(false))
+                // A title quoted is the title cited, all of it, as one
+                // given apart is (wild-6 #653); not a reference quoted
+                // whole ("Corrections to “Shamloul R, Bella AJ. …”").
+                .or_else(|| {
+                    titles::given_title(&text.raw)
+                        .is_some_and(|quoted| {
+                            title_similarity(&quoted, actual) >= QUOTED_TITLE_SHARE
+                                && titles::replaces(&quoted, actual)
+                        })
+                        .then_some(false)
+                })
         }
         (Some(actual), Some(text)) if found && main_only && claim.title.is_none() => {
             text.substitutes_in(actual)
@@ -259,6 +281,14 @@ pub fn assess(claim: &Claim, record: &SourceRecord) -> Assessment {
     let cut = work_title
         .as_deref()
         .is_some_and(|actual| text::title_cut(claimed_title.as_deref(), text.as_ref(), actual));
+    // Or without its opening words, the ones the rest depends on
+    // (`Normalised::cut_in_front`, wild-6 #49). Not a notice's ("Correction
+    // to “…”"), cited for its original: `derivative.rs` tells those.
+    let cut = cut
+        || (record_derivative_kind(work).is_none()
+            && work_title.as_deref().is_some_and(|actual| {
+                text::title_cut_in_front(claimed_title.as_deref(), text.as_ref(), actual)
+            }));
     let title = match (title.score, reworded) {
         (Some(s), Some(true)) => FieldCheck::scored(s.min(OTHER_IN_SERIES)),
         (Some(s), Some(false)) => FieldCheck::scored(s.min(EXTENDED_TITLE)),

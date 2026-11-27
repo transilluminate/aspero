@@ -421,14 +421,64 @@ pub(super) fn replaced(
             stretch(&claimed[ci + 1..cj], &title[ti + 1..tj]);
         }
     }
+    let count = if count > 0 {
+        count
+    } else {
+        scattered(claimed, title, &anchors, together)
+    };
     count > 0 && count * KEPT_SHARE <= m
 }
 
+/// Words of `claimed`'s own and words of `title` it drops, in different
+/// places between the words they share, paired off: a title reworded
+/// though no stretch of one stands where the other's does ("… during
+/// pregnancy and birth outcomes: the Generation R Study" for "… during
+/// pregnancy and the risks of low birthweight and preterm birth: …",
+/// wild-6 #130). Its own words count before the first shared word, or
+/// after the last, only when all of `claimed` runs together (a title
+/// given apart or quoted: "The effect of deliberate practice on
+/// performance …" for "Deliberate Practice and Performance …", wild-6
+/// #653); the title's words dropped there don't (a title cut short, a
+/// subtitle dropped).
+fn scattered(
+    claimed: &[String],
+    title: &[String],
+    anchors: &[(usize, usize)],
+    together: &dyn Fn(usize, usize, bool) -> bool,
+) -> usize {
+    let (n, (first, last)) = (claimed.len(), (anchors[0], anchors[anchors.len() - 1]));
+    let mut own: Vec<String> = Vec::new();
+    let mut dropped: Vec<String> = Vec::new();
+    if together(0, n - 1, true) {
+        own.extend_from_slice(&claimed[..first.0]);
+        own.extend_from_slice(&claimed[last.0 + 1..]);
+    }
+    for pair in anchors.windows(2) {
+        let ((ci, ti), (cj, tj)) = (pair[0], pair[1]);
+        if together(ci, cj, false) {
+            own.extend_from_slice(&claimed[ci + 1..cj]);
+        }
+        dropped.extend_from_slice(&title[ti + 1..tj]);
+    }
+    replacements(&own, &dropped)
+}
+
 /// Words of `c` put in place of words of `t`, once those written otherwise
-/// are paired off.
+/// are paired off. A formula, letters and digits run together, isn't
+/// counted: records print one spaced ("BF3" for "B F 3", holdout-1 #87).
 fn replacements(c: &[String], t: &[String]) -> usize {
-    let mut c: Vec<&str> = c.iter().map(String::as_str).collect();
-    let mut t: Vec<&str> = t.iter().map(String::as_str).collect();
+    let formula =
+        |w: &&str| w.chars().any(|c| c.is_ascii_digit()) && w.chars().any(char::is_alphabetic);
+    let mut c: Vec<&str> = c
+        .iter()
+        .map(String::as_str)
+        .filter(|w| !formula(w))
+        .collect();
+    let mut t: Vec<&str> = t
+        .iter()
+        .map(String::as_str)
+        .filter(|w| !formula(w))
+        .collect();
     // A word split in two on one side ("mort- ality", "non small").
     let unsplit = |parts: &mut Vec<&str>, whole: &mut Vec<&str>| {
         let mut k = 0;

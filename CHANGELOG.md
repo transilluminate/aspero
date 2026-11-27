@@ -22,6 +22,25 @@ Added:
 
 Fixed:
 
+- An identifier with a footnote mark glued to its end
+  (`https://doi.org/10.1109/ICSE43902.2021.00140†`) is read without it:
+  daggers, `§`, `¶`, `‖`, asterisk look-alikes and superscript digits come
+  off every kind, as trailing sentence punctuation does, so the DOI is
+  looked up rather than reported as one that doesn't exist (wild-6 #404,
+  #411, #414 and three more from the same answer). `#` and `+`, which can
+  end a SICI-style DOI, stay.
+- A citation whose only identifier is an ISBN that Open Library doesn't
+  know, beside a book the citation otherwise matches, is plausible with
+  the ISBN named, not a mismatch saying the ISBN doesn't exist: the
+  catalogue misses many real books (a WHO guideline's, wild-6 #207).
+- An identifier's work with the title cited, no authors to compare (a
+  record without them, a corporate author) and only the year different
+  is plausible, its year named, not a mismatch: a preprint dated by its
+  journal version (wild-3 #931), a guideline's Bookshelf record (holdout-5
+  #99).
+- A chapter cited by its DOI is no longer a mismatch because the book it
+  is in matches the citation too: the book a chapter's citation names is
+  not another work it points at (wild-6 #597, an IPCC report's chapter).
 - The wrong-verdict issue form offers `unverifiable`, so a `verify
   --report` link for an unverifiable result fills in its verdict; a test
   now checks the form against every verdict the engine gives.

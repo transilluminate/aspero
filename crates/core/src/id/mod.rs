@@ -10,7 +10,8 @@
 //!   parsing that output yields an equal value, so normalisation is idempotent.
 //! - Equality is equality of canonical forms.
 //! - Parsing is strict about structure, with one concession to pasted prose:
-//!   wrappers and trailing sentence punctuation come off (see [`Doi`]).
+//!   wrappers, trailing sentence punctuation and footnote marks (`†`,
+//!   superscript digits) come off (see [`Doi`]).
 //!   Finding identifiers in running text is [`scan`]'s job.
 //!
 //! [`WorkId`] is the kind-tagged union. Its canonical form is `kind:value`

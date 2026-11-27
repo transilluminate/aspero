@@ -3,7 +3,7 @@
 
 use aspero_core::matching::{self, PLAUSIBLE, VERIFIED, WorkKind};
 use aspero_core::publication::first_page;
-use aspero_core::{Agreement, Claim, Notice, NoticeKind};
+use aspero_core::{Agreement, Claim, IdKind, Notice, NoticeKind};
 
 use crate::resolve::{Candidate, ClaimExt, ResolveReport};
 
@@ -262,6 +262,35 @@ fn near_miss(c: &Candidate) -> bool {
     let a = &c.assessment;
     a.title.agreement == Agreement::Match
         && (a.authors.agreement == Agreement::Match || a.year.agreement == Agreement::Match)
+}
+
+/// The same title and no authors to compare (a record without them, a
+/// citation by its corporate author), nothing else contradicted but the
+/// year: the identifiers' work cited with another year, as a chapter of a
+/// report reissued in print (wild-6 #597) or a preprint by its later
+/// journal version's date (wild-3 #931) is.
+fn unauthored_near_miss(c: &Candidate) -> bool {
+    let a = &c.assessment;
+    a.title.agreement == Agreement::Match
+        && a.authors.agreement == Agreement::Unknown
+        && [a.container, a.volume, a.page]
+            .iter()
+            .all(|f| f.agreement != Agreement::Mismatch)
+}
+
+/// Whether `other` is the book `chapter` (a record whose title and
+/// container the citation gives) is in: its title holds the container's.
+/// A chapter's citation names its book, so the book's record matches it
+/// too, but isn't another work it points at (wild-6 #597).
+fn its_book(chapter: &Candidate, other: &Candidate) -> bool {
+    let (Some(book), Some(title)) = (
+        chapter.record.work.container_title.as_deref(),
+        other.record.work.title.as_deref(),
+    ) else {
+        return false;
+    };
+    let (book, title) = (matching::normalise(book), matching::normalise(title));
+    book.split_whitespace().count() >= 3 && format!(" {title} ").contains(&format!(" {book} "))
 }
 
 /// Titles alike enough to be one book's.
@@ -555,11 +584,16 @@ fn weigh(claim: &Claim, report: &ResolveReport) -> (Verdict, Reason, Option<usiz
                 && !(a.title.agreement == Agreement::Mismatch
                     && a.authors.agreement == Agreement::Mismatch)
         });
+        let chapter = skip.map(|i| &report.candidates[i]).filter(|c| {
+            c.assessment.title.agreement == Agreement::Match
+                && c.assessment.container.agreement == Agreement::Match
+        });
         report.candidates.iter().enumerate().position(|(i, c)| {
             let a = &c.assessment;
             Some(i) != skip
                 && a.confidence >= PLAUSIBLE
                 && !own.is_some_and(|own| another_edition(own, c))
+                && !chapter.is_some_and(|chapter| its_book(chapter, c))
                 && !(placed
                     && (a.ids == Agreement::Mismatch || a.page.agreement == Agreement::Mismatch))
         })
@@ -597,7 +631,7 @@ fn weigh(claim: &Claim, report: &ResolveReport) -> (Verdict, Reason, Option<usiz
             Some(j) => (Verdict::Mismatch, Reason::IdElsewhere { cited: i }, Some(j)),
             // The identifiers' work, cited with an error (a wrong year):
             // the same title, and matching authors or year.
-            None if near_miss(c) => (
+            None if near_miss(c) || unauthored_near_miss(c) => (
                 Verdict::Plausible,
                 Reason::IdPartlyMatches {
                     differs: differences(claim, c, true),
@@ -608,6 +642,31 @@ fn weigh(claim: &Claim, report: &ResolveReport) -> (Verdict, Reason, Option<usiz
         },
         None if failed => (Verdict::Unverifiable, Reason::ProvidersFailed, None),
         None => match elsewhere(None) {
+            // An ISBN no catalogue knows, beside a book the citation
+            // matches: Open Library's coverage is far from whole (a WHO
+            // guideline's, wild-6 #207), so the ISBN is named, not called
+            // nonexistent.
+            Some(j) if claim.ids.iter().all(|id| id.kind() == IdKind::Isbn) => {
+                let c = &report.candidates[j];
+                let mut differs = differences(claim, c, true);
+                differs.extend(claim.ids.first().map(|cited| {
+                    Difference {
+                        field: CitedField::Identifier,
+                        actual: c
+                            .ids
+                            .iter()
+                            .find(|k| k.kind() == IdKind::Isbn)
+                            .map(ToString::to_string),
+                        cited: Some(cited.to_string()),
+                        kind: None,
+                    }
+                }));
+                (
+                    Verdict::Plausible,
+                    Reason::PartlyMatches { differs },
+                    Some(j),
+                )
+            }
             Some(j) => (Verdict::Mismatch, Reason::IdMissingElsewhere, Some(j)),
             None => (Verdict::NotFound, Reason::IdMissing, None),
         },

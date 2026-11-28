@@ -404,8 +404,12 @@ Two SQLite stores, split by whether data can be refetched.
 - **Cache** (`cache.sqlite`, platform cache dir or `$ASPERO_CACHE_DIR`):
   records with raw bodies, "not found", search pages, citation links. WAL
   and a busy timeout, so agent processes share it. No migrations: bump
-  `SCHEMA_VERSION` on any schema *or record-shape/mapping* change and it
-  rebuilds; tables and columns added beside the schema need none.
+  `SCHEMA_VERSION` on any schema *or record-shape/mapping* change and an
+  older cache rebuilds; tables and columns added beside the schema need
+  none. A newer version's cache is left alone: the older binary runs
+  without its answers (none read, written or evicted), its accounting
+  tables shared as ever, so two versions on one file (an embedder and the
+  CLI, one upgraded first) don't wipe each other's.
 - **Lifetimes** (`CachePolicy`): records (with their notices) 7 days, "not
   found" 1 day (both settings; 0 asks every time), search pages 1 day,
   references 30 days, citing-work pages 1 day. Failures and verdicts are
@@ -819,7 +823,8 @@ Not until needed: priority lanes in the pacer, a daemon, a SQLite
 connection pool, and CLI keys anywhere but the environment (agents run
 headless, where a Keychain prompt after an upgrade would hang them). The
 app and the CLI keep separate caches (the sandbox puts the app's in its
-container, and different schema versions would rebuild each other's).
+container); where they share one, the older version runs without the
+newer's answers rather than rebuilding them (Storage).
 
 ## Diagnostics events
 

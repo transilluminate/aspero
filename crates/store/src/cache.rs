@@ -139,6 +139,9 @@ impl Cache for SqliteCache {
         provider: &ProviderId,
         ids: &[WorkId],
     ) -> Result<Vec<Option<CachedLookup>>> {
+        if self.newer {
+            return Ok(vec![None; ids.len()]);
+        }
         let (rows, records, misses) = self.lookup_rows(provider, ids)?;
         self.touch("record", &records);
         self.touch("miss", &misses);
@@ -171,6 +174,9 @@ impl Cache for SqliteCache {
         answers: &[(&WorkId, Option<&SourceRecord>)],
         at: Timestamp,
     ) -> Result<()> {
+        if self.newer {
+            return Ok(());
+        }
         let mut conn = self.conn();
         let tx = conn.transaction()?;
         {
@@ -229,6 +235,9 @@ impl Cache for SqliteCache {
         provider: &ProviderId,
         query: &SearchQuery,
     ) -> Result<Option<Entry<Page>>> {
+        if self.newer {
+            return Ok(None);
+        }
         let row: Option<(String, i64, i64, i64)> = self
             .conn()
             .query_row(
@@ -257,6 +266,9 @@ impl Cache for SqliteCache {
         page: &Page,
         at: Timestamp,
     ) -> Result<()> {
+        if self.newer {
+            return Ok(());
+        }
         self.conn().execute(
             "INSERT OR REPLACE INTO search (provider, query, page, stored_at, used_at) \
              VALUES (?1, ?2, ?3, ?4, ?4)",
@@ -277,6 +289,9 @@ impl Cache for SqliteCache {
         works: &[WorkId],
     ) -> Result<Vec<Option<Entry<Edges>>>> {
         type Row = (String, bool, i64, i64, i64);
+        if self.newer {
+            return Ok(vec![None; works.len()]);
+        }
         let rows: Vec<Option<Row>> = {
             let mut conn = self.conn();
             let tx = conn.transaction()?;
@@ -321,6 +336,9 @@ impl Cache for SqliteCache {
         edges: &[(&WorkId, &Edges)],
         at: Timestamp,
     ) -> Result<()> {
+        if self.newer {
+            return Ok(());
+        }
         // Serialised before the lock is taken.
         let rows: Vec<(String, String, bool)> = edges
             .iter()

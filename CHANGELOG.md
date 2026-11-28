@@ -5,8 +5,34 @@ and 0.1 to 0.9 in [docs/changelog/0.0x.md](docs/changelog/0.0x.md).
 
 ## Unreleased
 
+Added:
+
+- A Cochrane review's id given on its own (`CD001955.pub5`, or
+  `CD001955` for the first version) is looked up as its DOI
+  (`10.1002/14651858.CD001955.pub5`). It isn't read from a citation's
+  text, where it is the review's page.
+
 Fixed:
 
+- A Cochrane review's version is dated by its own record. OpenAlex merges
+  a review's versions into one work dated by the earliest, so `.pub5`
+  ("Glucocorticoids for croup", 2023) came back as issued in 2011, with
+  `disagreements` saying Crossref has 2023. Where OpenAlex's record shows
+  it merges two works (another version's or work's DOI under its own
+  prefix, or two PubMed records) and its year is none of Crossref's for
+  the DOI, Crossref's date stands, in lookups and in verify; OpenAlex's
+  year is kept among the work's other years, so a citation's year matches
+  as before. Other records keep their earliest date, mostly the
+  online-first one.
+- A work's free copy is no longer another version's: OpenAlex offered
+  `.pub4`'s PDF for the Cochrane review's `.pub5`, so a tool fetching
+  `open_access.pdf_url` got the superseded version. A copy whose link names
+  another `.pubN` version of the work's DOI gives way to the work's next
+  free copy (PMC's, here), or the work isn't known to be free. `free_copy`
+  (and the FFI's) drops such a link from a work kept from an earlier
+  lookup, and asks PMC. Other DOIs in a link still count as the work's
+  copy: a repository's copy has the repository's DOI. The answer cache is
+  rebuilt once, for OpenAlex's records to be read again.
 - An identifier with a footnote mark glued to its end
   (`https://doi.org/10.1109/ICSE43902.2021.00140†`) is read without it:
   daggers, `§`, `¶`, `‖`, asterisk look-alikes and superscript digits come

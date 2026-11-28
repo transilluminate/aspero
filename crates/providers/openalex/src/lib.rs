@@ -33,7 +33,7 @@ use aspero_core::{
 use async_trait::async_trait;
 use secrecy::{ExposeSecret, SecretString};
 
-pub use crate::merged::looks_merged;
+pub use crate::merged::{looks_merged, merges_works};
 use crate::wire::WireList;
 
 pub const ID: ProviderId = ProviderId::from_static("openalex");

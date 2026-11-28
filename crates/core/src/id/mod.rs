@@ -265,6 +265,11 @@ impl WorkId {
         if s.starts_with(['W', 'w']) && is_digits(&s[1..]) {
             return WorkId::parse_as(IdKind::OpenAlex, input);
         }
+        // A Cochrane review's id, `CD001955.pub5`: its DOI. Only as a
+        // whole input; [`scan`] doesn't find one in running text.
+        if let Some(doi) = Doi::cochrane_review(s) {
+            return Ok(WorkId::Doi(doi));
+        }
         if let Ok(pii) = s.parse::<Pii>() {
             return Ok(WorkId::Pii(pii));
         }
@@ -439,6 +444,18 @@ mod tests {
         assert_eq!(pmcid.to_string(), "pmcid:PMC4458712");
     }
 
+    /// A Cochrane review's id is its DOI only given alone: in a citation
+    /// it is the review's page, beside its DOI or not.
+    #[test]
+    fn a_cochrane_id_is_not_found_in_running_text() {
+        let text = "Gates A, et al. Glucocorticoids for croup. Cochrane Database Syst Rev. 2023;1:CD001955.pub5.";
+        assert!(scan(text).is_empty());
+        assert_eq!(
+            parse("CD001955.pub5").unwrap().to_string(),
+            "doi:10.1002/14651858.cd001955.pub5"
+        );
+    }
+
     #[test]
     fn detects_kind_from_bare_prefixed_and_url_forms() {
         let cases = [
@@ -457,6 +474,8 @@ mod tests {
                 "nbk:NBK526056",
             ),
             ("W2741809807", "openalex:W2741809807"),
+            ("CD001955.pub5", "doi:10.1002/14651858.cd001955.pub5"),
+            ("cd004149", "doi:10.1002/14651858.cd004149"),
             ("pii:S0140-6736(20)30183-5", "pii:S0140673620301835"),
             ("S0140-6736(20)30183-5", "pii:S0140673620301835"),
             (

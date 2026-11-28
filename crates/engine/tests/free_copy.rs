@@ -194,3 +194,25 @@ async fn a_pmcid_of_another_work_lends_no_copy() {
     assert_eq!(copy.kind(), FreeCopyKind::BrowserOnly);
     assert_eq!(copy.open_access.unwrap().pdf_url.as_deref(), Some(RENDER));
 }
+
+#[tokio::test]
+async fn another_versions_pdf_is_no_copy_and_pmc_is_asked() {
+    // A work kept from an earlier lookup, its PDF link another version's
+    // (as OpenAlex offered a Cochrane review's `.pub4` for its `.pub5`).
+    let mut record = on_pmc("PMC8114386", "10.1080/21642850.2018.1462707");
+    if let Some(oa) = record.work.open_access.as_mut() {
+        oa.pdf_url =
+            Some("https://publisher.example/doi/10.1080/21642850.2018.1462707.pub2/pdf".into());
+        oa.url = Some("https://doi.org/10.1080/21642850.2018.1462707.pub2".into());
+    }
+    let (engine, http) = setup(vec![], oa_fixtures());
+    let copy = engine.free_copy(&record).await;
+    assert_eq!(copy.kind(), FreeCopyKind::Pdf);
+    let oa = copy.open_access.unwrap();
+    assert_eq!(oa.pdf_url.as_deref(), Some(S3_PDF));
+    assert_ne!(
+        oa.url.as_deref(),
+        Some("https://doi.org/10.1080/21642850.2018.1462707.pub2")
+    );
+    assert_eq!(http.requests().len(), 2);
+}

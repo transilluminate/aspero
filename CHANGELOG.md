@@ -33,6 +33,25 @@ Fixed:
   lookup, and asks PMC. Other DOIs in a link still count as the work's
   copy: a repository's copy has the repository's DOI. The answer cache is
   rebuilt once, for OpenAlex's records to be read again.
+- `scan` no longer reads a DOI ending its line on into the next line's
+  `key:` label. In Markdown frontmatter, `doi: 10.1136/gutjnl-2017-315909`
+  followed by `pdf_url: https://…` gave the DOI
+  `10.1136/gutjnl-2017-315909pdf_url`, and `…/kel163a` followed by
+  `doi: …` had `…/kel163adoi` as its alternative. A line starting with a
+  word directly followed by a colon (a YAML key, `PMID:`, `url:`) never
+  continues a DOI or link on the line before, in `scan` or in
+  `split_references`. A PDF's DOI wrapped mid-suffix is rejoined as
+  before.
+- A DOI whose OpenAlex record is another year's work is served as
+  Crossref's record. `10.1093/ejcts/ezag193`, the corrigendum to the
+  2025 ESC/EACTS valvular guideline (2026), came back as the 2021
+  guideline's corrigendum (2022), with that one's free copy: the titles
+  differ only in the year. Where OpenAlex's and Crossref's titles for a
+  DOI each name a year, not the same ones, and the dates share no year,
+  Crossref's record wins, as it does where they disagree on two of date,
+  volume and page, in lookups and in verify; OpenAlex's free copy and
+  other identifiers go with it. GLOBOCAN 2024 (`10.3322/caac.70090`),
+  served as GLOBOCAN 2020, is fixed too.
 - An identifier with a footnote mark glued to its end
   (`https://doi.org/10.1109/ICSE43902.2021.00140†`) is read without it:
   daggers, `§`, `¶`, `‖`, asterisk look-alikes and superscript digits come

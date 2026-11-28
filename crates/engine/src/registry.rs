@@ -184,9 +184,49 @@ const CONTRADICTION: usize = 2;
 const AGGREGATOR: &str = "openalex";
 
 /// Whether the registry's record (`registry`) wins over `record` for its
-/// DOI: `record` is the aggregator's and [`contradicts`] it.
+/// DOI: `record` is the aggregator's and [`contradicts`] it, or names
+/// another year in its title ([`another_years_title`]).
 pub(crate) fn overrules(registry: &SourceRecord, record: &SourceRecord) -> bool {
-    record.source.as_str() == AGGREGATOR && contradicts(record, registry)
+    record.source.as_str() == AGGREGATOR
+        && (contradicts(record, registry) || another_years_title(record, registry))
+}
+
+/// Whether `record`'s title and `registry`'s each name a year, not the
+/// same ones, beside dates that share no year ([`share_a_year`]): the
+/// record is then of another year's work, a title similarity notwithstanding.
+/// OpenAlex's record of the corrigendum to the 2025 ESC/EACTS valvular
+/// guideline (`10.1093/ejcts/ezag193`, 2026) is the 2021 guideline's
+/// corrigendum (2022), and of GLOBOCAN 2024 (`10.3322/caac.70090`, 2026)
+/// GLOBOCAN 2020 (2021). Of the 9,829 DOIs the red-team tape has from both
+/// OpenAlex and Crossref (2026-11-27), 5 have titles naming different
+/// years: GLOBOCAN's, and four book reviews whose Crossref titles add the
+/// book's year, each sharing its year with OpenAlex's record.
+fn another_years_title(record: &SourceRecord, registry: &SourceRecord) -> bool {
+    let (w, r) = (&record.work, &registry.work);
+    let (Some(a), Some(b)) = (&w.title, &r.title) else {
+        return false;
+    };
+    let (a, b) = (title_years(a), title_years(b));
+    w.issued.is_some()
+        && r.issued.is_some()
+        && !share_a_year(w, r)
+        && !a.is_empty()
+        && !b.is_empty()
+        && a != b
+}
+
+/// The years a title names: runs of four digits from 1800 to 2099, not
+/// part of a longer number.
+fn title_years(title: &str) -> Vec<u16> {
+    let mut years: Vec<u16> = title
+        .split(|c: char| !c.is_ascii_digit())
+        .filter(|run| run.len() == 4)
+        .filter_map(|run| run.parse().ok())
+        .filter(|y| (1800..2100).contains(y))
+        .collect();
+    years.sort_unstable();
+    years.dedup();
+    years
 }
 
 /// Whether `ids` carry a DOI of `registry`'s record.

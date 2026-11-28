@@ -243,7 +243,12 @@ impl Engine {
 ///   other run takes, so nothing searched before is put out; and only for
 ///   a reference with no identifier or place to look it up by
 ///   (`bookish`), as a book's: otherwise the search finds what those
-///   already do, or nothing (an invented article's).
+///   already do, or nothing (an invented article's);
+/// - after a hit's only run that is a part of it, more than a fragment,
+///   for such a reference too, in the slot no other run takes: the guess
+///   may run on past the title, or the run be a namesake's shorter one
+///   (wild-6 #265); not the whole reference, nothing guessed. Never in
+///   another run's place: a second run is often what finds the work.
 ///
 /// A hit's run that is the guess itself is searched however far down the
 /// hits it came, before runs that only hold it and run on. Only the runs
@@ -282,6 +287,17 @@ fn with_guess(mut titles: Vec<String>, text: &str, bookish: bool) -> Vec<String>
             && titles.iter().all(|t| fragment(t, &title, text)))
     {
         titles.insert(0, title);
+    } else if bookish
+        && titles.len() < MAX_TITLE_SEARCHES
+        && guess != matching::normalise(text)
+        && titles
+            .iter()
+            .all(|t| beside_title(t, &title, text) == Beside::Part)
+    {
+        // A book's guessed title holding a hit's only run and more ("The
+        // Spirit Level Delusion" beside a namesake's "Spirit Level",
+        // wild-6 #265): searched after it, in the slot no other takes.
+        titles.push(title);
     }
     titles
 }
@@ -531,6 +547,27 @@ mod tests {
         ));
         // Unplaced, no fragment.
         assert!(!fragment("graph networks", guess, army));
+    }
+
+    #[test]
+    fn a_books_guess_holding_a_hits_only_run_is_searched_after_it() {
+        // wild-6 #265: a namesake's "Spirit Level" was all that was searched.
+        let snowdon = "Snowdon, The Spirit Level Delusion (2010).";
+        assert_eq!(
+            with_guess(vec!["spirit level".into()], snowdon, true),
+            ["spirit level", "The Spirit Level Delusion"]
+        );
+        // Not with an identifier or place to look it up by.
+        assert_eq!(
+            with_guess(vec!["spirit level".into()], snowdon, false),
+            ["spirit level"]
+        );
+        // A second run keeps its place.
+        let runs = vec!["spirit level".to_owned(), "delusion".to_owned()];
+        assert_eq!(
+            with_guess(runs, snowdon, true),
+            ["spirit level", "delusion"]
+        );
     }
 
     #[test]

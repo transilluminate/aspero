@@ -10,11 +10,12 @@ use super::caps::{
     EXTENDED_TITLE_CAP, FIRST_EDITION_CAP, ID_CONFLICT_CAP, JOURNAL_MISMATCH_CAP,
     JOURNAL_MISMATCH_PENALTY, LOCATION_MISMATCH_CAP, NO_EVIDENCE_CAP, OTHER_IN_SERIES, PLACED,
     PLACED_YEAR_OFF, PLACED_YEAR_WRONG, PLAUSIBLE, SHORT_TITLE_WORDS, STRANGERS_CAP,
-    UNCORROBORATED_CAP, UNPLACED_CAP, VENUE_RECORD_CAP, VERSION, combine,
+    UNCORROBORATED_CAP, UNPLACED_CAP, VENUE_RECORD_CAP, VERSION, WHOLE_BYLINE, combine,
 };
 use super::claim::{byline, cites_chapter, title_region, untitled_byline};
 use super::derivative::{self, WorkKind, record_derivative_kind};
 use super::edition;
+use super::label;
 use super::preprint::{names_preprint, preprint_server, preprint_version_claimed};
 use super::record_title::record_title;
 use super::same_work::{id_agreement, same_work_id};
@@ -28,6 +29,10 @@ use crate::id::{IdKind, is_digits};
 use crate::publication::{self, first_page, journal_in, other_journal, same_journal};
 use crate::record::SourceRecord;
 use crate::work::WorkType;
+
+/// A quoted span's similarity to the record's title, at least, for it to be
+/// read as the title cited.
+const QUOTED_TITLE_SHARE: f64 = 2.0 / 3.0;
 
 /// Scores how well `record` matches `claim`.
 // The caps and floors apply in order, each reading what the ones before
@@ -49,7 +54,7 @@ pub fn assess(claim: &Claim, record: &SourceRecord) -> Assessment {
         let t = work
             .title
             .as_deref()
-            .and_then(|title| titles::expand_acronyms(&t, title))
+            .and_then(|title| super::acronyms::expand_acronyms(&t, title))
             .unwrap_or(t);
         Normalised::new(&t)
     });
@@ -91,8 +96,19 @@ pub fn assess(claim: &Claim, record: &SourceRecord) -> Assessment {
     });
     let title = match (&claimed_title, &work_title, &text) {
         (Some(claimed), Some(actual), _) => FieldCheck::scored(title_similarity(claimed, actual)),
+        // A title quoted that is the work's main title with one word put
+        // in place of one ("'The political economy of coal in Germany'"
+        // for "… in Poland: Drivers and barriers …", wild-6 #464): partly
+        // the work's, however few of its words the text has.
         (None, Some(actual), Some(text)) if !untitled => {
-            FieldCheck::scored(text.title_coverage(actual))
+            let quoted = titles::given_title(&text.raw)
+                .is_some_and(|q| titles::main_title_replaced(&q, actual));
+            let coverage = text.title_coverage(actual);
+            FieldCheck::scored(if quoted {
+                coverage.max(EXTENDED_TITLE)
+            } else {
+                coverage
+            })
         }
         _ => FieldCheck::UNKNOWN,
     };
@@ -133,11 +149,22 @@ pub fn assess(claim: &Claim, record: &SourceRecord) -> Assessment {
             }
             _ => text.raw.clone(),
         };
+        // An organisation's report found by its whole title is often cited
+        // without the organisation: what stands before the title there
+        // ("Pakistan Country Economic Memorandum: From Swimming in Sand …"
+        // for the World Bank Group's "From Swimming in Sand …", wild-6
+        // #600) is no byline of others, unless it names people.
+        let body_found = title_span.as_ref().is_some_and(|s| !s.is_empty())
+            && work
+                .authors
+                .iter()
+                .all(|p| p.display_name().is_some_and(|n| authors::is_body(&n)));
         let others = || {
             authors::names_given(&outside_title())
-                || byline(text, work_title.as_deref(), title_span.as_ref()).is_some_and(|b| {
-                    byline_strangers(&b, &work.authors, work.container_title.as_deref())
-                })
+                || (!body_found
+                    && byline(text, work_title.as_deref(), title_span.as_ref()).is_some_and(|b| {
+                        byline_strangers(&b, &work.authors, work.container_title.as_deref())
+                    }))
         };
         match text.author_coverage(&families) {
             0.0 if !others() => FieldCheck::UNKNOWN,
@@ -149,13 +176,15 @@ pub fn assess(claim: &Claim, record: &SourceRecord) -> Assessment {
     // Names the claim gives that the record's byline lacks: invented
     // co-authors beside a real first author. Not a match, whoever is first.
     // Not for books, whose records often list only the first author (Open
-    // Library's Sutton without Barto).
+    // Library's Sutton without Barto), or their editors or translators,
+    // unless the reference swaps one of the record's co-authors for
+    // another (`authors::book_co_author_swapped`, wild-6 #267).
     let journal = work
         .container_title
         .as_deref()
         .map(publication::significant);
+    let book = work.work_type == Some(crate::work::WorkType::Book);
     let strangers = authors.agreement != Agreement::Unknown
-        && work.work_type != Some(crate::work::WorkType::Book)
         && complete_byline(&work.authors)
         && if claim.authors.is_empty() {
             text.as_ref()
@@ -164,10 +193,15 @@ pub fn assess(claim: &Claim, record: &SourceRecord) -> Assessment {
                         .or_else(|| untitled_byline(text, journal.as_deref()))
                 })
                 .is_some_and(|b| {
-                    byline_strangers(&b, &work.authors, work.container_title.as_deref())
+                    let journal = work.container_title.as_deref();
+                    if book {
+                        authors::book_co_author_swapped(&b, &work.authors, journal)
+                    } else {
+                        byline_strangers(&b, &work.authors, journal)
+                    }
                 })
         } else {
-            claimed_strangers(&claim.authors, &work.authors)
+            !book && claimed_strangers(&claim.authors, &work.authors)
         };
     // Or names an earlier version's first author.
     let earlier = authors.agreement != Agreement::Unknown
@@ -241,6 +275,17 @@ pub fn assess(claim: &Claim, record: &SourceRecord) -> Assessment {
             text.substitutes_in(actual)
                 .or_else(|| text.inserts_in(actual).then_some(false))
                 .or_else(|| text.replaces_in(actual).then_some(false))
+                // A title quoted is the title cited, all of it, as one
+                // given apart is (wild-6 #653); not a reference quoted
+                // whole ("Corrections to “Shamloul R, Bella AJ. …”").
+                .or_else(|| {
+                    titles::given_title(&text.raw)
+                        .is_some_and(|quoted| {
+                            title_similarity(&quoted, actual) >= QUOTED_TITLE_SHARE
+                                && titles::replaces(&quoted, actual)
+                        })
+                        .then_some(false)
+                })
         }
         (Some(actual), Some(text)) if found && main_only && claim.title.is_none() => {
             text.substitutes_in(actual)
@@ -258,6 +303,14 @@ pub fn assess(claim: &Claim, record: &SourceRecord) -> Assessment {
     let cut = work_title
         .as_deref()
         .is_some_and(|actual| text::title_cut(claimed_title.as_deref(), text.as_ref(), actual));
+    // Or without its opening words, the ones the rest depends on
+    // (`Normalised::cut_in_front`, wild-6 #49). Not a notice's ("Correction
+    // to “…”"), cited for its original: `derivative.rs` tells those.
+    let cut = cut
+        || (record_derivative_kind(work).is_none()
+            && work_title.as_deref().is_some_and(|actual| {
+                text::title_cut_in_front(claimed_title.as_deref(), text.as_ref(), actual)
+            }));
     let title = match (title.score, reworded) {
         (Some(s), Some(true)) => FieldCheck::scored(s.min(OTHER_IN_SERIES)),
         (Some(s), Some(false)) => FieldCheck::scored(s.min(EXTENDED_TITLE)),
@@ -668,14 +721,40 @@ pub fn assess(claim: &Claim, record: &SourceRecord) -> Assessment {
     {
         confidence = confidence.max(PLAUSIBLE);
     }
+    // A claimed identifier that is the work's, beside a label for it and
+    // nothing else ("Gated SAEs: 2404.16014", "Lookahead Decoding |
+    // 2402.02057"): a method's name or a short form, every word of it the
+    // title's, as a model's list of papers gives them (wild-6 #319,
+    // #545). Plausible, its title to check; never verified. Not another
+    // work's name, with words of its own ("DESI 2024 III" for "DESI 2024
+    // VI", wild-6 #589), nor beside other people or a wrong year or place.
+    if ids == Agreement::Match
+        && claimed_title.is_none()
+        && title.agreement != Agreement::Match
+        && authors.agreement != Agreement::Mismatch
+        && !(strangers || earlier)
+        && [year, volume, page, container]
+            .iter()
+            .all(|c| c.agreement != Agreement::Mismatch)
+        && (text.as_ref().zip(work_title.as_deref()))
+            .is_some_and(|(t, w)| label::labels(&t.raw, w, &claim.ids))
+    {
+        confidence = confidence.max(PLAUSIBLE);
+    }
     // A quoted part of the work's title (its opening words or subtitle) beside
     // its authors, year and journal: the work (wild-5 #400, #488). Plausible.
+    // Without a journal, beside its whole byline, two names or more
+    // ("Kraft & Falken, \"A Blueprint for Scaling Tutoring\" (2021)" for
+    // "… Tutoring and Mentoring Across Public Schools", wild-6 #594).
     if claimed_title.is_none()
         && title.agreement == Agreement::Mismatch
         && authors.score.is_some_and(|s| s >= CORROBORATING_AUTHORS)
         && !(strangers || earlier)
         && year.agreement == Agreement::Match
-        && container.agreement == Agreement::Match
+        && (container.agreement == Agreement::Match
+            || (container.agreement == Agreement::Unknown
+                && work.authors.len() > 1
+                && authors.score.is_some_and(|s| s >= WHOLE_BYLINE)))
         && (text.as_ref().zip(work_title.as_deref()))
             .is_some_and(|(t, w)| titles::quotes_part_of(&t.raw, w))
     {

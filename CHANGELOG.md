@@ -3,6 +3,96 @@
 Releases 0.10 to 0.19 are in [docs/changelog/0.1x.md](docs/changelog/0.1x.md),
 and 0.1 to 0.9 in [docs/changelog/0.0x.md](docs/changelog/0.0x.md).
 
+## Unreleased
+
+Fixed:
+
+- An identifier with a footnote mark glued to its end
+  (`https://doi.org/10.1109/ICSE43902.2021.00140†`) is read without it:
+  daggers, `§`, `¶`, `‖`, asterisk look-alikes and superscript digits come
+  off every kind, as trailing sentence punctuation does, so the DOI is
+  looked up rather than reported as one that doesn't exist (wild-6 #404,
+  #411, #414 and three more from the same answer). `#` and `+`, which can
+  end a SICI-style DOI, stay.
+- A citation whose only identifier is an ISBN that Open Library doesn't
+  know, beside a book the citation otherwise matches, is plausible with
+  the ISBN named, not a mismatch saying the ISBN doesn't exist: the
+  catalogue misses many real books (a WHO guideline's, wild-6 #207).
+- An identifier's work with the title cited, no authors to compare (a
+  record without them, a corporate author) and only the year different
+  is plausible, its year named, not a mismatch: a preprint dated by its
+  journal version (wild-3 #931), a guideline's Bookshelf record (holdout-5
+  #99).
+- A chapter cited by its DOI is no longer a mismatch because the book it
+  is in matches the citation too: the book a chapter's citation names is
+  not another work it points at (wild-6 #597, an IPCC report's chapter).
+- A paper listed by its identifier beside a short label for it, as a
+  model's list of papers gives them ("Gated SAEs: 2404.16014",
+  "Lookahead Decoding | 2402.02057", "DESI DR2 BAO (arXiv:2503.14738,
+  2025)"), is plausible, its title to check, where it was a mismatch
+  saying the identifier is another work's: every word of the label is a
+  word of the work's title, its acronyms written out. A label with words
+  of its own ("DESI 2024 III" beside DESI 2024 VI's identifier) is still
+  a mismatch.
+- An acronym may take both initials of a compound word ("SAEs" for
+  "Sparse Autoencoders"), so a title written with one ("SAEs Do Not Find
+  Canonical Units of Analysis") is the title.
+- A title reworded is plausible, not verified, even beside the work's DOI
+  or place, when its words are dropped in one place and others put in
+  another ("… and birth outcomes" for "… and the risks of low
+  birthweight and preterm birth"), when a quoted title is reworded, or
+  around a "vs." (wild-6 #14, #130, #653). A title misspelt, abbreviated,
+  given without its subtitle or a leading article, or a formula printed
+  spaced ("B F 3") is still verified.
+- A title without its opening words, the ones the rest depends on
+  ("Additional strengthening of …" for "The effect of additional
+  strengthening of …"), is plausible, the title named (wild-6 #49). A
+  leading article dropped, or a main title dropped before its subtitle,
+  is still verified.
+- A journal is read in two more places, as one possible reading: before a
+  note in square brackets ending the reference ("Caries Res. 2014 [year
+  and volume to verify]."), and between the year and a quoted title
+  ("(2024), PNAS, \"…\""). Another journal there makes the citation
+  plausible, the journal named (wild-6 #145, #592).
+- A book whose record lists more than one author, cited with a co-author
+  it doesn't have, is plausible, the authors named (wild-6 #267). A book's
+  record listing one author may list only the first, and is still not
+  held against the others cited.
+- A title quoted by its opening words beside the work's whole byline
+  (two names or more) and year is now plausible without the journal
+  named too ("Kraft & Falken, \"A Blueprint for Scaling Tutoring\"
+  (2021)", wild-6 #594).
+- An organisation's report found by its whole title, cited without the
+  organisation, no longer reads what stands before the title as another
+  byline ("Pakistan Country Economic Memorandum: From Swimming in Sand …"
+  for the World Bank Group's report, wild-6 #600): plausible.
+- An era marker beside a year in a record's title ("The Paston letters,
+  A.D. 1422-1509") is no word the citation lacks (wild-6 #347).
+- A real work cited with an error, found but scoring below plausible, is
+  a mismatch naming what differs in two more cases: a title of four
+  content words or more, given whole, with no one named and only the year
+  wrong, for a record that names its authors (wild-6 #710); and the whole
+  byline with such a title nearly the work's and the year wrong (wild-6
+  #108). They were not found.
+- A quoted title that is the work's main title with one word put in
+  place of one ("'The political economy of coal in Germany'" for "… in
+  Poland: Drivers and barriers …") is partly the work's: plausible beside
+  its authors, year and journal (wild-6 #464).
+- Books are searched by their titles more often (wild-6 #92, #247,
+  #265, #347, #519, #677, #217): an edition after the title ("…, 4th
+  ed.") is no editors' byline and no part of the title; nor are authors
+  named after it ("… by Richard Twycross and Andrew Wilcock"), its
+  translators or editors outside brackets (", translated by …"), a family
+  name alone before a title with an article ("Snowdon, The Spirit Level
+  Delusion"), an editor's byline ("James Gairdner, ed., …"), a note's
+  place, publisher and page ("(Paris: L'Harmattan, 2001), [page]") or
+  organisations listed before a colon ("HPA / College of Radiographers /
+  RCR: …"); a one-word sentence opening a title ("Italiano. Antico e
+  nuovo") is the title's first part.
+- A book's guessed title is searched beside a citation matcher's hit
+  that shares only part of it, when a title search is left ("The Spirit
+  Level Delusion" beside a namesake's "Spirit Level", wild-6 #265).
+
 ## 0.44.1
 
 Added:

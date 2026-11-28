@@ -33,6 +33,7 @@ plausible ≥ 0.6).
 | A journal's article cited by its preprint's DOI (Research Square, bioRxiv, …) | plausible, the server named |
 | Wrong volume or first page | plausible (capped 0.8) |
 | Title and year only, no authors or ID | plausible at most (0.8) |
+| ID beside a label for the work, no title or authors: a method's name, a short form, an acronym ("Gated SAEs: 2404.16014"), every word the record title's | plausible (wild-6); a label with words of its own (another work's name) stays a mismatch |
 | Year/journal alone, or a 1–2-word title in free text | not_found |
 | Journal + volume + first page, no title (running header) | verified (0.9; 0.8 a year off) |
 | Fields missing (no year, no journal) | verified when title and authors agree |

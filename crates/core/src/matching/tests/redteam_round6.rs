@@ -494,7 +494,7 @@ fn initials_and_parts_of_words_are_no_acronyms() {
     let title = "Effectiveness of vestibular rehabilitation therapy and yoga in the management \
                  of chronic peripheral vertigo: A randomized controlled trial";
     assert_eq!(
-        super::super::titles::expand_acronyms(
+        super::super::acronyms::expand_acronyms(
             "Vaishali K, Kishore CP, Sampath CPR. Effectiveness …",
             title
         ),
@@ -503,11 +503,11 @@ fn initials_and_parts_of_words_are_no_acronyms() {
     let title = "DS-K3DOM: 3-D Dynamic Occupancy Mapping with Kernel Inference and \
                  Dempster-Shafer Evidential Theory";
     assert_eq!(
-        super::super::titles::expand_acronyms("DS-K3DOM: 3-D Dynamic Occupancy Mapping", title),
+        super::super::acronyms::expand_acronyms("DS-K3DOM: 3-D Dynamic Occupancy Mapping", title),
         None
     );
     assert_eq!(
-        super::super::titles::expand_acronyms(
+        super::super::acronyms::expand_acronyms(
             "Do LLMs Know What Humans Know?",
             "Do Large Language Models Know What Humans Know?"
         )

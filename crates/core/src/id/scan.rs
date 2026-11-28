@@ -10,8 +10,8 @@
 //! digits, `W1` or a 40-digit hex string in prose are more often something
 //! else. Elsevier's PIIs are read from ScienceDirect, Cell and Lancet
 //! pages. Each mention says whether it was [`Mention::from_url`]. Mentions are cleaned like pasted input: wrapping
-//! brackets, quotes and emphasis and trailing sentence punctuation are not
-//! part of them, while brackets inside a DOI are. Markdown links and table
+//! brackets, quotes and emphasis, trailing sentence punctuation and footnote
+//! marks (`†`, `‡`, superscript digits) are not part of them, while brackets inside a DOI are. Markdown links and table
 //! cells are split apart. A DOI or URL broken across lines, as text from
 //! PDFs is, is rejoined by the rules `split_references` uses: the mention
 //! then spans both lines.
@@ -113,6 +113,25 @@ impl Mention {
         let id = WorkId::parse_as(IdKind::Doi, &joined).ok()?;
         (id != self.id).then_some(id)
     }
+}
+
+/// An arXiv identifier written with its label that no paper can have:
+/// `arXiv:` and a new-style number its month doesn't allow
+/// ("arXiv:1201.11701", five digits in 2012; "arXiv:2513.01234", a
+/// thirteenth month). [`scan`] doesn't read it, so a citation giving one
+/// would otherwise count as giving no identifier. The first such, as
+/// written; `None` when every labelled one reads (or there is none).
+pub fn unreadable_arxiv(text: &str) -> Option<&str> {
+    let lower = text.to_ascii_lowercase();
+    lower.match_indices("arxiv:").find_map(|(at, label)| {
+        let rest = text.get(at + label.len()..)?.trim_start();
+        let token = clean_pasted(rest.split_whitespace().next()?);
+        let (yymm, seq) = token.split_once('.')?;
+        let seq = seq.split(['v', 'V']).next().unwrap_or(seq);
+        let shaped =
+            yymm.len() == 4 && is_digits(yymm) && (4..=5).contains(&seq.len()) && is_digits(seq);
+        (shaped && WorkId::parse_as(IdKind::Arxiv, token).is_err()).then_some(token)
+    })
 }
 
 /// Every identifier mentioned in `text`, in order, repeats included. Text
@@ -693,6 +712,25 @@ fn offset(whole: &str, part: &str) -> usize {
 mod tests {
     use super::*;
 
+    #[test]
+    fn arxiv_numbers_no_month_allows_are_unreadable() {
+        // Five digits in 2012, four in 2015, a thirteenth month.
+        assert_eq!(
+            unreadable_arxiv("Scaling of Congestion. arXiv:1201.11701."),
+            Some("1201.11701")
+        );
+        assert_eq!(unreadable_arxiv("arXiv: 1503.0123v2"), Some("1503.0123v2"));
+        assert_eq!(unreadable_arxiv("ARXIV:2513.01234"), Some("2513.01234"));
+        // Real ones, and labels without a number, aren't.
+        assert_eq!(
+            unreadable_arxiv("arXiv:1706.03762v5; arXiv:2404.16014"),
+            None
+        );
+        assert_eq!(unreadable_arxiv("arXiv: preprint, 2024"), None);
+        assert_eq!(unreadable_arxiv("hep-th/9901001"), None);
+        assert!(scan("arXiv:1201.11701").is_empty());
+    }
+
     /// The first implementation of `scan_line`, for comparison.
     fn reference_scan_line(line: &str) -> Vec<(WorkId, Range<usize>)> {
         let mut found = Vec::new();
@@ -778,6 +816,25 @@ mod tests {
             .into_iter()
             .map(|m| (m.id.to_string(), &text[m.span]))
             .collect()
+    }
+
+    #[test]
+    fn footnote_marks_ending_a_mention_are_not_part_of_it() {
+        // wild-6 #414, minimised.
+        assert_eq!(
+            found("Alshammari et al. ICSE 2021. https://doi.org/10.1109/ICSE43902.2021.00140†"),
+            [(
+                "doi:10.1109/icse43902.2021.00140".into(),
+                "https://doi.org/10.1109/ICSE43902.2021.00140"
+            )]
+        );
+        assert_eq!(
+            found("PMID: 29565522‡; arXiv:1706.03762v5¹"),
+            [
+                ("pmid:29565522".into(), "PMID: 29565522"),
+                ("arxiv:1706.03762v5".into(), "arXiv:1706.03762v5"),
+            ]
+        );
     }
 
     #[test]

@@ -25,6 +25,9 @@ pub(super) const UNCORROBORATED_CAP: f64 = 0.8;
 /// Author score that corroborates a match: the first author present
 /// (0.75 for structured claims, 0.9 in free text).
 pub(super) const CORROBORATING_AUTHORS: f64 = 0.75;
+/// Author score of a byline naming every author compared, two or more
+/// (the first alone scores 0.9).
+pub const WHOLE_BYLINE: f64 = 0.999;
 /// Confidence when the journal, volume and first page all agree and
 /// nothing contradicts them: verified.
 pub(super) const PLACED: f64 = 0.9;
@@ -55,6 +58,9 @@ pub(super) const VERSION: f64 = PLAUSIBLE;
 /// Content words below which a title found inside free text is short: one
 /// or two words turn up in any text ("Aspero", "Deep learning").
 pub(super) const SHORT_TITLE_WORDS: usize = 3;
+/// Distinct content words from which a title is distinctive: found whole
+/// with only its year cited wrong, it names a work cited with an error.
+pub(super) const DISTINCTIVE_TITLE_WORDS: usize = 4;
 /// Multiplier for replies, corrections, errata and commentaries.
 pub(super) const DERIVATIVE_PENALTY: f64 = 0.5;
 /// Confidence ceiling for the original when the claim cites a reply,

@@ -18,6 +18,31 @@ verdict.
 > output. The targets are set high, and each round climbs the hardest
 > cases that are left.
 
+**What's being chased, and what comes next.** The targets (2% and 85%)
+are stretch goals set by the project, not a figure any user asked for. The
+latest model-output corpora are harder than everyday use on purpose. Their
+prompts ask for what models most often get wrong (identifiers, named
+citation styles, very recent work, reports), and half the answers come
+from the weakest model, so about one reference in nine is wrong. Checking
+a published paper's reference list, or a careful model's answer, sees far
+fewer. Each fix round now fixes a handful of rarer cases: a paper cited
+by its first version's title, a nickname beside an arXiv number. The
+held-out figures improve slowly. So the next measure will be realistic
+input: real reference lists from papers, guidelines and notes, checked by
+hand. Until then, the work goes where real use has pointed. In one
+evening a user's tool found four bugs that matter day to day, and none of
+them was about a verdict:
+- a Cochrane review served with an older version's date and PDF;
+- abstracts with words missing;
+- a DOI read into the next line of a note;
+- a guideline's correction confused with an older one's.
+
+**Reports are the most useful input there is.** If aspero gets anything
+wrong, please report it ([below](#reporting-a-problem)). That covers a
+verdict, and also a wrong date, version or download link from `lookup`,
+an abstract that reads oddly, or an identifier `scan` misreads or misses.
+Each confirmed report becomes a test.
+
 ## What `verify` promises
 
 **A fabricated or miscited reference should not come back `verified`.**
@@ -433,9 +458,10 @@ scripts/redteam.py --rescore --failures   # re-score saved results, offline
   issued. A re-run months later may differ for reasons that have nothing
   to do with aspero.
 
-## Reporting a wrong verdict
+## Reporting a problem
 
-If `verify` gets one wrong, [open a wrong-verdict
+Reports are welcome, and they're what most improves aspero. If `verify`
+gets a verdict wrong, [open a wrong-verdict
 issue](https://github.com/transilluminate/aspero/issues/new?template=wrong-verdict.yml).
 From the CLI, `aspero verify --report "<citation>"` prints a link with the
 form already filled in (the citation, the verdict, the JSON output, the
@@ -446,3 +472,11 @@ or otherwise shareable sources, never from an unpublished manuscript.
 Each confirmed report becomes a case in the red-team corpus
 (`bench/redteam/reports.jsonl`, by `scripts/issue-to-case.py`), and its fix
 an offline test.
+
+Anything else that looks wrong is worth [a bug
+report](https://github.com/transilluminate/aspero/issues/new?template=bug.yml)
+too: `lookup` giving another version or edition of a work, its date or
+its free copy; an abstract with words missing; `scan` reading an
+identifier wrongly or missing one; a search that should find a work and
+doesn't. Give the identifier or text, the command and its output
+(`--format json`), and `aspero --version`.

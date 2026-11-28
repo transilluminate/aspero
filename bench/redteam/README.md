@@ -4,6 +4,11 @@ aspero's promise: a fabricated or wrong citation must not verify; a real,
 correct one should. `bench/citations.jsonl` checks that on 49 hand-picked
 cases. This directory measures it at scale and records what gets through.
 
+The corpora here are hard on purpose, and the latest model-output ones
+harder than everyday use: see [docs/accuracy.md](../../docs/accuracy.md)
+("What's being chased") for what the numbers do and don't say, and why the
+next measure is realistic input and people's reports.
+
 **The fabricated entries here are invented test data.** Categories `a`–`i`
 in `corpus.jsonl` and every `adversarial` entry in `failures.jsonl` cite
 works that don't exist, or real works with deliberately wrong details. They

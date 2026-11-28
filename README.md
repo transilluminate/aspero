@@ -144,7 +144,10 @@ acceptance criteria), the results, and what `verify` can't check are in
 [docs/accuracy.md](docs/accuracy.md). A verdict that looks wrong:
 `aspero verify --report "<citation>"` prints a link to a [wrong-verdict
 issue](https://github.com/transilluminate/aspero/issues/new?template=wrong-verdict.yml),
-filled in; nothing is sent unless you open it and submit.
+filled in; nothing is sent unless you open it and submit. Reports of
+anything else that looks wrong (a lookup's date, version or download link,
+an abstract, a misread identifier) are just as welcome: [open a
+bug](https://github.com/transilluminate/aspero/issues/new?template=bug.yml).
 
 ## Agents (MCP)
 

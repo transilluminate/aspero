@@ -264,9 +264,10 @@ impl WireWork {
         work.abstract_text = self
             .abstract_inverted_index
             .as_ref()
-            .map(|index| tidy_abstract(&rebuild_abstract(index)))
+            .and_then(rebuild_abstract)
+            .map(|text| tidy_abstract(&text))
             .and_then(without_footer)
-            .filter(|text| !scraped_page(text));
+            .filter(|text| !scraped_page(text) && text.chars().count() <= LONGEST_ABSTRACT);
         work.url = self
             .primary_location
             .as_ref()
@@ -435,6 +436,15 @@ fn scraped_page(text: &str) -> bool {
     })
 }
 
+/// The longest text taken for an abstract, in characters. Longer is a full
+/// text or a page OpenAlex indexed as one: of the tape's 64,533 whole
+/// indexes (2026-11-27), the longest real abstracts are reviews' and
+/// technology assessments' at 7,000 to 8,000 characters; the 86 over
+/// 10,000 are articles' and editorials' opening sections, book lists and
+/// pages, up to 29,309 ("New books Astronomy and astrophysics Section:
+/// Choose Top of page…").
+const LONGEST_ABSTRACT: usize = 10_000;
+
 /// Shortest text before a page's footer that is still an abstract.
 const ABSTRACT_BEFORE_FOOTER: usize = 100;
 
@@ -507,18 +517,29 @@ fn glued_date(text: &str) -> bool {
     })
 }
 
-/// OpenAlex ships abstracts as `{word: [positions]}`; put the words back in order.
-fn rebuild_abstract(index: &BTreeMap<String, Vec<usize>>) -> String {
+/// OpenAlex ships abstracts as `{word: [positions]}`; put the words back in
+/// order. `None` when a position has no word, or two: the index has lost
+/// words, and the text would read on across them ("…was reported in of it
+/// was not seen in any patient…", W2089383900, a guideline's full text
+/// with 636 of its 4,588 positions empty). Of 64,975 indexes on the
+/// red-team tape (2026-11-27), 442 have holes: some long full texts with
+/// hundreds or thousands, and 125 with one, which still drops a word that
+/// matters ("use of ▯ key systems", "on a ▯ dataset"). Without it another
+/// provider's abstract can stand.
+fn rebuild_abstract(index: &BTreeMap<String, Vec<usize>>) -> Option<String> {
     let mut positioned: Vec<(usize, &str)> = index
         .iter()
         .flat_map(|(word, positions)| positions.iter().map(move |&p| (p, word.as_str())))
         .collect();
     positioned.sort_unstable();
-    positioned
-        .into_iter()
-        .map(|(_, word)| word)
-        .collect::<Vec<_>>()
-        .join(" ")
+    let whole = positioned.iter().enumerate().all(|(i, &(p, _))| p == i);
+    whole.then(|| {
+        positioned
+            .into_iter()
+            .map(|(_, word)| word)
+            .collect::<Vec<_>>()
+            .join(" ")
+    })
 }
 
 #[cfg(test)]
@@ -700,7 +721,62 @@ mod tests {
             ("you".to_owned(), vec![3, 5]),
             ("need".to_owned(), vec![4]),
         ]);
-        assert_eq!(rebuild_abstract(&index), "Attention is all you need you");
+        assert_eq!(
+            rebuild_abstract(&index).as_deref(),
+            Some("Attention is all you need you")
+        );
+    }
+
+    #[test]
+    fn an_index_with_holes_is_no_abstract() {
+        let index = |pairs: &[(&str, &[usize])]| -> BTreeMap<String, Vec<usize>> {
+            pairs
+                .iter()
+                .map(|(word, at)| ((*word).to_owned(), at.to_vec()))
+                .collect()
+        };
+        // W2089383900's: "…was reported in [25%] of [patients]; it was not
+        // seen…", two words gone.
+        let holed = index(&[
+            ("was", &[0]),
+            ("reported", &[1]),
+            ("in", &[2]),
+            ("of", &[4]),
+            ("it", &[6]),
+            ("seen", &[7]),
+        ]);
+        assert_eq!(rebuild_abstract(&holed), None);
+        // One word gone is still a hole: "use of [public] key systems".
+        let one = index(&[
+            ("use", &[0]),
+            ("of", &[1]),
+            ("key", &[3]),
+            ("systems", &[4]),
+        ]);
+        assert_eq!(rebuild_abstract(&one), None);
+        // Nothing at the start.
+        assert_eq!(rebuild_abstract(&index(&[("late", &[1])])), None);
+        // Two words at one place.
+        let doubled = index(&[("a", &[0]), ("b", &[0]), ("c", &[1])]);
+        assert_eq!(rebuild_abstract(&doubled), None);
+        assert_eq!(rebuild_abstract(&BTreeMap::new()).as_deref(), Some(""));
+    }
+
+    #[test]
+    fn a_full_text_indexed_as_an_abstract_is_none() {
+        let abstract_of = |words: usize| {
+            let index: BTreeMap<String, Vec<usize>> =
+                (0..words).map(|i| (format!("w{i:05}"), vec![i])).collect();
+            let wire: WireWork = serde_json::from_value(serde_json::json!({
+                "type": "article",
+                "abstract_inverted_index": index,
+            }))
+            .unwrap();
+            wire.work().abstract_text
+        };
+        // 1,428 six-letter words and their spaces: 9,995 characters.
+        assert!(abstract_of(1_428).is_some_and(|a| a.len() == 9_995));
+        assert_eq!(abstract_of(1_430), None);
     }
 
     #[test]

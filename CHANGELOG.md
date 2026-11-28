@@ -118,6 +118,14 @@ Fixed:
 - A book's guessed title is searched beside a citation matcher's hit
   that shares only part of it, when a title search is left ("The Spirit
   Level Delusion" beside a namesake's "Spirit Level", wild-6 #265).
+- An abstract rebuilt from OpenAlex's word index is no longer served when
+  the index has lost words: the text read on across the gaps, dropping
+  numbers and words mid-sentence (the ACG 2015 colon ischaemia
+  guideline's ran to 25,000 characters with 636 words missing). Nor is
+  one over 10,000 characters, which is a full text or a page rather than
+  an abstract. Either way `--abstract` looks for one at the other
+  providers (Crossref, then Europe PMC). The cache is rebuilt once, so
+  records stored with such an abstract are read again.
 
 ## 0.44.1
 

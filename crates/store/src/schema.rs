@@ -24,7 +24,8 @@ use crate::{Result, SqliteCache, StoreError};
 /// 9: `http://` ORCIDs read everywhere; Crossref works read as CSL items.
 /// 10: records carry the works they cite (OpenAlex `referenced_works`).
 /// 11: OpenAlex's free copy isn't another version's (a Cochrane review's
-/// `.pub4` for its `.pub5`).
+/// `.pub4` for its `.pub5`); no abstract from an OpenAlex index with holes
+/// or a full text's.
 const SCHEMA_VERSION: i64 = 11;
 
 const SCHEMA: &str = "

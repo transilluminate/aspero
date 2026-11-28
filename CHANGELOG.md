@@ -3,6 +3,20 @@
 Releases 0.10 to 0.19 are in [docs/changelog/0.1x.md](docs/changelog/0.1x.md),
 and 0.1 to 0.9 in [docs/changelog/0.0x.md](docs/changelog/0.0x.md).
 
+## Unreleased
+
+Fixed:
+
+- A Cochrane review's version is credited to its own authors. OpenAlex's
+  record of `.pub5` ("Glucocorticoids for croup in children", 2023),
+  merged with the review's earlier versions, names `.pub4`'s 2018 team.
+  Where OpenAlex's record shows it merges two works, its year is none of
+  Crossref's for the DOI (as 0.44.2 dates it) and it names other authors,
+  Crossref's record of the DOI wins for who wrote it and its title: a
+  lookup serves Crossref's record, keeping OpenAlex's work id, cited-by
+  count and free copy, and verify's merged work takes its authors and
+  title.
+
 ## 0.44.2
 
 Added:

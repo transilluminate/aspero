@@ -7,10 +7,12 @@
 //! [`drop_foreign`]). A full lookup checks every record; a plain one only
 //! those that look merged ([`looks_merged`]), so the rest cost no request.
 
-use aspero_core::matching::{same_work_id, title_similarity};
+use std::collections::BTreeSet;
+
+use aspero_core::matching::{normalise, same_work_id, title_similarity};
 use aspero_core::publication::first_page;
 use aspero_core::{
-    FieldSet, IdKind, NoticeKind, PartialDate, ProviderId, SourceRecord, Work, WorkId,
+    FieldSet, IdKind, NoticeKind, PartialDate, Person, ProviderId, SourceRecord, Work, WorkId,
 };
 
 use crate::{Engine, Entry, LookupReport, LookupResult};
@@ -153,6 +155,75 @@ pub(crate) fn date_as(record: &mut SourceRecord, own: &SourceRecord) {
     w.issued = own.work.issued;
     w.other_years
         .retain(|&y| Some(y) != w.issued.map(|d| d.year()));
+}
+
+/// Whether `record`, an aggregator's record whose date is another work's
+/// than `own`'s ([`dates_another_work`]), also names other authors: it is
+/// then another version's record under the DOI, and `own`'s, the DOI's
+/// own, wins for who wrote it and what it's called ([`authored_as`],
+/// [`yield_to`]). OpenAlex's record of a Cochrane review's `.pub5` (2023,
+/// Aregbesola et al.), merged with its earlier versions, has `.pub4`'s
+/// authors (2018, Gates et al.). Of the 22 records on the red-team tape
+/// that `dates_another_work` (2026-11-28), 4 name other authors than
+/// Crossref's ([`others_wrote`]), each another version's: two Cochrane reviews' earlier
+/// versions, a 2026 guideline's 2012 one, a 2026 policy statement's 2025
+/// one. A record that shares a year with Crossref's isn't counted: there
+/// the authors differ by a misspelling (Stiell, Crossref's "Shell").
+pub(crate) fn authored_by_another(record: &SourceRecord, own: &SourceRecord) -> bool {
+    dates_another_work(record, own) && others_wrote(&record.work, &own.work)
+}
+
+/// Whether `a` and `b` each name authors, and each names one the other
+/// doesn't: by family name, normalised, in any order. A list that holds
+/// the other is the same team, one source listing fewer (Crossref's record
+/// of a 59-author survey's book edition names its two lead authors).
+fn others_wrote(a: &Work, b: &Work) -> bool {
+    let families = |w: &Work| -> BTreeSet<String> {
+        w.authors
+            .iter()
+            .filter_map(Person::parts)
+            .map(|(family, _)| normalise(&family))
+            .filter(|f| !f.is_empty())
+            .collect()
+    };
+    let (a, b) = (families(a), families(b));
+    !a.is_empty() && !b.is_empty() && !a.is_subset(&b) && !b.is_subset(&a)
+}
+
+/// `record` written as `own` says it was ([`authored_by_another`]): its
+/// authors, and its title where it has one. In verify's merge, where the
+/// records' dates and other values are reconciled field by field.
+pub(crate) fn authored_as(record: &mut SourceRecord, own: &SourceRecord) {
+    record.work.authors.clone_from(&own.work.authors);
+    if own.work.title.is_some() {
+        record.work.title.clone_from(&own.work.title);
+    }
+}
+
+/// The record a lookup serves for `record`, found by `asked`, where it
+/// [`authored_by_another`] than `own`: `own`, the DOI's own record, as
+/// where it [`overrules`] `record`, keeping only what holds for the work
+/// whichever version it's of: `record`'s aggregator id, its cited-by
+/// count, and its open access where `own` has none (a version's other
+/// copies are dropped as it's read, #236).
+pub(crate) fn yield_to(record: &SourceRecord, own: SourceRecord, asked: &WorkId) -> SourceRecord {
+    let mut theirs = own;
+    let kept = record
+        .ids
+        .iter()
+        .filter(|id| id.kind() == IdKind::OpenAlex)
+        .chain(std::iter::once(asked));
+    for id in kept {
+        if !theirs.ids.iter().any(|r| same_work_id(r, id)) {
+            theirs.ids.push(id.clone());
+        }
+    }
+    let w = &mut theirs.work;
+    w.cited_by_count = record.work.cited_by_count.or(w.cited_by_count);
+    if w.open_access.is_none() {
+        w.open_access.clone_from(&record.work.open_access);
+    }
+    theirs
 }
 
 /// Whether `record` contradicts `registry`'s record of a DOI it carries on
@@ -341,8 +412,11 @@ impl Engine {
             }
             // Once replaced, the record is the registry's own.
             if !overrules(&theirs, ours) {
+                // Its authors another version's: the DOI's own record wins.
+                if own && authored_by_another(ours, &theirs) {
+                    *ours = yield_to(ours, theirs, &result.id);
                 // Its date another work's: the DOI's own date stands.
-                if own && dates_another_work(ours, &theirs) {
+                } else if own && dates_another_work(ours, &theirs) {
                     date_as(ours, &theirs);
                 }
                 continue;
@@ -429,4 +503,41 @@ impl Engine {
 /// When a date's period starts: 2026-12 is no earlier than 2026-12-01.
 fn starts(d: PartialDate) -> (i16, u8, u8) {
     (d.year(), d.month().unwrap_or(1), d.day().unwrap_or(1))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn by(names: &[&str]) -> Work {
+        let mut w = Work::default();
+        w.authors = names.iter().map(|n| Person::literal(*n)).collect();
+        w
+    }
+
+    #[test]
+    fn other_authors_are_others_by_family_name() {
+        let pub4 = by(&["Allison Gates", "Michelle Gates", "Terry P Klassen"]);
+        let pub5 = by(&["Alex Aregbesola", "Terry P Klassen"]);
+        assert!(others_wrote(&pub4, &pub5));
+        // One author each the other lacks is another team.
+        assert!(others_wrote(
+            &by(&["Tina Lavender", "Anna Hart"]),
+            &by(&["Tina Lavender", "Linda Cuthbert"])
+        ));
+        // A list cut short isn't.
+        assert!(!others_wrote(
+            &by(&["Peter Kairouz", "H. Brendan McMahan", "Brendan Avent"]),
+            &by(&["Peter Kairouz", "H. Brendan McMahan"])
+        ));
+        // The same people, however written or ordered.
+        assert!(!others_wrote(
+            &by(&["Terry P Klassen", "Allison Gates"]),
+            &by(&["GATES, A.", "Klassen, Terry P.", "Allison Gates"]),
+        ));
+        assert!(!others_wrote(&by(&["José Müller"]), &by(&["Jose Muller"])));
+        // A record naming no one says nothing of who wrote it.
+        assert!(!others_wrote(&pub4, &by(&[])));
+        assert!(!others_wrote(&by(&[]), &pub5));
+    }
 }

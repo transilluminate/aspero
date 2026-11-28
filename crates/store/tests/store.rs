@@ -187,27 +187,120 @@ fn a_cache_file_persists_and_clears() {
     assert_eq!(counts(&cache), [0; 5]);
 }
 
-#[test]
-fn a_cache_from_another_schema_version_is_rebuilt() {
-    let dir = tempfile::tempdir().unwrap();
-    let path = dir.path().join("cache.sqlite");
-    {
-        let cache = SqliteCache::open(&path).unwrap();
+fn user_version(path: &std::path::Path) -> i64 {
+    rusqlite::Connection::open(path)
+        .unwrap()
+        .pragma_query_value(None, "user_version", |r| r.get(0))
+        .unwrap()
+}
+
+/// `path`'s cache, with one record, its schema then said to be `version`.
+fn cache_of_version(path: &std::path::Path, version: i64) -> i64 {
+    let ours = {
+        let cache = SqliteCache::open(path).unwrap();
         cache
             .put_lookups(&OA, &[(&id("W1"), Some(&record(&["W1"], "old")))], at(0))
             .unwrap();
-    }
-    {
-        let conn = rusqlite::Connection::open(&path).unwrap();
-        conn.execute_batch("CREATE TABLE from_the_future (x);")
+        cache
+            .put_search(
+                &OA,
+                &SearchQuery::new("q"),
+                &Page::new(vec![], None, None),
+                at(0),
+            )
             .unwrap();
-        conn.pragma_update(None, "user_version", 99).unwrap();
-    }
+        cache.add_key_spend("k1", "2026-11-14", 0.25).unwrap();
+        user_version(path)
+    };
+    let conn = rusqlite::Connection::open(path).unwrap();
+    conn.execute_batch("CREATE TABLE another_versions (x);")
+        .unwrap();
+    conn.pragma_update(None, "user_version", version).unwrap();
+    ours
+}
+
+#[test]
+fn a_cache_from_an_older_schema_version_is_rebuilt() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("cache.sqlite");
+    let ours = cache_of_version(&path, 1);
     let cache = SqliteCache::open(&path).unwrap();
+    assert!(!cache.answers_unused());
     assert_eq!(counts(&cache), [0; 5]);
+    assert_eq!(user_version(&path), ours);
     cache
         .put_lookups(&OA, &[(&id("W1"), Some(&record(&["W1"], "new")))], at(0))
         .unwrap();
+    assert_eq!(
+        get(&cache, &OA, "W1")
+            .unwrap()
+            .value
+            .unwrap()
+            .work
+            .title
+            .as_deref(),
+        Some("new")
+    );
+    // The ledgers outlive it.
+    assert_eq!(cache.key_spend("k1", "2026-11-14").unwrap(), 0.25);
+}
+
+/// A newer version's cache (an embedder and the CLI sharing the default
+/// path, one upgraded first) isn't dropped, or each would wipe the
+/// other's on opening it. This version runs without its answers: none
+/// read, none written, nothing evicted; the ledgers still shared.
+#[test]
+fn a_cache_from_a_newer_schema_version_is_left_alone() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("cache.sqlite");
+    let ours = cache_of_version(&path, 1_000);
+    let cache = SqliteCache::open(&path).unwrap();
+    assert!(cache.answers_unused());
+    assert_eq!(get(&cache, &OA, "W1"), None, "its answers aren't read");
+    let q = SearchQuery::new("q");
+    assert_eq!(cache.get_search(&OA, &q).unwrap(), None);
+    cache
+        .put_lookups(&OA, &[(&id("W2"), Some(&record(&["W2"], "mine")))], at(0))
+        .unwrap();
+    cache
+        .put_edges(
+            Direction::References,
+            &[(&id("W2"), &Edges::new(vec![], true))],
+            at(0),
+        )
+        .unwrap();
+    assert_eq!(
+        cache.get_edges(Direction::References, &[id("W2")]).unwrap(),
+        [None]
+    );
+    // Held to a limit it's already past: nothing evicted.
+    cache.set_max_bytes(Some(1)).unwrap();
+    // The ledgers work as ever.
+    cache.add_key_spend("k1", "2026-11-14", 0.5).unwrap();
+    assert_eq!(cache.key_spend("k1", "2026-11-14").unwrap(), 0.75);
+    drop(cache);
+
+    // The newer version finds its cache as it left it, but for the spend.
+    assert_eq!(user_version(&path), 1_000);
+    let conn = rusqlite::Connection::open(&path).unwrap();
+    let rows = |table: &str| -> i64 {
+        conn.query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |r| r.get(0))
+            .unwrap()
+    };
+    assert_eq!(
+        (rows("record"), rows("search"), rows("another_versions")),
+        (1, 1, 0)
+    );
+    drop(conn);
+
+    // Once this version is the newer, the file is its own again.
+    rusqlite::Connection::open(&path)
+        .unwrap()
+        .pragma_update(None, "user_version", 1)
+        .unwrap();
+    let cache = SqliteCache::open(&path).unwrap();
+    assert!(!cache.answers_unused());
+    assert_eq!(user_version(&path), ours);
 }
 
 /// Per-key spend outlives reopening, clearing and rebuilding: it's a
@@ -227,7 +320,7 @@ fn key_spend_adds_up_per_day_and_survives_rebuilds() {
     }
     {
         let conn = rusqlite::Connection::open(&path).unwrap();
-        conn.pragma_update(None, "user_version", 99).unwrap();
+        conn.pragma_update(None, "user_version", 1).unwrap();
     }
     let cache = SqliteCache::open(&path).unwrap();
     assert_eq!(cache.key_spend("k1", "2026-11-14").unwrap(), 0.75);
@@ -328,7 +421,7 @@ fn prepaid_days_are_kept_per_provider_and_day_and_survive_rebuilds() {
     }
     {
         let conn = rusqlite::Connection::open(&path).unwrap();
-        conn.pragma_update(None, "user_version", 99).unwrap();
+        conn.pragma_update(None, "user_version", 1).unwrap();
     }
     let cache = SqliteCache::open(&path).unwrap();
     let other = SqliteCache::open(&path).unwrap();
@@ -380,7 +473,7 @@ fn credit_spent_here_adds_up_per_provider_and_day_and_survives_rebuilds() {
     }
     {
         let conn = rusqlite::Connection::open(&path).unwrap();
-        conn.pragma_update(None, "user_version", 99).unwrap();
+        conn.pragma_update(None, "user_version", 1).unwrap();
     }
     let cache = SqliteCache::open(&path).unwrap();
     let other = SqliteCache::open(&path).unwrap();

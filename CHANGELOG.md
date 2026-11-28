@@ -3,6 +3,27 @@
 Releases 0.10 to 0.19 are in [docs/changelog/0.1x.md](docs/changelog/0.1x.md),
 and 0.1 to 0.9 in [docs/changelog/0.0x.md](docs/changelog/0.0x.md).
 
+## Unreleased
+
+Fixed:
+
+- A Cochrane review's version is credited to its own authors. OpenAlex's
+  record of `.pub5` ("Glucocorticoids for croup in children", 2023),
+  merged with the review's earlier versions, names `.pub4`'s 2018 team.
+  Where OpenAlex's record shows it merges two works, its year is none of
+  Crossref's for the DOI (as 0.44.2 dates it) and it names other authors,
+  Crossref's record of the DOI wins for who wrote it and its title: a
+  lookup serves Crossref's record, keeping OpenAlex's work id, cited-by
+  count and free copy, and verify's merged work takes its authors and
+  title.
+- Two versions sharing one cache file no longer wipe each other's cache.
+  The CLI and an embedder use the same default path, and each dropped and
+  rebuilt the cache whenever it found the other's schema version, so with
+  one upgraded first neither kept its cache for long. A version that finds a newer schema now
+  leaves the file alone and runs without its cached answers (said at debug
+  level), still sharing its request pacing and spend accounting; an older
+  schema is still dropped and rebuilt.
+
 ## 0.44.2
 
 Added:

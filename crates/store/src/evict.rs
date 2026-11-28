@@ -50,7 +50,8 @@ impl SqliteCache {
     /// Evicts least recently used entries while the cache is over its
     /// limit.
     fn enforce_limit(&self) -> Result<()> {
-        let Some(max) = self.max_bytes() else {
+        // A newer version's answers are its own to evict.
+        let Some(max) = self.max_bytes().filter(|_| !self.newer) else {
             return Ok(());
         };
         let mut conn = self.conn();

@@ -2,8 +2,8 @@
 //! tables and columns added beside it.
 
 use std::path::Path;
-use std::sync::Mutex;
 use std::sync::atomic::AtomicU64;
+use std::sync::{Mutex, Once};
 use std::time::Duration;
 
 use rusqlite::{Connection, TransactionBehavior, params};
@@ -17,7 +17,7 @@ use crate::{Result, SqliteCache, StoreError};
 
 /// Bump on any schema change, *and* when cached records' shape or mapping
 /// changes (records are stored as mapped); older caches are dropped and
-/// rebuilt. 2: records gained `updates` (retractions). 3: `other_years`.
+/// rebuilt, newer ones left alone ([`SqliteCache::answers_unused`]). 2: records gained `updates` (retractions). 3: `other_years`.
 /// 4: Crossref and Europe PMC map print/online years into `other_years`.
 /// 5: `update_to` (what a notice updates). 6: `open_access`. 7: Crossref
 /// relations map to `new_version` updates. 8: notices are typed as such.
@@ -98,12 +98,15 @@ impl SqliteCache {
         let version = |c: &Connection| -> rusqlite::Result<i64> {
             c.pragma_query_value(None, "user_version", |r| r.get(0))
         };
-        if version(&conn)? != SCHEMA_VERSION {
+        let mut newer = version(&conn)? > SCHEMA_VERSION;
+        if !newer && version(&conn)? != SCHEMA_VERSION {
             // Take the write lock, then check again: another process may
-            // have rebuilt it meanwhile.
+            // have rebuilt it meanwhile, or a newer version.
             let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-            if version(&tx)? != SCHEMA_VERSION {
-                // Disposable: drop whatever is there (older or newer) and rebuild.
+            let found = version(&tx)?;
+            newer = found > SCHEMA_VERSION;
+            if found < SCHEMA_VERSION {
+                // Disposable: drop what an older version left and rebuild.
                 let tables: Vec<String> = tx
                     .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' AND name NOT IN ('pacing', 'mcp_spend', 'prepaid_day', 'credit_here')")?
                     .query_map([], |r| r.get(0))?
@@ -116,19 +119,45 @@ impl SqliteCache {
             }
             tx.commit()?;
         }
+        if newer {
+            NEWER_ONCE.call_once(|| {
+                tracing::debug!(
+                    "the cache was written by a newer version (schema {} here); running without its answers",
+                    SCHEMA_VERSION
+                );
+            });
+        } else {
+            // The answers' own tables and columns, beside the schema.
+            conn.execute_batch(EDGES)?;
+            add_access(&mut conn)?;
+        }
+        // The ledgers, shared by every version.
         conn.execute_batch(PACING)?;
-        conn.execute_batch(EDGES)?;
         conn.execute_batch(SPEND)?;
         drop_old_prepaid(&mut conn)?;
         conn.execute_batch(PREPAID)?;
         conn.execute_batch(CREDIT_HERE)?;
-        add_access(&mut conn)?;
         Ok(SqliteCache {
             conn: Mutex::new(conn),
             max_bytes: AtomicU64::new(u64::MAX),
+            newer,
         })
     }
+
+    /// Whether this process runs without the file's cached answers: a
+    /// newer version wrote them (its schema is newer than this one's), and
+    /// dropping them, as an older schema is, would wipe that version's
+    /// cache each time this one opened it (an embedder and the CLI on one
+    /// file, one of them upgraded first). Lookups miss and nothing is
+    /// stored or evicted, as if no cache were configured; the ledgers the
+    /// file shares across processes (request pacing, spend) work as ever.
+    pub fn answers_unused(&self) -> bool {
+        self.newer
+    }
 }
+
+/// The newer schema is said once per process, however often it's opened.
+static NEWER_ONCE: Once = Once::new();
 
 /// Drops a `prepaid_day` table of the first shape (no `bought_usd`), under
 /// the write lock: it took stale balances for top-ups, so its days' starts

@@ -9,7 +9,9 @@ use aspero_core::{
 
 use super::rank::rank;
 use super::{Candidate, ResolveReport, Sighting, Via};
-use crate::registry::{carries_doi, dates_another_work, drop_foreign, overrules};
+use crate::registry::{
+    authored_as, authored_by_another, carries_doi, dates_another_work, drop_foreign, overrules,
+};
 use crate::{EngineError, SearchReport, add_usage};
 
 /// Confidence at which `verify` stops gathering candidates early.
@@ -149,6 +151,9 @@ fn absorb(
 ///     But not OpenAlex's date where its record merges two works and
 ///     shares no year with the other's ([`dates_another_work`]): the
 ///     other's, one version's own, stands.
+///   - authors and title: where OpenAlex's record merges two works, shares
+///     no year with the other's and names other authors
+///     ([`authored_by_another`]), the other's, one version's own.
 fn merged_values(a: &mut SourceRecord, b: &mut SourceRecord, counts: (bool, bool)) -> (bool, bool) {
     let oa = best_open_access(a.work.open_access.as_ref(), b.work.open_access.as_ref()).cloned();
     a.work.open_access.clone_from(&oa);
@@ -166,6 +171,11 @@ fn merged_values(a: &mut SourceRecord, b: &mut SourceRecord, counts: (bool, bool
     };
     a.work.cited_by_count = count;
     b.work.cited_by_count = count;
+    if authored_by_another(a, b) {
+        written_as(a, b);
+    } else if authored_by_another(b, a) {
+        written_as(b, a);
+    }
     let issued = match (a.work.issued, b.work.issued) {
         _ if dates_another_work(a, b) => b.work.issued,
         _ if dates_another_work(b, a) => a.work.issued,
@@ -177,6 +187,14 @@ fn merged_values(a: &mut SourceRecord, b: &mut SourceRecord, counts: (bool, bool
     share_author_ids(&mut a.work.authors, &b.work.authors);
     share_author_ids(&mut b.work.authors, &a.work.authors);
     (counted, counted)
+}
+
+/// `merged`, OpenAlex's record of two works, written as `own` says
+/// ([`authored_as`]); of the authors both name, OpenAlex's ids are kept.
+fn written_as(merged: &mut SourceRecord, own: &SourceRecord) {
+    let named = std::mem::take(&mut merged.work.authors);
+    authored_as(merged, own);
+    share_author_ids(&mut merged.work.authors, &named);
 }
 
 /// Gives `to`'s authors the OpenAlex ids `from`'s have (#174), so a work

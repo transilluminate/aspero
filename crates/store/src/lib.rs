@@ -21,6 +21,10 @@
 //! share one cache file. The same file paces them: [`Pacing`] hands out
 //! request slots per provider across every process using it.
 //!
+//! A file a newer version's schema has written (an embedder and the CLI
+//! sharing the default path, one upgraded first) isn't dropped: the older
+//! binary runs without its answers, so neither wipes the other's cache.
+//!
 //! A size limit ([`SqliteCache::set_max_bytes`]) evicts the least recently
 //! used entries (records, "not found" answers, searches, links; never the
 //! pacing slots) once the database passes it; see [`ACCESS`].
@@ -90,6 +94,11 @@ pub struct SqliteCache {
     conn: Mutex<Connection>,
     /// The size limit in bytes; `u64::MAX` for none.
     max_bytes: AtomicU64,
+    /// Whether the file's answers are a newer version's schema: then they
+    /// are neither read, written nor evicted, and this process runs as if
+    /// no cache were configured, the file's ledgers (pacing, spend)
+    /// shared as ever ([`SqliteCache::answers_unused`]).
+    newer: bool,
 }
 
 impl SqliteCache {
